@@ -28,3 +28,13 @@ python staff.py   # staff
 ```
 
 Copy `.env.example` to `.env` and set secrets locally. Do not commit `.env`.
+
+## E2E (API + dashboard)
+
+With Laravel (`php artisan serve`), the dashboard (`cd dashboard && npm run dev`), and optionally the landing site running:
+
+```bash
+npm install
+npm run e2e
+```
+
