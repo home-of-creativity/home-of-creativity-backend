@@ -114,6 +114,42 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
             <dt>{t(copy.telegram)}</dt>
             <dd dir="ltr">{item.client?.telegram_user_id ?? "—"}</dd>
           </div>
+          <div>
+            <dt>{t(copy.odooPartner)}</dt>
+            <dd dir="ltr">
+              {item.client?.odoo_url ? (
+                <a href={item.client.odoo_url} target="_blank" rel="noreferrer">
+                  {item.client.odoo_partner_id}
+                </a>
+              ) : (
+                item.client?.odoo_partner_id ?? "—"
+              )}
+            </dd>
+          </div>
+          <div>
+            <dt>{t(copy.odooQuote)}</dt>
+            <dd dir="ltr">
+              {item.odoo_quotation_url ? (
+                <a href={item.odoo_quotation_url} target="_blank" rel="noreferrer">
+                  {item.odoo_quotation_id}
+                </a>
+              ) : (
+                item.odoo_quotation_id ?? "—"
+              )}
+            </dd>
+          </div>
+          <div>
+            <dt>{t(copy.odooInvoice)}</dt>
+            <dd dir="ltr">
+              {item.odoo_invoice_url ? (
+                <a href={item.odoo_invoice_url} target="_blank" rel="noreferrer">
+                  {item.odoo_invoice_id}
+                </a>
+              ) : (
+                item.odoo_invoice_id ?? "—"
+              )}
+            </dd>
+          </div>
         </dl>
         {item.quotations?.length ? (
           <div className="briefs">

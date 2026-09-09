@@ -120,4 +120,76 @@ class AdminDashboardTest extends TestCase
             ->assertJsonCount(1, 'data')
             ->assertJsonPath('meta.current_page', 3);
     }
+
+    public function test_admin_can_create_client_and_push_to_odoo(): void
+    {
+        Http::preventStrayRequests();
+        config([
+            'services.odoo.enabled' => true,
+            'services.odoo.url' => 'https://odoo.test',
+            'services.odoo.db' => 'hoc',
+            'services.odoo.username' => 'admin',
+            'services.odoo.api_key' => 'secret-key',
+        ]);
+        Http::fake([
+            'https://odoo.test/jsonrpc' => Http::sequence()
+                ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => 2], 200)
+                ->push(['jsonrpc' => '2.0', 'id' => 2, 'result' => []], 200)
+                ->push(['jsonrpc' => '2.0', 'id' => 3, 'result' => 44], 200),
+        ]);
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        $this->postJson('/api/admin/clients', [
+            'name' => 'Studio Client',
+            'email' => 'studio@hoc.test',
+            'phone' => '+963999000111',
+        ])->assertCreated()
+            ->assertJsonPath('data.name', 'Studio Client')
+            ->assertJsonPath('data.odoo_partner_id', '44');
+
+        $this->assertDatabaseHas('clients', [
+            'email' => 'studio@hoc.test',
+            'odoo_partner_id' => '44',
+        ]);
+    }
+
+    public function test_admin_can_sync_odoo_partners_into_clients(): void
+    {
+        Http::preventStrayRequests();
+        config([
+            'services.odoo.enabled' => true,
+            'services.odoo.url' => 'https://odoo.test',
+            'services.odoo.db' => 'hoc',
+            'services.odoo.username' => 'admin',
+            'services.odoo.api_key' => 'secret-key',
+        ]);
+        Http::fake([
+            'https://odoo.test/jsonrpc' => Http::sequence()
+                ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => 2], 200)
+                ->push(['jsonrpc' => '2.0', 'id' => 2, 'result' => [[
+                    'id' => 55,
+                    'name' => 'Odoo Client',
+                    'email' => 'odoo@hoc.test',
+                    'phone' => '+963111',
+                    'mobile' => false,
+                ]]], 200),
+        ]);
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        $this->postJson('/api/admin/odoo/sync-partners')
+            ->assertOk()
+            ->assertJsonPath('data.created', 1);
+
+        $this->assertDatabaseHas('clients', [
+            'name' => 'Odoo Client',
+            'email' => 'odoo@hoc.test',
+            'odoo_partner_id' => '55',
+        ]);
+    }
 }

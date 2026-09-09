@@ -4,6 +4,7 @@ namespace App\Http\Resources;
 
 use App\Models\ServiceRequest;
 use App\Services\ClickUpStatusMapper;
+use App\Services\OdooClient;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -16,6 +17,8 @@ class ServiceRequestResource extends JsonResource
     public function toArray(Request $request): array
     {
         $mapper = app(ClickUpStatusMapper::class);
+        $odoo = app(OdooClient::class);
+        $odooReady = $odoo->configured();
 
         return [
             'id' => $this->id,
@@ -30,6 +33,12 @@ class ServiceRequestResource extends JsonResource
             'execution_status_label' => $mapper->toClientLabel($this->execution_status),
             'odoo_quotation_id' => $this->odoo_quotation_id,
             'odoo_invoice_id' => $this->odoo_invoice_id,
+            'odoo_quotation_url' => $odooReady && filled($this->odoo_quotation_id)
+                ? $odoo->recordUrl('sale.order', (string) $this->odoo_quotation_id)
+                : null,
+            'odoo_invoice_url' => $odooReady && filled($this->odoo_invoice_id)
+                ? $odoo->recordUrl('account.move', (string) $this->odoo_invoice_id)
+                : null,
             'ai_analysis' => $this->ai_analysis,
             'paid_at' => $this->paid_at?->toIso8601String(),
             'payment_method' => $this->payment_method?->value,

@@ -24,7 +24,33 @@ export type Client = {
   phone: string | null;
   telegram_user_id: string | null;
   odoo_partner_id?: string | null;
+  odoo_url?: string | null;
   requests_count?: number;
+};
+
+export type OdooQuotation = {
+  id: number;
+  name: string;
+  partner_name: string | null;
+  amount_total: number;
+  state: string;
+  client_order_ref: string | null;
+  origin: string | null;
+  date_order: string | null;
+  odoo_url: string;
+};
+
+export type OdooInvoice = {
+  id: number;
+  name: string;
+  partner_name: string | null;
+  amount_total: number;
+  state: string;
+  payment_state: string;
+  invoice_origin: string | null;
+  ref: string | null;
+  invoice_date: string | null;
+  odoo_url: string;
 };
 
 export type Brief = {
@@ -69,6 +95,8 @@ export type ServiceRequest = {
   execution_status_label?: string | null;
   odoo_quotation_id?: string | null;
   odoo_invoice_id?: string | null;
+  odoo_quotation_url?: string | null;
+  odoo_invoice_url?: string | null;
   gemini_status?: string | null;
   gemini_error?: string | null;
   quotation_amount?: string | null;
@@ -202,6 +230,26 @@ export const api = {
   },
   clients(page = 1) {
     return request<Paginated<Client>>(`/admin/clients${queryString({ page })}`);
+  },
+  createClient(payload: { name: string; email?: string; phone?: string; telegram_user_id?: string }) {
+    return request<Envelope<Client>>("/admin/clients", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  odooStatus() {
+    return request<Envelope<{ configured: boolean; url: string | null }>>("/admin/odoo/status");
+  },
+  syncOdooPartners() {
+    return request<Envelope<{ synced: number; created: number; updated: number }>>("/admin/odoo/sync-partners", {
+      method: "POST",
+    });
+  },
+  odooQuotations() {
+    return request<{ data: OdooQuotation[] }>("/admin/odoo/quotations");
+  },
+  odooInvoices() {
+    return request<{ data: OdooInvoice[] }>("/admin/odoo/invoices");
   },
   employees() {
     return request<{ data: Employee[] }>("/admin/employees");

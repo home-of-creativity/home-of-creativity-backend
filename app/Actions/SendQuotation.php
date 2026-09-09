@@ -81,6 +81,7 @@ class SendQuotation
                         $request->client?->phone,
                         $request->number,
                         $request->title,
+                        $amount,
                     );
                     $request->forceFill(['odoo_quotation_id' => $created['odoo_quotation_id']])->save();
                     $request->client?->forceFill(['odoo_partner_id' => $created['odoo_partner_id']])->save();

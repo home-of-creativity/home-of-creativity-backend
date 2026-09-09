@@ -36,11 +36,21 @@ class IssueInvoice
             if ($this->odoo->configured()) {
                 try {
                     $partnerId = $request->client?->odoo_partner_id;
+                    if (! $partnerId && $request->client) {
+                        $partnerId = $this->odoo->createOrReusePartner(
+                            $request->client->name,
+                            $request->client->email,
+                            $request->client->phone,
+                            $request->number,
+                        );
+                        $request->client->forceFill(['odoo_partner_id' => $partnerId])->save();
+                    }
                     if ($partnerId) {
                         $odooInvoiceId = $this->odoo->createInvoice(
                             (string) $partnerId,
                             $request->number,
                             $request->odoo_quotation_id,
+                            $amount > 0 ? $amount : null,
                         );
                         $request->forceFill(['odoo_invoice_id' => $odooInvoiceId])->save();
                     }

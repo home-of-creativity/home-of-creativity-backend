@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Admin\ClientController as AdminClientController;
 use App\Http\Controllers\Admin\EmployeeController as AdminEmployeeController;
+use App\Http\Controllers\Admin\OdooController as AdminOdooController;
 use App\Http\Controllers\Admin\OverviewController;
 use App\Http\Controllers\Admin\ServiceRequestController as AdminServiceRequestController;
 use App\Http\Controllers\AuthController;
@@ -32,6 +33,11 @@ Route::middleware('auth:sanctum')->group(function () {
 Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::get('overview', OverviewController::class);
     Route::get('clients', [AdminClientController::class, 'index']);
+    Route::post('clients', [AdminClientController::class, 'store']);
+    Route::get('odoo/status', [AdminOdooController::class, 'status']);
+    Route::post('odoo/sync-partners', [AdminOdooController::class, 'syncPartners']);
+    Route::get('odoo/quotations', [AdminOdooController::class, 'quotations']);
+    Route::get('odoo/invoices', [AdminOdooController::class, 'invoices']);
     Route::get('clickup/members', [AdminEmployeeController::class, 'clickupMembers']);
     Route::apiResource('employees', AdminEmployeeController::class);
     Route::post('employees/{employee}/approve', [AdminEmployeeController::class, 'approve']);
