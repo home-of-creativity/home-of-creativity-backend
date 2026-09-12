@@ -69,6 +69,7 @@ class SyncClickUpFromStaff
                 ->whereIn('task_type', [
                     ClickUpTaskType::Design,
                     ClickUpTaskType::Content,
+                    ClickUpTaskType::Programming,
                     ClickUpTaskType::Revision,
                 ])
                 ->values(),

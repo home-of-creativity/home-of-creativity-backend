@@ -41,8 +41,12 @@
         <env name="TELEGRAM_STAFF_BOT_SECRET" value="change-me-staff"/>
         <env name="TELEGRAM_STAFF_CHAT_ID" value=""/>
         <env name="ODOO_ENABLED" value="false"/>
+        <env name="ODOO_USE_JSON2" value="false"/>
         <env name="ODOO_URL" value=""/>
         <env name="CLICKUP_TOKEN" value=""/>
         <env name="GOOGLE_API_KEY" value="test-key"/>
+        <env name="FACEBOOK_ACCESS_TOKEN" value=""/>
+        <env name="FACEBOOK_APP_ID" value=""/>
+        <env name="FACEBOOK_APP_SECRET" value=""/>
     </php>
 </phpunit>

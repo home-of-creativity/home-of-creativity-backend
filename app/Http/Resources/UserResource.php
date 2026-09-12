@@ -21,6 +21,8 @@ class UserResource extends JsonResource
             'phone' => $this->phone,
             'locale' => $this->locale,
             'is_admin' => (bool) $this->is_admin,
+            'social_permissions' => $this->social_permissions,
+            'social_abilities' => $this->socialAbilities(),
             'created_at' => $this->created_at?->toIso8601String(),
         ];
     }

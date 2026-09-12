@@ -144,6 +144,7 @@ class ClickUpClient
             'sales', 'المبيعات' => 'sales',
             'design', 'تصميم' => 'design',
             'content', 'محتوى' => 'content',
+            'programming', 'web', 'development', 'dev', 'البرمجة', 'برمجة', 'ويب' => 'programming',
             'photography', 'media', 'التصوير', 'تصوير', 'photo' => 'photography',
             default => 'sales',
         };

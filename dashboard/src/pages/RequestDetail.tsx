@@ -1,25 +1,57 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
+import { LoadingLottie } from "../components/LoadingLottie";
 import { api, type ServiceRequest } from "../api";
 import { copy, sources, statuses, type Locale } from "../i18n";
+
+type QuotationLine = {
+  id: string;
+  title: string;
+  amount: string;
+  units: string;
+  notes: string;
+};
+
+function createQuotationLine(): QuotationLine {
+  return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    title: "",
+    amount: "",
+    units: "1",
+    notes: "",
+  };
+}
 
 export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
   const { id } = useParams();
   const [item, setItem] = useState<ServiceRequest | null>(null);
+  const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState("");
-  const [amount, setAmount] = useState("");
-  const [notes, setNotes] = useState("");
+  const [quotationLines, setQuotationLines] = useState<QuotationLine[]>([createQuotationLine()]);
+  const [sendingQuotation, setSendingQuotation] = useState(false);
   const [error, setError] = useState("");
   const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!receiptUrl) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setReceiptUrl(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [receiptUrl]);
+
+  useEffect(() => {
     if (!id) return;
-    api.request(id).then((res) => {
-      setItem(res.data);
-      setStatus(res.data.status);
-      setAmount(String(res.data.quotation_amount ?? ""));
-      setNotes(res.data.quotation_notes ?? "");
-    });
+    setLoading(true);
+    api
+      .request(id)
+      .then((res) => {
+        setItem(res.data);
+        setStatus(res.data.status);
+      })
+      .catch(() => setItem(null))
+      .finally(() => setLoading(false));
   }, [id]);
 
   async function saveStatus(next: string) {
@@ -40,16 +72,54 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
     await saveStatus(status);
   }
 
+  function updateQuotationLine(lineId: string, patch: Partial<QuotationLine>) {
+    setQuotationLines((current) => current.map((line) => (line.id === lineId ? { ...line, ...patch } : line)));
+  }
+
+  function addQuotationLine() {
+    setQuotationLines((current) => [...current, createQuotationLine()]);
+  }
+
+  function removeQuotationLine(lineId: string) {
+    setQuotationLines((current) => (current.length === 1 ? current : current.filter((line) => line.id !== lineId)));
+  }
+
   async function sendQuotation(event: FormEvent) {
     event.preventDefault();
-    if (!item) return;
+    if (!item || sendingQuotation) return;
+
+    const lines = quotationLines
+      .map((line) => ({
+        title: line.title.trim(),
+        amount: Number(line.amount),
+        units: Number(line.units || 1),
+        notes: line.notes.trim() || undefined,
+      }))
+      .filter(
+        (line) =>
+          line.title &&
+          Number.isFinite(line.amount) &&
+          line.amount > 0 &&
+          Number.isFinite(line.units) &&
+          line.units > 0,
+      );
+
+    if (!lines.length) {
+      setError(t(copy.saveFailed));
+      return;
+    }
+
     setError("");
+    setSendingQuotation(true);
     try {
-      const res = await api.sendQuotation(item.id, Number(amount), notes || undefined);
+      const res = await api.sendQuotation(item.id, { lines });
       setItem(res.data);
       setStatus(res.data.status);
+      setQuotationLines([createQuotationLine()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : t(copy.saveFailed));
+    } finally {
+      setSendingQuotation(false);
     }
   }
 
@@ -65,6 +135,7 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
     }
   }
 
+  if (loading) return <LoadingLottie variant="page" label={t(copy.loading)} />;
   if (!item) return <p className="muted">{t(copy.empty)}</p>;
 
   const canSendQuotation = ["submitted", "quotation_rejected"].includes(item.status);
@@ -75,6 +146,7 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
   return (
     <div className="detail">
       <Link className="back-link" to="/requests">
+        <span aria-hidden="true">←</span>
         {t(copy.back)}
       </Link>
       <header className="page-head">
@@ -186,13 +258,13 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
         {attachments.length ? (
           <div className="briefs">
             <h3>{t(copy.attachments)}</h3>
-            <ul>
+            <ul className="file-list">
               {attachments.map((file) => (
                 <li key={file.id}>
-                  {file.original_name}
+                  <span>{file.original_name}</span>
                   <button
                     type="button"
-                    className="btn btn-teal"
+                    className="btn btn-ghost"
                     onClick={() => void api.receiptBlob(item.id, file.id).then((blob) => setReceiptUrl(URL.createObjectURL(blob)))}
                   >
                     {t(copy.viewAttachment)}
@@ -205,13 +277,13 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
         {receipts.length ? (
           <div className="briefs">
             <h3>{t(copy.receipts)}</h3>
-            <ul>
+            <ul className="file-list">
               {receipts.map((file) => (
                 <li key={file.id}>
-                  {file.original_name}
+                  <span>{file.original_name}</span>
                   <button
                     type="button"
-                    className="btn btn-teal"
+                    className="btn btn-ghost"
                     onClick={() => void api.receiptBlob(item.id, file.id).then((blob) => setReceiptUrl(URL.createObjectURL(blob)))}
                   >
                     {t(copy.viewReceipt)}
@@ -223,45 +295,117 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
         ) : null}
       </section>
       {canSendQuotation ? (
-        <form className="toolbar" onSubmit={sendQuotation}>
-          <input className="field" type="number" step="0.01" min="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={t(copy.amount)} />
-          <input className="field" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder={t(copy.quotationNotes)} />
-          <button className="btn btn-primary" type="submit">
-            {t(copy.sendQuotation)}
-          </button>
-        </form>
+        <section className="card action-card">
+          <h2 className="form-title">{t(copy.sendQuotation)}</h2>
+          <form className="quotation-form" onSubmit={sendQuotation}>
+            <div className="quotation-lines">
+              {quotationLines.map((line, index) => (
+                <div className="quotation-line" key={line.id}>
+                  <span className="quotation-line-index">{index + 1}</span>
+                  <input
+                    className="field"
+                    value={line.title}
+                    onChange={(e) => updateQuotationLine(line.id, { title: e.target.value })}
+                    placeholder={t(copy.lineTitle)}
+                    required
+                  />
+                  <input
+                    className="field"
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    value={line.amount}
+                    onChange={(e) => updateQuotationLine(line.id, { amount: e.target.value })}
+                    placeholder={t(copy.amount)}
+                    required
+                  />
+                  <input
+                    className="field quotation-line-units"
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    value={line.units}
+                    onChange={(e) => updateQuotationLine(line.id, { units: e.target.value })}
+                    placeholder={t(copy.lineUnits)}
+                    required
+                  />
+                  <input
+                    className="field"
+                    value={line.notes}
+                    onChange={(e) => updateQuotationLine(line.id, { notes: e.target.value })}
+                    placeholder={t(copy.quotationNotes)}
+                  />
+                  {quotationLines.length > 1 ? (
+                    <button
+                      type="button"
+                      className="btn btn-ghost quotation-line-remove"
+                      aria-label={t(copy.removeQuotationLine)}
+                      onClick={() => removeQuotationLine(line.id)}
+                    >
+                      ×
+                    </button>
+                  ) : (
+                    <span className="quotation-line-spacer" aria-hidden="true" />
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="quotation-form-actions">
+              <button type="button" className="btn btn-ghost" onClick={addQuotationLine} disabled={sendingQuotation}>
+                + {t(copy.addQuotationLine)}
+              </button>
+              <button className="btn btn-primary" type="submit" disabled={sendingQuotation} aria-busy={sendingQuotation}>
+                {sendingQuotation ? t(copy.sendingQuotation) : t(copy.sendQuotation)}
+              </button>
+            </div>
+          </form>
+        </section>
       ) : null}
-      <form className="toolbar" onSubmit={onSave}>
-        <select className="field" value={status} onChange={(e) => setStatus(e.target.value)} aria-label={t(copy.status)}>
-          {Object.entries(statuses).map(([key, label]) => (
-            <option key={key} value={key}>
-              {t(label)}
-            </option>
-          ))}
-        </select>
-        <button className="btn btn-primary" type="submit">
-          {t(copy.save)}
-        </button>
-        {canConfirmPayment ? (
-          <>
-            <button className="btn btn-teal" type="button" onClick={() => void confirmPayment("receipt")}>
-              {t(copy.markPaid)}
-            </button>
-            <button className="btn btn-teal" type="button" onClick={() => void confirmPayment("cash")}>
-              {t(copy.markCash)}
-            </button>
-          </>
-        ) : null}
-        {item.gemini_status === "failed" ? (
-          <button className="btn" type="button" onClick={() => void api.retryGemini(item.id).then((res) => setItem(res.data))}>
-            {t(copy.retryGemini)}
+      <section className="card action-card">
+        <h2 className="form-title">{t(copy.status)}</h2>
+        <form className="toolbar" onSubmit={onSave}>
+          <select className="field" value={status} onChange={(e) => setStatus(e.target.value)} aria-label={t(copy.status)}>
+            {Object.entries(statuses).map(([key, label]) => (
+              <option key={key} value={key}>
+                {t(label)}
+              </option>
+            ))}
+          </select>
+          <button className="btn btn-primary" type="submit">
+            {t(copy.save)}
           </button>
-        ) : null}
-      </form>
+          {canConfirmPayment ? (
+            <>
+              <button className="btn btn-teal" type="button" onClick={() => void confirmPayment("receipt")}>
+                {t(copy.markPaid)}
+              </button>
+              <button className="btn btn-teal" type="button" onClick={() => void confirmPayment("cash")}>
+                {t(copy.markCash)}
+              </button>
+            </>
+          ) : null}
+          {item.gemini_status === "failed" ? (
+            <button className="btn" type="button" onClick={() => void api.retryGemini(item.id).then((res) => setItem(res.data))}>
+              {t(copy.retryGemini)}
+            </button>
+          ) : null}
+        </form>
+      </section>
       {error ? <p className="error">{error}</p> : null}
       {receiptUrl ? (
-        <div className="modal" onClick={() => setReceiptUrl(null)}>
-          <img src={receiptUrl} alt="receipt" />
+        <div className="modal" role="dialog" aria-modal="true" onClick={() => setReceiptUrl(null)}>
+          <button
+            type="button"
+            className="modal-close"
+            aria-label={t(copy.cancel)}
+            onClick={(event) => {
+              event.stopPropagation();
+              setReceiptUrl(null);
+            }}
+          >
+            ×
+          </button>
+          <img src={receiptUrl} alt="" onClick={(event) => event.stopPropagation()} />
         </div>
       ) : null}
     </div>

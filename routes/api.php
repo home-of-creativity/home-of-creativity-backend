@@ -1,13 +1,27 @@
 <?php
 
 use App\Http\Controllers\Admin\ClientController as AdminClientController;
+use App\Http\Controllers\Admin\ContactChannelController as AdminContactChannelController;
 use App\Http\Controllers\Admin\EmployeeController as AdminEmployeeController;
 use App\Http\Controllers\Admin\OdooController as AdminOdooController;
 use App\Http\Controllers\Admin\OverviewController;
+use App\Http\Controllers\Admin\PortfolioCategoryController as AdminPortfolioCategoryController;
+use App\Http\Controllers\Admin\PortfolioProjectController as AdminPortfolioProjectController;
+use App\Http\Controllers\Admin\PricingCategoryController as AdminPricingCategoryController;
+use App\Http\Controllers\Admin\PricingPackageController as AdminPricingPackageController;
+use App\Http\Controllers\Admin\PricingSubcategoryController as AdminPricingSubcategoryController;
 use App\Http\Controllers\Admin\ServiceRequestController as AdminServiceRequestController;
+use App\Http\Controllers\Admin\ShowcaseClientController as AdminShowcaseClientController;
+use App\Http\Controllers\Admin\SocialAccountController as AdminSocialAccountController;
+use App\Http\Controllers\Admin\SocialInboxController as AdminSocialInboxController;
+use App\Http\Controllers\Admin\SocialPostController as AdminSocialPostController;
+use App\Http\Controllers\Admin\SocialStaffController as AdminSocialStaffController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\ContactController;
 use App\Http\Controllers\IntegrationController;
 use App\Http\Controllers\N8nWebhookController;
+use App\Http\Controllers\PortfolioController;
+use App\Http\Controllers\PricingController;
 use App\Http\Controllers\ServiceRequestController;
 use App\Http\Controllers\StaffBotController;
 use App\Http\Controllers\TelegramBotController;
@@ -24,6 +38,12 @@ Route::prefix('auth')->group(function () {
     });
 });
 
+Route::get('pricing', [PricingController::class, 'index']);
+Route::get('contact', [ContactController::class, 'index']);
+Route::get('portfolio/clients', [PortfolioController::class, 'clients']);
+Route::get('portfolio/projects', [PortfolioController::class, 'projects']);
+Route::get('portfolio/projects/{portfolio_project}', [PortfolioController::class, 'show']);
+
 Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('requests', ServiceRequestController::class)
         ->parameters(['requests' => 'service_request'])
@@ -32,6 +52,11 @@ Route::middleware('auth:sanctum')->group(function () {
 
 Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::get('overview', OverviewController::class);
+    Route::get('contact', [AdminContactChannelController::class, 'index']);
+    Route::post('contact', [AdminContactChannelController::class, 'store']);
+    Route::put('contact/{contact_channel}', [AdminContactChannelController::class, 'update']);
+    Route::post('contact/{contact_channel}/move', [AdminContactChannelController::class, 'move']);
+    Route::delete('contact/{contact_channel}', [AdminContactChannelController::class, 'destroy']);
     Route::get('clients', [AdminClientController::class, 'index']);
     Route::post('clients', [AdminClientController::class, 'store']);
     Route::get('odoo/status', [AdminOdooController::class, 'status']);
@@ -50,6 +75,57 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
     Route::post('requests/{service_request}/retry-gemini', [AdminServiceRequestController::class, 'retryGemini']);
     Route::get('requests/{service_request}/files/{file}/receipt', [AdminServiceRequestController::class, 'receipt']);
     Route::post('integration-events/{integrationEvent}/retry', [AdminServiceRequestController::class, 'retryIntegrationEvent']);
+    Route::get('portfolio/categories', [AdminPortfolioCategoryController::class, 'index']);
+    Route::post('portfolio/categories', [AdminPortfolioCategoryController::class, 'store']);
+    Route::delete('portfolio/categories/bulk', [AdminPortfolioCategoryController::class, 'destroyAll']);
+    Route::put('portfolio/categories/{portfolio_category}', [AdminPortfolioCategoryController::class, 'update']);
+    Route::post('portfolio/categories/{portfolio_category}/move', [AdminPortfolioCategoryController::class, 'move']);
+    Route::delete('portfolio/categories/{portfolio_category}', [AdminPortfolioCategoryController::class, 'destroy']);
+    Route::get('portfolio/clients', [AdminShowcaseClientController::class, 'index']);
+    Route::post('portfolio/clients', [AdminShowcaseClientController::class, 'store']);
+    Route::delete('portfolio/clients/bulk', [AdminShowcaseClientController::class, 'destroyAll']);
+    Route::put('portfolio/clients/{showcase_client}', [AdminShowcaseClientController::class, 'update']);
+    Route::delete('portfolio/clients/{showcase_client}', [AdminShowcaseClientController::class, 'destroy']);
+    Route::get('portfolio/projects', [AdminPortfolioProjectController::class, 'index']);
+    Route::post('portfolio/projects', [AdminPortfolioProjectController::class, 'store']);
+    Route::delete('portfolio/projects/bulk', [AdminPortfolioProjectController::class, 'destroyAll']);
+    Route::put('portfolio/projects/{portfolio_project}', [AdminPortfolioProjectController::class, 'update']);
+    Route::delete('portfolio/projects/{portfolio_project}', [AdminPortfolioProjectController::class, 'destroy']);
+    Route::get('pricing/categories', [AdminPricingCategoryController::class, 'index']);
+    Route::post('pricing/categories', [AdminPricingCategoryController::class, 'store']);
+    Route::delete('pricing/categories/bulk', [AdminPricingCategoryController::class, 'destroyAll']);
+    Route::put('pricing/categories/{pricing_category}', [AdminPricingCategoryController::class, 'update']);
+    Route::post('pricing/categories/{pricing_category}/move', [AdminPricingCategoryController::class, 'move']);
+    Route::delete('pricing/categories/{pricing_category}', [AdminPricingCategoryController::class, 'destroy']);
+    Route::get('pricing/subcategories', [AdminPricingSubcategoryController::class, 'index']);
+    Route::post('pricing/subcategories', [AdminPricingSubcategoryController::class, 'store']);
+    Route::delete('pricing/subcategories/bulk', [AdminPricingSubcategoryController::class, 'destroyAll']);
+    Route::put('pricing/subcategories/{pricing_subcategory}', [AdminPricingSubcategoryController::class, 'update']);
+    Route::post('pricing/subcategories/{pricing_subcategory}/move', [AdminPricingSubcategoryController::class, 'move']);
+    Route::delete('pricing/subcategories/{pricing_subcategory}', [AdminPricingSubcategoryController::class, 'destroy']);
+    Route::get('pricing/packages', [AdminPricingPackageController::class, 'index']);
+    Route::post('pricing/packages', [AdminPricingPackageController::class, 'store']);
+    Route::delete('pricing/packages/bulk', [AdminPricingPackageController::class, 'destroyAll']);
+    Route::put('pricing/packages/{pricing_package}', [AdminPricingPackageController::class, 'update']);
+    Route::post('pricing/packages/{pricing_package}/move', [AdminPricingPackageController::class, 'move']);
+    Route::delete('pricing/packages/{pricing_package}', [AdminPricingPackageController::class, 'destroy']);
+    Route::get('social/accounts', [AdminSocialAccountController::class, 'index']);
+    Route::post('social/accounts', [AdminSocialAccountController::class, 'store']);
+    Route::put('social/accounts/{social_account}', [AdminSocialAccountController::class, 'update']);
+    Route::post('social/accounts/{social_account}/toggle', [AdminSocialAccountController::class, 'toggle']);
+    Route::delete('social/accounts/{social_account}', [AdminSocialAccountController::class, 'destroy']);
+    Route::get('social/posts', [AdminSocialPostController::class, 'index']);
+    Route::post('social/posts', [AdminSocialPostController::class, 'store']);
+    Route::get('social/posts/{social_post}', [AdminSocialPostController::class, 'show']);
+    Route::put('social/posts/{social_post}', [AdminSocialPostController::class, 'update']);
+    Route::delete('social/posts/{social_post}', [AdminSocialPostController::class, 'destroy']);
+    Route::post('social/posts/{social_post}/approve', [AdminSocialPostController::class, 'approve']);
+    Route::post('social/posts/{social_post}/publish', [AdminSocialPostController::class, 'publish']);
+    Route::get('social/inbox', [AdminSocialInboxController::class, 'index']);
+    Route::post('social/inbox/sync', [AdminSocialInboxController::class, 'sync']);
+    Route::post('social/inbox/{social_inbox_item}/reply', [AdminSocialInboxController::class, 'reply']);
+    Route::get('social/staff', [AdminSocialStaffController::class, 'index']);
+    Route::put('social/staff/{user}', [AdminSocialStaffController::class, 'update']);
 });
 
 Route::post('webhooks/n8n', N8nWebhookController::class)

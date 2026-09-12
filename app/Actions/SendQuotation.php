@@ -7,33 +7,51 @@ use App\Enums\RequestStatus;
 use App\Models\Employee;
 use App\Models\Quotation;
 use App\Models\ServiceRequest;
-use App\Services\BrandedDocument;
 use App\Services\OdooClient;
 use App\Services\RequestStatusTransitionService;
 use App\Services\TelegramNotifier;
 use App\Support\ResolveServiceRequest;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
+use Throwable;
 
 class SendQuotation
 {
     public function __construct(
-        private BrandedDocument $documents,
         private TelegramNotifier $telegram,
         private RequestStatusTransitionService $transitions,
+        private OdooClient $odoo,
     ) {}
 
-    public function handle(ServiceRequest $request, float $amount, ?string $notes = null, string $actor = 'admin', ?Employee $employee = null): Quotation
-    {
+    /**
+     * @param  list<array{title: string, amount: float|int|string, units?: float|int|string|null, notes?: string|null}>|null  $lines
+     */
+    public function handle(
+        ServiceRequest $request,
+        float $amount,
+        ?string $notes = null,
+        string $actor = 'admin',
+        ?Employee $employee = null,
+        ?array $lines = null,
+    ): Quotation {
         if (! in_array($request->status, [RequestStatus::Submitted, RequestStatus::QuotationRejected], true)) {
             throw ValidationException::withMessages([
                 'status' => 'Quotation can only be sent from submitted or quotation_rejected.',
             ]);
         }
 
-        $quotation = DB::transaction(function () use ($request, $amount, $notes, $actor): Quotation {
+        if ($lines !== null && $lines !== []) {
+            $amount = (float) collect($lines)->sum(
+                fn (array $line): float => (float) $line['amount'] * (float) ($line['units'] ?? 1),
+            );
+            $notes = $this->formatQuotationLines($lines);
+        }
+
+        $quotation = DB::transaction(function () use ($request, $amount, $notes, $actor, $lines): Quotation {
             $version = ((int) $request->quotations()->max('version')) + 1;
-            $pdfPath = $this->documents->quotationPdf($request, $amount, $notes, $version);
+            $pdfPath = $this->resolveQuotationPdf($request, $amount, $notes, $version, $lines);
 
             $quotation = Quotation::query()->create([
                 'request_id' => $request->id,
@@ -51,43 +69,38 @@ class SendQuotation
 
             $this->transitions->transition($request, RequestStatus::QuotationSent, $actor, "Quotation v{$version} sent.");
 
-            $fileId = $this->telegram->sendStoredDocument(
-                $request,
-                $pdfPath,
-                "عرض سعر #{$request->number} (v{$version})\nالمبلغ: {$amount}\n\nوافق أو ارفض من الأزرار أدناه.",
-            );
-            if ($fileId) {
-                $quotation->forceFill(['telegram_file_id' => $fileId])->save();
-            }
-
-            $chatId = $request->client?->telegram_user_id;
-            if ($chatId) {
-                $ref = ResolveServiceRequest::displayNumber($request);
-                $this->telegram->sendInlineActions(
-                    (string) $chatId,
-                    'اختر:',
-                    [
-                        ['text' => '✅ موافقة', 'callback_data' => "approve:{$ref}"],
-                        ['text' => '❌ رفض', 'callback_data' => "reject:{$ref}"],
-                    ],
+            try {
+                $caption = $this->quotationCaption($request, $amount, $notes, $version);
+                $fileId = $this->telegram->sendStoredDocument(
+                    $request,
+                    $pdfPath,
+                    $caption,
                 );
-            }
-
-            if (app(OdooClient::class)->configured()) {
-                try {
-                    $created = app(OdooClient::class)->createQuotation(
-                        (string) ($request->client?->name ?? $request->number),
-                        $request->client?->email,
-                        $request->client?->phone,
-                        $request->number,
-                        $request->title,
-                        $amount,
-                    );
-                    $request->forceFill(['odoo_quotation_id' => $created['odoo_quotation_id']])->save();
-                    $request->client?->forceFill(['odoo_partner_id' => $created['odoo_partner_id']])->save();
-                } catch (\Throwable) {
-                    // Odoo failure must not block quotation send.
+                if ($fileId) {
+                    $quotation->forceFill(['telegram_file_id' => $fileId])->save();
                 }
+
+                $chatId = $request->client?->telegram_user_id;
+                if ($chatId) {
+                    $ref = ResolveServiceRequest::displayNumber($request);
+                    $this->telegram->sendInlineActions(
+                        (string) $chatId,
+                        'اختر:',
+                        [
+                            ['text' => '✅ موافقة', 'callback_data' => "approve:{$ref}"],
+                            ['text' => '❌ رفض', 'callback_data' => "reject:{$ref}"],
+                        ],
+                    );
+                }
+            } catch (Throwable $exception) {
+                if ((bool) config('services.telegram.strict')) {
+                    throw $exception;
+                }
+
+                Log::warning('Telegram quotation delivery failed; quotation was still saved.', [
+                    'request' => $request->number,
+                    'error' => $exception->getMessage(),
+                ]);
             }
 
             return $quotation->fresh() ?? $quotation;
@@ -101,5 +114,105 @@ class SendQuotation
         );
 
         return $quotation;
+    }
+
+    /**
+     * @param  list<array{title: string, amount: float|int|string, notes?: string|null}>|null  $lines
+     */
+    private function resolveQuotationPdf(
+        ServiceRequest $request,
+        float $amount,
+        ?string $notes,
+        int $version,
+        ?array $lines = null,
+    ): string {
+        if (! $this->odoo->configured()) {
+            throw ValidationException::withMessages([
+                'odoo' => 'Odoo integration is required to send quotation PDFs.',
+            ]);
+        }
+
+        try {
+            $created = $this->odoo->createQuotation(
+                (string) ($request->client?->name ?? $request->number),
+                $request->client?->email,
+                $request->client?->phone,
+                $request->number,
+                $request->title,
+                $amount,
+                $notes,
+                $lines,
+            );
+            $request->forceFill([
+                'odoo_quotation_id' => $created['odoo_quotation_id'],
+            ])->save();
+            $request->client?->forceFill(['odoo_partner_id' => $created['odoo_partner_id']])->save();
+
+            $pdfBinary = $this->odoo->downloadSaleOrderPdf($created['odoo_quotation_id']);
+            if (! is_string($pdfBinary) || $pdfBinary === '') {
+                throw ValidationException::withMessages([
+                    'odoo' => 'Odoo returned an empty quotation PDF.',
+                ]);
+            }
+
+            $relativePath = "quotations/{$request->number}-v{$version}-odoo.pdf";
+            Storage::disk('local')->put($relativePath, $pdfBinary);
+
+            return $relativePath;
+        } catch (ValidationException $exception) {
+            throw $exception;
+        } catch (Throwable $exception) {
+            Log::error('Odoo quotation PDF failed.', [
+                'request' => $request->number,
+                'error' => $exception->getMessage(),
+            ]);
+
+            throw ValidationException::withMessages([
+                'odoo' => 'Failed to create or download the Odoo quotation PDF.',
+            ]);
+        }
+    }
+
+    private function quotationCaption(ServiceRequest $request, float $amount, ?string $notes, int $version): string
+    {
+        $lines = [
+            "عرض سعر #{$request->number} (v{$version})",
+            "العنوان: {$request->title}",
+            'المبلغ: '.number_format($amount, 2).' SYP',
+        ];
+
+        if (filled($notes)) {
+            $lines[] = "تفاصيل العرض: {$notes}";
+        }
+
+        if (filled($request->description)) {
+            $lines[] = "وصف الطلب: {$request->description}";
+        }
+
+        $lines[] = '';
+        $lines[] = 'وافق أو ارفض من الأزرار أدناه.';
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param  list<array{title: string, amount: float|int|string, units?: float|int|string|null, notes?: string|null}>  $lines
+     */
+    private function formatQuotationLines(array $lines): string
+    {
+        return collect($lines)
+            ->values()
+            ->map(function (array $line, int $index): string {
+                $number = $index + 1;
+                $units = (float) ($line['units'] ?? 1);
+                $unitPrice = (float) $line['amount'];
+                $row = "{$number}. {$line['title']} — {$units} × ".number_format($unitPrice, 2).' SYP = '.number_format($units * $unitPrice, 2).' SYP';
+                if (filled($line['notes'] ?? null)) {
+                    $row .= "\n   {$line['notes']}";
+                }
+
+                return $row;
+            })
+            ->implode("\n");
     }
 }

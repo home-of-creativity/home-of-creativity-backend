@@ -208,7 +208,8 @@ class ServiceRequestTest extends TestCase
 
     public function test_gemini_success_dispatches_payment_confirmed_outbox(): void
     {
-        Http::fake();
+        Http::fake($this->odooDocumentsHttpFake());
+        $this->fakeOdooDocuments();
         $request = ServiceRequest::factory()->create([
             'status' => RequestStatus::AwaitingPayment,
             'gemini_status' => 'pending',
@@ -240,6 +241,7 @@ class ServiceRequestTest extends TestCase
     public function test_gemini_success_provisions_clickup_tasks_and_notifies_design_team(): void
     {
         Http::preventStrayRequests();
+        $this->fakeOdooDocuments();
         config([
             'services.clickup.token' => 'pk_test',
             'services.clickup.list_id' => '901821114103',
@@ -248,10 +250,10 @@ class ServiceRequestTest extends TestCase
             'services.telegram.bot_token' => 'client-token',
         ]);
 
-        Http::fake([
+        Http::fake(array_merge($this->odooDocumentsHttpFake(), [
             'https://api.clickup.com/*' => Http::response(['id' => 'cu-design-1'], 200),
             'https://api.telegram.org/*' => Http::response(['ok' => true], 200),
-        ]);
+        ]));
 
         $client = Client::factory()->create(['telegram_user_id' => 'tg-design']);
         $request = ServiceRequest::factory()->for($client)->create([

@@ -33,9 +33,10 @@ load_dotenv()
     WAITING_RECEIPT,
 ) = range(8)
 
-_origin = (os.environ.get("HOC_API_URL") or "http://127.0.0.1:8000").rstrip("/")
+_local_api = (os.environ.get("HOC_LOCAL_API_URL") or "http://127.0.0.1:8001").rstrip("/")
+_origin = (os.environ.get("HOC_API_URL") or _local_api).rstrip("/")
 if "trycloudflare.com" in _origin:
-    _origin = "http://127.0.0.1:8000"
+    _origin = _local_api
 API_URL = _origin if _origin.endswith("/api") else f"{_origin}/api"
 BOT_SECRET = os.environ.get("TELEGRAM_BOT_SECRET", "")
 BTN_NEW = "🆕 طلب جديد"
@@ -48,6 +49,10 @@ ALLOWED_ATTACHMENT_MIMES = {
     "image/png",
     "image/webp",
     "application/pdf",
+    "audio/ogg",
+    "audio/mpeg",
+    "audio/mp4",
+    "audio/x-m4a",
 }
 
 
@@ -84,6 +89,16 @@ async def download_message_attachment(message) -> dict[str, str] | None:
         if mime_type not in ALLOWED_ATTACHMENT_MIMES:
             return None
         file_name = file_obj.file_name or "attachment.pdf"
+    elif message.voice:
+        file_obj = message.voice
+        file_name = "voice.ogg"
+        mime_type = "audio/ogg"
+    elif message.audio:
+        file_obj = message.audio
+        mime_type = message.audio.mime_type or "audio/mpeg"
+        if mime_type not in ALLOWED_ATTACHMENT_MIMES:
+            return None
+        file_name = message.audio.file_name or "audio.mp3"
     else:
         return None
 
@@ -96,11 +111,51 @@ async def download_message_attachment(message) -> dict[str, str] | None:
     }
 
 
+def attachment_status_text(count: int, has_description: bool) -> str:
+    label = "مرفق" if count == 1 else "مرفقات"
+    if has_description:
+        return (
+            f"تم استلام {count} {label}.\n"
+            "أرسل المزيد أو اضغط «✅ تم الإرسال»."
+        )
+    return (
+        f"تم استلام {count} {label}.\n"
+        "اكتب الوصف الذي تريده، أو أرسل المزيد من المرفقات."
+    )
+
+
+async def update_attachment_status(message, context: ContextTypes.DEFAULT_TYPE) -> None:
+    attachments = context.user_data.get("attachments") or []
+    if not attachments:
+        return
+
+    description = (context.user_data.get("description") or "").strip()
+    text = attachment_status_text(len(attachments), bool(description))
+    previous_id = context.user_data.get("attachment_status_message_id")
+    if previous_id:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=message.chat_id,
+                message_id=previous_id,
+                text=text,
+                reply_markup=body_keyboard(),
+            )
+            return
+        except Exception:
+            pass
+
+    sent = await message.reply_text(text, reply_markup=body_keyboard())
+    context.user_data["attachment_status_message_id"] = sent.message_id
+
+
 async def submit_new_request(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user = update.effective_user
     message = update.message
     if user is None or message is None:
         return ConversationHandler.END
+
+    if context.user_data.get("submitting"):
+        return WAITING_BODY
 
     description = (context.user_data.get("description") or "").strip()
     attachments = context.user_data.get("attachments") or []
@@ -110,6 +165,9 @@ async def submit_new_request(update: Update, context: ContextTypes.DEFAULT_TYPE)
             reply_markup=body_keyboard(),
         )
         return WAITING_BODY
+
+    context.user_data["submitting"] = True
+    await message.reply_text("⏳ جاري معالجة طلبك الآن...", reply_markup=body_keyboard())
 
     payload: dict[str, object] = {
         "telegram_user_id": str(user.id),
@@ -127,6 +185,7 @@ async def submit_new_request(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         if response.status_code >= 400:
             detail = response.json().get("message", response.text)
+            context.user_data["submitting"] = False
             await message.reply_text(
                 f"تعذر تسجيل الطلب: {escape(str(detail))}",
                 reply_markup=body_keyboard(),
@@ -137,6 +196,9 @@ async def submit_new_request(update: Update, context: ContextTypes.DEFAULT_TYPE)
     context.user_data.pop("attachments", None)
     context.user_data.pop("description", None)
     context.user_data.pop("title", None)
+    context.user_data.pop("composing_request", None)
+    context.user_data.pop("submitting", None)
+    context.user_data.pop("attachment_status_message_id", None)
 
     attachment_note = ""
     if attachments:
@@ -178,8 +240,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def new_request(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if update.message is None:
         return ConversationHandler.END
+    context.user_data["composing_request"] = True
     context.user_data["attachments"] = []
     context.user_data["description"] = ""
+    context.user_data.pop("submitting", None)
+    context.user_data.pop("attachment_status_message_id", None)
     await update.message.reply_text("ما عنوان الطلب؟")
     return WAITING_TITLE
 
@@ -192,7 +257,8 @@ async def capture_title(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     context.user_data["description"] = ""
     await update.message.reply_text(
         "صف المطلوب.\n"
-        "يمكنك إرسال نص أو صور وملفات (JPG, PNG, PDF).\n"
+        "يمكنك إرسال نصاً أو صوراً أو ملفات (JPG, PNG, PDF) أو رسالة صوتية.\n"
+        "يمكنك البدء بالمرفقات ثم كتابة الوصف، أو العكس.\n"
         "عند الانتهاء اضغط «✅ تم الإرسال».",
         reply_markup=body_keyboard(),
     )
@@ -221,23 +287,27 @@ async def capture_body(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         attachments.append(attachment)
         if message.caption:
             context.user_data["description"] = message.caption.strip()
-        await message.reply_text(
-            f"تم استلام الملف ({len(attachments)}/{MAX_ATTACHMENTS}).\n"
-            "أرسل المزيد أو اضغط «✅ تم الإرسال».",
-            reply_markup=body_keyboard(),
-        )
+        await update_attachment_status(message, context)
         return WAITING_BODY
 
     if message.text:
         context.user_data["description"] = message.text.strip()
-        await message.reply_text(
-            "تم حفظ الوصف. أرسل مرفقات إن وجدت، ثم اضغط «✅ تم الإرسال».",
-            reply_markup=body_keyboard(),
-        )
+        attachments = context.user_data.get("attachments") or []
+        if attachments:
+            await update_attachment_status(message, context)
+            await message.reply_text(
+                "تم حفظ الوصف. اضغط «✅ تم الإرسال» لإرسال الطلب.",
+                reply_markup=body_keyboard(),
+            )
+        else:
+            await message.reply_text(
+                "تم حفظ الوصف. أرسل مرفقات (صور، ملفات، أو رسالة صوتية) إن وجدت، ثم اضغط «✅ تم الإرسال».",
+                reply_markup=body_keyboard(),
+            )
         return WAITING_BODY
 
     await message.reply_text(
-        "أرسل نصاً أو صورة/ملف PDF.",
+        "أرسل نصاً أو صورة/ملف PDF أو رسالة صوتية.",
         reply_markup=body_keyboard(),
     )
     return WAITING_BODY
@@ -532,6 +602,8 @@ async def upload_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     message = update.message
     if user is None or message is None:
         return
+    if context.user_data.get("composing_request"):
+        return
 
     file_obj = None
     file_name = "receipt"
@@ -561,7 +633,6 @@ async def upload_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         items = requests_resp.json().get("data", [])
         awaiting = next((i for i in items if i.get("status") == "awaiting_payment"), None)
         if not awaiting:
-            await message.reply_text("لا يوجد طلب بانتظار الدفع.", reply_markup=main_keyboard())
             return
 
         response = await client.post(
@@ -586,6 +657,9 @@ async def upload_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data.pop("composing_request", None)
+    context.user_data.pop("submitting", None)
+    context.user_data.pop("attachment_status_message_id", None)
     if update.message:
         await update.message.reply_text("تم الإلغاء.", reply_markup=main_keyboard())
     return ConversationHandler.END
@@ -644,7 +718,10 @@ def main() -> None:
                 WAITING_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, capture_title)],
                 WAITING_BODY: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, capture_body),
-                    MessageHandler(filters.PHOTO | filters.Document.ALL, capture_body),
+                    MessageHandler(
+                        filters.PHOTO | filters.Document.ALL | filters.VOICE | filters.AUDIO,
+                        capture_body,
+                    ),
                 ],
                 WAITING_SUPPORT: [MessageHandler(filters.TEXT & ~filters.COMMAND, capture_support)],
             },

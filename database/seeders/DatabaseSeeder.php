@@ -62,16 +62,35 @@ class DatabaseSeeder extends Seeder
                 ->create();
         }
 
-        Employee::query()->firstOrCreate(
+        Employee::query()->updateOrCreate(
             ['code' => 'EMP-0001'],
             [
                 'name' => 'Sales Desk',
                 'phone' => '+963 000 000 000',
+                'telegram_user_id' => '6350001',
                 'profession' => EmployeeProfession::Sales,
                 'status' => EmployeeStatus::Approved,
                 'notes' => 'Receives new client requests.',
                 'is_active' => true,
             ],
         );
+
+        Employee::query()->updateOrCreate(
+            ['code' => 'EMP-0002'],
+            [
+                'name' => 'Design Desk',
+                'phone' => '+963 000 000 001',
+                'telegram_user_id' => '6350002',
+                'clickup_user_id' => 'cu-design-e2e',
+                'profession' => EmployeeProfession::Design,
+                'status' => EmployeeStatus::Approved,
+                'notes' => 'Executes assigned design tasks.',
+                'is_active' => true,
+            ],
+        );
+
+        $this->call(PortfolioSeeder::class);
+        $this->call(PricingSeeder::class);
+        $this->call(ContactSeeder::class);
     }
 }

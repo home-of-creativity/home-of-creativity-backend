@@ -1,0 +1,24 @@
+<?php
+
+namespace App\Http\Requests;
+
+use App\Enums\SocialAbility;
+use Illuminate\Foundation\Http\FormRequest;
+
+class ReplySocialInboxRequest extends FormRequest
+{
+    public function authorize(): bool
+    {
+        return $this->user()?->canSocial(SocialAbility::Engage) ?? false;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function rules(): array
+    {
+        return [
+            'body' => ['required', 'string', 'max:2000'],
+        ];
+    }
+}

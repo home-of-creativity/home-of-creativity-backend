@@ -16,6 +16,13 @@ class GeminiService
      */
     public function classify(string $title, string $description): array
     {
+        if (config('services.gemini.e2e_stub')) {
+            return [
+                'work_type' => WorkType::Design,
+                'briefs' => [['type' => 'design', 'brief' => "E2E brief for {$title}"]],
+            ];
+        }
+
         $apiKey = (string) config('services.gemini.api_key');
         if ($apiKey === '') {
             throw ValidationException::withMessages([

@@ -1,4 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { FormDialog } from "../components/FormDialog";
+import { LoadingTableRow } from "../components/LoadingTableRow";
 import { api, type ClickUpMember, type Employee } from "../api";
 import { copy, professions, type Locale } from "../i18n";
 
@@ -18,6 +20,7 @@ export function Employees({ t }: { locale: Locale; t: (c: { ar: string; en: stri
   const [members, setMembers] = useState<ClickUpMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [approvingId, setApprovingId] = useState<number | null>(null);
   const [form, setForm] = useState(emptyForm);
@@ -38,6 +41,14 @@ export function Employees({ t }: { locale: Locale; t: (c: { ar: string; en: stri
     load();
   }, []);
 
+  function startAdd() {
+    setEditingId(null);
+    setApprovingId(null);
+    setForm(emptyForm);
+    setShowForm(true);
+    setError("");
+  }
+
   function startEdit(item: Employee) {
     setEditingId(item.id);
     setApprovingId(null);
@@ -51,6 +62,7 @@ export function Employees({ t }: { locale: Locale; t: (c: { ar: string; en: stri
       notes: item.notes ?? "",
       is_active: item.is_active,
     });
+    setShowForm(true);
     setError("");
   }
 
@@ -63,6 +75,7 @@ export function Employees({ t }: { locale: Locale; t: (c: { ar: string; en: stri
       profession: item.profession || "sales",
       clickup_user_id: item.clickup_user_id ?? "",
     });
+    setShowForm(true);
     setError("");
   }
 
@@ -70,6 +83,7 @@ export function Employees({ t }: { locale: Locale; t: (c: { ar: string; en: stri
     setEditingId(null);
     setApprovingId(null);
     setForm(emptyForm);
+    setShowForm(false);
     setError("");
   }
 
@@ -148,14 +162,19 @@ export function Employees({ t }: { locale: Locale; t: (c: { ar: string; en: stri
           <h1 className="page-title">{t(copy.employees)}</h1>
           <p className="page-lede">{t(copy.employeesLede)}</p>
         </div>
-        {staffBot ? (
-          <a className="btn btn-telegram" href={`https://t.me/${staffBot}`} target="_blank" rel="noreferrer">
-            {t(copy.openStaffBot)}
-          </a>
-        ) : null}
+        <div className="toolbar">
+          <button type="button" className="btn btn-primary" onClick={startAdd}>
+            {t(copy.addEmployee)}
+          </button>
+          {staffBot ? (
+            <a className="btn btn-telegram" href={`https://t.me/${staffBot}`} target="_blank" rel="noreferrer">
+              {t(copy.openStaffBot)}
+            </a>
+          ) : null}
+        </div>
       </header>
 
-      <p className="muted">{t(copy.joinHint)}</p>
+      <p className="notice notice-info">{t(copy.joinHint)}</p>
 
       {pending.length > 0 ? (
         <section className="card pending-card">
@@ -181,85 +200,83 @@ export function Employees({ t }: { locale: Locale; t: (c: { ar: string; en: stri
         </section>
       ) : null}
 
-      <form className="card employee-form" onSubmit={onSubmit}>
-        <h2 className="form-title">
-          {approvingId ? t(copy.approveEmployee) : editingId ? t(copy.editEmployee) : t(copy.addEmployee)}
-        </h2>
-        <div className="form-grid">
-          <label>
-            {t(copy.employeeName)}
-            <input
-              className="field"
-              required
-              value={form.name}
-              disabled={Boolean(approvingId)}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-            />
-          </label>
-          {approvingId ? null : (
-            <label>
-              {t(copy.employeeCode)}
-              <input className="field" dir="ltr" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="EMP-0001" />
+      {!showForm && error ? <p className="error">{error}</p> : null}
+
+      {showForm ? (
+        <FormDialog
+          title={approvingId ? t(copy.approveEmployee) : editingId ? t(copy.editEmployee) : t(copy.addEmployee)}
+          onClose={resetForm}
+          onSubmit={onSubmit}
+          submitLabel={approvingId ? t(copy.approveEmployee) : editingId ? t(copy.saveEmployee) : t(copy.addEmployee)}
+          cancelLabel={t(copy.cancel)}
+          closeLabel={t(copy.close)}
+          error={error}
+        >
+          <div className="form-grid">
+            <label className="field-label">
+              {t(copy.employeeName)}
+              <input
+                className="field"
+                required
+                value={form.name}
+                disabled={Boolean(approvingId)}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+              />
             </label>
-          )}
-          {approvingId ? null : (
-            <label>
-              {t(copy.phone)}
-              <input className="field" dir="ltr" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+            {approvingId ? null : (
+              <label className="field-label">
+                {t(copy.employeeCode)}
+                <input className="field" dir="ltr" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="EMP-0001" />
+              </label>
+            )}
+            {approvingId ? null : (
+              <label className="field-label">
+                {t(copy.phone)}
+                <input className="field" dir="ltr" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+              </label>
+            )}
+            {approvingId ? null : (
+              <label className="field-label">
+                {t(copy.email)}
+                <input className="field" dir="ltr" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+              </label>
+            )}
+            <label className="field-label">
+              {t(copy.profession)}
+              <select className="field" value={form.profession} onChange={(e) => setForm({ ...form, profession: e.target.value })}>
+                {Object.entries(professions).map(([key, label]) => (
+                  <option key={key} value={key}>
+                    {t(label)}
+                  </option>
+                ))}
+              </select>
             </label>
-          )}
-          {approvingId ? null : (
-            <label>
-              {t(copy.email)}
-              <input className="field" dir="ltr" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+            <label className="field-label">
+              {t(copy.clickupMember)}
+              <select className="field" value={form.clickup_user_id} onChange={(e) => setForm({ ...form, clickup_user_id: e.target.value })}>
+                <option value="">{t(copy.clickupUnlinked)}</option>
+                {members.map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.email ? `${member.name} (${member.email})` : member.name}
+                  </option>
+                ))}
+              </select>
             </label>
-          )}
-          <label>
-            {t(copy.profession)}
-            <select className="field" value={form.profession} onChange={(e) => setForm({ ...form, profession: e.target.value })}>
-              {Object.entries(professions).map(([key, label]) => (
-                <option key={key} value={key}>
-                  {t(label)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            {t(copy.clickupMember)}
-            <select className="field" value={form.clickup_user_id} onChange={(e) => setForm({ ...form, clickup_user_id: e.target.value })}>
-              <option value="">{t(copy.clickupUnlinked)}</option>
-              {members.map((member) => (
-                <option key={member.id} value={member.id}>
-                  {member.email ? `${member.name} (${member.email})` : member.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          {approvingId ? null : (
-            <label className="check-row">
-              <input type="checkbox" checked={form.is_active} onChange={(e) => setForm({ ...form, is_active: e.target.checked })} />
-              {t(copy.active)}
-            </label>
-          )}
-        </div>
-        {approvingId ? null : (
-          <label>
-            {t(copy.notes)}
-            <textarea className="field field-area" rows={3} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
-          </label>
-        )}
-        <div className="toolbar">
-          <button className="btn btn-primary" type="submit">
-            {approvingId ? t(copy.approveEmployee) : editingId ? t(copy.saveEmployee) : t(copy.addEmployee)}
-          </button>
-          {editingId || approvingId ? (
-            <button className="btn" type="button" onClick={resetForm}>
-              {t(copy.cancel)}
-            </button>
-          ) : null}
-        </div>
-        {error ? <p className="error">{error}</p> : null}
-      </form>
+            {approvingId ? null : (
+              <label className="checkbox-row">
+                <input type="checkbox" checked={form.is_active} onChange={(e) => setForm({ ...form, is_active: e.target.checked })} />
+                {t(copy.active)}
+              </label>
+            )}
+            {approvingId ? null : (
+              <label className="field-label portfolio-form-span">
+                {t(copy.notes)}
+                <textarea className="field field-area" rows={3} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+              </label>
+            )}
+          </div>
+        </FormDialog>
+      ) : null}
 
       <div className="table-wrap">
         <table>
@@ -276,9 +293,7 @@ export function Employees({ t }: { locale: Locale; t: (c: { ar: string; en: stri
           </thead>
           <tbody>
             {loading ? (
-              <tr>
-                <td colSpan={7}>{t(copy.loading)}</td>
-              </tr>
+              <LoadingTableRow colSpan={7} label={t(copy.loading)} />
             ) : items.length === 0 ? (
               <tr>
                 <td colSpan={7}>{t(copy.empty)}</td>

@@ -58,6 +58,7 @@ class IntegrationTest extends TestCase
             'services.odoo.db' => 'hoc',
             'services.odoo.username' => 'admin',
             'services.odoo.api_key' => 'secret-key',
+            'services.odoo.use_json2' => false,
         ]);
 
         Http::fake([
@@ -65,7 +66,7 @@ class IntegrationTest extends TestCase
                 ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => 2], 200)
                 ->push(['jsonrpc' => '2.0', 'id' => 2, 'result' => []], 200)
                 ->push(['jsonrpc' => '2.0', 'id' => 3, 'result' => 44], 200)
-                ->push(['jsonrpc' => '2.0', 'id' => 4, 'result' => 2], 200)
+                ->push(['jsonrpc' => '2.0', 'id' => 4, 'result' => [['id' => 1, 'name' => 'SYP']]], 200)
                 ->push(['jsonrpc' => '2.0', 'id' => 5, 'result' => 88], 200),
         ]);
 
@@ -81,6 +82,34 @@ class IntegrationTest extends TestCase
             ->assertJsonPath('data.odoo_quotation_id', '88');
 
         Http::assertSentCount(5);
+    }
+
+    public function test_clickup_programming_tasks_use_programming_list(): void
+    {
+        Http::preventStrayRequests();
+        config([
+            'services.clickup.token' => 'pk_test',
+            'services.clickup.list_id' => '12345',
+            'services.clickup.lists.sales' => '12345',
+            'services.clickup.lists.programming' => 'prog-list',
+        ]);
+
+        Http::fake([
+            'https://api.clickup.com/api/v2/list/prog-list/task' => Http::response(['id' => 'cu-prog'], 200),
+        ]);
+
+        $number = $this->createTelegramRequest();
+
+        $this->withHeaders(['X-N8N-Secret' => 'change-me'])
+            ->postJson('/api/integrations/clickup/tasks', [
+                'request_number' => $number,
+                'briefs' => [
+                    ['department' => 'programming', 'brief' => 'Build landing page'],
+                ],
+            ])->assertOk()
+            ->assertJsonPath('data.briefs.0.clickup_task_id', 'cu-prog');
+
+        Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/list/prog-list/task'));
     }
 
     public function test_clickup_tasks_are_created_per_department(): void
@@ -127,12 +156,14 @@ class IntegrationTest extends TestCase
             'services.odoo.db' => 'hoc',
             'services.odoo.username' => 'admin',
             'services.odoo.api_key' => 'secret-key',
+            'services.odoo.use_json2' => false,
         ]);
 
         Http::fake([
             'https://odoo.test/jsonrpc' => Http::sequence()
                 ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => 2], 200)
-                ->push(['jsonrpc' => '2.0', 'id' => 2, 'result' => 501], 200),
+                ->push(['jsonrpc' => '2.0', 'id' => 2, 'result' => [['id' => 1, 'name' => 'SYP']]], 200)
+                ->push(['jsonrpc' => '2.0', 'id' => 3, 'result' => 501], 200),
         ]);
 
         $number = $this->createTelegramRequest();

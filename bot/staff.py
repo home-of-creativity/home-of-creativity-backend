@@ -29,9 +29,10 @@ STATUS_AR = {
     "revision_requested": "مطلوب تعديل",
     "ready_for_review": "بانتظار المراجعة",
 }
-_origin = (os.environ.get("HOC_API_URL") or "http://127.0.0.1:8000").rstrip("/")
+_local_api = (os.environ.get("HOC_LOCAL_API_URL") or "http://127.0.0.1:8001").rstrip("/")
+_origin = (os.environ.get("HOC_API_URL") or _local_api).rstrip("/")
 if "trycloudflare.com" in _origin:
-    _origin = "http://127.0.0.1:8000"
+    _origin = _local_api
 API_URL = _origin if _origin.endswith("/api") else f"{_origin}/api"
 BOT_SECRET = os.environ.get("TELEGRAM_STAFF_BOT_SECRET", "change-me-staff")
 API_TIMEOUT = httpx.Timeout(30.0)

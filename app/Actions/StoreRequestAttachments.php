@@ -19,6 +19,10 @@ class StoreRequestAttachments
         'image/png',
         'image/webp',
         'application/pdf',
+        'audio/ogg',
+        'audio/mpeg',
+        'audio/mp4',
+        'audio/x-m4a',
     ];
 
     /**
@@ -62,6 +66,9 @@ class StoreRequestAttachments
                 'image/png' => 'png',
                 'image/webp' => 'webp',
                 'application/pdf' => 'pdf',
+                'audio/ogg' => 'ogg',
+                'audio/mpeg' => 'mp3',
+                'audio/mp4', 'audio/x-m4a' => 'm4a',
                 default => 'bin',
             };
 

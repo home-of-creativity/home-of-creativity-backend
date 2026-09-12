@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type PageMeta, type ServiceRequest } from "../api";
+import { LoadingTableRow } from "../components/LoadingTableRow";
 import { Pagination } from "../components/Pagination";
 import { copy, sources, statuses, type Locale } from "../i18n";
 
@@ -35,7 +36,7 @@ export function Requests({ t }: { locale: Locale; t: (c: { ar: string; en: strin
           <p className="page-lede">{t(copy.requestsLede)}</p>
         </div>
       </header>
-      <div className="toolbar">
+      <div className="toolbar filter-bar">
         <label className="filter-label" htmlFor="request-status-filter">
           {t(copy.status)}
         </label>
@@ -69,9 +70,7 @@ export function Requests({ t }: { locale: Locale; t: (c: { ar: string; en: strin
           </thead>
           <tbody>
             {loading ? (
-              <tr>
-                <td colSpan={5}>{t(copy.loading)}</td>
-              </tr>
+              <LoadingTableRow colSpan={5} label={t(copy.loading)} />
             ) : items.length === 0 ? (
               <tr>
                 <td colSpan={5}>{t(copy.empty)}</td>

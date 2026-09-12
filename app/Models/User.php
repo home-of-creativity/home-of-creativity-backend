@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\SocialAbility;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasOne;
@@ -21,6 +22,7 @@ class User extends Authenticatable
         'telegram_user_id',
         'locale',
         'password',
+        'social_permissions',
     ];
 
     protected $hidden = [
@@ -34,11 +36,45 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'is_admin' => 'boolean',
+            'social_permissions' => 'array',
         ];
     }
 
     public function client(): HasOne
     {
         return $this->hasOne(Client::class);
+    }
+
+    public function canSocial(SocialAbility|string $ability): bool
+    {
+        if (! $this->is_admin) {
+            return false;
+        }
+
+        $ability = $ability instanceof SocialAbility ? $ability->value : $ability;
+
+        if ($this->social_permissions === null) {
+            return true;
+        }
+
+        return in_array($ability, $this->social_permissions, true);
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function socialAbilities(): array
+    {
+        if (! $this->is_admin) {
+            return [];
+        }
+
+        $all = SocialAbility::values();
+
+        if ($this->social_permissions === null) {
+            return $all;
+        }
+
+        return array_values(array_intersect($all, $this->social_permissions));
     }
 }

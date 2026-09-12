@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Actions\CompleteRequest;
 use App\Actions\ConfirmRequestPayment;
+use App\Actions\DispatchStatusWorkflow;
 use App\Actions\EnqueueIntegrationEvent;
 use App\Actions\SendQuotation;
 use App\Enums\GeminiStatus;
@@ -62,6 +63,7 @@ class ServiceRequestController extends Controller
         ServiceRequest $serviceRequest,
         RequestStatusTransitionService $transitions,
         CompleteRequest $completeRequest,
+        DispatchStatusWorkflow $dispatchStatusWorkflow,
     ): ServiceRequestResource {
         $status = RequestStatus::from($request->validated('status'));
 
@@ -69,6 +71,7 @@ class ServiceRequestController extends Controller
             $serviceRequest = $completeRequest->handle($serviceRequest, 'admin');
         } else {
             $serviceRequest = $transitions->transition($serviceRequest, $status, 'admin');
+            $dispatchStatusWorkflow->handle($serviceRequest, $status);
         }
 
         $serviceRequest->load('client');
@@ -82,10 +85,16 @@ class ServiceRequestController extends Controller
         ServiceRequest $serviceRequest,
         SendQuotation $sendQuotation,
     ): ServiceRequestResource {
+        $lines = $request->validated('lines');
         $sendQuotation->handle(
             $serviceRequest,
-            (float) $request->validated('amount'),
+            $lines
+                ? (float) collect($lines)->sum(fn (array $line): float => (float) $line['amount'] * (float) ($line['units'] ?? 1))
+                : (float) $request->validated('amount'),
             $request->validated('notes'),
+            'admin',
+            null,
+            $lines,
         );
 
         return ServiceRequestResource::make($serviceRequest->fresh([

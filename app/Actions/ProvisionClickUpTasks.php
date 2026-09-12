@@ -52,7 +52,7 @@ class ProvisionClickUpTasks
 
                 foreach ($created as $index => $task) {
                     $brief = $briefPayloads[$index] ?? null;
-                    $taskType = ClickUpTaskType::tryFrom($task['department']);
+                    $taskType = ClickUpTaskType::fromDepartment($task['department']);
                     if (! $taskType || $taskType === ClickUpTaskType::Sales) {
                         continue;
                     }
@@ -111,14 +111,15 @@ class ProvisionClickUpTasks
     private function notifyExecutionTeamsOnly(ServiceRequest $request): void
     {
         foreach ($request->briefs as $brief) {
-            $taskType = ClickUpTaskType::tryFrom((string) ($brief->type ?? $brief->department));
-            if (! in_array($taskType, [ClickUpTaskType::Design, ClickUpTaskType::Content], true)) {
+            $taskType = ClickUpTaskType::fromDepartment((string) ($brief->type ?? $brief->department));
+            if (! in_array($taskType, [ClickUpTaskType::Design, ClickUpTaskType::Content, ClickUpTaskType::Programming], true)) {
                 continue;
             }
 
             $profession = match ($taskType) {
                 ClickUpTaskType::Design => EmployeeProfession::Design,
                 ClickUpTaskType::Content => EmployeeProfession::Content,
+                ClickUpTaskType::Programming => EmployeeProfession::Web,
                 default => null,
             };
 
@@ -126,7 +127,12 @@ class ProvisionClickUpTasks
                 continue;
             }
 
-            $label = $taskType === ClickUpTaskType::Design ? 'مهمة تنفيذ (تصميم)' : 'مهمة تنفيذ (محتوى)';
+            $label = match ($taskType) {
+                ClickUpTaskType::Design => 'مهمة تنفيذ (تصميم)',
+                ClickUpTaskType::Content => 'مهمة تنفيذ (محتوى)',
+                ClickUpTaskType::Programming => 'مهمة تنفيذ (برمجة)',
+                default => 'مهمة تنفيذ',
+            };
             $displayNumber = ResolveServiceRequest::displayNumber($request);
             $text = "{$label}\n#{$displayNumber} — {$request->title}\n{$request->client?->name}\n\n{$brief->brief}";
 

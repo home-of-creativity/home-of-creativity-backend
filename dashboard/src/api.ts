@@ -10,11 +10,104 @@ export function setToken(token: string | null) {
   else localStorage.removeItem(TOKEN_KEY);
 }
 
+export type SocialAbility = "accounts" | "create" | "approve" | "engage";
+
 export type User = {
   id: number;
   name: string;
   email: string;
   is_admin: boolean;
+  social_permissions?: SocialAbility[] | null;
+  social_abilities?: SocialAbility[];
+};
+
+export function canSocial(user: User | null | undefined, ability: SocialAbility) {
+  return Boolean(user?.social_abilities?.includes(ability));
+}
+
+export type SocialStaff = User;
+
+export type SocialAccount = {
+  id: number;
+  platform: string;
+  name: string;
+  handle: string | null;
+  page_id: string | null;
+  has_token: boolean;
+  is_active: boolean;
+  connection_status: string;
+  last_error: string | null;
+  connected_by?: { id: number; name: string } | null;
+  created_at?: string | null;
+};
+
+export type SocialPostMedia = {
+  id: number;
+  url: string | null;
+  original_name: string;
+  mime: string | null;
+  kind: string;
+  sort_order: number;
+};
+
+export type SocialActivity = {
+  id: number;
+  action: string;
+  user?: { id: number; name: string } | null;
+  metadata?: Record<string, unknown> | null;
+  created_at: string | null;
+};
+
+export type SocialPostAccount = {
+  id: number;
+  platform: string;
+  name: string;
+  handle: string | null;
+  is_active: boolean;
+  publish_status: string;
+  external_id: string | null;
+  published_at?: string | null;
+  last_error: string | null;
+};
+
+export type SocialPost = {
+  id: number;
+  body: string;
+  status: string;
+  scheduled_at: string | null;
+  published_at: string | null;
+  approved_at: string | null;
+  last_error: string | null;
+  is_editable?: boolean;
+  is_deletable?: boolean;
+  created_by?: { id: number; name: string } | null;
+  updated_by?: { id: number; name: string } | null;
+  approved_by?: { id: number; name: string } | null;
+  accounts?: SocialPostAccount[];
+  media?: SocialPostMedia[];
+  activities?: SocialActivity[];
+  created_at?: string | null;
+};
+
+export type SocialInboxReply = {
+  id: number;
+  body: string;
+  sent_at: string | null;
+  last_error: string | null;
+  user?: { id: number; name: string } | null;
+};
+
+export type SocialInboxItem = {
+  id: number;
+  kind: string;
+  external_id: string;
+  author_name: string;
+  author_handle: string | null;
+  body: string;
+  occurred_at: string | null;
+  is_replied: boolean;
+  account?: { id: number; platform: string; name: string } | null;
+  replies?: SocialInboxReply[];
 };
 
 export type Client = {
@@ -130,6 +223,135 @@ export type ClickUpMember = {
   email: string | null;
 };
 
+export type ShowcaseClient = {
+  id: number;
+  name: string;
+  logo_path: string | null;
+  logo_url: string | null;
+  website_url: string | null;
+  sort_order: number;
+  is_published: boolean;
+};
+
+export type PortfolioCategory = {
+  id: number;
+  slug: string;
+  name_en: string;
+  name_ar: string;
+  sort_order: number;
+  is_published: boolean;
+  projects_count?: number;
+};
+
+export type PortfolioProjectImage = {
+  id: number;
+  image_path: string;
+  image_url: string | null;
+  alt_en: string | null;
+  alt_ar: string | null;
+  sort_order: number;
+  featured: boolean;
+};
+
+export type PortfolioSocialLinks = Partial<
+  Record<"instagram" | "facebook" | "linkedin" | "x" | "tiktok" | "youtube", string>
+>;
+
+export type PricingCategory = {
+  id: number;
+  slug: string;
+  name_en: string;
+  name_ar: string;
+  lead_en: string | null;
+  lead_ar: string | null;
+  sort_order: number;
+  is_published: boolean;
+  subcategories_count?: number;
+};
+
+export type PricingSubcategory = {
+  id: number;
+  category_id: number;
+  slug: string;
+  name_en: string;
+  name_ar: string;
+  lead_en: string | null;
+  lead_ar: string | null;
+  one_time: boolean;
+  lead_in_box: boolean;
+  lead_note_en: string | null;
+  lead_note_ar: string | null;
+  sort_order: number;
+  is_published: boolean;
+  packages_count?: number;
+  category?: PricingCategory;
+};
+
+export type PricingPackagePrices = {
+  monthly: number;
+  quarterly: number;
+  semiannual: number;
+  yearly: number;
+};
+
+export type PricingPackageReach = {
+  adBudgetUsd: number;
+  adCreditUsd: number;
+  estimatedReach: { en: string; ar: string };
+  goal: { en: string; ar: string };
+};
+
+export type PricingPackage = {
+  id: number;
+  subcategory_id: number;
+  slug: string;
+  name_en: string;
+  name_ar: string;
+  subtitle_en: string;
+  subtitle_ar: string;
+  price_usd: number | null;
+  prices: PricingPackagePrices | null;
+  features: Array<{ en: string; ar: string }>;
+  reach: PricingPackageReach | null;
+  featured: boolean;
+  badge_en: string | null;
+  badge_ar: string | null;
+  sort_order: number;
+  is_published: boolean;
+  subcategory?: PricingSubcategory;
+};
+
+export type ContactChannel = {
+  id: number;
+  kind: "mobile" | "whatsapp" | "social" | "location";
+  region: string | null;
+  platform: string | null;
+  value: string;
+  value_ar: string | null;
+  digits: string | null;
+  url: string | null;
+  sort_order: number;
+  is_published: boolean;
+};
+
+export type PortfolioProject = {
+  id: number;
+  category_id: number;
+  category?: PortfolioCategory;
+  title_en: string;
+  title_ar: string;
+  summary_en: string | null;
+  summary_ar: string | null;
+  website_url: string | null;
+  social_links: PortfolioSocialLinks;
+  image_path: string | null;
+  image_url: string | null;
+  images?: PortfolioProjectImage[];
+  sort_order: number;
+  is_published: boolean;
+  featured: boolean;
+};
+
 export type PageMeta = {
   current_page: number;
   last_page: number;
@@ -157,10 +379,25 @@ function queryString(params: Record<string, string | number | undefined>) {
   return query ? `?${query}` : "";
 }
 
+function apiErrorMessage(body: Record<string, unknown>, status: number) {
+  if (typeof body.message === "string" && body.message.length > 0) {
+    return body.message;
+  }
+  if (body.errors && typeof body.errors === "object") {
+    const lines = Object.values(body.errors as Record<string, string[]>)
+      .flat()
+      .filter(Boolean);
+    if (lines.length > 0) return lines.join(" ");
+  }
+  return `HTTP ${status}`;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   headers.set("Accept", "application/json");
-  if (init?.body) headers.set("Content-Type", "application/json");
+  if (init?.body && !(init.body instanceof FormData)) {
+    headers.set("Content-Type", "application/json");
+  }
   const token = getToken();
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
@@ -169,10 +406,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     setToken(null);
   }
   if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error(body.message ?? `HTTP ${response.status}`);
+    const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    throw new Error(apiErrorMessage(body, response.status));
   }
   return response.json() as Promise<T>;
+}
+
+async function submitForm<T>(path: string, method: "POST" | "PUT", form: FormData) {
+  if (method === "PUT") {
+    form.set("_method", "PUT");
+    return request<T>(path, { method: "POST", body: form });
+  }
+  return request<T>(path, { method: "POST", body: form });
 }
 
 export const api = {
@@ -205,10 +450,15 @@ export const api = {
       body: JSON.stringify({ status }),
     });
   },
-  sendQuotation(id: number, amount: number, notes?: string) {
+  sendQuotation(
+    id: number,
+    payload:
+      | { lines: Array<{ title: string; amount: number; units?: number; notes?: string }> }
+      | { amount: number; notes?: string },
+  ) {
     return request<Envelope<ServiceRequest>>(`/admin/requests/${id}/quotation`, {
       method: "POST",
-      body: JSON.stringify({ amount, notes }),
+      body: JSON.stringify(payload),
     });
   },
   confirmPayment(id: number, payment_method: "receipt" | "cash") {
@@ -280,5 +530,304 @@ export const api = {
   },
   deleteEmployee(id: number) {
     return request<Envelope<null>>(`/admin/employees/${id}`, { method: "DELETE" });
+  },
+  portfolioCategories() {
+    return request<{ data: PortfolioCategory[] }>("/admin/portfolio/categories");
+  },
+  createPortfolioCategory(payload: {
+    slug: string;
+    name_en: string;
+    name_ar: string;
+    sort_order?: number;
+    is_published?: boolean;
+  }) {
+    return request<Envelope<PortfolioCategory>>("/admin/portfolio/categories", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  updatePortfolioCategory(
+    id: number,
+    payload: Partial<{
+      slug: string;
+      name_en: string;
+      name_ar: string;
+      sort_order: number;
+      is_published: boolean;
+    }>,
+  ) {
+    return request<Envelope<PortfolioCategory>>(`/admin/portfolio/categories/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+  deletePortfolioCategory(id: number) {
+    return request<Envelope<null>>(`/admin/portfolio/categories/${id}`, { method: "DELETE" });
+  },
+  deleteAllPortfolioCategories() {
+    return request<Envelope<{ deleted: boolean }>>("/admin/portfolio/categories/bulk", { method: "DELETE" });
+  },
+  movePortfolioCategory(id: number, direction: "up" | "down") {
+    return request<{ data: PortfolioCategory[]; message?: string }>(`/admin/portfolio/categories/${id}/move`, {
+      method: "POST",
+      body: JSON.stringify({ direction }),
+    });
+  },
+  showcaseClients(page = 1) {
+    return request<Paginated<ShowcaseClient>>(`/admin/portfolio/clients${queryString({ page })}`);
+  },
+  createShowcaseClient(form: FormData) {
+    return submitForm<Envelope<ShowcaseClient>>("/admin/portfolio/clients", "POST", form);
+  },
+  updateShowcaseClient(id: number, form: FormData) {
+    return submitForm<Envelope<ShowcaseClient>>(`/admin/portfolio/clients/${id}`, "PUT", form);
+  },
+  deleteShowcaseClient(id: number) {
+    return request<Envelope<null>>(`/admin/portfolio/clients/${id}`, { method: "DELETE" });
+  },
+  deleteAllShowcaseClients() {
+    return request<Envelope<{ deleted: number }>>("/admin/portfolio/clients/bulk", { method: "DELETE" });
+  },
+  portfolioProjects(page = 1) {
+    return request<Paginated<PortfolioProject>>(`/admin/portfolio/projects${queryString({ page })}`);
+  },
+  createPortfolioProject(form: FormData) {
+    return submitForm<Envelope<PortfolioProject>>("/admin/portfolio/projects", "POST", form);
+  },
+  updatePortfolioProject(id: number, form: FormData) {
+    return submitForm<Envelope<PortfolioProject>>(`/admin/portfolio/projects/${id}`, "PUT", form);
+  },
+  deletePortfolioProject(id: number) {
+    return request<Envelope<null>>(`/admin/portfolio/projects/${id}`, { method: "DELETE" });
+  },
+  deleteAllPortfolioProjects() {
+    return request<Envelope<{ deleted: number }>>("/admin/portfolio/projects/bulk", { method: "DELETE" });
+  },
+  pricingCategories() {
+    return request<{ data: PricingCategory[] }>("/admin/pricing/categories");
+  },
+  createPricingCategory(payload: {
+    slug: string;
+    name_en: string;
+    name_ar: string;
+    lead_en?: string | null;
+    lead_ar?: string | null;
+    sort_order?: number;
+    is_published?: boolean;
+  }) {
+    return request<Envelope<PricingCategory>>("/admin/pricing/categories", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  updatePricingCategory(id: number, payload: Partial<{
+    slug: string;
+    name_en: string;
+    name_ar: string;
+    lead_en: string | null;
+    lead_ar: string | null;
+    sort_order: number;
+    is_published: boolean;
+  }>) {
+    return request<Envelope<PricingCategory>>(`/admin/pricing/categories/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+  deletePricingCategory(id: number) {
+    return request<Envelope<null>>(`/admin/pricing/categories/${id}`, { method: "DELETE" });
+  },
+  deleteAllPricingCategories() {
+    return request<Envelope<{ deleted: boolean }>>("/admin/pricing/categories/bulk", { method: "DELETE" });
+  },
+  movePricingCategory(id: number, direction: "up" | "down") {
+    return request<{ data: PricingCategory[] }>(`/admin/pricing/categories/${id}/move`, {
+      method: "POST",
+      body: JSON.stringify({ direction }),
+    });
+  },
+  pricingSubcategories(categoryId?: number) {
+    return request<{ data: PricingSubcategory[] }>(
+      `/admin/pricing/subcategories${queryString({ category_id: categoryId })}`,
+    );
+  },
+  createPricingSubcategory(payload: {
+    category_id: number;
+    slug: string;
+    name_en: string;
+    name_ar: string;
+    lead_en?: string | null;
+    lead_ar?: string | null;
+    one_time?: boolean;
+    lead_in_box?: boolean;
+    lead_note_en?: string | null;
+    lead_note_ar?: string | null;
+    sort_order?: number;
+    is_published?: boolean;
+  }) {
+    return request<Envelope<PricingSubcategory>>("/admin/pricing/subcategories", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  updatePricingSubcategory(id: number, payload: Partial<{
+    category_id: number;
+    slug: string;
+    name_en: string;
+    name_ar: string;
+    lead_en: string | null;
+    lead_ar: string | null;
+    one_time: boolean;
+    lead_in_box: boolean;
+    lead_note_en: string | null;
+    lead_note_ar: string | null;
+    sort_order: number;
+    is_published: boolean;
+  }>) {
+    return request<Envelope<PricingSubcategory>>(`/admin/pricing/subcategories/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+  deletePricingSubcategory(id: number) {
+    return request<Envelope<null>>(`/admin/pricing/subcategories/${id}`, { method: "DELETE" });
+  },
+  movePricingSubcategory(id: number, direction: "up" | "down") {
+    return request<{ data: PricingSubcategory[] }>(`/admin/pricing/subcategories/${id}/move`, {
+      method: "POST",
+      body: JSON.stringify({ direction }),
+    });
+  },
+  pricingPackages(filters?: { categoryId?: number; subcategoryId?: number }) {
+    return request<{ data: PricingPackage[] }>(
+      `/admin/pricing/packages${queryString({
+        category_id: filters?.categoryId,
+        subcategory_id: filters?.subcategoryId,
+      })}`,
+    );
+  },
+  createPricingPackage(payload: Record<string, unknown>) {
+    return request<Envelope<PricingPackage>>("/admin/pricing/packages", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  updatePricingPackage(id: number, payload: Record<string, unknown>) {
+    return request<Envelope<PricingPackage>>(`/admin/pricing/packages/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+  deletePricingPackage(id: number) {
+    return request<Envelope<null>>(`/admin/pricing/packages/${id}`, { method: "DELETE" });
+  },
+  movePricingPackage(id: number, direction: "up" | "down") {
+    return request<{ data: PricingPackage[] }>(`/admin/pricing/packages/${id}/move`, {
+      method: "POST",
+      body: JSON.stringify({ direction }),
+    });
+  },
+  contactChannels() {
+    return request<{ data: ContactChannel[] }>("/admin/contact");
+  },
+  createContactChannel(payload: Partial<ContactChannel> & { kind: ContactChannel["kind"]; value: string }) {
+    return request<Envelope<ContactChannel>>("/admin/contact", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  updateContactChannel(id: number, payload: Partial<ContactChannel>) {
+    return request<Envelope<ContactChannel>>(`/admin/contact/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+  deleteContactChannel(id: number) {
+    return request<Envelope<null>>(`/admin/contact/${id}`, { method: "DELETE" });
+  },
+  moveContactChannel(id: number, direction: "up" | "down") {
+    return request<{ data: ContactChannel[] }>(`/admin/contact/${id}/move`, {
+      method: "POST",
+      body: JSON.stringify({ direction }),
+    });
+  },
+  socialAccounts() {
+    return request<{ data: SocialAccount[]; facebook_configured?: boolean; facebook_error?: string | null }>(
+      "/admin/social/accounts",
+    );
+  },
+  createSocialAccount(payload: Partial<SocialAccount> & { platform: string; name: string; access_token?: string }) {
+    return request<Envelope<SocialAccount>>("/admin/social/accounts", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  updateSocialAccount(id: number, payload: Partial<SocialAccount> & { access_token?: string }) {
+    return request<Envelope<SocialAccount>>(`/admin/social/accounts/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+  toggleSocialAccount(id: number) {
+    return request<Envelope<SocialAccount>>(`/admin/social/accounts/${id}/toggle`, { method: "POST" });
+  },
+  deleteSocialAccount(id: number) {
+    return request<Envelope<null>>(`/admin/social/accounts/${id}`, { method: "DELETE" });
+  },
+  socialPosts(params?: { status?: string; page?: number; from?: string; to?: string; per_page?: number }) {
+    return request<Paginated<SocialPost>>(
+      `/admin/social/posts${queryString({
+        status: params?.status,
+        page: params?.page,
+        from: params?.from,
+        to: params?.to,
+        per_page: params?.per_page,
+      })}`,
+    );
+  },
+  socialPost(id: number) {
+    return request<Envelope<SocialPost>>(`/admin/social/posts/${id}`);
+  },
+  createSocialPost(form: FormData) {
+    return submitForm<Envelope<SocialPost>>("/admin/social/posts", "POST", form);
+  },
+  updateSocialPost(id: number, form: FormData) {
+    return submitForm<Envelope<SocialPost>>(`/admin/social/posts/${id}`, "PUT", form);
+  },
+  deleteSocialPost(id: number) {
+    return request<Envelope<null>>(`/admin/social/posts/${id}`, { method: "DELETE" });
+  },
+  approveSocialPost(id: number) {
+    return request<Envelope<SocialPost>>(`/admin/social/posts/${id}/approve`, { method: "POST" });
+  },
+  publishSocialPost(id: number) {
+    return request<Envelope<SocialPost>>(`/admin/social/posts/${id}/publish`, { method: "POST" });
+  },
+  socialInbox(params?: { kind?: string; account_id?: number; page?: number }) {
+    return request<Paginated<SocialInboxItem>>(
+      `/admin/social/inbox${queryString({
+        kind: params?.kind,
+        account_id: params?.account_id,
+        page: params?.page,
+      })}`,
+    );
+  },
+  replySocialInbox(id: number, body: string) {
+    return request<Envelope<SocialInboxItem>>(`/admin/social/inbox/${id}/reply`, {
+      method: "POST",
+      body: JSON.stringify({ body }),
+    });
+  },
+  syncSocialInbox() {
+    return request<Envelope<{ imported: number }>>("/admin/social/inbox/sync", { method: "POST" });
+  },
+  socialStaff() {
+    return request<{ data: SocialStaff[] }>("/admin/social/staff");
+  },
+  updateSocialStaff(id: number, social_permissions: SocialAbility[] | null) {
+    return request<Envelope<SocialStaff>>(`/admin/social/staff/${id}`, {
+      method: "PUT",
+      body: JSON.stringify({ social_permissions }),
+    });
   },
 };

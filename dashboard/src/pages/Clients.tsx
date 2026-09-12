@@ -1,14 +1,46 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, type Client, type OdooInvoice, type OdooQuotation, type PageMeta } from "../api";
+import { FormDialog } from "../components/FormDialog";
+import { LoadingTableRow } from "../components/LoadingTableRow";
 import { Pagination } from "../components/Pagination";
 import { copy, type Locale } from "../i18n";
+import { ClientLogosPanel } from "./portfolio/ClientLogosPanel";
 
 const TELEGRAM_BOT = import.meta.env.VITE_TELEGRAM_BOT ?? "pro_design_perfect_bot";
 
-type Tab = "clients" | "quotations" | "invoices";
+type Tab = "clients" | "logos" | "quotations" | "invoices";
 
-export function Clients({ t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
-  const [tab, setTab] = useState<Tab>("clients");
+const tabs: Tab[] = ["clients", "logos", "quotations", "invoices"];
+
+function readTab(value: string | null): Tab {
+  return tabs.includes(value as Tab) ? (value as Tab) : "clients";
+}
+
+function tabLabel(tab: Tab, t: (c: { ar: string; en: string }) => string) {
+  switch (tab) {
+    case "logos":
+      return t(copy.portfolioTabClients);
+    case "quotations":
+      return t(copy.odooTabQuotations);
+    case "invoices":
+      return t(copy.odooTabInvoices);
+    default:
+      return t(copy.odooTabClients);
+  }
+}
+
+export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = readTab(searchParams.get("tab"));
+
+  function setTab(next: Tab) {
+    if (next === "clients") {
+      setSearchParams({});
+      return;
+    }
+    setSearchParams({ tab: next });
+  }
   const [items, setItems] = useState<Client[]>([]);
   const [quotations, setQuotations] = useState<OdooQuotation[]>([]);
   const [invoices, setInvoices] = useState<OdooInvoice[]>([]);
@@ -113,59 +145,79 @@ export function Clients({ t }: { locale: Locale; t: (c: { ar: string; en: string
         <div>
           <p className="eyebrow">{t(copy.brandMark)}</p>
           <h1 className="page-title">{t(copy.clients)}</h1>
-          <p className="page-lede">{t(copy.clientsLede)}</p>
+          <p className="page-lede">
+            {tab === "logos" ? t(copy.clientLogosLede) : t(copy.clientsLede)}
+          </p>
         </div>
-        <div className="toolbar">
-          {odooReady ? (
-            <button type="button" className="btn btn-teal" onClick={() => void syncOdoo()}>
-              {t(copy.odooSync)}
+        {tab === "clients" ? (
+          <div className="toolbar">
+            {odooReady ? (
+              <button type="button" className="btn btn-teal" onClick={() => void syncOdoo()}>
+                {t(copy.odooSync)}
+              </button>
+            ) : (
+              <span className="muted">{t(copy.odooNotConfigured)}</span>
+            )}
+            <button type="button" className="btn btn-primary" onClick={() => { setShowForm(true); setError(""); }}>
+              {t(copy.addClient)}
             </button>
-          ) : (
-            <span className="muted">{t(copy.odooNotConfigured)}</span>
-          )}
-          <button type="button" className="btn btn-primary" onClick={() => setShowForm((v) => !v)}>
-            {t(copy.addClient)}
-          </button>
-          <a className="btn btn-telegram" href={`https://t.me/${TELEGRAM_BOT}`} target="_blank" rel="noreferrer">
-            {t(copy.signupCta)}
-          </a>
-        </div>
+            <a className="btn btn-telegram" href={`https://t.me/${TELEGRAM_BOT}`} target="_blank" rel="noreferrer">
+              {t(copy.signupCta)}
+            </a>
+          </div>
+        ) : null}
       </header>
 
-      <div className="toolbar" role="tablist" aria-label={t(copy.clients)}>
-        {(["clients", "quotations", "invoices"] as Tab[]).map((key) => (
+      <div className="tabs" role="tablist" aria-label={t(copy.clients)}>
+        {tabs.map((key) => (
           <button
             key={key}
             type="button"
             role="tab"
             aria-selected={tab === key}
-            className={tab === key ? "btn btn-primary" : "btn btn-ghost"}
+            className={tab === key ? "tab is-active" : "tab"}
             onClick={() => {
               setTab(key);
               setError("");
+              setShowForm(false);
             }}
           >
-            {t(copy[key === "clients" ? "odooTabClients" : key === "quotations" ? "odooTabQuotations" : "odooTabInvoices"])}
+            {tabLabel(key, t)}
           </button>
         ))}
       </div>
 
-      {showForm ? (
-        <form className="card detail-card toolbar" onSubmit={createClient}>
-          <input className="field" value={name} onChange={(e) => setName(e.target.value)} placeholder={t(copy.client)} required />
-          <input className="field" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder={t(copy.email)} />
-          <input className="field" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder={t(copy.phone)} />
-          <button className="btn btn-primary" type="submit">
-            {t(copy.saveClient)}
-          </button>
-          <button className="btn btn-ghost" type="button" onClick={() => setShowForm(false)}>
-            {t(copy.cancel)}
-          </button>
-        </form>
+      {tab === "clients" && showForm ? (
+        <FormDialog
+          title={t(copy.addClient)}
+          onClose={() => { setShowForm(false); setError(""); }}
+          onSubmit={createClient}
+          submitLabel={t(copy.saveClient)}
+          cancelLabel={t(copy.cancel)}
+          closeLabel={t(copy.close)}
+          error={error}
+        >
+          <div className="portfolio-form-grid">
+            <label className="field-label">
+              {t(copy.client)}
+              <input className="field" value={name} onChange={(e) => setName(e.target.value)} required />
+            </label>
+            <label className="field-label">
+              {t(copy.email)}
+              <input className="field" type="email" dir="ltr" value={email} onChange={(e) => setEmail(e.target.value)} />
+            </label>
+            <label className="field-label">
+              {t(copy.phone)}
+              <input className="field" dir="ltr" value={phone} onChange={(e) => setPhone(e.target.value)} />
+            </label>
+          </div>
+        </FormDialog>
       ) : null}
 
-      {notice ? <p className="muted">{notice}</p> : null}
-      {error ? <p className="error">{error}</p> : null}
+      {tab === "clients" && notice ? <p className="notice">{notice}</p> : null}
+      {tab === "clients" && !showForm && error ? <p className="error">{error}</p> : null}
+
+      {tab === "logos" ? <ClientLogosPanel locale={locale} t={t} /> : null}
 
       {tab === "clients" ? (
         <>
@@ -183,9 +235,7 @@ export function Clients({ t }: { locale: Locale; t: (c: { ar: string; en: string
               </thead>
               <tbody>
                 {loading ? (
-                  <tr>
-                    <td colSpan={6}>{t(copy.loading)}</td>
-                  </tr>
+                  <LoadingTableRow colSpan={6} label={t(copy.loading)} />
                 ) : items.length === 0 ? (
                   <tr>
                     <td colSpan={6}>{t(copy.empty)}</td>
@@ -241,9 +291,7 @@ export function Clients({ t }: { locale: Locale; t: (c: { ar: string; en: string
             </thead>
             <tbody>
               {loading ? (
-                <tr>
-                  <td colSpan={7}>{t(copy.loading)}</td>
-                </tr>
+                <LoadingTableRow colSpan={7} label={t(copy.loading)} />
               ) : !odooReady ? (
                 <tr>
                   <td colSpan={7}>{t(copy.odooNotConfigured)}</td>
@@ -290,9 +338,7 @@ export function Clients({ t }: { locale: Locale; t: (c: { ar: string; en: string
             </thead>
             <tbody>
               {loading ? (
-                <tr>
-                  <td colSpan={7}>{t(copy.loading)}</td>
-                </tr>
+                <LoadingTableRow colSpan={7} label={t(copy.loading)} />
               ) : !odooReady ? (
                 <tr>
                   <td colSpan={7}>{t(copy.odooNotConfigured)}</td>

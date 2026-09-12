@@ -238,11 +238,14 @@ class EmployeeTest extends TestCase
     public function test_sales_staff_can_send_quotation_via_bot_api(): void
     {
         Http::preventStrayRequests();
+        $this->fakeOdooDocuments();
         config([
             'services.telegram.staff_bot_token' => 'staff-token',
             'services.telegram.bot_token' => 'client-token',
         ]);
-        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['document' => ['file_id' => 'doc-1']]], 200)]);
+        Http::fake(array_merge($this->odooDocumentsHttpFake(), [
+            'https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['document' => ['file_id' => 'doc-1']]], 200),
+        ]));
 
         Employee::factory()->sales()->create(['telegram_user_id' => '6350001']);
         $client = Client::factory()->create(['telegram_user_id' => 'tg-client-9']);

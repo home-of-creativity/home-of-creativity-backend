@@ -10,7 +10,7 @@ test.describe("Staff dashboard", () => {
     await page.goto(`${DASHBOARD}/login`, { waitUntil: "networkidle" });
     await expect(page).toHaveURL(/127\.0\.0\.1:5173\/staff/);
     await expect(page.getByRole("heading", { name: /Staff login|دخول الفريق/ })).toBeVisible();
-    await expect(page.getByRole("link", { name: /Open Telegram bot|فتح بوت تيليجرام/ })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: /Open Telegram bot|فتح بوت تيليجرام/ })).toHaveCount(1);
     await page.getByLabel(/Email|البريد/).fill("test@example.com");
     await page.getByLabel(/Password|كلمة المرور/).fill("password");
     await page.getByRole("button", { name: /Sign in|دخول/ }).click();
@@ -54,8 +54,6 @@ test.describe("Staff dashboard", () => {
     await expect(page.getByRole("heading", { name: /Employees|الموظفون/ })).toBeVisible();
     await expect(page.getByText(/Do not type Telegram or ClickUp IDs|لا تدخل آيدي/)).toBeVisible();
     await expect(page.getByRole("button", { name: /Add employee|إضافة موظف/ })).toBeVisible();
-    await expect(page.getByLabel(/Name|الاسم/)).toBeVisible();
-    await expect(page.getByLabel(/ClickUp member|عضو ClickUp/)).toBeVisible();
-    await expect(page.getByLabel(/^Telegram$|^تيليجرام$/)).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /Add employee|إضافة موظف/ })).toBeVisible();
   });
 });

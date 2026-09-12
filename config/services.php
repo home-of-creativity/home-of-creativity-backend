@@ -49,6 +49,7 @@ return [
         'staff_bot_token' => env('TELEGRAM_STAFF_BOT_TOKEN'),
         'staff_bot_secret' => env('TELEGRAM_STAFF_BOT_SECRET', 'change-me-staff'),
         'staff_bot_username' => env('TELEGRAM_STAFF_BOT_USERNAME'),
+        'strict' => (bool) env('TELEGRAM_STRICT', false),
     ],
 
     'odoo' => [
@@ -57,7 +58,9 @@ return [
         'db' => env('ODOO_DB'),
         'username' => env('ODOO_USERNAME'),
         'api_key' => env('ODOO_API_KEY'),
+        'use_json2' => (bool) env('ODOO_USE_JSON2', false),
         'timeout' => (int) env('ODOO_TIMEOUT', 12),
+        'currency_code' => env('ODOO_CURRENCY_CODE', 'SYP'),
     ],
 
     'clickup' => [
@@ -69,6 +72,7 @@ return [
             'photography' => env('CLICKUP_LIST_PHOTOGRAPHY'),
             'content' => env('CLICKUP_LIST_CONTENT'),
             'design' => env('CLICKUP_LIST_DESIGN'),
+            'programming' => env('CLICKUP_LIST_PROGRAMMING'),
         ],
         'timeout' => (int) env('CLICKUP_TIMEOUT', 12),
         'statuses' => [
@@ -83,6 +87,20 @@ return [
         'api_key' => env('GOOGLE_API_KEY'),
         'model' => env('GEMINI_MODEL', 'gemini-2.5-flash'),
         'timeout' => (int) env('GEMINI_TIMEOUT', 30),
+        'e2e_stub' => env('GEMINI_E2E_STUB', false),
+    ],
+
+    'social' => [
+        'graph_base' => env('META_GRAPH_URL', 'https://graph.facebook.com/v21.0'),
+        'timeout' => (int) env('SOCIAL_GRAPH_TIMEOUT', 20),
+        'upload_timeout' => (int) env('SOCIAL_GRAPH_UPLOAD_TIMEOUT', 60),
+        'timezone' => env('SOCIAL_TIMEZONE', 'Asia/Damascus'),
+    ],
+
+    'facebook' => [
+        'access_token' => trim((string) env('FACEBOOK_ACCESS_TOKEN', '')),
+        'app_id' => trim((string) env('FACEBOOK_APP_ID', '')),
+        'app_secret' => trim((string) env('FACEBOOK_APP_SECRET', '')),
     ],
 
 ];

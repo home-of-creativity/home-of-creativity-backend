@@ -29,7 +29,7 @@ class ApplyClickUpMapping
     {
         $eventUuid = (string) ($payload['event_uuid'] ?? $payload['event_id'] ?? '');
         $requestUuid = (string) ($payload['request_uuid'] ?? '');
-        $taskType = ClickUpTaskType::tryFrom((string) ($payload['task_type'] ?? ''));
+        $taskType = ClickUpTaskType::fromDepartment((string) ($payload['task_type'] ?? ''));
         $integrationKey = (string) ($payload['integration_key'] ?? '');
 
         if ($eventUuid === '' || $requestUuid === '' || ! $taskType || $integrationKey === '') {
@@ -76,7 +76,7 @@ class ApplyClickUpMapping
                 return $request->fresh(['clickupTasks', 'client']) ?? $request;
             }
 
-            if (in_array($taskType, [ClickUpTaskType::Design, ClickUpTaskType::Content, ClickUpTaskType::Revision], true)) {
+            if (in_array($taskType, [ClickUpTaskType::Design, ClickUpTaskType::Content, ClickUpTaskType::Programming, ClickUpTaskType::Revision], true)) {
                 $this->notifyTaskEmployees($request, $taskType, $payload);
             }
 
@@ -127,6 +127,7 @@ class ApplyClickUpMapping
         $profession = match ($taskType) {
             ClickUpTaskType::Design => EmployeeProfession::Design,
             ClickUpTaskType::Content => EmployeeProfession::Content,
+            ClickUpTaskType::Programming => EmployeeProfession::Web,
             ClickUpTaskType::Revision => EmployeeProfession::Design,
             default => null,
         };
@@ -138,6 +139,7 @@ class ApplyClickUpMapping
         $label = match ($taskType) {
             ClickUpTaskType::Design => 'مهمة تنفيذ (تصميم)',
             ClickUpTaskType::Content => 'مهمة تنفيذ (محتوى)',
+            ClickUpTaskType::Programming => 'مهمة تنفيذ (برمجة)',
             ClickUpTaskType::Revision => 'طلب تعديل',
             default => 'مهمة',
         };
