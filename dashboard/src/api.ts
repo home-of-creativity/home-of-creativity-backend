@@ -33,6 +33,7 @@ export type SocialAccount = {
   name: string;
   handle: string | null;
   page_id: string | null;
+  facebook_page_id?: string | null;
   has_token: boolean;
   is_active: boolean;
   connection_status: string;
@@ -73,6 +74,7 @@ export type SocialPostAccount = {
 export type SocialPost = {
   id: number;
   body: string;
+  placement?: string;
   status: string;
   scheduled_at: string | null;
   published_at: string | null;
@@ -101,6 +103,12 @@ export type SocialInboxItem = {
   id: number;
   kind: string;
   external_id: string;
+  source_external_id?: string | null;
+  source_body?: string | null;
+  source_permalink?: string | null;
+  source_preview_url?: string | null;
+  source_media_type?: string | null;
+  source_post?: { id: number; body: string; placement?: string | null } | null;
   author_name: string;
   author_handle: string | null;
   body: string;
@@ -211,6 +219,8 @@ export type Employee = {
   telegram_user_id: string | null;
   telegram_username: string | null;
   clickup_user_id: string | null;
+  odoo_employee_id?: string | null;
+  odoo_url?: string | null;
   profession: string;
   status: "pending" | "approved" | "rejected";
   notes: string | null;
@@ -352,6 +362,18 @@ export type PortfolioProject = {
   featured: boolean;
 };
 
+export type LandingReel = {
+  id: number;
+  title_en: string;
+  title_ar: string;
+  video_path: string;
+  video_url: string | null;
+  poster_path: string | null;
+  poster_url: string | null;
+  sort_order: number;
+  is_published: boolean;
+};
+
 export type PageMeta = {
   current_page: number;
   last_page: number;
@@ -415,7 +437,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 async function submitForm<T>(path: string, method: "POST" | "PUT", form: FormData) {
   if (method === "PUT") {
     form.set("_method", "PUT");
-    return request<T>(path, { method: "POST", body: form });
   }
   return request<T>(path, { method: "POST", body: form });
 }
@@ -491,7 +512,36 @@ export const api = {
     return request<Envelope<{ configured: boolean; url: string | null }>>("/admin/odoo/status");
   },
   syncOdooPartners() {
-    return request<Envelope<{ synced: number; created: number; updated: number }>>("/admin/odoo/sync-partners", {
+    return request<Envelope<{ synced: number; created: number; updated: number; pushed?: number }>>("/admin/odoo/sync-partners", {
+      method: "POST",
+    });
+  },
+  importOdooCrmClients() {
+    return request<Envelope<{ imported: number; created: number; updated: number; pushed: number; crm_leads: number; partners: number }>>(
+      "/admin/odoo/import-crm-clients",
+      { method: "POST" },
+    );
+  },
+  importOdooCrmClientsExcel(file: File) {
+    const form = new FormData();
+    form.append("file", file);
+    return submitForm<
+      Envelope<{
+        parsed: number;
+        skipped: number;
+        created_in_odoo: number;
+        duplicates: number;
+        failed: number;
+        imported: number;
+        created: number;
+        updated: number;
+        crm_leads: number;
+        partners: number;
+      }>
+    >("/admin/odoo/import-crm-clients/excel", "POST", form);
+  },
+  syncOdooEmployees() {
+    return request<Envelope<{ synced: number; created: number; updated: number; pushed: number }>>("/admin/odoo/sync-employees", {
       method: "POST",
     });
   },
@@ -602,6 +652,21 @@ export const api = {
   },
   deleteAllPortfolioProjects() {
     return request<Envelope<{ deleted: number }>>("/admin/portfolio/projects/bulk", { method: "DELETE" });
+  },
+  landingReels(page = 1) {
+    return request<Paginated<LandingReel>>(`/admin/reels${queryString({ page })}`);
+  },
+  createLandingReel(form: FormData) {
+    return submitForm<Envelope<LandingReel>>("/admin/reels", "POST", form);
+  },
+  updateLandingReel(id: number, form: FormData) {
+    return submitForm<Envelope<LandingReel>>(`/admin/reels/${id}`, "PUT", form);
+  },
+  deleteLandingReel(id: number) {
+    return request<Envelope<null>>(`/admin/reels/${id}`, { method: "DELETE" });
+  },
+  deleteAllLandingReels() {
+    return request<Envelope<{ deleted: number }>>("/admin/reels/bulk", { method: "DELETE" });
   },
   pricingCategories() {
     return request<{ data: PricingCategory[] }>("/admin/pricing/categories");
@@ -752,9 +817,12 @@ export const api = {
     });
   },
   socialAccounts() {
-    return request<{ data: SocialAccount[]; facebook_configured?: boolean; facebook_error?: string | null }>(
-      "/admin/social/accounts",
-    );
+    return request<{
+      data: SocialAccount[];
+      facebook_configured?: boolean;
+      facebook_error?: string | null;
+      facebook_pages_found?: number;
+    }>("/admin/social/accounts");
   },
   createSocialAccount(payload: Partial<SocialAccount> & { platform: string; name: string; access_token?: string }) {
     return request<Envelope<SocialAccount>>("/admin/social/accounts", {
@@ -774,7 +842,7 @@ export const api = {
   deleteSocialAccount(id: number) {
     return request<Envelope<null>>(`/admin/social/accounts/${id}`, { method: "DELETE" });
   },
-  socialPosts(params?: { status?: string; page?: number; from?: string; to?: string; per_page?: number }) {
+  socialPosts(params?: { status?: string; page?: number; from?: string; to?: string; per_page?: number; account_id?: number; placement?: string }) {
     return request<Paginated<SocialPost>>(
       `/admin/social/posts${queryString({
         status: params?.status,
@@ -782,6 +850,8 @@ export const api = {
         from: params?.from,
         to: params?.to,
         per_page: params?.per_page,
+        account_id: params?.account_id,
+        placement: params?.placement,
       })}`,
     );
   },

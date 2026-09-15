@@ -105,6 +105,130 @@ class OdooClient
     }
 
     /**
+     * @param  array{name: string, contact_name?: string|null, partner_name?: string|null, stage_id?: int|null}  $values
+     */
+    public function createCrmLead(array $values): int
+    {
+        $payload = array_filter([
+            'name' => $values['name'],
+            'contact_name' => $values['contact_name'] ?? null,
+            'partner_name' => $values['partner_name'] ?? null,
+            'stage_id' => $values['stage_id'] ?? null,
+            'type' => 'opportunity',
+        ], fn (mixed $value): bool => $value !== null && $value !== '');
+
+        $leadId = $this->call('crm.lead', 'create', [$payload]);
+
+        return (int) $leadId;
+    }
+
+    public function findCrmLead(string $name, ?string $partnerName = null): ?int
+    {
+        $domain = [['name', '=', $name]];
+        if (filled($partnerName)) {
+            $domain[] = ['partner_name', '=', $partnerName];
+        }
+
+        $ids = $this->call('crm.lead', 'search', [
+            'domain' => $domain,
+            'limit' => 1,
+        ]);
+
+        if (! is_array($ids) || ! isset($ids[0])) {
+            return null;
+        }
+
+        return (int) $ids[0];
+    }
+
+    public function findCrmStageId(string $stageName): ?int
+    {
+        $normalized = trim($stageName);
+        if ($normalized === '') {
+            return null;
+        }
+
+        $rows = $this->searchRead('crm.stage', [], ['id', 'name'], 200, 0, 'sequence asc');
+
+        foreach ($rows as $row) {
+            if (trim((string) ($row['name'] ?? '')) === $normalized) {
+                return (int) $row['id'];
+            }
+        }
+
+        foreach ($rows as $row) {
+            $candidate = trim((string) ($row['name'] ?? ''));
+            if ($candidate !== '' && mb_stripos($candidate, $normalized) !== false) {
+                return (int) $row['id'];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return list<array{lead_id: int, name: string, email: string|null, phone: string|null, odoo_partner_id: string|null, odoo_url: string}>
+     */
+    public function listCrmClients(int $limit = 200, int $offset = 0): array
+    {
+        $rows = $this->searchRead('crm.lead', [
+            ['active', '=', true],
+        ], [
+            'id', 'name', 'contact_name', 'partner_id', 'email_from', 'phone',
+        ], $limit, $offset, 'write_date desc');
+
+        $clients = [];
+        $seen = [];
+
+        foreach ($rows as $row) {
+            $leadId = (int) ($row['id'] ?? 0);
+            if ($leadId <= 0) {
+                continue;
+            }
+
+            $partnerId = 0;
+            if (is_array($row['partner_id'] ?? null) && isset($row['partner_id'][0])) {
+                $partnerId = (int) $row['partner_id'][0];
+            } elseif (is_numeric($row['partner_id'] ?? null)) {
+                $partnerId = (int) $row['partner_id'];
+            }
+
+            $name = filled($row['contact_name'] ?? null)
+                ? (string) $row['contact_name']
+                : (string) ($row['name'] ?? '');
+            if ($name === '') {
+                continue;
+            }
+
+            $email = filled($row['email_from'] ?? null) ? (string) $row['email_from'] : null;
+            $phone = filled($row['phone'] ?? null)
+                ? (string) $row['phone']
+                : (filled($row['mobile'] ?? null) ? (string) $row['mobile'] : null);
+
+            $key = $partnerId > 0
+                ? 'partner:'.$partnerId
+                : 'lead:'.$leadId.':'.strtolower($email ?? $name);
+            if (isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+
+            $clients[] = [
+                'lead_id' => $leadId,
+                'name' => $name,
+                'email' => $email,
+                'phone' => $phone,
+                'odoo_partner_id' => $partnerId > 0 ? (string) $partnerId : null,
+                'odoo_url' => $partnerId > 0
+                    ? $this->recordUrl('res.partner', $partnerId)
+                    : $this->recordUrl('crm.lead', $leadId),
+            ];
+        }
+
+        return $clients;
+    }
+
+    /**
      * @param  list<array{title: string, amount: float|int|string, units?: float|int|string|null, notes?: string|null}>|null  $lines
      * @return array{odoo_partner_id: string, odoo_quotation_id: string}
      */
@@ -243,6 +367,87 @@ class OdooClient
         return (string) $partnerId;
     }
 
+    /**
+     * @return list<array{id: int, name: string, email: string|null, phone: string|null, barcode: string|null, active: bool, odoo_url: string}>
+     */
+    public function listEmployees(int $limit = 100, int $offset = 0): array
+    {
+        $rows = $this->searchRead('hr.employee', [
+            ['active', 'in', [true, false]],
+        ], [
+            'id', 'name', 'work_email', 'work_phone', 'mobile_phone', 'barcode', 'active',
+        ], $limit, $offset, 'name asc');
+
+        return array_map(fn (array $row): array => [
+            'id' => (int) $row['id'],
+            'name' => (string) ($row['name'] ?? ''),
+            'email' => filled($row['work_email'] ?? null) ? (string) $row['work_email'] : null,
+            'phone' => filled($row['work_phone'] ?? null)
+                ? (string) $row['work_phone']
+                : (filled($row['mobile_phone'] ?? null) ? (string) $row['mobile_phone'] : null),
+            'barcode' => filled($row['barcode'] ?? null) ? (string) $row['barcode'] : null,
+            'active' => (bool) ($row['active'] ?? true),
+            'odoo_url' => $this->recordUrl('hr.employee', (int) $row['id']),
+        ], $rows);
+    }
+
+    public function createOrReuseEmployee(
+        string $name,
+        ?string $email,
+        ?string $phone,
+        ?string $code = null,
+        bool $active = true,
+    ): string {
+        if (filled($email)) {
+            $existing = $this->call('hr.employee', 'search', [
+                'domain' => [['work_email', '=', $email]],
+                'limit' => 1,
+            ]);
+            if (is_array($existing) && isset($existing[0])) {
+                return (string) $existing[0];
+            }
+        }
+
+        if (filled($code)) {
+            $existing = $this->call('hr.employee', 'search', [
+                'domain' => [['barcode', '=', $code]],
+                'limit' => 1,
+            ]);
+            if (is_array($existing) && isset($existing[0])) {
+                return (string) $existing[0];
+            }
+        }
+
+        $employeeId = $this->call('hr.employee', 'create', [[
+            'name' => $name,
+            'work_email' => $email,
+            'work_phone' => $phone,
+            'barcode' => $code,
+            'active' => $active,
+        ]]);
+
+        return (string) $employeeId;
+    }
+
+    /**
+     * @param  array<string, mixed>  $values
+     */
+    public function writeEmployee(int|string $employeeId, array $values): void
+    {
+        $this->writeRecord('hr.employee', $employeeId, $values);
+    }
+
+    /**
+     * @param  array<string, mixed>  $values
+     */
+    public function writeRecord(string $model, int|string $recordId, array $values): void
+    {
+        $this->call($model, 'write', [
+            'ids' => [(int) $recordId],
+            'vals' => $values,
+        ]);
+    }
+
     public function createInvoice(string $partnerId, string $requestNumber, ?string $quotationId = null, ?float $amount = null): string
     {
         $values = [
@@ -329,7 +534,7 @@ class OdooClient
     private function saleOrderLine(array $values): array
     {
         return array_merge($values, [
-            'tax_id' => [[6, 0, []]],
+            'tax_ids' => [[6, 0, []]],
         ]);
     }
 
@@ -370,6 +575,13 @@ class OdooClient
             if (array_is_list($payload) && isset($payload[0]) && is_array($payload[0])) {
                 return ['vals_list' => [$payload[0]]];
             }
+        }
+
+        if ($method === 'write') {
+            return [
+                'ids' => $payload['ids'] ?? [],
+                'vals' => $payload['vals'] ?? [],
+            ];
         }
 
         if ($method === 'search' && isset($payload[0]) && is_array($payload[0])) {
@@ -461,6 +673,13 @@ class OdooClient
             $values = $payload['vals'] ?? ($payload[0] ?? $payload);
 
             return $this->execute($uid, $model, $method, [[$values]]);
+        }
+
+        if ($method === 'write') {
+            return $this->execute($uid, $model, $method, [
+                $payload['ids'] ?? [],
+                $payload['vals'] ?? [],
+            ]);
         }
 
         return $this->execute($uid, $model, $method, [$payload]);

@@ -10,13 +10,18 @@ use App\Models\Client;
 use App\Models\Employee;
 use App\Models\ServiceRequest;
 use App\Models\User;
+use App\Services\SocialAccountSync;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 
 class DatabaseSeeder extends Seeder
 {
+    public function __construct(private SocialAccountSync $socialAccountSync) {}
+
     public function run(): void
     {
-        $clientUser = User::query()->firstOrCreate(
+        $clientUser = User::query()->updateOrCreate(
             ['email' => 'test@example.com'],
             [
                 'name' => 'Test Client',
@@ -25,9 +30,12 @@ class DatabaseSeeder extends Seeder
                 'locale' => 'ar',
             ],
         );
-        $clientUser->forceFill(['is_admin' => false])->save();
+        $clientUser->forceFill([
+            'password' => 'password',
+            'is_admin' => false,
+        ])->save();
 
-        $admin = User::query()->firstOrCreate(
+        $admin = User::query()->updateOrCreate(
             ['email' => 'admin@example.com'],
             [
                 'name' => 'HOC Admin',
@@ -35,7 +43,10 @@ class DatabaseSeeder extends Seeder
                 'locale' => 'ar',
             ],
         );
-        $admin->forceFill(['is_admin' => true])->save();
+        $admin->forceFill([
+            'password' => 'password',
+            'is_admin' => true,
+        ])->save();
 
         $client = Client::query()->firstOrCreate(
             ['user_id' => $clientUser->id],
@@ -92,5 +103,26 @@ class DatabaseSeeder extends Seeder
         $this->call(PortfolioSeeder::class);
         $this->call(PricingSeeder::class);
         $this->call(ContactSeeder::class);
+        $this->call(LandingReelSeeder::class);
+        $this->syncSocialAccounts($admin->id);
+    }
+
+    private function syncSocialAccounts(int $adminId): void
+    {
+        if (app()->environment('testing') || ! $this->socialAccountSync->configured()) {
+            return;
+        }
+
+        $count = $this->socialAccountSync->syncFromFacebook($adminId);
+        Cache::forget('social.landing.instagram.profile');
+        Cache::forget('social.landing.facebook.profile');
+        Cache::forget('social.landing.instagram.v2.200');
+        Cache::forget('social.landing.facebook.v2.200');
+
+        if ($count === 0 && filled($this->socialAccountSync->lastError)) {
+            Log::warning('Social account seed sync skipped.', [
+                'error' => $this->socialAccountSync->lastError,
+            ]);
+        }
     }
 }

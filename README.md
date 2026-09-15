@@ -2,7 +2,14 @@
 
 Laravel API, Telegram bots, and the staff dashboard.
 
-## Run
+GitHub stores this source only. Actions do **not** start Laravel. Production is the Docker stack in the parent `home_of_creativity` folder:
+
+```powershell
+cd ..
+.\docker-up.ps1
+```
+
+## Local run (without Docker)
 
 ```bash
 composer install

@@ -1,5 +1,5 @@
 import { NavLink, Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
-import { useEffect, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import { canSocial } from "./api";
 import { AuthProvider, useAuth } from "./auth";
 import { applyLocale, copy, readLocale, type Copy, type Locale } from "./i18n";
@@ -29,9 +29,12 @@ import {
   IconOverview,
   IconPricing,
   IconProjects,
+  IconReels,
   IconRequests,
   IconSocial,
 } from "./components/icons";
+
+const LandingReels = lazy(() => import("./pages/LandingReels"));
 
 function tFactory(locale: Locale) {
   return (entry: Copy) => entry[locale];
@@ -132,6 +135,10 @@ function Shell({ locale, setLocale }: { locale: Locale; setLocale: (next: Locale
             <IconProjects aria-hidden />
             <span>{t(copy.portfolioTabProjects)}</span>
           </NavLink>
+          <NavLink to="/reels">
+            <IconReels aria-hidden />
+            <span>{t(copy.reelsTitle)}</span>
+          </NavLink>
           <NavLink to="/categories">
             <IconCategories aria-hidden />
             <span>{t(copy.portfolioTabCategories)}</span>
@@ -220,6 +227,14 @@ export function App() {
           <Route path="/social/accounts" element={<SocialAccounts locale={locale} t={t} />} />
           <Route path="/client-logos" element={<Navigate to="/clients?tab=logos" replace />} />
           <Route path="/projects" element={<PortfolioProjects locale={locale} t={t} />} />
+          <Route
+            path="/reels"
+            element={
+              <Suspense fallback={<LoadingLottie variant="page" label={t(copy.loading)} />}>
+                <LandingReels locale={locale} t={t} />
+              </Suspense>
+            }
+          />
           <Route path="/categories" element={<PortfolioCategories locale={locale} t={t} />} />
           <Route path="/pricing" element={<Pricing locale={locale} t={t} />} />
           <Route path="/portfolio/clients" element={<Navigate to="/clients?tab=logos" replace />} />

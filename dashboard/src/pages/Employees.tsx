@@ -24,6 +24,8 @@ export function Employees({ t }: { locale: Locale; t: (c: { ar: string; en: stri
   const [editingId, setEditingId] = useState<number | null>(null);
   const [approvingId, setApprovingId] = useState<number | null>(null);
   const [form, setForm] = useState(emptyForm);
+  const [odooReady, setOdooReady] = useState(false);
+  const [notice, setNotice] = useState("");
   const staffBot = import.meta.env.VITE_TELEGRAM_STAFF_BOT as string | undefined;
 
   function load() {
@@ -39,7 +41,20 @@ export function Employees({ t }: { locale: Locale; t: (c: { ar: string; en: stri
 
   useEffect(() => {
     load();
+    api.odooStatus().then((res) => setOdooReady(res.data.configured)).catch(() => setOdooReady(false));
   }, []);
+
+  async function syncOdoo() {
+    setError("");
+    setNotice("");
+    try {
+      const res = await api.syncOdooEmployees();
+      setNotice(`${t(copy.odooSyncDone)}: ${res.data.created} / ${res.data.updated}`);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t(copy.saveFailed));
+    }
+  }
 
   function startAdd() {
     setEditingId(null);
@@ -163,6 +178,13 @@ export function Employees({ t }: { locale: Locale; t: (c: { ar: string; en: stri
           <p className="page-lede">{t(copy.employeesLede)}</p>
         </div>
         <div className="toolbar">
+          {odooReady ? (
+            <button type="button" className="btn btn-teal" onClick={() => void syncOdoo()}>
+              {t(copy.odooSync)}
+            </button>
+          ) : (
+            <span className="muted">{t(copy.odooNotConfigured)}</span>
+          )}
           <button type="button" className="btn btn-primary" onClick={startAdd}>
             {t(copy.addEmployee)}
           </button>
@@ -175,6 +197,7 @@ export function Employees({ t }: { locale: Locale; t: (c: { ar: string; en: stri
       </header>
 
       <p className="notice notice-info">{t(copy.joinHint)}</p>
+      {notice ? <p className="notice notice-info">{notice}</p> : null}
 
       {pending.length > 0 ? (
         <section className="card pending-card">
@@ -286,6 +309,7 @@ export function Employees({ t }: { locale: Locale; t: (c: { ar: string; en: stri
               <th>{t(copy.employeeName)}</th>
               <th>{t(copy.telegram)}</th>
               <th>{t(copy.clickupMember)}</th>
+              <th>{t(copy.odooEmployee)}</th>
               <th>{t(copy.profession)}</th>
               <th>{t(copy.employeeStatus)}</th>
               <th>{t(copy.actions)}</th>
@@ -293,10 +317,10 @@ export function Employees({ t }: { locale: Locale; t: (c: { ar: string; en: stri
           </thead>
           <tbody>
             {loading ? (
-              <LoadingTableRow colSpan={7} label={t(copy.loading)} />
+              <LoadingTableRow colSpan={8} label={t(copy.loading)} />
             ) : items.length === 0 ? (
               <tr>
-                <td colSpan={7}>{t(copy.empty)}</td>
+                <td colSpan={8}>{t(copy.empty)}</td>
               </tr>
             ) : (
               items.map((item) => (
@@ -307,6 +331,15 @@ export function Employees({ t }: { locale: Locale; t: (c: { ar: string; en: stri
                   </td>
                   <td dir="ltr">{telegramLabel(item)}</td>
                   <td>{clickupLabel(item.clickup_user_id)}</td>
+                  <td dir="ltr">
+                    {item.odoo_url ? (
+                      <a href={item.odoo_url} target="_blank" rel="noreferrer">
+                        {item.odoo_employee_id}
+                      </a>
+                    ) : (
+                      item.odoo_employee_id ?? "—"
+                    )}
+                  </td>
                   <td>{t(professions[item.profession] ?? { ar: item.profession, en: item.profession })}</td>
                   <td>
                     <span className={`emp-status emp-status-${item.status}`}>

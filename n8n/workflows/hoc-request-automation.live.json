@@ -1,0 +1,74 @@
+{
+  "id": "r8CMUfJQDvAztHxD",
+  "name": "HOC Request Automation",
+  "active": true,
+  "url": "https://prodesign.app.n8n.cloud/workflow/r8CMUfJQDvAztHxD",
+  "webhook": {
+    "node": "Laravel Event",
+    "method": "POST",
+    "production": "https://prodesign.app.n8n.cloud/webhook/hoc-events",
+    "test": "https://prodesign.app.n8n.cloud/webhook-test/hoc-events"
+  },
+  "capturedAt": "2026-09-14T08:09:00Z",
+  "versionId": "b8d9a62c-9147-44bf-b518-202410a1b320",
+  "sameAsDraft": false,
+  "settings": {
+    "executionOrder": "v1",
+    "executionTimeout": 90,
+    "availableInMCP": true
+  },
+  "lanes": [
+    {
+      "name": "Ingest",
+      "nodes": ["Laravel Event", "Normalize Event", "Is Submitted?"]
+    },
+    {
+      "name": "1 Submitted",
+      "group": "Quotation + staff notify",
+      "flow": [
+        "Mark Analyzing → POST /api/webhooks/n8n event REQUEST_SUBMITTED + ai_analysis",
+        "Send Quotation → POST /api/webhooks/n8n event QUOTATION_READY",
+        "Odoo Quotation → POST /api/integrations/odoo/quotation [disabled]",
+        "Should Notify? → Notify Laravel or Skip Notify",
+        "Notify Laravel → POST /api/integrations/telegram/notify"
+      ]
+    },
+    {
+      "name": "2 Paid",
+      "group": "Payment + delivery",
+      "flow": [
+        "Is Payment? yes → Mark Paid → POST /api/webhooks/n8n event PAYMENT_CONFIRMED",
+        "Odoo Invoice → POST /api/integrations/odoo/invoice [disabled]",
+        "ClickUp Tasks → POST /api/integrations/clickup/tasks",
+        "Notify Client → POST /api/integrations/telegram/notify",
+        "Send Tasks → POST /api/webhooks/n8n event TASKS_READY"
+      ]
+    },
+    {
+      "name": "3 Other",
+      "group": "Other events",
+      "flow": [
+        "Is Payment? no → Forward Event → POST /api/webhooks/n8n with original event"
+      ]
+    }
+  ],
+  "normalize": {
+    "secretHeader": "X-N8N-Secret",
+    "required": ["event", "request_number"],
+    "departments": ["branding", "3d_visualization", "media", "web", "print", "creative_direction"]
+  },
+  "connections": {
+    "Laravel Event": ["Normalize Event"],
+    "Normalize Event": ["Is Submitted?"],
+    "Is Submitted?": { "true": ["Mark Analyzing"], "false": ["Is Payment?"] },
+    "Mark Analyzing": ["Send Quotation"],
+    "Send Quotation": ["Should Notify?", "Odoo Quotation"],
+    "Should Notify?": { "true": ["Notify Laravel"], "false": ["Skip Notify"] },
+    "Is Payment?": { "true": ["Mark Paid"], "false": ["Forward Event"] },
+    "Mark Paid": ["ClickUp Tasks", "Odoo Invoice"],
+    "ClickUp Tasks": ["Notify Client"],
+    "Notify Client": ["Send Tasks"]
+  },
+  "disabledNodes": ["Odoo Quotation", "Odoo Invoice"],
+  "laravelNote": "ApplyN8nCallback rejects QUOTATION_READY; quotation must be sent from the dashboard."
+}

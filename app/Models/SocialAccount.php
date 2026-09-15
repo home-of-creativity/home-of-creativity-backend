@@ -25,6 +25,7 @@ class SocialAccount extends Model
         'name',
         'handle',
         'page_id',
+        'facebook_page_id',
         'access_token',
         'refresh_token',
         'token_expires_at',

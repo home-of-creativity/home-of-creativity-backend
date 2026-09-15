@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { FormDialog } from "../../components/FormDialog";
 import { LoadingTableRow } from "../../components/LoadingTableRow";
 import { SocialBrandIcon } from "../../components/SocialBrandIcon";
@@ -6,7 +6,7 @@ import { api, canSocial, type SocialAbility, type SocialAccount, type SocialStaf
 import { useAuth } from "../../auth";
 import { copy, type Locale } from "../../i18n";
 import { SocialChrome } from "./SocialChrome";
-import { platformLabel, socialPlatforms } from "./helpers";
+import { facebookErrorMessage, groupSocialPages, platformLabel, socialAccountStatusLabel, socialPlatforms, socialStatusLabel } from "./helpers";
 
 const emptyForm = {
   platform: "facebook",
@@ -31,6 +31,7 @@ export function SocialAccounts({ locale, t }: { locale: Locale; t: (c: { ar: str
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [facebookError, setFacebookError] = useState("");
+  const [facebookPagesFound, setFacebookPagesFound] = useState<number | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState(emptyForm);
@@ -47,6 +48,7 @@ export function SocialAccounts({ locale, t }: { locale: Locale; t: (c: { ar: str
         setStaff(team.data);
         setError("");
         setFacebookError(accounts.facebook_error ?? "");
+        setFacebookPagesFound(typeof accounts.facebook_pages_found === "number" ? accounts.facebook_pages_found : null);
       })
       .catch((err) => setError(err instanceof Error ? err.message : t(copy.loading)))
       .finally(() => setLoading(false));
@@ -114,6 +116,17 @@ export function SocialAccounts({ locale, t }: { locale: Locale; t: (c: { ar: str
     }
   }
 
+  const pages = useMemo(() => groupSocialPages(items), [items]);
+
+  function accountHandle(item: SocialAccount) {
+    return item.handle ? `@${item.handle}` : item.page_id || "—";
+  }
+
+  function accountStatus(item: SocialAccount) {
+    if (item.connection_status === "error") return socialStatusLabel("failed", t);
+    return item.is_active ? t(copy.active) : t(copy.inactive);
+  }
+
   async function updateStaff(member: SocialStaff, ability: SocialAbility, enabled: boolean) {
     const current = member.social_permissions ?? member.social_abilities ?? [];
     const next = enabled ? Array.from(new Set([...current, ability])) : current.filter((item) => item !== ability);
@@ -128,10 +141,9 @@ export function SocialAccounts({ locale, t }: { locale: Locale; t: (c: { ar: str
   return (
     <SocialChrome locale={locale} t={t} user={user} title={copy.socialAccounts} lede={copy.socialAccountsLede}>
       {error && !showForm ? <p className="error">{error}</p> : null}
-      {facebookError ? (
-        <p className="error">
-          {facebookError === "no_pages" ? t(copy.socialFacebookNoPages) : t(copy.socialFacebookError)}
-        </p>
+      {facebookError ? <p className="error">{facebookErrorMessage(facebookError, t)}</p> : null}
+      {facebookPagesFound !== null && facebookPagesFound > 0 ? (
+        <p className="notice notice-info">{t(copy.socialFacebookPagesFound).replace("{count}", String(facebookPagesFound))}</p>
       ) : null}
       <div className="table-wrap card">
         <table className="table-flush">
@@ -145,43 +157,67 @@ export function SocialAccounts({ locale, t }: { locale: Locale; t: (c: { ar: str
           </thead>
           <tbody>
             {loading ? <LoadingTableRow colSpan={4} label={t(copy.loading)} /> : null}
-            {!loading && items.length === 0 ? (
+            {!loading && pages.length === 0 ? (
               <tr>
                 <td colSpan={4}>{t(copy.socialNoAccounts)}</td>
               </tr>
             ) : null}
-            {items.map((item) => (
-              <tr key={item.id}>
+            {pages.map((page) => (
+              <tr key={page.key}>
                 <td>
-                  <span className="social-account-name">
-                    <SocialBrandIcon platform={item.platform} />
-                    <strong>{item.name}</strong>
-                  </span>
-                  <br />
-                  <small>{platformLabel(item.platform, t)}</small>
+                  <strong className="client-name">{page.name}</strong>
+                  <div className="social-page-channels">
+                    {page.facebook ? (
+                      <span className="social-account-name">
+                        <SocialBrandIcon platform="facebook" />
+                        {t(copy.facebook)}
+                      </span>
+                    ) : null}
+                    {page.instagram ? (
+                      <span className="social-account-name">
+                        <SocialBrandIcon platform="instagram" />
+                        {t(copy.socialLinkedInstagram)}
+                      </span>
+                    ) : (
+                      <small className="muted">{t(copy.socialNoInstagram)}</small>
+                    )}
+                  </div>
                 </td>
-                <td dir="ltr">{item.handle ? `@${item.handle}` : item.page_id || "—"}</td>
                 <td>
-                  <span className={`status ${item.is_active ? "status-published" : "status-failed"}`}>
-                    {item.is_active ? t(copy.active) : t(copy.inactive)}
-                  </span>
-                  <br />
-                  <small>{item.has_token ? t(copy.socialHasToken) : t(copy.socialNoToken)}</small>
+                  {page.accounts.map((item) => (
+                    <div key={item.id} dir="ltr">
+                      {platformLabel(item.platform, t)} · {accountHandle(item)}
+                    </div>
+                  ))}
                 </td>
-                <td className="row-actions">
-                  {canSocial(user, "accounts") ? (
-                    <>
-                      <button type="button" className="btn btn-ghost" onClick={() => startEdit(item)}>
-                        {t(copy.edit)}
-                      </button>
-                      <button type="button" className="btn btn-ghost" disabled={busyId === item.id} onClick={() => void toggle(item.id)}>
-                        {item.is_active ? t(copy.socialToggleOff) : t(copy.socialToggleOn)}
-                      </button>
-                      <button type="button" className="btn btn-ghost" disabled={busyId === item.id} onClick={() => void remove(item.id)}>
-                        {t(copy.delete)}
-                      </button>
-                    </>
-                  ) : null}
+                <td>
+                  {page.accounts.map((item) => (
+                    <div key={item.id} className="social-page-status">
+                      <span className={`status ${item.connection_status === "error" ? "status-failed" : item.is_active ? "status-published" : "status-failed"}`}>
+                        {accountStatus(item)}
+                      </span>
+                      <small>{item.has_token ? t(copy.socialHasToken) : t(copy.socialNoToken)}</small>
+                      {socialAccountStatusLabel(item, t) ? <small className="error-inline">{socialAccountStatusLabel(item, t)}</small> : null}
+                    </div>
+                  ))}
+                </td>
+                <td>
+                  {canSocial(user, "accounts")
+                    ? page.accounts.map((item) => (
+                        <div key={item.id} className="row-actions">
+                          <small>{platformLabel(item.platform, t)}</small>
+                          <button type="button" className="btn btn-ghost" onClick={() => startEdit(item)}>
+                            {t(copy.edit)}
+                          </button>
+                          <button type="button" className="btn btn-ghost" disabled={busyId === item.id} onClick={() => void toggle(item.id)}>
+                            {item.is_active ? t(copy.socialToggleOff) : t(copy.socialToggleOn)}
+                          </button>
+                          <button type="button" className="btn btn-ghost" disabled={busyId === item.id} onClick={() => void remove(item.id)}>
+                            {t(copy.delete)}
+                          </button>
+                        </div>
+                      ))
+                    : null}
                 </td>
               </tr>
             ))}
@@ -266,6 +302,14 @@ export function SocialAccounts({ locale, t }: { locale: Locale; t: (c: { ar: str
             <span>{t(copy.socialToken)}</span>
             <input className="field" type="password" autoComplete="off" value={form.access_token} onChange={(event) => setForm((current) => ({ ...current, access_token: event.target.value }))} />
             <small className="muted">{t(copy.socialTokenHint)}</small>
+          </label>
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={form.is_active}
+              onChange={(event) => setForm((current) => ({ ...current, is_active: event.target.checked }))}
+            />
+            <span>{form.is_active ? t(copy.socialToggleOn) : t(copy.socialToggleOff)}</span>
           </label>
         </FormDialog>
       ) : null}

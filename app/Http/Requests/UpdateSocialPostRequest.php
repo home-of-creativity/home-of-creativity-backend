@@ -3,7 +3,9 @@
 namespace App\Http\Requests;
 
 use App\Enums\SocialAbility;
+use App\Enums\SocialPlacement;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class UpdateSocialPostRequest extends FormRequest
 {
@@ -26,6 +28,7 @@ class UpdateSocialPostRequest extends FormRequest
     {
         return [
             'body' => ['sometimes', 'string', 'max:5000'],
+            'placement' => ['sometimes', 'string', Rule::in(SocialPlacement::values())],
             'account_ids' => ['sometimes', 'array', 'min:1'],
             'account_ids.*' => ['integer', 'exists:social_accounts,id'],
             'scheduled_at' => ['nullable', 'date'],

@@ -3,6 +3,7 @@
 use App\Http\Controllers\Admin\ClientController as AdminClientController;
 use App\Http\Controllers\Admin\ContactChannelController as AdminContactChannelController;
 use App\Http\Controllers\Admin\EmployeeController as AdminEmployeeController;
+use App\Http\Controllers\Admin\LandingReelController as AdminLandingReelController;
 use App\Http\Controllers\Admin\OdooController as AdminOdooController;
 use App\Http\Controllers\Admin\OverviewController;
 use App\Http\Controllers\Admin\PortfolioCategoryController as AdminPortfolioCategoryController;
@@ -19,10 +20,12 @@ use App\Http\Controllers\Admin\SocialStaffController as AdminSocialStaffControll
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\IntegrationController;
+use App\Http\Controllers\LandingReelController;
 use App\Http\Controllers\N8nWebhookController;
 use App\Http\Controllers\PortfolioController;
 use App\Http\Controllers\PricingController;
 use App\Http\Controllers\ServiceRequestController;
+use App\Http\Controllers\SocialFeedController;
 use App\Http\Controllers\StaffBotController;
 use App\Http\Controllers\TelegramBotController;
 use Illuminate\Support\Facades\Route;
@@ -43,6 +46,9 @@ Route::get('contact', [ContactController::class, 'index']);
 Route::get('portfolio/clients', [PortfolioController::class, 'clients']);
 Route::get('portfolio/projects', [PortfolioController::class, 'projects']);
 Route::get('portfolio/projects/{portfolio_project}', [PortfolioController::class, 'show']);
+Route::get('social/instagram-feed', [SocialFeedController::class, 'instagram']);
+Route::get('social/facebook-feed', [SocialFeedController::class, 'facebook']);
+Route::get('reels', [LandingReelController::class, 'index']);
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('requests', ServiceRequestController::class)
@@ -61,6 +67,9 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
     Route::post('clients', [AdminClientController::class, 'store']);
     Route::get('odoo/status', [AdminOdooController::class, 'status']);
     Route::post('odoo/sync-partners', [AdminOdooController::class, 'syncPartners']);
+    Route::post('odoo/import-crm-clients', [AdminOdooController::class, 'importCrmClients']);
+    Route::post('odoo/import-crm-clients/excel', [AdminOdooController::class, 'importCrmClientsExcel']);
+    Route::post('odoo/sync-employees', [AdminOdooController::class, 'syncEmployees']);
     Route::get('odoo/quotations', [AdminOdooController::class, 'quotations']);
     Route::get('odoo/invoices', [AdminOdooController::class, 'invoices']);
     Route::get('clickup/members', [AdminEmployeeController::class, 'clickupMembers']);
@@ -91,6 +100,11 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
     Route::delete('portfolio/projects/bulk', [AdminPortfolioProjectController::class, 'destroyAll']);
     Route::put('portfolio/projects/{portfolio_project}', [AdminPortfolioProjectController::class, 'update']);
     Route::delete('portfolio/projects/{portfolio_project}', [AdminPortfolioProjectController::class, 'destroy']);
+    Route::get('reels', [AdminLandingReelController::class, 'index']);
+    Route::post('reels', [AdminLandingReelController::class, 'store']);
+    Route::delete('reels/bulk', [AdminLandingReelController::class, 'destroyAll']);
+    Route::match(['put', 'post'], 'reels/{landing_reel}', [AdminLandingReelController::class, 'update']);
+    Route::delete('reels/{landing_reel}', [AdminLandingReelController::class, 'destroy']);
     Route::get('pricing/categories', [AdminPricingCategoryController::class, 'index']);
     Route::post('pricing/categories', [AdminPricingCategoryController::class, 'store']);
     Route::delete('pricing/categories/bulk', [AdminPricingCategoryController::class, 'destroyAll']);

@@ -93,8 +93,12 @@ return [
     'social' => [
         'graph_base' => env('META_GRAPH_URL', 'https://graph.facebook.com/v21.0'),
         'timeout' => (int) env('SOCIAL_GRAPH_TIMEOUT', 20),
+        'connect_timeout' => (int) env('SOCIAL_GRAPH_CONNECT_TIMEOUT', 10),
         'upload_timeout' => (int) env('SOCIAL_GRAPH_UPLOAD_TIMEOUT', 60),
         'timezone' => env('SOCIAL_TIMEZONE', 'Asia/Damascus'),
+        'landing_instagram_handle' => env('SOCIAL_LANDING_INSTAGRAM_HANDLE', 'homeofcreativity.sy'),
+        'landing_facebook_page_id' => env('SOCIAL_LANDING_FACEBOOK_PAGE_ID', ''),
+        'landing_facebook_handle' => env('SOCIAL_LANDING_FACEBOOK_HANDLE', 'homeofcreativity'),
     ],
 
     'facebook' => [

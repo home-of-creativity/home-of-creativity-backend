@@ -20,9 +20,14 @@ class SocialInboxItem extends Model
      */
     protected $fillable = [
         'social_account_id',
+        'social_post_id',
         'kind',
         'external_id',
         'source_external_id',
+        'source_body',
+        'source_permalink',
+        'source_preview_url',
+        'source_media_type',
         'author_name',
         'author_handle',
         'body',
@@ -45,6 +50,11 @@ class SocialInboxItem extends Model
     public function account(): BelongsTo
     {
         return $this->belongsTo(SocialAccount::class, 'social_account_id');
+    }
+
+    public function sourcePost(): BelongsTo
+    {
+        return $this->belongsTo(SocialPost::class, 'social_post_id');
     }
 
     public function replies(): HasMany

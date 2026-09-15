@@ -2,12 +2,15 @@
 
 namespace Tests\Feature;
 
+use App\Enums\EmployeeProfession;
 use App\Enums\RequestStatus;
 use App\Jobs\ClassifyWithGeminiJob;
 use App\Models\Client;
+use App\Models\Employee;
 use App\Models\ServiceRequest;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
 use Laravel\Sanctum\Sanctum;
@@ -191,5 +194,236 @@ class AdminDashboardTest extends TestCase
             'email' => 'odoo@hoc.test',
             'odoo_partner_id' => '55',
         ]);
+    }
+
+    public function test_admin_can_create_employee_and_push_to_odoo(): void
+    {
+        Http::preventStrayRequests();
+        config([
+            'services.odoo.enabled' => true,
+            'services.odoo.url' => 'https://odoo.test',
+            'services.odoo.db' => 'hoc',
+            'services.odoo.username' => 'admin',
+            'services.odoo.api_key' => 'secret-key',
+        ]);
+        Http::fake([
+            'https://odoo.test/jsonrpc' => Http::sequence()
+                ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => 2], 200)
+                ->push(['jsonrpc' => '2.0', 'id' => 2, 'result' => []], 200)
+                ->push(['jsonrpc' => '2.0', 'id' => 3, 'result' => []], 200)
+                ->push(['jsonrpc' => '2.0', 'id' => 4, 'result' => 91], 200),
+        ]);
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        $this->postJson('/api/admin/employees', [
+            'name' => 'Sara Saleh',
+            'email' => 'sara@hoc.test',
+            'phone' => '+963999000222',
+            'profession' => EmployeeProfession::Sales->value,
+        ])->assertCreated()
+            ->assertJsonPath('data.name', 'Sara Saleh')
+            ->assertJsonPath('data.odoo_employee_id', '91');
+
+        $this->assertDatabaseHas('employees', [
+            'email' => 'sara@hoc.test',
+            'odoo_employee_id' => '91',
+        ]);
+    }
+
+    public function test_admin_can_sync_odoo_employees_and_push_local_staff(): void
+    {
+        Http::preventStrayRequests();
+        config([
+            'services.odoo.enabled' => true,
+            'services.odoo.url' => 'https://odoo.test',
+            'services.odoo.db' => 'hoc',
+            'services.odoo.username' => 'admin',
+            'services.odoo.api_key' => 'secret-key',
+        ]);
+        Http::fake([
+            'https://odoo.test/jsonrpc' => Http::sequence()
+                ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => 2], 200)
+                ->push(['jsonrpc' => '2.0', 'id' => 2, 'result' => [[
+                    'id' => 66,
+                    'name' => 'Odoo Staff',
+                    'work_email' => 'staff@hoc.test',
+                    'work_phone' => '+963222',
+                    'mobile_phone' => false,
+                    'barcode' => 'EMP-0099',
+                    'active' => true,
+                ]]], 200)
+                ->push(['jsonrpc' => '2.0', 'id' => 3, 'result' => []], 200)
+                ->push(['jsonrpc' => '2.0', 'id' => 4, 'result' => []], 200)
+                ->push(['jsonrpc' => '2.0', 'id' => 5, 'result' => 92], 200),
+        ]);
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        Employee::factory()->create([
+            'name' => 'Local Designer',
+            'email' => 'designer@hoc.test',
+            'profession' => EmployeeProfession::Design,
+            'odoo_employee_id' => null,
+        ]);
+
+        $this->postJson('/api/admin/odoo/sync-employees')
+            ->assertOk()
+            ->assertJsonPath('data.created', 1)
+            ->assertJsonPath('data.pushed', 1);
+
+        $this->assertDatabaseHas('employees', [
+            'name' => 'Odoo Staff',
+            'email' => 'staff@hoc.test',
+            'odoo_employee_id' => '66',
+        ]);
+        $this->assertDatabaseHas('employees', [
+            'email' => 'designer@hoc.test',
+            'odoo_employee_id' => '92',
+        ]);
+    }
+
+    public function test_sync_partners_pushes_local_clients_without_odoo_id(): void
+    {
+        Http::preventStrayRequests();
+        config([
+            'services.odoo.enabled' => true,
+            'services.odoo.url' => 'https://odoo.test',
+            'services.odoo.db' => 'hoc',
+            'services.odoo.username' => 'admin',
+            'services.odoo.api_key' => 'secret-key',
+        ]);
+        Http::fake([
+            'https://odoo.test/jsonrpc' => Http::sequence()
+                ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => 2], 200)
+                ->push(['jsonrpc' => '2.0', 'id' => 2, 'result' => []], 200)
+                ->push(['jsonrpc' => '2.0', 'id' => 3, 'result' => []], 200)
+                ->push(['jsonrpc' => '2.0', 'id' => 4, 'result' => 80], 200),
+        ]);
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        Client::factory()->create([
+            'name' => 'Local Studio',
+            'email' => 'local-studio@hoc.test',
+            'odoo_partner_id' => null,
+        ]);
+
+        $this->postJson('/api/admin/odoo/sync-partners')
+            ->assertOk()
+            ->assertJsonPath('data.pushed', 1);
+
+        $this->assertDatabaseHas('clients', [
+            'email' => 'local-studio@hoc.test',
+            'odoo_partner_id' => '80',
+        ]);
+    }
+
+    public function test_admin_can_import_crm_clients_from_odoo(): void
+    {
+        Http::preventStrayRequests();
+        config([
+            'services.odoo.enabled' => true,
+            'services.odoo.url' => 'https://odoo.test',
+            'services.odoo.db' => 'hoc',
+            'services.odoo.username' => 'admin',
+            'services.odoo.api_key' => 'secret-key',
+            'services.odoo.use_json2' => false,
+        ]);
+
+        Http::fake([
+            'https://odoo.test/jsonrpc' => Http::sequence()
+                ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => 2], 200)
+                ->push(['jsonrpc' => '2.0', 'id' => 2, 'result' => [[
+                    'id' => 701,
+                    'name' => 'Booth project',
+                    'contact_name' => 'CRM Lead Client',
+                    'partner_id' => [88, 'CRM Lead Client'],
+                    'email_from' => 'crm-lead@hoc.test',
+                    'phone' => '+963700111222',
+                ]]], 200)
+                ->push(['jsonrpc' => '2.0', 'id' => 3, 'result' => 2], 200)
+                ->push(['jsonrpc' => '2.0', 'id' => 4, 'result' => []], 200),
+        ]);
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        $this->postJson('/api/admin/odoo/import-crm-clients')
+            ->assertOk()
+            ->assertJsonPath('data.created', 1)
+            ->assertJsonPath('data.crm_leads', 1);
+
+        $this->assertDatabaseHas('clients', [
+            'name' => 'CRM Lead Client',
+            'email' => 'crm-lead@hoc.test',
+            'odoo_partner_id' => '88',
+        ]);
+    }
+
+    public function test_crm_import_does_not_request_removed_mobile_field(): void
+    {
+        Http::preventStrayRequests();
+        config([
+            'services.odoo.enabled' => true,
+            'services.odoo.url' => 'https://odoo.test',
+            'services.odoo.db' => 'hoc',
+            'services.odoo.username' => 'admin',
+            'services.odoo.api_key' => 'secret-key',
+            'services.odoo.use_json2' => true,
+        ]);
+
+        Http::fake(function (Request $request) {
+            if ($request->url() === 'https://odoo.test/json/2/crm.lead/search_read') {
+                $fields = $request['fields'] ?? [];
+                if (in_array('mobile', $fields, true)) {
+                    return Http::response([
+                        'name' => 'builtins.ValueError',
+                        'message' => "Invalid field 'mobile' on 'crm.lead'",
+                    ], 500);
+                }
+
+                return Http::response([[
+                    'id' => 701,
+                    'name' => 'Booth project',
+                    'contact_name' => 'CRM Lead Client',
+                    'partner_id' => [88, 'CRM Lead Client'],
+                    'email_from' => 'crm-lead@hoc.test',
+                    'phone' => '+963700111222',
+                ]], 200);
+            }
+
+            if ($request->url() === 'https://odoo.test/json/2/res.partner/search_read') {
+                return Http::response([], 200);
+            }
+
+            return Http::response(['message' => 'Unexpected Odoo call: '.$request->url()], 500);
+        });
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        $this->postJson('/api/admin/odoo/import-crm-clients')
+            ->assertOk()
+            ->assertJsonPath('data.created', 1)
+            ->assertJsonPath('data.crm_leads', 1);
+
+        Http::assertSent(function (Request $request): bool {
+            if ($request->url() !== 'https://odoo.test/json/2/crm.lead/search_read') {
+                return false;
+            }
+
+            $fields = $request['fields'] ?? [];
+
+            return is_array($fields) && ! in_array('mobile', $fields, true);
+        });
     }
 }

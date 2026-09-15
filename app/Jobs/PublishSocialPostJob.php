@@ -63,6 +63,10 @@ class PublishSocialPostJob implements ShouldBeUnique, ShouldQueue
                 continue;
             }
 
+            if ($target->status === SocialPublishStatus::Published && filled($target->external_id)) {
+                continue;
+            }
+
             $target->forceFill([
                 'status' => SocialPublishStatus::Publishing,
                 'last_error' => null,

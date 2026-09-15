@@ -20,6 +20,7 @@ class SocialInboxSync
 
     public function syncAll(): int
     {
+        $this->lastError = null;
         $imported = 0;
 
         SocialAccount::query()->active()->each(function (SocialAccount $account) use (&$imported): void {
@@ -40,8 +41,21 @@ class SocialInboxSync
         }
 
         $imported = 0;
-        $imported += $this->importCommentsFromPath($account, $account->page_id.'/published_posts');
-        $imported += $this->importCommentsFromPath($account, $account->page_id.'/feed');
+        if ($account->platform === SocialPlatform::Instagram) {
+            $imported += $this->importCommentsFromPath($account, $account->page_id.'/media', [
+                'fields' => 'id,caption,permalink,media_type,media_url,thumbnail_url,comments.limit(50){id,text,username,timestamp,from}',
+                'limit' => '25',
+            ]);
+        } else {
+            $imported += $this->importCommentsFromPath($account, $account->page_id.'/published_posts', [
+                'fields' => 'id,message,permalink_url,full_picture,attachments{media{image{src}}},comments.limit(50){id,message,from,created_time}',
+                'limit' => '25',
+            ]);
+            $imported += $this->importCommentsFromPath($account, $account->page_id.'/feed', [
+                'fields' => 'id,message,permalink_url,full_picture,attachments{media{image{src}}},comments.limit(50){id,message,from,created_time}',
+                'limit' => '25',
+            ]);
+        }
         $imported += $this->importCommentsFromPublishedTargets($account);
         $imported += $this->importMessages($account);
         $this->pruneDeletedComments($account);
@@ -49,12 +63,12 @@ class SocialInboxSync
         return $imported;
     }
 
-    private function importCommentsFromPath(SocialAccount $account, string $path): int
+    /**
+     * @param  array<string, string>  $query
+     */
+    private function importCommentsFromPath(SocialAccount $account, string $path, array $query): int
     {
-        $payload = $this->graphGet($account, $path, [
-            'fields' => 'id,comments.limit(50){id,message,from,created_time}',
-            'limit' => '25',
-        ]);
+        $payload = $this->graphGet($account, $path, $query);
 
         if ($payload === null) {
             return 0;
@@ -62,12 +76,20 @@ class SocialInboxSync
 
         $imported = 0;
         foreach (data_get($payload, 'data', []) as $post) {
+            if (! is_array($post)) {
+                continue;
+            }
             $postId = data_get($post, 'id');
             if (! is_string($postId) || $postId === '') {
                 continue;
             }
 
-            $imported += $this->syncCommentsForPost($account, $postId, data_get($post, 'comments.data', []));
+            $imported += $this->syncCommentsForPost(
+                $account,
+                $postId,
+                data_get($post, 'comments.data', []),
+                $this->sourceFromPost($account, $post),
+            );
         }
 
         return $imported;
@@ -84,16 +106,23 @@ class SocialInboxSync
             ->limit(20)
             ->get()
             ->each(function (SocialPostAccount $target) use ($account, &$imported): void {
-                $payload = $this->graphGet($account, (string) $target->external_id.'/comments', [
-                    'fields' => 'id,message,from,created_time',
-                    'limit' => '50',
+                $fields = $account->platform === SocialPlatform::Instagram
+                    ? 'id,caption,permalink,media_type,media_url,thumbnail_url,comments.limit(50){id,text,username,timestamp,from}'
+                    : 'id,message,permalink_url,full_picture,comments.limit(50){id,message,from,created_time}';
+                $payload = $this->graphGet($account, (string) $target->external_id, [
+                    'fields' => $fields,
                 ]);
 
                 if ($payload === null) {
                     return;
                 }
 
-                $imported += $this->syncCommentsForPost($account, (string) $target->external_id, data_get($payload, 'data', []));
+                $imported += $this->syncCommentsForPost(
+                    $account,
+                    (string) $target->external_id,
+                    data_get($payload, 'comments.data', []),
+                    $this->sourceFromPost($account, is_array($payload) ? $payload : []),
+                );
             });
 
         return $imported;
@@ -101,10 +130,15 @@ class SocialInboxSync
 
     private function importMessages(SocialAccount $account): int
     {
-        $payload = $this->graphGet($account, $account->page_id.'/conversations', [
+        $query = [
             'fields' => 'id,updated_time,messages.limit(20){id,message,from,created_time}',
             'limit' => '25',
-        ]);
+        ];
+        if ($account->platform === SocialPlatform::Instagram) {
+            $query['platform'] = 'instagram';
+        }
+
+        $payload = $this->graphGet($account, $account->page_id.'/conversations', $query);
 
         if ($payload === null) {
             return 0;
@@ -112,6 +146,8 @@ class SocialInboxSync
 
         $imported = 0;
         foreach (data_get($payload, 'data', []) as $conversation) {
+            $conversationId = data_get($conversation, 'id');
+            $conversationId = is_string($conversationId) ? $conversationId : null;
             foreach (data_get($conversation, 'messages.data', []) as $message) {
                 $fromId = (string) data_get($message, 'from.id');
                 if ($fromId !== '' && $fromId === (string) $account->page_id) {
@@ -123,9 +159,13 @@ class SocialInboxSync
                     SocialInboxKind::Message,
                     data_get($message, 'id'),
                     data_get($message, 'message'),
-                    data_get($message, 'from.name'),
+                    data_get($message, 'from.name') ?? data_get($message, 'from.username'),
                     data_get($message, 'from.id'),
                     data_get($message, 'created_time'),
+                    [
+                        'source_external_id' => $conversationId,
+                        'source_media_type' => 'conversation',
+                    ],
                 );
             }
         }
@@ -133,10 +173,13 @@ class SocialInboxSync
         return $imported;
     }
 
-    private function syncCommentsForPost(SocialAccount $account, string $postId, mixed $comments): int
+    /**
+     * @param  array<string, mixed>  $source
+     */
+    private function syncCommentsForPost(SocialAccount $account, string $postId, mixed $comments, array $source = []): int
     {
         $rows = is_array($comments) ? $comments : [];
-        $imported = $this->storeComments($account, $rows, $postId);
+        $imported = $this->storeComments($account, $rows, $postId, $source);
         $liveIds = [];
         foreach ($rows as $comment) {
             $id = data_get($comment, 'id');
@@ -161,20 +204,22 @@ class SocialInboxSync
 
     /**
      * @param  list<array<string, mixed>>  $comments
+     * @param  array<string, mixed>  $source
      */
-    private function storeComments(SocialAccount $account, array $comments, string $sourceId): int
+    private function storeComments(SocialAccount $account, array $comments, string $sourceId, array $source = []): int
     {
         $imported = 0;
+        $source['source_external_id'] = $source['source_external_id'] ?? $sourceId;
         foreach ($comments as $comment) {
             $imported += $this->storeItem(
                 $account,
                 SocialInboxKind::Comment,
                 data_get($comment, 'id'),
-                data_get($comment, 'message'),
-                data_get($comment, 'from.name'),
+                data_get($comment, 'message') ?? data_get($comment, 'text'),
+                data_get($comment, 'from.name') ?? data_get($comment, 'username'),
                 data_get($comment, 'from.id'),
-                data_get($comment, 'created_time'),
-                $sourceId,
+                data_get($comment, 'created_time') ?? data_get($comment, 'timestamp'),
+                $source,
             );
         }
 
@@ -194,6 +239,9 @@ class SocialInboxSync
             });
     }
 
+    /**
+     * @param  array<string, mixed>  $source
+     */
     private function storeItem(
         SocialAccount $account,
         SocialInboxKind $kind,
@@ -202,28 +250,75 @@ class SocialInboxSync
         mixed $authorName,
         mixed $authorHandle,
         mixed $occurredAt,
-        ?string $sourceExternalId = null,
+        array $source = [],
     ): int {
         if (! is_string($externalId) || $externalId === '') {
             return 0;
         }
 
-        $item = SocialInboxItem::query()->firstOrCreate(
-            [
-                'social_account_id' => $account->id,
-                'external_id' => $externalId,
-            ],
-            [
+        $item = SocialInboxItem::query()->firstOrNew([
+            'social_account_id' => $account->id,
+            'external_id' => $externalId,
+        ]);
+
+        $created = ! $item->exists;
+        if ($created) {
+            $item->fill([
                 'kind' => $kind,
-                'source_external_id' => $sourceExternalId,
                 'author_name' => is_string($authorName) && $authorName !== '' ? $authorName : 'Unknown',
                 'author_handle' => is_string($authorHandle) ? $authorHandle : null,
                 'body' => is_string($body) && $body !== '' ? $body : '—',
                 'occurred_at' => is_string($occurredAt) ? $occurredAt : now(),
-            ]
-        );
+            ]);
+        } elseif (is_string($authorHandle) && $authorHandle !== '' && ! filled($item->author_handle)) {
+            $item->author_handle = $authorHandle;
+        }
 
-        return $item->wasRecentlyCreated ? 1 : 0;
+        foreach (['source_external_id', 'source_body', 'source_permalink', 'source_preview_url', 'source_media_type', 'social_post_id'] as $field) {
+            if (array_key_exists($field, $source) && filled($source[$field])) {
+                $item->{$field} = $source[$field];
+            }
+        }
+
+        $item->save();
+
+        return $created ? 1 : 0;
+    }
+
+    /**
+     * @param  array<string, mixed>  $post
+     * @return array<string, mixed>
+     */
+    private function sourceFromPost(SocialAccount $account, array $post): array
+    {
+        $postId = data_get($post, 'id');
+        $postId = is_string($postId) ? $postId : null;
+        $body = data_get($post, 'message') ?? data_get($post, 'caption');
+        $permalink = data_get($post, 'permalink_url') ?? data_get($post, 'permalink');
+        $preview = data_get($post, 'full_picture')
+            ?? data_get($post, 'thumbnail_url')
+            ?? data_get($post, 'media_url')
+            ?? data_get($post, 'attachments.data.0.media.image.src');
+        $mediaType = data_get($post, 'media_type');
+
+        return [
+            'source_external_id' => $postId,
+            'source_body' => is_string($body) && $body !== '' ? $body : null,
+            'source_permalink' => is_string($permalink) && $permalink !== '' ? $permalink : null,
+            'source_preview_url' => is_string($preview) && $preview !== '' ? $preview : null,
+            'source_media_type' => is_string($mediaType) && $mediaType !== '' ? $mediaType : null,
+            'social_post_id' => $postId ? $this->localPostId($account, $postId) : null,
+        ];
+    }
+
+    private function localPostId(SocialAccount $account, string $externalId): ?int
+    {
+        $id = SocialPostAccount::query()
+            ->where('social_account_id', $account->id)
+            ->where('external_id', $externalId)
+            ->value('social_post_id');
+
+        return is_numeric($id) ? (int) $id : null;
     }
 
     /**
@@ -236,10 +331,7 @@ class SocialInboxSync
             $response = Http::timeout((int) config('services.social.timeout', 20))
                 ->connectTimeout(3)
                 ->acceptJson()
-                ->get($this->graphUrl($path), [
-                    ...$query,
-                    'access_token' => $account->access_token,
-                ]);
+                ->get(FacebookGraph::url($path), FacebookGraph::withToken($query, (string) $account->access_token));
         } catch (ConnectionException|Throwable $exception) {
             $this->lastError = $exception->getMessage();
             Log::warning('Social inbox sync failed.', [
@@ -267,12 +359,5 @@ class SocialInboxSync
         $json = $response->json() ?? [];
 
         return $json;
-    }
-
-    private function graphUrl(string $path): string
-    {
-        $base = rtrim((string) config('services.social.graph_base', 'https://graph.facebook.com/v21.0'), '/');
-
-        return $base.'/'.ltrim($path, '/');
     }
 }

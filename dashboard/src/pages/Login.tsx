@@ -1,7 +1,10 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "../auth";
+import { LoadingLottie } from "../components/LoadingLottie";
 import { copy, type Copy, type Locale } from "../i18n";
+
+type LoginPhase = "idle" | "loading" | "success" | "error";
 
 export function Login({
   locale,
@@ -12,20 +15,53 @@ export function Login({
   t: (c: Copy) => string;
   setLocale: (next: Locale) => void;
 }) {
-  const { user, login } = useAuth();
+  const { user, login, ready } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [phase, setPhase] = useState<LoginPhase>("idle");
   const [error, setError] = useState("");
+  const [redirect, setRedirect] = useState(false);
 
-  if (user?.is_admin) return <Navigate to="/" replace />;
+  useEffect(() => {
+    if (phase !== "success") return;
+    const timer = window.setTimeout(() => setRedirect(true), 700);
+    return () => window.clearTimeout(timer);
+  }, [phase]);
+
+  if (!ready) {
+    return (
+      <main className="login">
+        <LoadingLottie variant="page" label={t(copy.loading)} />
+      </main>
+    );
+  }
+
+  if (user?.is_admin && phase === "idle") {
+    return <Navigate to="/" replace />;
+  }
+
+  if (redirect && user?.is_admin) {
+    return <Navigate to="/" replace />;
+  }
+
+  const busy = phase === "loading" || phase === "success";
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
+    setPhase("loading");
     setError("");
     try {
       await login(email, password);
+      setPhase("success");
     } catch (err) {
-      setError(err instanceof Error && err.message === "forbidden" ? t(copy.forbidden) : t(copy.failed));
+      setPhase("error");
+      setError(
+        err instanceof Error && err.message === "forbidden"
+          ? t(copy.forbidden)
+          : err instanceof Error && err.message
+            ? err.message
+            : t(copy.failed),
+      );
     }
   }
 
@@ -35,13 +71,30 @@ export function Login({
         {t(copy.language)}
       </button>
       <div className="login-grid">
-        <form className="form-card stack login-card" onSubmit={onSubmit}>
+        <form
+          className={`form-card stack login-card${busy ? " login-card--busy" : ""}`}
+          onSubmit={onSubmit}
+          aria-busy={busy}
+        >
           <p className="eyebrow">{t(copy.staffChip)}</p>
           <p className="brand-lockup">
             HOME <span>of</span> CREATIVITY
           </p>
           <h1>{t(copy.login)}</h1>
           <p className="muted">{t(copy.loginLede)}</p>
+
+          {phase === "success" ? (
+            <p className="login-feedback login-feedback--success" role="status" aria-live="polite">
+              {t(copy.loginSuccess)}
+            </p>
+          ) : null}
+
+          {phase === "error" && error ? (
+            <p className="login-feedback login-feedback--error" role="alert">
+              {error}
+            </p>
+          ) : null}
+
           <label className="field-label" htmlFor="staff-email">
             {t(copy.email)}
             <input
@@ -50,7 +103,14 @@ export function Login({
               type="email"
               autoComplete="username"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                if (phase === "error") {
+                  setPhase("idle");
+                  setError("");
+                }
+              }}
+              disabled={busy}
               required
             />
           </label>
@@ -62,16 +122,38 @@ export function Login({
               type="password"
               autoComplete="current-password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                if (phase === "error") {
+                  setPhase("idle");
+                  setError("");
+                }
+              }}
+              disabled={busy}
               required
             />
           </label>
-          {error ? <p className="error">{error}</p> : null}
-          <button className="btn btn-primary" type="submit">
-            {t(copy.submit)}
+
+          {phase === "loading" ? (
+            <LoadingLottie variant="inline" label={t(copy.loginSigningIn)} />
+          ) : null}
+
+          <button className="btn btn-primary" type="submit" disabled={busy}>
+            {phase === "loading"
+              ? t(copy.loginSigningIn)
+              : phase === "success"
+                ? t(copy.loginRedirecting)
+                : t(copy.submit)}
           </button>
           {import.meta.env.VITE_TELEGRAM_STAFF_BOT ? (
-            <a className="btn btn-telegram" href={`https://t.me/${import.meta.env.VITE_TELEGRAM_STAFF_BOT}`} target="_blank" rel="noreferrer">
+            <a
+              className="btn btn-telegram"
+              href={`https://t.me/${import.meta.env.VITE_TELEGRAM_STAFF_BOT}`}
+              target="_blank"
+              rel="noreferrer"
+              aria-disabled={busy}
+              tabIndex={busy ? -1 : undefined}
+            >
               {t(copy.openStaffBot)}
             </a>
           ) : null}

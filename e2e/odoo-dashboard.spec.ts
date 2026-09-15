@@ -20,4 +20,12 @@ test.describe("Odoo dashboard smoke", () => {
     });
     expect([200, 422, 503]).toContain(response.status());
   });
+
+  test("admin odoo sync employees endpoint responds", async ({ request }) => {
+    const staff = await loginStaff(request);
+    const response = await request.post(`${API}/admin/odoo/sync-employees`, {
+      headers: { Authorization: `Bearer ${staff.data.token}` },
+    });
+    expect([200, 422, 503]).toContain(response.status());
+  });
 });

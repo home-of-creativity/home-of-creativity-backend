@@ -12,6 +12,7 @@ type FormDialogProps = {
   closeLabel: string;
   error?: string;
   size?: "md" | "lg";
+  busy?: boolean;
   children: ReactNode;
 };
 
@@ -25,6 +26,7 @@ export function FormDialog({
   closeLabel,
   error,
   size = "md",
+  busy = false,
   children,
 }: FormDialogProps) {
   const titleId = useId();
@@ -82,10 +84,10 @@ export function FormDialog({
             </p>
           ) : null}
           <div className="form-dialog-actions">
-            <button className="btn btn-primary" type="submit">
+            <button className="btn btn-primary" type="submit" disabled={busy}>
               {submitLabel}
             </button>
-            <button className="btn btn-ghost" type="button" onClick={onClose}>
+            <button className="btn btn-ghost" type="button" onClick={onClose} disabled={busy}>
               {cancelLabel}
             </button>
           </div>

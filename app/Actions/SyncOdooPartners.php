@@ -8,15 +8,18 @@ use Illuminate\Support\Facades\Log;
 
 class SyncOdooPartners
 {
-    public function __construct(private OdooClient $odoo) {}
+    public function __construct(
+        private OdooClient $odoo,
+        private PushClientToOdoo $pushClientToOdoo,
+    ) {}
 
     /**
-     * @return array{synced: int, created: int, updated: int}
+     * @return array{synced: int, created: int, updated: int, pushed: int}
      */
     public function handle(int $limit = 200): array
     {
         if (! $this->odoo->configured()) {
-            return ['synced' => 0, 'created' => 0, 'updated' => 0];
+            return ['synced' => 0, 'created' => 0, 'updated' => 0, 'pushed' => 0];
         }
 
         $partners = $this->odoo->listPartners($limit);
@@ -41,6 +44,7 @@ class SyncOdooPartners
             if ($client) {
                 $client->fill($payload)->save();
                 $updated++;
+
                 continue;
             }
 
@@ -55,10 +59,21 @@ class SyncOdooPartners
             }
         }
 
+        $pushed = 0;
+        Client::query()
+            ->whereNull('odoo_partner_id')
+            ->each(function (Client $client) use (&$pushed): void {
+                $this->pushClientToOdoo->handle($client);
+                if (filled($client->fresh()?->odoo_partner_id)) {
+                    $pushed++;
+                }
+            });
+
         return [
             'synced' => count($partners),
             'created' => $created,
             'updated' => $updated,
+            'pushed' => $pushed,
         ];
     }
 }

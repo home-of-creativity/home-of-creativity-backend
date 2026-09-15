@@ -7,9 +7,11 @@ use App\Models\User;
 
 class EnsureClientForUser
 {
+    public function __construct(private PushClientToOdoo $pushClientToOdoo) {}
+
     public function handle(User $user): Client
     {
-        return $user->client()->firstOrCreate(
+        $client = $user->client()->firstOrCreate(
             ['user_id' => $user->id],
             [
                 'name' => $user->name,
@@ -19,5 +21,7 @@ class EnsureClientForUser
                 'locale' => $user->locale ?? 'ar',
             ],
         );
+
+        return $this->pushClientToOdoo->handle($client);
     }
 }

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Actions\GenerateEmployeeCode;
+use App\Actions\PushEmployeeToOdoo;
 use App\Enums\EmployeeStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\ApproveEmployeeRequest;
@@ -28,14 +29,17 @@ class EmployeeController extends Controller
         )->additional(['message' => 'ok']);
     }
 
-    public function store(StoreEmployeeRequest $request, GenerateEmployeeCode $generateEmployeeCode): JsonResponse
-    {
+    public function store(
+        StoreEmployeeRequest $request,
+        GenerateEmployeeCode $generateEmployeeCode,
+        PushEmployeeToOdoo $pushEmployeeToOdoo,
+    ): JsonResponse {
         $data = $request->validated();
         $data['code'] = $data['code'] ?? $generateEmployeeCode->handle();
         $data['is_active'] = $data['is_active'] ?? true;
         $data['status'] = EmployeeStatus::Approved;
 
-        $employee = Employee::query()->create($data);
+        $employee = $pushEmployeeToOdoo->handle(Employee::query()->create($data));
 
         return EmployeeResource::make($employee)
             ->additional(['message' => 'Created.'])
@@ -49,11 +53,11 @@ class EmployeeController extends Controller
             ->additional(['message' => 'ok']);
     }
 
-    public function update(UpdateEmployeeRequest $request, Employee $employee): EmployeeResource
+    public function update(UpdateEmployeeRequest $request, Employee $employee, PushEmployeeToOdoo $pushEmployeeToOdoo): EmployeeResource
     {
         $employee->fill($request->validated())->save();
 
-        return EmployeeResource::make($employee)
+        return EmployeeResource::make($pushEmployeeToOdoo->handle($employee->fresh() ?? $employee))
             ->additional(['message' => 'Updated.']);
     }
 
@@ -67,7 +71,7 @@ class EmployeeController extends Controller
         ]);
     }
 
-    public function approve(ApproveEmployeeRequest $request, Employee $employee): EmployeeResource
+    public function approve(ApproveEmployeeRequest $request, Employee $employee, PushEmployeeToOdoo $pushEmployeeToOdoo): EmployeeResource
     {
         if ($employee->status === EmployeeStatus::Approved) {
             throw ValidationException::withMessages([
@@ -80,6 +84,8 @@ class EmployeeController extends Controller
             'status' => EmployeeStatus::Approved,
             'is_active' => true,
         ])->save();
+
+        $employee = $pushEmployeeToOdoo->handle($employee->fresh() ?? $employee);
 
         $this->notifyDecision($employee, "تمت الموافقة على انضمامك يا {$employee->name}. ستصلك طلبات قسمك هنا.");
 

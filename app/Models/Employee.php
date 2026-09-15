@@ -22,6 +22,7 @@ class Employee extends Model
         'telegram_user_id',
         'telegram_username',
         'clickup_user_id',
+        'odoo_employee_id',
         'profession',
         'notes',
         'status',

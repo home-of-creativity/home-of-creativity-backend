@@ -61,6 +61,15 @@ export function IconProjects(props: IconProps) {
   );
 }
 
+export function IconReels(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <rect x="7" y="3.5" width="10" height="17" rx="2.2" />
+      <path d="M10.5 10.2 15 12.5l-4.5 2.3Z" />
+    </svg>
+  );
+}
+
 export function IconCategories(props: IconProps) {
   return (
     <svg {...base} {...props}>

@@ -18,6 +18,18 @@ class SocialInboxItemResource extends JsonResource
             'id' => $this->id,
             'kind' => $this->kind->value,
             'external_id' => $this->external_id,
+            'source_external_id' => $this->source_external_id,
+            'source_body' => $this->source_body,
+            'source_permalink' => $this->source_permalink,
+            'source_preview_url' => $this->source_preview_url,
+            'source_media_type' => $this->source_media_type,
+            'source_post' => $this->whenLoaded('sourcePost', fn () => $this->sourcePost ? [
+                'id' => $this->sourcePost->id,
+                'body' => $this->sourcePost->body,
+                'placement' => $this->sourcePost->placement instanceof \BackedEnum
+                    ? $this->sourcePost->placement->value
+                    : $this->sourcePost->placement,
+            ] : null),
             'author_name' => $this->author_name,
             'author_handle' => $this->author_handle,
             'body' => $this->body,

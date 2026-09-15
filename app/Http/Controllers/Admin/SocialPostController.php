@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Enums\SocialAbility;
 use App\Enums\SocialActivityAction;
+use App\Enums\SocialPlacement;
 use App\Enums\SocialPostStatus;
 use App\Enums\SocialPublishStatus;
 use App\Http\Controllers\Controller;
@@ -42,17 +43,25 @@ class SocialPostController extends Controller
 
         $request->validate([
             'status' => ['sometimes', 'nullable', Rule::in(SocialPostStatus::values())],
+            'account_id' => ['sometimes', 'nullable', 'integer', 'exists:social_accounts,id'],
+            'placement' => ['sometimes', 'nullable', Rule::in(SocialPlacement::values())],
             'from' => ['sometimes', 'nullable', 'date'],
             'to' => ['sometimes', 'nullable', 'date'],
             'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
         ]);
 
         $this->schedulePublisher->dispatchDue();
-        $this->publishedSync->prune();
+        if (! $request->filled('account_id')) {
+            $this->publishedSync->prune();
+        }
 
         $query = SocialPost::query()
             ->with(['accounts', 'media', 'creator:id,name', 'updater:id,name', 'approver:id,name'])
             ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')))
+            ->when($request->filled('account_id'), function ($q) use ($request) {
+                $q->whereHas('accounts', fn ($accounts) => $accounts->where('social_accounts.id', $request->integer('account_id')));
+            })
+            ->when($request->filled('placement'), fn ($q) => $q->where('placement', $request->string('placement')))
             ->when($request->filled('from') && $request->filled('to'), function ($q) use ($request) {
                 $from = $request->date('from')->startOfDay();
                 $to = $request->date('to')->endOfDay();
@@ -91,6 +100,7 @@ class SocialPostController extends Controller
     {
         $post = SocialPost::query()->create([
             'body' => $request->validated('body'),
+            'placement' => $request->validated('placement') ?? SocialPlacement::Feed->value,
             'status' => SocialPostStatus::Draft,
             'scheduled_at' => $this->scheduledAt($request->input('scheduled_at')),
             'created_by' => $request->user()->id,
@@ -119,7 +129,7 @@ class SocialPostController extends Controller
         $previousTargets = $socialPost->targets()->with('account')->get();
         $mediaChanged = $request->hasFile('media') || (is_array($request->input('remove_media_ids')) && $request->input('remove_media_ids') !== []);
 
-        $data = $request->safe()->only(['body', 'scheduled_at']);
+        $data = $request->safe()->only(['body', 'placement', 'scheduled_at']);
         $data['updated_by'] = $request->user()->id;
         if ($request->exists('scheduled_at')) {
             $data['scheduled_at'] = $this->scheduledAt($request->input('scheduled_at'));

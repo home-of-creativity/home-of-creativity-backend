@@ -4,7 +4,8 @@ import { api, canSocial, type SocialAccount, type SocialPost, type SocialPostMed
 import { useAuth } from "../../auth";
 import { copy, socialActivities, type Locale } from "../../i18n";
 import { SocialChrome } from "./SocialChrome";
-import { formatWhen, fromLocalInput, platformLabel, socialStatusLabel, toLocalInput } from "./helpers";
+import { SocialPhonePreview } from "./SocialPhonePreview";
+import { formatWhen, fromLocalInput, groupSocialPages, pageGroupKey, platformLabel, publishErrorMessage, socialPlacementLabel, socialStatusLabel, toLocalInput } from "./helpers";
 
 export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
   const { user } = useAuth();
@@ -14,7 +15,9 @@ export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: stri
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
   const [post, setPost] = useState<SocialPost | null>(null);
   const [body, setBody] = useState("");
+  const [placement, setPlacement] = useState("feed");
   const [accountIds, setAccountIds] = useState<number[]>([]);
+  const [pageKey, setPageKey] = useState("");
   const [scheduledAt, setScheduledAt] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [existingMedia, setExistingMedia] = useState<SocialPostMedia[]>([]);
@@ -35,7 +38,9 @@ export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: stri
       .then((res) => {
         setPost(res.data);
         setBody(res.data.body);
-        setAccountIds(res.data.accounts?.map((item) => item.id) ?? []);
+        setPlacement(res.data.placement || "feed");
+        const nextIds = res.data.accounts?.map((item) => item.id) ?? [];
+        setAccountIds(nextIds);
         setScheduledAt(toLocalInput(res.data.scheduled_at));
         setExistingMedia(res.data.media ?? []);
       })
@@ -46,9 +51,33 @@ export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: stri
   const previewFiles = useMemo(() => files.map((file) => ({ name: file.name, url: URL.createObjectURL(file), kind: file.type.startsWith("video/") ? "video" : "image" })), [files]);
   useEffect(() => () => previewFiles.forEach((file) => URL.revokeObjectURL(file.url)), [previewFiles]);
 
+  const pages = useMemo(() => groupSocialPages(accounts), [accounts]);
+  const selectedPage = pages.find((page) => page.key === pageKey) ?? null;
   const selectedAccounts = accounts.filter((account) => accountIds.includes(account.id));
+  const instagramSelected = selectedAccounts.some((account) => account.platform === "instagram");
+  const hasMedia = files.length > 0 || existingMedia.length > 0;
   const isPublished = post?.status === "published";
   const editable = !post || post.is_editable !== false;
+
+  useEffect(() => {
+    if (pageKey || pages.length === 0) return;
+    const fromSelection = accounts.find((account) => accountIds.includes(account.id));
+    if (fromSelection) {
+      setPageKey(pageGroupKey(fromSelection));
+      return;
+    }
+    if (!postId && pages.length === 1) {
+      const only = pages[0];
+      setPageKey(only.key);
+      setAccountIds(only.accounts.map((account) => account.id));
+    }
+  }, [accounts, accountIds, pageKey, pages, postId]);
+
+  function selectPage(key: string) {
+    const page = pages.find((item) => item.key === key);
+    setPageKey(key);
+    setAccountIds(page ? page.accounts.map((account) => account.id) : []);
+  }
 
   function toggleAccount(accountId: number) {
     setAccountIds((current) => (current.includes(accountId) ? current.filter((value) => value !== accountId) : [...current, accountId]));
@@ -57,6 +86,7 @@ export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: stri
   function buildForm(intent: "draft" | "schedule" | "publish") {
     const form = new FormData();
     form.set("body", body);
+    form.set("placement", placement);
     form.set("intent", intent);
     if (scheduledAt) form.set("scheduled_at", fromLocalInput(scheduledAt));
     accountIds.forEach((value) => form.append("account_ids[]", String(value)));
@@ -67,6 +97,23 @@ export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: stri
 
   async function submit(event: FormEvent, intent: "draft" | "schedule" | "publish") {
     event.preventDefault();
+    if (intent !== "draft" && accountIds.length === 0) {
+      setError(t(copy.socialPickPage));
+      return;
+    }
+    if (intent !== "draft" && instagramSelected && !hasMedia) {
+      setError(t(copy.socialInstagramNeedsMedia));
+      return;
+    }
+    if (intent !== "draft" && placement === "story" && !hasMedia) {
+      setError(t(copy.socialStoryNeedsMedia));
+      return;
+    }
+    const hasVideo = files.some((file) => file.type.startsWith("video/")) || existingMedia.some((item) => item.kind === "video");
+    if (intent !== "draft" && placement === "reel" && !hasVideo) {
+      setError(t(copy.socialReelNeedsVideo));
+      return;
+    }
     setSaving(true);
     setError("");
     try {
@@ -94,6 +141,24 @@ export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: stri
             <span>{t(copy.socialBody)}</span>
             <textarea className="field" rows={8} value={body} disabled={!editable} onChange={(event) => setBody(event.target.value)} required />
           </label>
+          <fieldset className="field-label">
+            <legend>{t(copy.socialPlacement)}</legend>
+            <p className="muted">{t(copy.socialPlacementHint)}</p>
+            <div className="social-account-picks" role="radiogroup" aria-label={t(copy.socialPlacement)}>
+              {(["feed", "reel", "story"] as const).map((value) => (
+                <label key={value} className="check-row">
+                  <input
+                    type="radio"
+                    name="social-placement"
+                    checked={placement === value}
+                    disabled={!editable}
+                    onChange={() => setPlacement(value)}
+                  />
+                  <span>{socialPlacementLabel(value, t)}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
           <label className="field-label">
             <span>{t(copy.socialMedia)}</span>
             <input
@@ -127,19 +192,61 @@ export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: stri
             </ul>
           ) : null}
           <fieldset className="field-label">
-            <legend>{t(copy.socialPickAccounts)}</legend>
-            {accounts.length === 0 ? <p className="muted">{t(copy.socialNoAccounts)}</p> : null}
-            <div className="social-account-picks">
-              {accounts.map((account) => (
-                <label key={account.id} className="check-row">
-                  <input type="checkbox" checked={accountIds.includes(account.id)} disabled={!editable} onChange={() => toggleAccount(account.id)} />
+            <legend>{t(copy.socialPickPage)}</legend>
+            {pages.length === 0 ? <p className="muted">{t(copy.socialNoAccounts)}</p> : null}
+            <div className="social-account-picks" role="radiogroup" aria-label={t(copy.socialPickPage)}>
+              {pages.map((page) => (
+                <label key={page.key} className="check-row">
+                  <input
+                    type="radio"
+                    name="social-page"
+                    checked={pageKey === page.key}
+                    disabled={!editable}
+                    onChange={() => selectPage(page.key)}
+                  />
                   <span>
-                    {account.name} · {platformLabel(account.platform, t)}
+                    {page.name}
+                    {page.instagram ? (
+                      <small className="muted"> · {t(copy.facebook)} + {t(copy.instagram)}</small>
+                    ) : (
+                      <small className="muted"> · {platformLabel(page.facebook?.platform ?? page.accounts[0]?.platform ?? "", t)}</small>
+                    )}
                   </span>
                 </label>
               ))}
             </div>
           </fieldset>
+          {selectedPage ? (
+            <fieldset className="field-label">
+              <legend>{t(copy.socialPickPlatforms)}</legend>
+              <p className="muted">{t(copy.socialBothPlatformsHint)}</p>
+              <div className="social-account-picks">
+                {selectedPage.facebook ? (
+                  <label className="check-row">
+                    <input
+                      type="checkbox"
+                      checked={accountIds.includes(selectedPage.facebook.id)}
+                      disabled={!editable}
+                      onChange={() => toggleAccount(selectedPage.facebook!.id)}
+                    />
+                    <span>{t(copy.facebook)}</span>
+                  </label>
+                ) : null}
+                {selectedPage.instagram ? (
+                  <label className="check-row">
+                    <input
+                      type="checkbox"
+                      checked={accountIds.includes(selectedPage.instagram.id)}
+                      disabled={!editable}
+                      onChange={() => toggleAccount(selectedPage.instagram!.id)}
+                    />
+                    <span>{t(copy.instagram)}</span>
+                  </label>
+                ) : null}
+              </div>
+              {instagramSelected && !hasMedia ? <p className="muted">{t(copy.socialInstagramNeedsMedia)}</p> : null}
+            </fieldset>
+          ) : null}
           <label className="field-label">
             <span>{t(copy.socialScheduleAt)}</span>
             <input className="field" type="datetime-local" value={scheduledAt} disabled={!editable} onChange={(event) => setScheduledAt(event.target.value)} />
@@ -191,17 +298,18 @@ export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: stri
         <aside className="card social-preview" aria-live="polite">
           <p className="eyebrow">{t(copy.socialPreview)}</p>
           {post ? <span className={`status status-${post.status}`}>{socialStatusLabel(post.status, t)}</span> : null}
-          {post?.last_error ? <p className="error">{post.last_error}</p> : null}
-          <p className="social-preview-body">{body || "—"}</p>
-          <p className="muted">{selectedAccounts.map((account) => account.name).join(" · ") || t(copy.socialPickAccounts)}</p>
-          <div className="social-preview-media">
-            {existingMedia.map((item) =>
-              item.kind === "video" ? <video key={item.id} src={item.url ?? undefined} controls /> : <img key={item.id} src={item.url ?? ""} alt={item.original_name} />,
-            )}
-            {previewFiles.map((file) =>
-              file.kind === "video" ? <video key={file.url} src={file.url} controls /> : <img key={file.url} src={file.url} alt={file.name} />,
-            )}
-          </div>
+          <p className="muted">{socialPlacementLabel(placement, t)}</p>
+          {post?.last_error ? <p className="error">{publishErrorMessage(post.last_error, t)}</p> : null}
+          <SocialPhonePreview
+            locale={locale}
+            t={t}
+            accounts={selectedAccounts}
+            placement={placement}
+            body={body}
+            existingMedia={existingMedia}
+            files={previewFiles}
+            excludePostId={postId}
+          />
           {post?.activities && post.activities.length > 0 ? (
             <section>
               <h2 className="section-title">{t(copy.socialActivity)}</h2>

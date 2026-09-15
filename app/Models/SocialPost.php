@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\SocialPlacement;
 use App\Enums\SocialPostStatus;
 use Database\Factories\SocialPostFactory;
 use Illuminate\Database\Eloquent\Builder;
@@ -18,10 +19,18 @@ class SocialPost extends Model
     use HasFactory;
 
     /**
+     * @var array<string, mixed>
+     */
+    protected $attributes = [
+        'placement' => 'feed',
+    ];
+
+    /**
      * @var list<string>
      */
     protected $fillable = [
         'body',
+        'placement',
         'status',
         'scheduled_at',
         'published_at',
@@ -38,6 +47,7 @@ class SocialPost extends Model
     protected function casts(): array
     {
         return [
+            'placement' => SocialPlacement::class,
             'status' => SocialPostStatus::class,
             'scheduled_at' => 'datetime',
             'published_at' => 'datetime',

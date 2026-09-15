@@ -1,18 +1,21 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { api, type PageMeta, type SocialInboxItem } from "../../api";
 import { useAuth } from "../../auth";
-import { LoadingTableRow } from "../../components/LoadingTableRow";
 import { Pagination } from "../../components/Pagination";
 import { copy, type Copy, type Locale } from "../../i18n";
 import { SocialChrome } from "./SocialChrome";
-import { formatWhen, platformLabel } from "./helpers";
+import { formatWhen, inboxErrorMessage, platformLabel } from "./helpers";
 
 function inboxError(err: unknown, t: (item: Copy) => string) {
   const message = err instanceof Error ? err.message : "";
-  if (message.includes("missing_pages_manage_engagement") || message.includes("pages_manage_engagement")) {
-    return t(copy.socialNeedEngagePerm);
-  }
-  return message || t(copy.loading);
+  return inboxErrorMessage(message, t);
+}
+
+function sourceExcerpt(item: SocialInboxItem) {
+  const text = item.source_post?.body || item.source_body;
+  if (!text) return "";
+  return text.length > 140 ? `${text.slice(0, 140)}…` : text;
 }
 
 export function SocialInbox({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
@@ -36,7 +39,11 @@ export function SocialInbox({ locale, t }: { locale: Locale; t: (c: { ar: string
       .then((res) => {
         setItems(res.data);
         setMeta(res.meta);
-        setError("sync_error" in res && typeof res.sync_error === "string" && res.sync_error ? res.sync_error : "");
+        setError(
+          "sync_error" in res && typeof res.sync_error === "string" && res.sync_error
+            ? inboxErrorMessage(res.sync_error, t)
+            : "",
+        );
       })
       .catch((err) => {
         setItems([]);
@@ -55,7 +62,7 @@ export function SocialInbox({ locale, t }: { locale: Locale; t: (c: { ar: string
       const res = await api.syncSocialInbox();
       setNotice(`${t(copy.socialSyncInbox)}: ${res.data.imported}`);
       if ("sync_error" in res && typeof res.sync_error === "string" && res.sync_error) {
-        setError(res.sync_error);
+        setError(inboxErrorMessage(res.sync_error, t));
       }
       load();
     } catch (err) {
@@ -65,12 +72,11 @@ export function SocialInbox({ locale, t }: { locale: Locale; t: (c: { ar: string
     }
   }
 
-  async function sendReply(event: FormEvent) {
+  async function sendReply(event: FormEvent, itemId: number) {
     event.preventDefault();
-    if (!replyId) return;
     setSending(true);
     try {
-      await api.replySocialInbox(replyId, replyBody);
+      await api.replySocialInbox(itemId, replyBody);
       setReplyId(null);
       setReplyBody("");
       load();
@@ -95,67 +101,95 @@ export function SocialInbox({ locale, t }: { locale: Locale; t: (c: { ar: string
       </div>
       {notice ? <p className="notice">{notice}</p> : null}
       {error ? <p className="error">{error}</p> : null}
-      <div className="table-wrap card">
-        <table className="table-flush">
-          <thead>
-            <tr>
-              <th>{t(copy.socialPickAccounts)}</th>
-              <th>{t(copy.status)}</th>
-              <th>{t(copy.employeeName)}</th>
-              <th>{t(copy.socialBody)}</th>
-              <th>{t(copy.actions)}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? <LoadingTableRow colSpan={5} label={t(copy.loading)} /> : null}
-            {!loading && items.length === 0 ? (
-              <tr>
-                <td colSpan={5}>{t(copy.socialNoInbox)}</td>
-              </tr>
-            ) : null}
-            {items.map((item) => (
-              <tr key={item.id}>
-                <td>{item.account ? `${item.account.name} · ${platformLabel(item.account.platform, t)}` : "—"}</td>
-                <td>
+      {loading ? <p className="muted">{t(copy.loading)}</p> : null}
+      {!loading && items.length === 0 ? <p className="card social-inbox-empty">{t(copy.socialNoInbox)}</p> : null}
+      <div className="social-inbox-list">
+        {items.map((item) => {
+          const isComment = item.kind !== "message";
+          const excerpt = sourceExcerpt(item);
+          return (
+            <article key={item.id} className="card social-inbox-card">
+              <header className="social-inbox-head">
+                <div>
+                  <p className="social-inbox-account">
+                    {item.account ? `${item.account.name} · ${platformLabel(item.account.platform, t)}` : "—"}
+                  </p>
+                  <p className="muted">
+                    {item.author_name}
+                    {item.author_handle ? ` · ${item.author_handle}` : ""}
+                    {" · "}
+                    {formatWhen(item.occurred_at, locale)}
+                  </p>
+                </div>
+                <div className="social-inbox-flags">
                   <span className={`status ${item.is_replied ? "status-published" : "status-draft"}`}>
                     {item.is_replied ? t(copy.socialReplied) : t(copy.socialOpen)}
                   </span>
-                  <small> · {item.kind === "message" ? t(copy.socialMessage) : t(copy.socialComment)}</small>
-                </td>
-                <td>
-                  {item.author_name}
-                  <br />
-                  <small>{formatWhen(item.occurred_at, locale)}</small>
-                </td>
-                <td>
-                  <p>{item.body}</p>
-                  {item.replies?.map((reply) => (
-                    <p key={reply.id} className="muted">
-                      {reply.user?.name}: {reply.body}
+                  <span className="status status-pending">
+                    {isComment ? t(copy.socialComment) : t(copy.socialMessage)}
+                  </span>
+                </div>
+              </header>
+
+              {isComment ? (
+                <section className="social-inbox-source" aria-label={t(copy.socialOnPost)}>
+                  {item.source_preview_url ? (
+                    <img className="social-inbox-thumb" src={item.source_preview_url} alt="" />
+                  ) : (
+                    <span className="social-inbox-thumb social-inbox-thumb-empty" aria-hidden="true" />
+                  )}
+                  <div>
+                    <p className="social-inbox-source-label">{t(copy.socialCommentOn)}</p>
+                    <p className="social-inbox-source-body">{excerpt || t(copy.socialUnlinkedPost)}</p>
+                    <p className="social-inbox-source-links">
+                      {item.source_post ? (
+                        <Link className="table-link" to={`/social/compose/${item.source_post.id}`}>
+                          {t(copy.socialLocalPost)} #{item.source_post.id}
+                        </Link>
+                      ) : null}
+                      {item.source_permalink ? (
+                        <a className="table-link" href={item.source_permalink} target="_blank" rel="noreferrer">
+                          {t(copy.socialOpenSource)}
+                        </a>
+                      ) : null}
                     </p>
-                  ))}
-                </td>
-                <td>
-                  <button type="button" className="btn btn-ghost" onClick={() => { setReplyId(item.id); setReplyBody(""); }}>
-                    {t(copy.socialReply)}
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                  </div>
+                </section>
+              ) : (
+                <p className="muted">{t(copy.socialPrivateConversation)}</p>
+              )}
+
+              <p className="social-inbox-body">{item.body}</p>
+              {item.replies?.map((reply) => (
+                <p key={reply.id} className="social-inbox-reply">
+                  {reply.user?.name}: {reply.body}
+                </p>
+              ))}
+
+              {replyId === item.id ? (
+                <form className="social-inbox-reply-form" onSubmit={(event) => void sendReply(event, item.id)}>
+                  <label className="field-label">
+                    <span>{t(copy.socialReply)}</span>
+                    <textarea className="field" rows={3} value={replyBody} onChange={(event) => setReplyBody(event.target.value)} required />
+                  </label>
+                  <div className="toolbar">
+                    <button type="submit" className="btn btn-primary" disabled={sending}>
+                      {t(copy.socialSendReply)}
+                    </button>
+                    <button type="button" className="btn btn-ghost" onClick={() => { setReplyId(null); setReplyBody(""); }}>
+                      {t(copy.cancel)}
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <button type="button" className="btn btn-ghost" onClick={() => { setReplyId(item.id); setReplyBody(""); }}>
+                  {t(copy.socialReply)}
+                </button>
+              )}
+            </article>
+          );
+        })}
       </div>
-      {replyId ? (
-        <form className="card form-inline" onSubmit={(event) => void sendReply(event)}>
-          <label className="field-label">
-            <span>{t(copy.socialReply)}</span>
-            <textarea className="field" rows={3} value={replyBody} onChange={(event) => setReplyBody(event.target.value)} required />
-          </label>
-          <button type="submit" className="btn btn-primary" disabled={sending}>
-            {t(copy.socialSendReply)}
-          </button>
-        </form>
-      ) : null}
       <Pagination meta={meta} disabled={loading} onPage={setPage} t={t} />
     </SocialChrome>
   );

@@ -35,7 +35,7 @@ class SocialInboxController extends Controller
         $this->inboxSync->syncAll();
 
         $items = SocialInboxItem::query()
-            ->with(['account:id,platform,name', 'replies.user:id,name'])
+            ->with(['account:id,platform,name', 'replies.user:id,name', 'sourcePost:id,body,placement'])
             ->when($request->filled('kind'), fn ($q) => $q->where('kind', $request->string('kind')))
             ->when($request->filled('account_id'), fn ($q) => $q->where('social_account_id', $request->integer('account_id')))
             ->latest('occurred_at')
@@ -63,6 +63,7 @@ class SocialInboxController extends Controller
             $socialInboxItem->external_id,
             $reply->body,
             $socialInboxItem->kind->value,
+            $socialInboxItem->author_handle,
         );
 
         $reply->forceFill([
@@ -84,7 +85,7 @@ class SocialInboxController extends Controller
         }
 
         return SocialInboxItemResource::make(
-            $socialInboxItem->fresh(['account:id,platform,name', 'replies.user:id,name'])
+            $socialInboxItem->fresh(['account:id,platform,name', 'replies.user:id,name', 'sourcePost:id,body,placement'])
         )->additional(['message' => 'Replied.']);
     }
 

@@ -3,6 +3,7 @@
 namespace App\Http\Resources;
 
 use App\Models\Employee;
+use App\Services\OdooClient;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -23,6 +24,10 @@ class EmployeeResource extends JsonResource
             'telegram_user_id' => $this->telegram_user_id,
             'telegram_username' => $this->telegram_username,
             'clickup_user_id' => $this->clickup_user_id,
+            'odoo_employee_id' => $this->odoo_employee_id,
+            'odoo_url' => filled($this->odoo_employee_id) && app(OdooClient::class)->configured()
+                ? app(OdooClient::class)->recordUrl('hr.employee', (string) $this->odoo_employee_id)
+                : null,
             'profession' => $this->profession->value,
             'status' => $this->status->value,
             'notes' => $this->notes,

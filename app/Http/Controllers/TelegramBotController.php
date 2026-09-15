@@ -6,6 +6,7 @@ use App\Actions\ApproveQuotation;
 use App\Actions\CompleteRequest;
 use App\Actions\NotifyEmployees;
 use App\Actions\ProvisionSalesClickUpTask;
+use App\Actions\PushClientToOdoo;
 use App\Actions\RejectQuotation;
 use App\Actions\RequestRevision;
 use App\Actions\SubmitServiceRequest;
@@ -32,7 +33,7 @@ use Illuminate\Validation\ValidationException;
 
 class TelegramBotController extends Controller
 {
-    public function link(TelegramLinkRequest $request): JsonResponse
+    public function link(TelegramLinkRequest $request, PushClientToOdoo $pushClientToOdoo): JsonResponse
     {
         $client = Client::query()->updateOrCreate(
             ['telegram_user_id' => $request->validated('telegram_user_id')],
@@ -43,6 +44,8 @@ class TelegramBotController extends Controller
                 'locale' => $request->validated('locale') ?? 'ar',
             ],
         );
+
+        $client = $pushClientToOdoo->handle($client);
 
         return response()->json([
             'data' => ClientResource::make($client),

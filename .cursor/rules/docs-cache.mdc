@@ -1,0 +1,14 @@
+---
+description: Read backend/docs/cache before exploring the Laravel API, dashboard, or bots.
+alwaysApply: true
+---
+
+# Backend code cache
+
+Before scanning, read `docs/cache/README.md`, then only:
+
+- `docs/cache/api.md` — Laravel API
+- `docs/cache/dashboard.md` — staff SPA
+- `docs/cache/bots.md` — Telegram bots
+
+Open source files only for the change. After a milestone, update the matching file.

@@ -32,7 +32,10 @@ class SocialAccountController extends Controller
         return SocialAccountResource::collection(
             SocialAccount::query()
                 ->with('connector:id,name')
-                ->where('connection_status', SocialAccountStatus::Connected)
+                ->whereIn('connection_status', [
+                    SocialAccountStatus::Connected,
+                    SocialAccountStatus::Error,
+                ])
                 ->orderBy('platform')
                 ->orderBy('name')
                 ->get()
@@ -40,6 +43,7 @@ class SocialAccountController extends Controller
             'message' => 'ok',
             'facebook_configured' => $this->sync->configured(),
             'facebook_error' => $this->sync->lastError,
+            'facebook_pages_found' => $this->sync->facebookPagesFound,
         ]);
     }
 
@@ -113,7 +117,15 @@ class SocialAccountController extends Controller
     {
         abort_unless(request()->user()?->canSocial(SocialAbility::Accounts), 403);
 
-        $socialAccount->delete();
+        $socialAccount->forceFill([
+            'is_active' => false,
+            'connection_status' => SocialAccountStatus::Disconnected,
+            'last_error' => 'user_disconnected',
+        ])->save();
+
+        $this->logger->log(request()->user(), SocialActivityAction::AccountToggled, $socialAccount, [
+            'disconnected' => true,
+        ]);
 
         return response()->json([
             'data' => null,

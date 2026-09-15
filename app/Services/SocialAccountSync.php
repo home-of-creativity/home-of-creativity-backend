@@ -14,6 +14,8 @@ class SocialAccountSync
 {
     public ?string $lastError = null;
 
+    public int $facebookPagesFound = 0;
+
     public function configured(): bool
     {
         return filled(config('services.facebook.access_token'))
@@ -23,6 +25,7 @@ class SocialAccountSync
 
     public function syncFromFacebook(?int $connectedBy = null): int
     {
+        $this->lastError = null;
         $this->purgeTestAccounts();
         $this->purgePlaceholderAccounts();
 
@@ -51,6 +54,7 @@ class SocialAccountSync
                 $page['name'],
                 $page['access_token'],
                 $connectedBy,
+                $page['id'],
             )->id;
 
             if (! isset($page['instagram'])) {
@@ -65,14 +69,11 @@ class SocialAccountSync
                 $instagram['username'],
                 $page['access_token'],
                 $connectedBy,
+                $page['id'],
             )->id;
         }
 
-        if ($keepIds === []) {
-            SocialAccount::query()->delete();
-        } else {
-            SocialAccount::query()->whereNotIn('id', $keepIds)->delete();
-        }
+        $this->markMissingPages($keepIds);
 
         return count($keepIds);
     }
@@ -97,31 +98,38 @@ class SocialAccountSync
             ->count();
     }
 
-    private function graphErrorMessage(mixed $json, int $status): string
-    {
-        $message = data_get($json, 'error.message');
-
-        return is_string($message) && $message !== ''
-            ? $message
-            : 'Facebook Graph HTTP '.$status;
-    }
-
     /**
      * @return list<array{id: string, name: string, access_token: string, instagram?: array{id: string, name: string, username: string}}>|null
      */
     private function fetchPages(): ?array
     {
-        $accounts = $this->graphGet('me/accounts', [
-            'fields' => 'id,name,access_token,instagram_business_account{id,username,name}',
-        ]);
+        $pages = [];
+        $nextUrl = null;
 
-        if ($accounts === null) {
-            return null;
-        }
+        do {
+            $payload = $nextUrl === null
+                ? $this->graphGet('me/accounts', [
+                    'fields' => 'id,name,access_token,instagram_business_account{id,username,name}',
+                    'limit' => 100,
+                ])
+                : $this->graphGetUrl($nextUrl);
 
-        $rows = data_get($accounts, 'data');
+            if ($payload === null) {
+                return $pages === [] ? null : $pages;
+            }
 
-        return is_array($rows) ? $this->mapPages($rows) : [];
+            $rows = data_get($payload, 'data');
+            if (is_array($rows)) {
+                $pages = array_merge($pages, $this->mapPages($rows));
+            }
+
+            $next = data_get($payload, 'paging.next');
+            $nextUrl = is_string($next) && $next !== '' ? $next : null;
+        } while ($nextUrl !== null);
+
+        $this->facebookPagesFound = count($pages);
+
+        return $pages;
     }
 
     /**
@@ -135,8 +143,14 @@ class SocialAccountSync
         foreach ($rows as $row) {
             $id = data_get($row, 'id');
             $name = data_get($row, 'name');
-            $token = data_get($row, 'access_token') ?: config('services.facebook.access_token');
-            if (! is_string($id) || $id === '' || ! is_string($name) || $name === '' || ! is_string($token) || $token === '') {
+            $token = data_get($row, 'access_token');
+            if (! is_string($id) || $id === '' || ! is_string($name) || $name === '') {
+                continue;
+            }
+
+            if (! is_string($token) || $token === '') {
+                $this->lastError = 'missing_page_token';
+
                 continue;
             }
 
@@ -168,17 +182,12 @@ class SocialAccountSync
     private function graphGet(string $path, array $query): ?array
     {
         $token = trim((string) config('services.facebook.access_token'));
-        $secret = trim((string) config('services.facebook.app_secret'));
 
         try {
             $response = Http::timeout((int) config('services.social.timeout', 20))
                 ->connectTimeout(3)
                 ->acceptJson()
-                ->get($this->graphUrl($path), [
-                    ...$query,
-                    'access_token' => $token,
-                    'appsecret_proof' => hash_hmac('sha256', $token, $secret),
-                ]);
+                ->get(FacebookGraph::url($path), FacebookGraph::withToken($query, $token));
         } catch (ConnectionException|Throwable $exception) {
             $this->lastError = $exception->getMessage();
             Log::warning('Facebook account sync failed.', [
@@ -190,7 +199,7 @@ class SocialAccountSync
         }
 
         if (! $response->successful()) {
-            $this->lastError = $this->graphErrorMessage($response->json(), $response->status());
+            $this->lastError = FacebookGraph::errorMessage($response->json(), $response->status());
             Log::warning('Facebook account sync rejected.', [
                 'path' => $path,
                 'status' => $response->status(),
@@ -212,30 +221,88 @@ class SocialAccountSync
         string $handle,
         string $accessToken,
         ?int $connectedBy,
+        ?string $facebookPageId = null,
     ): SocialAccount {
         $account = SocialAccount::query()->firstOrNew([
             'platform' => $platform,
             'page_id' => $pageId,
         ]);
 
+        if ($account->exists
+            && $account->connection_status === SocialAccountStatus::Disconnected
+            && $account->last_error === 'user_disconnected') {
+            return $account;
+        }
+
+        $isNew = ! $account->exists;
         $account->fill([
-            'name' => $name,
-            'handle' => $handle,
-            'is_active' => true,
             'connection_status' => SocialAccountStatus::Connected,
             'last_error' => null,
             'connected_by' => $connectedBy ?? $account->connected_by,
+            'facebook_page_id' => $facebookPageId,
         ]);
+
+        if ($isNew) {
+            $account->fill([
+                'name' => $name,
+                'handle' => $handle,
+                'is_active' => true,
+            ]);
+        }
+
         $account->access_token = $accessToken;
         $account->save();
 
         return $account;
     }
 
-    private function graphUrl(string $path): string
+    /**
+     * @param  list<int>  $keepIds
+     */
+    private function markMissingPages(array $keepIds): void
     {
-        $base = rtrim((string) config('services.social.graph_base', 'https://graph.facebook.com/v21.0'), '/');
+        SocialAccount::query()
+            ->where('connection_status', SocialAccountStatus::Connected)
+            ->when($keepIds !== [], fn ($query) => $query->whereNotIn('id', $keepIds))
+            ->update([
+                'connection_status' => SocialAccountStatus::Error->value,
+                'last_error' => 'page_not_in_token',
+            ]);
+    }
 
-        return $base.'/'.ltrim($path, '/');
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function graphGetUrl(string $url): ?array
+    {
+        try {
+            $response = Http::timeout((int) config('services.social.timeout', 20))
+                ->connectTimeout(3)
+                ->acceptJson()
+                ->get($url);
+        } catch (ConnectionException|Throwable $exception) {
+            $this->lastError = $exception->getMessage();
+            Log::warning('Facebook account sync failed.', [
+                'url' => $url,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return null;
+        }
+
+        if (! $response->successful()) {
+            $this->lastError = FacebookGraph::errorMessage($response->json(), $response->status());
+            Log::warning('Facebook account sync rejected.', [
+                'url' => $url,
+                'status' => $response->status(),
+            ]);
+
+            return null;
+        }
+
+        /** @var array<string, mixed> $json */
+        $json = $response->json() ?? [];
+
+        return $json;
     }
 }

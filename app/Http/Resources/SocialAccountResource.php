@@ -20,6 +20,7 @@ class SocialAccountResource extends JsonResource
             'name' => $this->name,
             'handle' => $this->handle,
             'page_id' => $this->page_id,
+            'facebook_page_id' => $this->facebook_page_id,
             'has_token' => $this->hasToken(),
             'is_active' => $this->is_active,
             'connection_status' => $this->connection_status->value,

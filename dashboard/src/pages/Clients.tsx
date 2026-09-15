@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, type Client, type OdooInvoice, type OdooQuotation, type PageMeta } from "../api";
 import { FormDialog } from "../components/FormDialog";
@@ -54,6 +54,8 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
+  const [importingCrm, setImportingCrm] = useState(false);
+  const excelInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     api.odooStatus().then((res) => setOdooReady(res.data.configured)).catch(() => setOdooReady(false));
@@ -101,18 +103,51 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
       .finally(() => setLoading(false));
   }, [tab, odooReady, t]);
 
-  async function syncOdoo() {
+  async function importCrmClients() {
     setError("");
     setNotice("");
+    setImportingCrm(true);
     try {
-      const res = await api.syncOdooPartners();
-      setNotice(`${t(copy.odooSyncDone)}: ${res.data.created} / ${res.data.updated}`);
+      const res = await api.importOdooCrmClients();
+      const message = t(copy.odooImportCrmDone)
+        .replace("{created}", String(res.data.created))
+        .replace("{updated}", String(res.data.updated))
+        .replace("{crm}", String(res.data.crm_leads))
+        .replace("{partners}", String(res.data.partners));
+      setNotice(message);
       setPage(1);
       const list = await api.clients(1);
       setItems(list.data);
       setMeta(list.meta);
     } catch (err) {
       setError(err instanceof Error ? err.message : t(copy.saveFailed));
+    } finally {
+      setImportingCrm(false);
+    }
+  }
+
+  async function importCrmExcel(file: File) {
+    setError("");
+    setNotice("");
+    setImportingCrm(true);
+    try {
+      const res = await api.importOdooCrmClientsExcel(file);
+      const message = t(copy.odooImportCrmExcelDone)
+        .replace("{createdOdoo}", String(res.data.created_in_odoo))
+        .replace("{created}", String(res.data.created))
+        .replace("{skipped}", String(res.data.skipped));
+      setNotice(message);
+      setPage(1);
+      const list = await api.clients(1);
+      setItems(list.data);
+      setMeta(list.meta);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t(copy.saveFailed));
+    } finally {
+      setImportingCrm(false);
+      if (excelInputRef.current) {
+        excelInputRef.current.value = "";
+      }
     }
   }
 
@@ -152,9 +187,34 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
         {tab === "clients" ? (
           <div className="toolbar">
             {odooReady ? (
-              <button type="button" className="btn btn-teal" onClick={() => void syncOdoo()}>
-                {t(copy.odooSync)}
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="btn btn-teal"
+                  disabled={importingCrm}
+                  onClick={() => void importCrmClients()}
+                >
+                  {importingCrm ? t(copy.odooImportCrmLoading) : t(copy.odooImportCrmClients)}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={importingCrm}
+                  onClick={() => excelInputRef.current?.click()}
+                >
+                  {importingCrm ? t(copy.odooImportCrmLoading) : t(copy.odooImportCrmExcel)}
+                </button>
+                <input
+                  ref={excelInputRef}
+                  type="file"
+                  accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  hidden
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) void importCrmExcel(file);
+                  }}
+                />
+              </>
             ) : (
               <span className="muted">{t(copy.odooNotConfigured)}</span>
             )}

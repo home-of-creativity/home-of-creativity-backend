@@ -6,7 +6,7 @@ import { LoadingTableRow } from "../../components/LoadingTableRow";
 import { Pagination } from "../../components/Pagination";
 import { copy, type Locale } from "../../i18n";
 import { SocialChrome } from "./SocialChrome";
-import { formatWhen, socialStatusLabel } from "./helpers";
+import { formatWhen, publishErrorMessage, socialPlacementLabel, socialStatusLabel } from "./helpers";
 
 export function SocialPosts({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
   const { user } = useAuth();
@@ -150,14 +150,17 @@ export function SocialPosts({ locale, t }: { locale: Locale; t: (c: { ar: string
                       ) : (
                         <span className="social-post-thumb social-post-thumb-empty" aria-hidden="true" />
                       )}
-                      <span>{item.body.slice(0, 80) || "—"}</span>
+                      <span>
+                        {item.body.slice(0, 80) || "—"}
+                        <small className="muted"> · {socialPlacementLabel(item.placement, t)}</small>
+                      </span>
                     </Link>
                   </td>
                   <td>
                     <span className={`status status-${item.status}`}>{socialStatusLabel(item.status, t)}</span>
                     {item.last_error ? (
                       <p className="muted" title={item.last_error}>
-                        {item.last_error}
+                        {publishErrorMessage(item.last_error, t)}
                       </p>
                     ) : null}
                   </td>

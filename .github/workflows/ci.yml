@@ -1,97 +1,13 @@
-name: Backend CI
+# The Laravel API is not hosted or executed on GitHub.
+# Production runs from the home_of_creativity Docker stack on the server/workstation.
+name: Backend (not hosted on GitHub)
 
 on:
-  push:
-    branches: ["main"]
-  pull_request:
   workflow_dispatch:
 
 jobs:
-  tests:
+  not_hosted:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Setup PHP
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: "8.3"
-          extensions: pdo_sqlite, sqlite3
-          coverage: none
-
-      - name: Install Composer dependencies
-        run: composer install --no-interaction --prefer-dist --no-progress
-
-      - name: Run tests
-        run: php artisan test
-
-  dashboard:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: dashboard
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Setup Node
-        uses: actions/setup-node@v5
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: dashboard/package-lock.json
-
-      - name: Install and build
-        run: |
-          npm ci
-          npm run build
-
-  e2e:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Setup PHP
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: "8.3"
-          extensions: pdo_sqlite, sqlite3
-          coverage: none
-
-      - name: Setup Node
-        uses: actions/setup-node@v5
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            dashboard/package-lock.json
-
-      - name: Install backend dependencies
-        run: |
-          composer install --no-interaction --prefer-dist --no-progress
-          npm ci
-          cd dashboard && npm ci
-
-      - name: Prepare test environment
-        run: |
-          cp .env.example .env
-          php artisan key:generate
-          cp .env.example dashboard/.env
-
-      - name: Install Playwright browser
-        run: npx playwright install chromium
-
-      - name: Run Playwright E2E
-        run: npm run e2e
-        env:
-          CI: "true"
-          E2E_PORT: "8000"
-          E2E_API_URL: http://127.0.0.1:8000/api
-          TELEGRAM_STRICT: "false"
-          GEMINI_E2E_STUB: "true"
+      - name: Backend is production-only
+        run: echo "GitHub does not start Laravel. Use Docker Compose in home_of_creativity."

@@ -46,6 +46,9 @@ trait FakesOdooDocuments
                 return match (true) {
                     $model === 'res.partner' && $action === 'search' => Http::response(['jsonrpc' => '2.0', 'result' => []], 200),
                     $model === 'res.partner' && $action === 'create' => Http::response(['jsonrpc' => '2.0', 'result' => 44], 200),
+                    $model === 'hr.employee' && $action === 'search' => Http::response(['jsonrpc' => '2.0', 'result' => []], 200),
+                    $model === 'hr.employee' && $action === 'create' => Http::response(['jsonrpc' => '2.0', 'result' => 91], 200),
+                    $model === 'hr.employee' && $action === 'write' => Http::response(['jsonrpc' => '2.0', 'result' => true], 200),
                     $model === 'res.currency' && $action === 'search_read' => Http::response(['jsonrpc' => '2.0', 'result' => [['id' => 1, 'name' => 'SYP']]], 200),
                     $model === 'sale.order' && $action === 'create' => Http::response(['jsonrpc' => '2.0', 'result' => 88], 200),
                     $model === 'account.move' && $action === 'create' => Http::response(['jsonrpc' => '2.0', 'result' => 501], 200),
