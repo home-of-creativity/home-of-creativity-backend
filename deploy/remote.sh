@@ -36,5 +36,6 @@ docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml exec -T hoc-api ph
 docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml exec -T hoc-api php artisan config:cache
 docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml exec -T hoc-api php artisan route:cache
 docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml exec -T hoc-api php artisan view:cache || true
+docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml exec -T hoc-api php artisan seo:submit-sitemap || true
 
 echo "Deploy finished. API: https://api.hoc.agency/up | Site: https://hoc.agency"

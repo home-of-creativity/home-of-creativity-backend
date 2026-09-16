@@ -15,9 +15,10 @@ class GoogleServiceAccount
         'https://www.googleapis.com/auth/calendar',
     ];
 
-    private ?string $cachedToken = null;
+    public const SEARCH_CONSOLE_SCOPE = 'https://www.googleapis.com/auth/webmasters';
 
-    private ?int $expiresAt = null;
+    /** @var array<string, array{token: string, expires: int}> */
+    private array $tokens = [];
 
     public function configured(): bool
     {
@@ -26,12 +27,27 @@ class GoogleServiceAccount
 
     public function accessToken(): ?string
     {
+        return $this->tokenFor(self::SCOPES);
+    }
+
+    public function searchConsoleToken(): ?string
+    {
+        return $this->tokenFor([self::SEARCH_CONSOLE_SCOPE]);
+    }
+
+    /**
+     * @param  list<string>  $scopes
+     */
+    private function tokenFor(array $scopes): ?string
+    {
         if (! $this->configured()) {
             return null;
         }
 
-        if ($this->cachedToken !== null && $this->expiresAt !== null && time() < ($this->expiresAt - 60)) {
-            return $this->cachedToken;
+        $cacheKey = implode(' ', $scopes);
+        $cached = $this->tokens[$cacheKey] ?? null;
+        if ($cached !== null && time() < ($cached['expires'] - 60)) {
+            return $cached['token'];
         }
 
         try {
@@ -44,7 +60,7 @@ class GoogleServiceAccount
             $jwtHeader = $this->base64UrlEncode(json_encode(['alg' => 'RS256', 'typ' => 'JWT'], JSON_THROW_ON_ERROR));
             $jwtClaim = $this->base64UrlEncode(json_encode([
                 'iss' => $credentials['client_email'],
-                'scope' => implode(' ', self::SCOPES),
+                'scope' => implode(' ', $scopes),
                 'aud' => self::TOKEN_URL,
                 'iat' => $now,
                 'exp' => $now + 3600,
@@ -83,10 +99,12 @@ class GoogleServiceAccount
                 return null;
             }
 
-            $this->cachedToken = $token;
-            $this->expiresAt = $now + (int) $response->json('expires_in', 3600);
+            $this->tokens[$cacheKey] = [
+                'token' => $token,
+                'expires' => $now + (int) $response->json('expires_in', 3600),
+            ];
 
-            return $this->cachedToken;
+            return $token;
         } catch (Throwable $exception) {
             Log::warning('Google service account token failed.', [
                 'error' => $exception->getMessage(),
