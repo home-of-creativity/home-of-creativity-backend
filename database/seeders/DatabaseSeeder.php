@@ -59,18 +59,26 @@ class DatabaseSeeder extends Seeder
         );
 
         if ($client->requests()->doesntExist()) {
-            ServiceRequest::factory()
-                ->count(6)
-                ->for($client)
-                ->sequence(
-                    ['status' => RequestStatus::Submitted, 'source' => RequestSource::Website],
-                    ['status' => RequestStatus::QuotationSent],
-                    ['status' => RequestStatus::PaymentConfirmed],
-                    ['status' => RequestStatus::InProgress],
-                    ['status' => RequestStatus::ReadyForReview],
-                    ['status' => RequestStatus::Completed, 'source' => RequestSource::Telegram],
-                )
-                ->create();
+            $year = now()->year;
+            $demoRequests = [
+                ['number' => "REQ-{$year}-000001", 'title' => 'Brand identity refresh', 'description' => 'Logo, palette, and social templates for a retail launch.', 'status' => RequestStatus::Submitted, 'source' => RequestSource::Website],
+                ['number' => "REQ-{$year}-000002", 'title' => 'Event booth design', 'description' => 'Exhibition stand visuals and print-ready artwork.', 'status' => RequestStatus::QuotationSent, 'source' => RequestSource::Website],
+                ['number' => "REQ-{$year}-000003", 'title' => 'Product launch video', 'description' => 'Short promo edit with motion graphics and captions.', 'status' => RequestStatus::PaymentConfirmed, 'source' => RequestSource::Website],
+                ['number' => "REQ-{$year}-000004", 'title' => 'Website landing page', 'description' => 'Bilingual landing page design and responsive layout.', 'status' => RequestStatus::InProgress, 'source' => RequestSource::Website],
+                ['number' => "REQ-{$year}-000005", 'title' => 'Outdoor campaign artwork', 'description' => 'Billboard and storefront signage adaptations.', 'status' => RequestStatus::ReadyForReview, 'source' => RequestSource::Website],
+                ['number' => "REQ-{$year}-000006", 'title' => 'Social media kit', 'description' => 'Monthly content templates delivered via Telegram.', 'status' => RequestStatus::Completed, 'source' => RequestSource::Telegram],
+            ];
+
+            foreach ($demoRequests as $row) {
+                ServiceRequest::query()->create([
+                    'client_id' => $client->id,
+                    'number' => $row['number'],
+                    'title' => $row['title'],
+                    'description' => $row['description'],
+                    'status' => $row['status'],
+                    'source' => $row['source'],
+                ]);
+            }
         }
 
         Employee::query()->updateOrCreate(
