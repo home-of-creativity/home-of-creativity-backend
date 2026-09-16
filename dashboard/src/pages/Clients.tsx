@@ -54,6 +54,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
+  const [companyName, setCompanyName] = useState("");
   const [importingCrm, setImportingCrm] = useState(false);
   const excelInputRef = useRef<HTMLInputElement>(null);
 
@@ -160,10 +161,12 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
         name,
         email: email || undefined,
         phone: phone || undefined,
+        company_name: companyName || undefined,
       });
       setName("");
       setEmail("");
       setPhone("");
+      setCompanyName("");
       setShowForm(false);
       setNotice(t(copy.saveClient));
       const list = await api.clients(page);
@@ -270,6 +273,10 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
               {t(copy.phone)}
               <input className="field" dir="ltr" value={phone} onChange={(e) => setPhone(e.target.value)} />
             </label>
+            <label className="field-label">
+              {t(copy.company)}
+              <input className="field" value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
+            </label>
           </div>
         </FormDialog>
       ) : null}
@@ -286,6 +293,8 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
               <thead>
                 <tr>
                   <th>{t(copy.client)}</th>
+                  <th>{t(copy.company)}</th>
+                  <th>{t(copy.odooStage)}</th>
                   <th>{t(copy.email)}</th>
                   <th>{t(copy.phone)}</th>
                   <th>{t(copy.telegram)}</th>
@@ -295,10 +304,10 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
               </thead>
               <tbody>
                 {loading ? (
-                  <LoadingTableRow colSpan={6} label={t(copy.loading)} />
+                  <LoadingTableRow colSpan={8} label={t(copy.loading)} />
                 ) : items.length === 0 ? (
                   <tr>
-                    <td colSpan={6}>{t(copy.empty)}</td>
+                    <td colSpan={8}>{t(copy.empty)}</td>
                   </tr>
                 ) : (
                   items.map((item) => (
@@ -306,6 +315,8 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                       <td>
                         <strong className="client-name">{item.name}</strong>
                       </td>
+                      <td>{item.company_name ?? "—"}</td>
+                      <td>{item.odoo_live?.stage ?? item.odoo_stage_name ?? "—"}</td>
                       <td dir="ltr">{item.email ?? "—"}</td>
                       <td dir="ltr">{item.phone ?? "—"}</td>
                       <td dir="ltr">

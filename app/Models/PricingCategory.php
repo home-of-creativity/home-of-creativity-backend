@@ -18,6 +18,8 @@ class PricingCategory extends Model
         'lead_ar',
         'sort_order',
         'is_published',
+        'requires_full_payment',
+        'allows_renewal',
     ];
 
     /**
@@ -28,6 +30,8 @@ class PricingCategory extends Model
         return [
             'sort_order' => 'integer',
             'is_published' => 'boolean',
+            'requires_full_payment' => 'boolean',
+            'allows_renewal' => 'boolean',
         ];
     }
 
@@ -35,4 +39,10 @@ class PricingCategory extends Model
     {
         return $this->hasMany(PricingSubcategory::class, 'category_id');
     }
+
+    protected $attributes = [
+        'requires_full_payment' => false,
+        'allows_renewal' => false,
+        'is_published' => true,
+    ];
 }

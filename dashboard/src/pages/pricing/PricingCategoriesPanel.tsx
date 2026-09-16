@@ -12,6 +12,8 @@ const emptyForm = {
   lead_en: "",
   lead_ar: "",
   is_published: true,
+  requires_full_payment: false,
+  allows_renewal: false,
 };
 
 export function PricingCategoriesPanel({
@@ -66,6 +68,8 @@ export function PricingCategoriesPanel({
       lead_en: item.lead_en ?? "",
       lead_ar: item.lead_ar ?? "",
       is_published: item.is_published,
+      requires_full_payment: Boolean(item.requires_full_payment),
+      allows_renewal: Boolean(item.allows_renewal),
     });
     setShowForm(true);
     setError("");
@@ -82,6 +86,8 @@ export function PricingCategoriesPanel({
       lead_en: form.lead_en.trim() || null,
       lead_ar: form.lead_ar.trim() || null,
       is_published: form.is_published,
+      requires_full_payment: form.requires_full_payment,
+      allows_renewal: form.allows_renewal,
     };
 
     try {
@@ -183,6 +189,14 @@ export function PricingCategoriesPanel({
               <input type="checkbox" checked={form.is_published} onChange={(e) => setForm((prev) => ({ ...prev, is_published: e.target.checked }))} />
               {t(copy.published)}
             </label>
+            <label className="checkbox-row">
+              <input type="checkbox" checked={form.requires_full_payment} onChange={(e) => setForm((prev) => ({ ...prev, requires_full_payment: e.target.checked }))} />
+              {t(copy.fullPayment)}
+            </label>
+            <label className="checkbox-row">
+              <input type="checkbox" checked={form.allows_renewal} onChange={(e) => setForm((prev) => ({ ...prev, allows_renewal: e.target.checked }))} />
+              {t(copy.renewalOn)}
+            </label>
           </div>
         </FormDialog>
       ) : null}
@@ -194,6 +208,7 @@ export function PricingCategoriesPanel({
               <th>{t(copy.title)}</th>
               <th>{t(copy.slug)}</th>
               <th>{t(copy.pricingSubcategoriesCount)}</th>
+              <th>{t(copy.paymentPlan)}</th>
               <th>{t(copy.order)}</th>
               <th>{t(copy.published)}</th>
               <th>{t(copy.actions)}</th>
@@ -201,10 +216,10 @@ export function PricingCategoriesPanel({
           </thead>
           <tbody>
             {loading ? (
-              <LoadingTableRow colSpan={6} label={t(copy.loading)} />
+              <LoadingTableRow colSpan={7} label={t(copy.loading)} />
             ) : items.length === 0 ? (
               <tr>
-                <td colSpan={6}>{t(copy.empty)}</td>
+                <td colSpan={7}>{t(copy.empty)}</td>
               </tr>
             ) : (
               items.map((item, index) => (
@@ -212,6 +227,14 @@ export function PricingCategoriesPanel({
                   <td>{categoryLabel(item, locale)}</td>
                   <td>{item.slug}</td>
                   <td>{item.subcategories_count ?? 0}</td>
+                  <td>
+                    <span className={`pay-badge ${item.requires_full_payment ? "pay-badge-full" : "pay-badge-partial"}`}>
+                      {item.requires_full_payment ? t(copy.fullPayment) : t(copy.partialPayment)}
+                    </span>
+                    <span className={`renew-badge ${item.allows_renewal ? "renew-badge-on" : "renew-badge-off"}`}>
+                      {item.allows_renewal ? t(copy.renewalOn) : t(copy.renewalOff)}
+                    </span>
+                  </td>
                   <td>
                     <div className="order-actions">
                       <button type="button" className="btn btn-order" aria-label={t(copy.moveUp)} disabled={index === 0 || movingId === item.id} onClick={() => void move(item.id, "up")}>↑</button>

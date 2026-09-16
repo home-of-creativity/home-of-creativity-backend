@@ -4,6 +4,7 @@ namespace App\Actions;
 
 use App\Models\RequestFile;
 use App\Models\ServiceRequest;
+use App\Services\ElevenLabsService;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 
@@ -74,6 +75,18 @@ class StoreRequestAttachments
 
             $path = "request-attachments/{$request->number}-".now()->format('YmdHis')."-{$index}.{$extension}";
             Storage::disk('local')->put($path, $binary);
+
+            if (str_starts_with($mime, 'audio/')) {
+                $absolute = Storage::disk('local')->path($path);
+                $transcript = app(ElevenLabsService::class)->transcribe($absolute);
+                if (filled($transcript) && ! filled($request->description)) {
+                    $request->forceFill(['description' => $transcript])->save();
+                } elseif (filled($transcript)) {
+                    $request->forceFill([
+                        'description' => trim($request->description."\n\nتفريغ صوتي: {$transcript}"),
+                    ])->save();
+                }
+            }
 
             RequestFile::query()->create([
                 'request_id' => $request->id,

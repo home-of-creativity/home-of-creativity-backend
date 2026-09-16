@@ -47,7 +47,7 @@ class SocialAccountSync
         $keepIds = [];
 
         foreach ($pages as $page) {
-            $keepIds[] = $this->upsertAccount(
+            $this->rememberSyncedAccount($keepIds, $this->upsertAccount(
                 SocialPlatform::Facebook,
                 $page['id'],
                 $page['name'],
@@ -55,14 +55,14 @@ class SocialAccountSync
                 $page['access_token'],
                 $connectedBy,
                 $page['id'],
-            )->id;
+            ));
 
             if (! isset($page['instagram'])) {
                 continue;
             }
 
             $instagram = $page['instagram'];
-            $keepIds[] = $this->upsertAccount(
+            $this->rememberSyncedAccount($keepIds, $this->upsertAccount(
                 SocialPlatform::Instagram,
                 $instagram['id'],
                 $instagram['name'] ?: $instagram['username'],
@@ -70,7 +70,7 @@ class SocialAccountSync
                 $page['access_token'],
                 $connectedBy,
                 $page['id'],
-            )->id;
+            ));
         }
 
         $this->markMissingPages($keepIds);
@@ -228,9 +228,7 @@ class SocialAccountSync
             'page_id' => $pageId,
         ]);
 
-        if ($account->exists
-            && $account->connection_status === SocialAccountStatus::Disconnected
-            && $account->last_error === 'user_disconnected') {
+        if ($this->isManuallyDisconnected($account)) {
             return $account;
         }
 
@@ -254,6 +252,25 @@ class SocialAccountSync
         $account->save();
 
         return $account;
+    }
+
+    /**
+     * @param  list<int>  $keepIds
+     */
+    private function rememberSyncedAccount(array &$keepIds, SocialAccount $account): void
+    {
+        if ($this->isManuallyDisconnected($account)) {
+            return;
+        }
+
+        $keepIds[] = $account->id;
+    }
+
+    private function isManuallyDisconnected(SocialAccount $account): bool
+    {
+        return $account->exists
+            && $account->connection_status === SocialAccountStatus::Disconnected
+            && $account->last_error === 'user_disconnected';
     }
 
     /**

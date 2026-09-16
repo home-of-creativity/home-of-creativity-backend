@@ -35,8 +35,9 @@ class SendQuotation
         string $actor = 'admin',
         ?Employee $employee = null,
         ?array $lines = null,
+        bool $skipStatusTransition = false,
     ): Quotation {
-        if (! in_array($request->status, [RequestStatus::Submitted, RequestStatus::QuotationRejected], true)) {
+        if (! $skipStatusTransition && ! in_array($request->status, [RequestStatus::Submitted, RequestStatus::QuotationRejected], true)) {
             throw ValidationException::withMessages([
                 'status' => 'Quotation can only be sent from submitted or quotation_rejected.',
             ]);
@@ -49,7 +50,7 @@ class SendQuotation
             $notes = $this->formatQuotationLines($lines);
         }
 
-        $quotation = DB::transaction(function () use ($request, $amount, $notes, $actor, $lines): Quotation {
+        $quotation = DB::transaction(function () use ($request, $amount, $notes, $actor, $lines, $skipStatusTransition): Quotation {
             $version = ((int) $request->quotations()->max('version')) + 1;
             $pdfPath = $this->resolveQuotationPdf($request, $amount, $notes, $version, $lines);
 
@@ -58,7 +59,7 @@ class SendQuotation
                 'version' => $version,
                 'amount' => $amount,
                 'notes' => $notes,
-                'pdf_path' => $pdfPath,
+                'pdf_path' => $pdfPath !== '' ? $pdfPath : null,
                 'sent_at' => now(),
             ]);
 
@@ -67,28 +68,41 @@ class SendQuotation
                 'quotation_notes' => $notes,
             ])->save();
 
-            $this->transitions->transition($request, RequestStatus::QuotationSent, $actor, "Quotation v{$version} sent.");
+            if (! $skipStatusTransition) {
+                $this->transitions->transition($request, RequestStatus::QuotationSent, $actor, "Quotation v{$version} sent.");
+            }
 
             try {
                 $caption = $this->quotationCaption($request, $amount, $notes, $version);
-                $fileId = $this->telegram->sendStoredDocument(
-                    $request,
-                    $pdfPath,
-                    $caption,
-                );
-                if ($fileId) {
-                    $quotation->forceFill(['telegram_file_id' => $fileId])->save();
+                if ($pdfPath !== '') {
+                    $fileId = $this->telegram->sendStoredDocument(
+                        $request,
+                        $pdfPath,
+                        $caption,
+                    );
+                    if ($fileId) {
+                        $quotation->forceFill(['telegram_file_id' => $fileId])->save();
+                    }
+                } else {
+                    $chatId = $request->client?->telegram_user_id;
+                    if ($chatId) {
+                        $this->telegram->send((string) $chatId, $caption);
+                    }
                 }
 
                 $chatId = $request->client?->telegram_user_id;
                 if ($chatId) {
                     $ref = ResolveServiceRequest::displayNumber($request);
-                    $this->telegram->sendInlineActions(
+                    $this->telegram->sendInlineKeyboard(
                         (string) $chatId,
                         'اختر:',
                         [
-                            ['text' => '✅ موافقة', 'callback_data' => "approve:{$ref}"],
-                            ['text' => '❌ رفض', 'callback_data' => "reject:{$ref}"],
+                            [['text' => '✅ موافقة', 'callback_data' => "approve:{$ref}"]],
+                            [
+                                ['text' => 'السعر غالي', 'callback_data' => "rjprice:{$ref}"],
+                                ['text' => 'تأخير بالرد', 'callback_data' => "rjdelay:{$ref}"],
+                            ],
+                            [['text' => 'غير ذلك', 'callback_data' => "rjother:{$ref}"]],
                         ],
                     );
                 }
@@ -127,14 +141,22 @@ class SendQuotation
         ?array $lines = null,
     ): string {
         if (! $this->odoo->configured()) {
-            throw ValidationException::withMessages([
-                'odoo' => 'Odoo integration is required to send quotation PDFs.',
+            if ((bool) config('services.telegram.strict')) {
+                throw ValidationException::withMessages([
+                    'odoo' => 'Odoo integration is required to send quotation PDFs.',
+                ]);
+            }
+
+            Log::warning('Odoo not configured; sending quotation without PDF.', [
+                'request' => $request->number,
             ]);
+
+            return '';
         }
 
         try {
             $created = $this->odoo->createQuotation(
-                (string) ($request->client?->name ?? $request->number),
+                (string) ($request->client?->company_name ?: $request->client?->name ?? $request->number),
                 $request->client?->email,
                 $request->client?->phone,
                 $request->number,
@@ -160,16 +182,29 @@ class SendQuotation
 
             return $relativePath;
         } catch (ValidationException $exception) {
-            throw $exception;
+            if ((bool) config('services.telegram.strict')) {
+                throw $exception;
+            }
+
+            Log::warning('Odoo quotation PDF skipped; continuing locally.', [
+                'request' => $request->number,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return '';
         } catch (Throwable $exception) {
             Log::error('Odoo quotation PDF failed.', [
                 'request' => $request->number,
                 'error' => $exception->getMessage(),
             ]);
 
-            throw ValidationException::withMessages([
-                'odoo' => 'Failed to create or download the Odoo quotation PDF.',
-            ]);
+            if ((bool) config('services.telegram.strict')) {
+                throw ValidationException::withMessages([
+                    'odoo' => 'Failed to create or download the Odoo quotation PDF.',
+                ]);
+            }
+
+            return '';
         }
     }
 

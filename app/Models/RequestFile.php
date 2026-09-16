@@ -13,6 +13,7 @@ class RequestFile extends Model
         'original_name',
         'path',
         'drive_url',
+        'drive_file_id',
     ];
 
     public function request(): BelongsTo

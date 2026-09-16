@@ -19,6 +19,13 @@ class StorePricingCategoryRequest extends FormRequest
                 'is_published' => filter_var($this->input('is_published'), FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE) ?? true,
             ]);
         }
+        foreach (['requires_full_payment', 'allows_renewal'] as $key) {
+            if ($this->has($key)) {
+                $this->merge([
+                    $key => filter_var($this->input($key), FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE) ?? false,
+                ]);
+            }
+        }
     }
 
     /**
@@ -34,6 +41,8 @@ class StorePricingCategoryRequest extends FormRequest
             'lead_ar' => ['nullable', 'string', 'max:2000'],
             'sort_order' => ['sometimes', 'integer', 'min:0', 'max:9999'],
             'is_published' => ['sometimes', 'boolean'],
+            'requires_full_payment' => ['sometimes', 'boolean'],
+            'allows_renewal' => ['sometimes', 'boolean'],
         ];
     }
 }

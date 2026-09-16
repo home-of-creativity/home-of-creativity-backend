@@ -19,15 +19,21 @@ WAITING_QUOTE_PICK = 2
 WAITING_QUOTE_AMOUNT = 3
 WAITING_QUOTE_NOTES = 4
 WAITING_DELIVER_PICK = 5
+WAITING_PROGRESS_PICK = 6
+WAITING_COMPLETE_PICK = 7
 BTN_TASKS = "📌 مهامي"
 BTN_NEW = "🆕 طلبات جديدة"
 BTN_REPLY = "💬 رد على طلب"
 BTN_QUOTE = "📄 إرسال عرض سعر"
 BTN_DELIVER = "📤 تسليم نتيجة"
+BTN_PROGRESS = "🚧 قيد التجهيز"
+BTN_COMPLETE = "✅ إكمال الطلب"
 STATUS_AR = {
-    "in_progress": "قيد التنفيذ",
+    "in_progress": "قيد التجهيز",
     "revision_requested": "مطلوب تعديل",
     "ready_for_review": "بانتظار المراجعة",
+    "payment_confirmed": "تم تأكيد الدفع",
+    "submitted": "قيد المراجعة",
 }
 _local_api = (os.environ.get("HOC_LOCAL_API_URL") or "http://127.0.0.1:8001").rstrip("/")
 _origin = (os.environ.get("HOC_API_URL") or _local_api).rstrip("/")
@@ -59,13 +65,17 @@ def is_sales(employee: dict[str, Any]) -> bool:
 def staff_keyboard(employee: Optional[dict[str, Any]] = None) -> ReplyKeyboardMarkup:
     if employee is not None and not is_sales(employee):
         return ReplyKeyboardMarkup(
-            [[KeyboardButton(BTN_TASKS), KeyboardButton(BTN_DELIVER)]],
+            [
+                [KeyboardButton(BTN_TASKS), KeyboardButton(BTN_DELIVER)],
+                [KeyboardButton(BTN_PROGRESS)],
+            ],
             resize_keyboard=True,
         )
     return ReplyKeyboardMarkup(
         [
             [KeyboardButton(BTN_TASKS), KeyboardButton(BTN_NEW)],
             [KeyboardButton(BTN_REPLY), KeyboardButton(BTN_QUOTE)],
+            [KeyboardButton(BTN_PROGRESS), KeyboardButton(BTN_COMPLETE)],
         ],
         resize_keyboard=True,
     )
@@ -80,6 +90,24 @@ def employee_payload(body: dict[str, Any]) -> dict[str, Any]:
 
 def display_number(item: dict[str, Any]) -> str:
     return str(item.get("display_number") or item.get("number", ""))
+
+
+def format_staff_card(item: dict[str, Any]) -> str:
+    num = display_number(item)
+    status = item.get("status_label") or STATUS_AR.get(str(item.get("status", "")), str(item.get("status", "")))
+    package = item.get("package_name") or ("طلب يدوي" if item.get("is_manual") else "—")
+    company = item.get("company_name") or "—"
+    assignee = item.get("assignee") or "—"
+    client = item.get("client_name") or "—"
+    lines = [
+        f"• #{num}: {item.get('title', '')}",
+        f"  الزبون: {client}",
+        f"  الشركة: {company}",
+        f"  الباقة: {package}",
+        f"  الحالة: {status}",
+        f"  المسند: {assignee}",
+    ]
+    return "\n".join(lines)
 
 
 async def lookup_employee(telegram_id: int) -> Optional[dict[str, Any]]:
@@ -314,6 +342,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except httpx.TimeoutException:
         await update.message.reply_text("تعذر الاتصال بالخادم حالياً. أعد /start بعد ثوانٍ.")
         return
+    except httpx.HTTPStatusError:
+        await update.message.reply_text("تعذر تسجيل الانضمام حالياً. أعد /start بعد ثوانٍ.")
+        return
     if is_approved(employee):
         if is_sales(employee):
             hint = "للرد: 💬 رد على طلب | لعرض السعر: 📄 إرسال عرض سعر"
@@ -412,15 +443,13 @@ async def list_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
     lines = []
     for item in items:
-        num = display_number(item)
-        status = STATUS_AR.get(str(item.get("status", "")), str(item.get("status", "")))
-        line = f"• #{num}: {item['title']} ({status})"
+        line = format_staff_card(item)
         if item.get("revision_comments"):
             line += f"\n  تعديل مطلوب: {item['revision_comments']}"
         if item.get("clickup_url"):
             line += f"\n  {item['clickup_url']}"
         lines.append(line)
-    await update.message.reply_text("\n".join(lines), reply_markup=staff_keyboard(employee))
+    await update.message.reply_text("\n\n".join(lines), reply_markup=staff_keyboard(employee))
 
 
 async def list_new_requests(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -452,12 +481,14 @@ async def list_new_requests(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     lines = []
     for item in items:
-        num = display_number(item)
-        line = f"• #{num}: {item['title']}\n  {item.get('client_name', '')}\n  {item.get('description', '')[:120]}"
+        line = format_staff_card(item)
+        desc = (item.get("description") or "")[:120]
+        if desc:
+            line += f"\n  {desc}"
         if item.get("sales_clickup_url"):
             line += f"\n  ClickUp: {item['sales_clickup_url']}"
         lines.append(line)
-    lines.append("\nللرد: اضغط 💬 رد على طلب أو /reply")
+    lines.append("للرد: اضغط 💬 رد على طلب أو /reply")
     await update.message.reply_text("\n\n".join(lines), reply_markup=staff_keyboard(employee))
 
 
@@ -561,6 +592,139 @@ async def capture_deliver(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     return ConversationHandler.END
 
 
+async def fetch_progressable(telegram_id: int) -> list[dict[str, Any]]:
+    async with httpx.AsyncClient(timeout=API_TIMEOUT) as client:
+        response = await client.get(
+            f"{API_URL}/bot/staff/progressable-requests",
+            headers=api_headers(),
+            params={"telegram_user_id": str(telegram_id)},
+        )
+        response.raise_for_status()
+        return response.json().get("data", [])
+
+
+async def fetch_completable(telegram_id: int) -> list[dict[str, Any]]:
+    async with httpx.AsyncClient(timeout=API_TIMEOUT) as client:
+        response = await client.get(
+            f"{API_URL}/bot/staff/completable-requests",
+            headers=api_headers(),
+            params={"telegram_user_id": str(telegram_id)},
+        )
+        response.raise_for_status()
+        return response.json().get("data", [])
+
+
+async def progress_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user = update.effective_user
+    message = update.message
+    if user is None or message is None:
+        return ConversationHandler.END
+    employee = await ensure_approved(update)
+    if employee is None:
+        return ConversationHandler.END
+
+    items = await fetch_progressable(user.id)
+    if not items:
+        await message.reply_text("لا توجد طلبات مدفوعة لنقلها إلى قيد التجهيز.", reply_markup=staff_keyboard(employee))
+        return ConversationHandler.END
+
+    await message.reply_text(
+        "اختر الطلب لنقله إلى قيد التجهيز:\n\n" + "\n\n".join(format_staff_card(item) for item in items[:12]),
+        reply_markup=request_picker_keyboard(items, prefix="psel"),
+    )
+    return WAITING_PROGRESS_PICK
+
+
+async def on_select_progress(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if query is None or query.data is None or query.from_user is None:
+        return ConversationHandler.END
+    await query.answer()
+    employee = await ensure_approved(update)
+    if employee is None:
+        return ConversationHandler.END
+
+    request_ref = query.data.split(":", 1)[1]
+    async with httpx.AsyncClient(timeout=API_TIMEOUT) as client:
+        response = await client.post(
+            f"{API_URL}/bot/staff/in-progress",
+            headers=api_headers(),
+            json={"telegram_user_id": str(query.from_user.id), "request_number": request_ref},
+        )
+        if response.status_code >= 400:
+            await api_staff_error(query, response)
+            return ConversationHandler.END
+
+    text = f"تم نقل الطلب #{escape(request_ref)} إلى قيد التجهيز."
+    try:
+        await query.edit_message_text(text)
+    except Exception:
+        if query.message:
+            await query.message.reply_text(text, reply_markup=staff_keyboard(employee))
+    return ConversationHandler.END
+
+
+async def complete_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user = update.effective_user
+    message = update.message
+    if user is None or message is None:
+        return ConversationHandler.END
+    employee = await ensure_approved(update)
+    if employee is None:
+        return ConversationHandler.END
+    if not is_sales(employee):
+        await message.reply_text("إكمال الطلب متاح للمبيعات فقط.", reply_markup=staff_keyboard(employee))
+        return ConversationHandler.END
+
+    items = await fetch_completable(user.id)
+    if not items:
+        await message.reply_text("لا توجد طلبات بانتظار الإكمال.", reply_markup=staff_keyboard(employee))
+        return ConversationHandler.END
+
+    await message.reply_text(
+        "اختر الطلب لإكماله:\n\n" + "\n\n".join(format_staff_card(item) for item in items[:12]),
+        reply_markup=request_picker_keyboard(items, prefix="xsel"),
+    )
+    return WAITING_COMPLETE_PICK
+
+
+async def on_select_complete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if query is None or query.data is None or query.from_user is None:
+        return ConversationHandler.END
+    await query.answer()
+    employee = await ensure_approved(update)
+    if employee is None:
+        return ConversationHandler.END
+
+    request_ref = query.data.split(":", 1)[1]
+    async with httpx.AsyncClient(timeout=API_TIMEOUT) as client:
+        response = await client.post(
+            f"{API_URL}/bot/staff/complete",
+            headers=api_headers(),
+            json={"telegram_user_id": str(query.from_user.id), "request_number": request_ref},
+        )
+        if response.status_code >= 400:
+            await api_staff_error(query, response)
+            return ConversationHandler.END
+
+    text = f"تم إكمال الطلب #{escape(request_ref)}."
+    try:
+        await query.edit_message_text(text)
+    except Exception:
+        if query.message:
+            await query.message.reply_text(text, reply_markup=staff_keyboard(employee))
+    return ConversationHandler.END
+
+
+async def api_staff_error(query, response: httpx.Response) -> None:
+    try:
+        detail = response.json().get("message", response.text)
+    except Exception:
+        detail = response.text or f"HTTP {response.status_code}"
+    await query.answer(str(detail)[:200], show_alert=True)
+
+
 async def route_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.message is None or not update.message.text:
         return
@@ -625,6 +789,30 @@ def main() -> None:
             states={
                 WAITING_DELIVER_PICK: [CallbackQueryHandler(on_select_deliver_request, pattern=r"^dsel:")],
                 WAITING_DELIVER: [MessageHandler(filters.TEXT | filters.Document.ALL, capture_deliver)],
+            },
+            fallbacks=[CommandHandler("cancel", cancel)],
+        )
+    )
+    application.add_handler(
+        ConversationHandler(
+            entry_points=[
+                CommandHandler("progress", progress_menu),
+                MessageHandler(filters.Regex(f"^{BTN_PROGRESS}$"), progress_menu),
+            ],
+            states={
+                WAITING_PROGRESS_PICK: [CallbackQueryHandler(on_select_progress, pattern=r"^psel:")],
+            },
+            fallbacks=[CommandHandler("cancel", cancel)],
+        )
+    )
+    application.add_handler(
+        ConversationHandler(
+            entry_points=[
+                CommandHandler("complete", complete_menu),
+                MessageHandler(filters.Regex(f"^{BTN_COMPLETE}$"), complete_menu),
+            ],
+            states={
+                WAITING_COMPLETE_PICK: [CallbackQueryHandler(on_select_complete, pattern=r"^xsel:")],
             },
             fallbacks=[CommandHandler("cancel", cancel)],
         )

@@ -51,9 +51,9 @@ class SocialPostController extends Controller
         ]);
 
         $this->schedulePublisher->dispatchDue();
-        if (! $request->filled('account_id')) {
-            $this->publishedSync->prune();
-        }
+        $this->publishedSync->prune(
+            $request->filled('account_id') ? $request->integer('account_id') : null,
+        );
 
         $query = SocialPost::query()
             ->with(['accounts', 'media', 'creator:id,name', 'updater:id,name', 'approver:id,name'])

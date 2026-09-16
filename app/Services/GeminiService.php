@@ -19,7 +19,7 @@ class GeminiService
         if (config('services.gemini.e2e_stub')) {
             return [
                 'work_type' => WorkType::Design,
-                'briefs' => [['type' => 'design', 'brief' => "E2E brief for {$title}"]],
+                'briefs' => [['type' => 'design', 'brief' => "موجز تجريبي للمهمة: {$title}"]],
             ];
         }
 
@@ -41,6 +41,7 @@ Rules:
 - If work_type is content, briefs must contain exactly one item with type content
 - If work_type is both, briefs must contain one design and one content item
 - brief text must be actionable for the assigned team
+- Write all brief text in Arabic (العربية).
 
 Request title: {$title}
 Request description: {$description}
@@ -87,6 +88,73 @@ PROMPT;
         }
 
         return $this->validatePayload($decoded);
+    }
+
+    public function classifyCompanyIndustry(string $companyName): ?string
+    {
+        $companyName = trim($companyName);
+        if ($companyName === '') {
+            return null;
+        }
+
+        if (config('services.gemini.e2e_stub')) {
+            return 'خدمات عامة';
+        }
+
+        $apiKey = (string) config('services.gemini.api_key');
+        if ($apiKey === '') {
+            return null;
+        }
+
+        try {
+            $model = (string) config('services.gemini.model', 'gemini-2.5-flash');
+            $prompt = <<<PROMPT
+Classify the industry of this company in one short Arabic tag (2-5 words).
+Return ONLY valid JSON: {"industry":"..."}
+Write all brief text in Arabic (العربية).
+
+Company name: {$companyName}
+PROMPT;
+
+            $response = Http::timeout((int) config('services.gemini.timeout', 30))
+                ->connectTimeout(5)
+                ->acceptJson()
+                ->post("https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key={$apiKey}", [
+                    'contents' => [
+                        ['parts' => [['text' => $prompt]]],
+                    ],
+                    'generationConfig' => [
+                        'temperature' => 0.2,
+                        'responseMimeType' => 'application/json',
+                    ],
+                ]);
+
+            if (! $response->successful()) {
+                Log::warning('Gemini industry classification failed.', [
+                    'status' => $response->status(),
+                    'body' => $response->body(),
+                ]);
+
+                return null;
+            }
+
+            $text = trim((string) data_get($response->json(), 'candidates.0.content.parts.0.text', ''));
+            $text = $this->extractJsonText($text);
+            $decoded = json_decode($text, true);
+            if (! is_array($decoded)) {
+                return null;
+            }
+
+            $industry = trim((string) ($decoded['industry'] ?? ''));
+
+            return $industry !== '' ? $industry : null;
+        } catch (\Throwable $exception) {
+            Log::warning('Gemini industry classification exception.', [
+                'error' => $exception->getMessage(),
+            ]);
+
+            return null;
+        }
     }
 
     /**

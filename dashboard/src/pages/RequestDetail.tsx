@@ -30,7 +30,10 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
   const [quotationLines, setQuotationLines] = useState<QuotationLine[]>([createQuotationLine()]);
   const [sendingQuotation, setSendingQuotation] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
+  const [receiptReason, setReceiptReason] = useState("");
+  const [hasQr, setHasQr] = useState(false);
 
   useEffect(() => {
     if (!receiptUrl) return;
@@ -44,11 +47,11 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
   useEffect(() => {
     if (!id) return;
     setLoading(true);
-    api
-      .request(id)
-      .then((res) => {
+    Promise.all([api.request(id), api.opsSettings().catch(() => ({ data: { sham_cash_qr: false } }))])
+      .then(([res, ops]) => {
         setItem(res.data);
         setStatus(res.data.status);
+        setHasQr(Boolean(ops.data.sham_cash_qr));
       })
       .catch(() => setItem(null))
       .finally(() => setLoading(false));
@@ -126,10 +129,51 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
   async function confirmPayment(method: "receipt" | "cash") {
     if (!item) return;
     setError("");
+    setNotice("");
     try {
       const res = await api.confirmPayment(item.id, method);
       setItem(res.data);
       setStatus(res.data.status);
+      setNotice(res.message ?? "");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t(copy.saveFailed));
+    }
+  }
+
+  async function reRequestReceipt() {
+    if (!item) return;
+    setError("");
+    setNotice("");
+    try {
+      const res = await api.reRequestReceipt(item.id, receiptReason.trim() || undefined);
+      setItem(res.data);
+      setNotice(res.message ?? "");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t(copy.saveFailed));
+    }
+  }
+
+  async function renew() {
+    if (!item) return;
+    setError("");
+    setNotice("");
+    try {
+      const res = await api.renewRequest(item.id);
+      setItem(res.data);
+      setStatus(res.data.status);
+      setNotice(res.message ?? "");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t(copy.saveFailed));
+    }
+  }
+
+  async function uploadQr(file: File) {
+    setError("");
+    setNotice("");
+    try {
+      await api.uploadShamCashQr(file);
+      setHasQr(true);
+      setNotice(t(copy.qrSaved));
     } catch (err) {
       setError(err instanceof Error ? err.message : t(copy.saveFailed));
     }
@@ -139,7 +183,9 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
   if (!item) return <p className="muted">{t(copy.empty)}</p>;
 
   const canSendQuotation = ["submitted", "quotation_rejected"].includes(item.status);
+  const remaining = Number(item.amount_remaining ?? 0);
   const canConfirmPayment = item.status === "awaiting_payment";
+  const canConfirmRemaining = remaining > 0.009 && Boolean(item.paid_at);
   const receipts = item.files?.filter((file) => file.kind === "payment_receipt") ?? [];
   const attachments = item.files?.filter((file) => file.kind === "brief_attachment") ?? [];
 
@@ -159,12 +205,23 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
           {t(statuses[item.status] ?? { ar: item.status, en: item.status })}
         </p>
       </header>
+      <p className="badge-row">
+        <span className={`pay-badge ${item.requires_full_payment ? "pay-badge-full" : "pay-badge-partial"}`}>
+          {item.requires_full_payment ? t(copy.fullPayment) : t(copy.partialPayment)}
+        </span>
+        <span className={`renew-badge ${item.allows_renewal ? "renew-badge-on" : "renew-badge-off"}`}>
+          {item.allows_renewal ? t(copy.renewalOn) : t(copy.renewalOff)}
+        </span>
+      </p>
       <section className="card detail-card">
         <p>{item.description}</p>
         <dl className="meta-grid">
           <div>
             <dt>{t(copy.client)}</dt>
-            <dd>{item.client?.name ?? "—"}</dd>
+            <dd>
+              {item.client?.name ?? "—"}
+              {item.client?.company_name ? ` · ${item.client.company_name}` : ""}
+            </dd>
           </div>
           <div>
             <dt>{t(copy.source)}</dt>
@@ -221,6 +278,18 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
                 item.odoo_invoice_id ?? "—"
               )}
             </dd>
+          </div>
+          <div>
+            <dt>{t(copy.paidAmount)}</dt>
+            <dd>{item.amount_paid ?? "—"}</dd>
+          </div>
+          <div>
+            <dt>{t(copy.remainingBalance)}</dt>
+            <dd>{item.amount_remaining ?? "—"}</dd>
+          </div>
+          <div>
+            <dt>{t(copy.driveFolder)}</dt>
+            <dd dir="ltr">{item.google_drive_folder_id ?? "—"}</dd>
           </div>
         </dl>
         {item.quotations?.length ? (
@@ -384,6 +453,16 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
               </button>
             </>
           ) : null}
+          {canConfirmRemaining ? (
+            <button className="btn btn-teal" type="button" onClick={() => void confirmPayment("cash")}>
+              {t(copy.confirmRemaining)}
+            </button>
+          ) : null}
+          {item.can_renew ? (
+            <button className="btn" type="button" onClick={() => void renew()}>
+              {t(copy.renewSubscription)}
+            </button>
+          ) : null}
           {item.gemini_status === "failed" ? (
             <button className="btn" type="button" onClick={() => void api.retryGemini(item.id).then((res) => setItem(res.data))}>
               {t(copy.retryGemini)}
@@ -391,6 +470,33 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
           ) : null}
         </form>
       </section>
+      <section className="card action-card">
+        <h2 className="form-title">{t(copy.receipts)}</h2>
+        <div className="toolbar">
+          <input
+            className="field"
+            value={receiptReason}
+            onChange={(e) => setReceiptReason(e.target.value)}
+            placeholder={t(copy.receiptReason)}
+          />
+          <button className="btn btn-ghost" type="button" onClick={() => void reRequestReceipt()}>
+            {t(copy.reRequestReceipt)}
+          </button>
+        </div>
+        <label className="field-label">
+          {t(copy.shamCashQr)} {hasQr ? "✓" : ""}
+          <input
+            className="field"
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) void uploadQr(file);
+            }}
+          />
+        </label>
+      </section>
+      {notice ? <p className="notice notice-info">{notice}</p> : null}
       {error ? <p className="error">{error}</p> : null}
       {receiptUrl ? (
         <div className="modal" role="dialog" aria-modal="true" onClick={() => setReceiptUrl(null)}>

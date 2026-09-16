@@ -6,6 +6,8 @@ use App\Actions\CompleteRequest;
 use App\Actions\ConfirmRequestPayment;
 use App\Actions\DispatchStatusWorkflow;
 use App\Actions\EnqueueIntegrationEvent;
+use App\Actions\RenewSubscription;
+use App\Actions\ReRequestReceipt;
 use App\Actions\SendQuotation;
 use App\Enums\GeminiStatus;
 use App\Enums\PaymentMethod;
@@ -18,9 +20,12 @@ use App\Http\Requests\UpdateServiceRequestStatusRequest;
 use App\Http\Resources\ServiceRequestResource;
 use App\Jobs\ClassifyWithGeminiJob;
 use App\Models\IntegrationEvent;
+use App\Models\OpsSetting;
 use App\Models\RequestFile;
 use App\Models\ServiceRequest;
 use App\Services\RequestStatusTransitionService;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -52,6 +57,8 @@ class ServiceRequestController extends Controller
             'clickupTasks.employee',
             'statusHistory',
             'integrationEvents',
+            'pricingPackage.subcategory.category',
+            'subscriptions',
         ]);
 
         return ServiceRequestResource::make($serviceRequest)
@@ -130,6 +137,63 @@ class ServiceRequestController extends Controller
 
         return ServiceRequestResource::make($serviceRequest->fresh(['client', 'briefs']))
             ->additional(['message' => 'Gemini retry queued.']);
+    }
+
+    public function reRequestReceipt(Request $request, ServiceRequest $serviceRequest, ReRequestReceipt $reRequestReceipt): ServiceRequestResource
+    {
+        $validated = $request->validate([
+            'reason' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $updated = $reRequestReceipt->handle(
+            $serviceRequest,
+            $validated['reason'] ?? 'الوصل غير واضح',
+        );
+
+        return ServiceRequestResource::make($updated)
+            ->additional(['message' => 'Receipt re-requested.']);
+    }
+
+    public function renew(ServiceRequest $serviceRequest, RenewSubscription $renewSubscription): ServiceRequestResource
+    {
+        $updated = $renewSubscription->handle($serviceRequest);
+
+        return ServiceRequestResource::make($updated)
+            ->additional(['message' => 'Renewal started.']);
+    }
+
+    public function opsSettings(): JsonResponse
+    {
+        $path = OpsSetting::getValue('sham_cash_qr_path');
+
+        return response()->json([
+            'data' => [
+                'sham_cash_qr' => filled($path) && Storage::disk('local')->exists($path),
+            ],
+            'message' => 'ok',
+        ]);
+    }
+
+    public function uploadShamCashQr(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'file' => ['required', 'file', 'max:5120', 'mimes:jpg,jpeg,png,webp'],
+        ]);
+
+        $stored = $request->file('file')?->store('payment', 'local');
+        abort_unless(is_string($stored) && $stored !== '', 422, 'Failed to store QR image.');
+
+        $previous = OpsSetting::getValue('sham_cash_qr_path');
+        if (filled($previous) && $previous !== $stored && Storage::disk('local')->exists($previous)) {
+            Storage::disk('local')->delete($previous);
+        }
+
+        OpsSetting::setValue('sham_cash_qr_path', $stored);
+
+        return response()->json([
+            'data' => ['sham_cash_qr' => true],
+            'message' => 'QR saved.',
+        ]);
     }
 
     public function retryIntegrationEvent(IntegrationEvent $integrationEvent, EnqueueIntegrationEvent $enqueue): ServiceRequestResource

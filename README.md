@@ -36,6 +36,50 @@ python staff.py   # staff
 
 Copy `.env.example` to `.env` and set secrets locally. Do not commit `.env`.
 
+## Deploy (SSH key, not a password)
+
+GitHub Actions copies this repo to the VPS and runs Docker there. Login uses an **SSH private key**. Do not add `DEPLOY_PASSWORD`.
+
+### One-time on your PC
+
+```powershell
+ssh-keygen -t ed25519 -f $env:USERPROFILE\.ssh\id_ed25519_hoc_deploy -N "" -C "hoc-github-deploy"
+Get-Content $env:USERPROFILE\.ssh\id_ed25519_hoc_deploy.pub
+```
+
+### One-time on the VPS (password login, once)
+
+```bash
+mkdir -p ~/.ssh && chmod 700 ~/.ssh
+echo "PASTE_PUBLIC_KEY_HERE" >> ~/.ssh/authorized_keys
+chmod 600 ~/.ssh/authorized_keys
+sudo bash  # then after the first sync:
+# sudo bash /var/www/landing/backend/deploy/bootstrap.sh
+```
+
+Install Docker with `deploy/bootstrap.sh` after the files exist, or install Docker first.
+
+Create `/var/www/landing/backend/.env` from `.env.example`. Set `APP_KEY`, `APP_URL=http://YOUR_IP`, `DB_PASSWORD`, and `CORS_ALLOWED_ORIGINS=http://YOUR_IP/staff,http://YOUR_IP`.
+
+### GitHub secrets (Settings → Secrets and variables → Actions)
+
+| Secret | Value |
+|--------|--------|
+| `SSH_HOST` | Server IP |
+| `SSH_USER` | `root` or your sudo user |
+| `SSH_PRIVATE_KEY` | Full contents of `id_ed25519_hoc_deploy` (private file) |
+| `SSH_PORT` | Optional, default `22` |
+| `DEPLOY_PATH` | Optional, default `/var/www/landing/backend` |
+
+Then **Actions → Deploy (SSH) → Run workflow**.
+
+From this machine (same key, no GitHub):
+
+```powershell
+cd backend
+.\deploy\push.ps1 -HostName YOUR_IP -User root
+```
+
 ## E2E (API + dashboard)
 
 Playwright starts the API (`php artisan serve` on port 8000) and dashboard dev server automatically via `playwright.config.ts`. Optional landing checks use `E2E_REQUIRE_LANDING=1`.

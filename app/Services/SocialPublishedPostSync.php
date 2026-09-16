@@ -12,13 +12,20 @@ class SocialPublishedPostSync
 {
     public function __construct(private SocialPublisher $publisher) {}
 
-    public function prune(): int
+    public function prune(?int $accountId = null): int
     {
         $deleted = 0;
 
         SocialPost::query()
             ->where('status', SocialPostStatus::Published)
             ->with(['targets.account', 'media'])
+            ->when(
+                $accountId !== null,
+                fn ($query) => $query->whereHas(
+                    'accounts',
+                    fn ($accounts) => $accounts->where('social_accounts.id', $accountId),
+                ),
+            )
             ->orderBy('id')
             ->each(function (SocialPost $post) use (&$deleted): void {
                 $removedRemote = false;

@@ -12,6 +12,7 @@ use App\Http\Requests\UpdateEmployeeRequest;
 use App\Http\Resources\EmployeeResource;
 use App\Models\Employee;
 use App\Services\ClickUpClient;
+use App\Services\OdooClient;
 use App\Services\TelegramNotifier;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
@@ -19,8 +20,16 @@ use Illuminate\Validation\ValidationException;
 
 class EmployeeController extends Controller
 {
-    public function index()
+    public function index(OdooClient $odoo, PushEmployeeToOdoo $pushEmployeeToOdoo)
     {
+        if ($odoo->configured()) {
+            Employee::query()
+                ->whereNull('odoo_employee_id')
+                ->limit(25)
+                ->get()
+                ->each(fn (Employee $employee) => $pushEmployeeToOdoo->handle($employee));
+        }
+
         return EmployeeResource::collection(
             Employee::query()
                 ->orderByRaw("CASE status WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 ELSE 2 END")
@@ -57,7 +66,7 @@ class EmployeeController extends Controller
     {
         $employee->fill($request->validated())->save();
 
-        return EmployeeResource::make($pushEmployeeToOdoo->handle($employee->fresh() ?? $employee))
+        return EmployeeResource::make($pushEmployeeToOdoo->handle($employee->refresh()))
             ->additional(['message' => 'Updated.']);
     }
 
@@ -85,7 +94,7 @@ class EmployeeController extends Controller
             'is_active' => true,
         ])->save();
 
-        $employee = $pushEmployeeToOdoo->handle($employee->fresh() ?? $employee);
+        $employee = $pushEmployeeToOdoo->handle($employee->refresh());
 
         $this->notifyDecision($employee, "تمت الموافقة على انضمامك يا {$employee->name}. ستصلك طلبات قسمك هنا.");
 

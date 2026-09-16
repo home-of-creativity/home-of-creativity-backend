@@ -21,6 +21,7 @@ class TelegramLinkRequest extends FormRequest
             'name' => ['required', 'string', 'max:120'],
             'email' => ['nullable', 'email', 'max:255'],
             'phone' => ['nullable', 'string', 'max:40'],
+            'company_name' => ['nullable', 'string', 'max:160'],
             'locale' => ['nullable', 'in:ar,en'],
         ];
     }

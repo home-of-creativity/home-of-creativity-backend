@@ -1,0 +1,46 @@
+:80 {
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		X-Frame-Options SAMEORIGIN
+	}
+
+	handle /home-of-creativity-profile* {
+		root * /var/www/design
+		encode gzip
+		try_files {path} {path}/index.html
+		file_server
+	}
+
+	handle /staff* {
+		reverse_proxy hoc-dashboard:5173
+	}
+
+	handle /assets* {
+		reverse_proxy hoc-dashboard:5173
+	}
+
+	handle /storage* {
+		root * /var/www/hoc/storage/app/public
+		uri strip_prefix /storage
+		header {
+			Accept-Ranges bytes
+			Cache-Control "public, max-age=86400"
+		}
+		file_server
+	}
+
+	handle {
+		root * /var/www/hoc/public
+		encode gzip
+		request_body {
+			max_size 512MB
+		}
+		php_fastcgi hoc-api:9000 {
+			dial_timeout 10s
+			read_timeout 10m
+			write_timeout 10m
+		}
+		file_server
+	}
+}

@@ -4,10 +4,14 @@ namespace App\Http\Controllers;
 
 use App\Actions\ApproveQuotation;
 use App\Actions\CompleteRequest;
+use App\Actions\CreateCatalogRequest;
+use App\Actions\DeclineRenewal;
 use App\Actions\NotifyEmployees;
 use App\Actions\ProvisionSalesClickUpTask;
+use App\Actions\PushClientLeadToOdoo;
 use App\Actions\PushClientToOdoo;
 use App\Actions\RejectQuotation;
+use App\Actions\RenewSubscription;
 use App\Actions\RequestRevision;
 use App\Actions\SubmitServiceRequest;
 use App\Actions\SyncClickUpFromStaff;
@@ -20,36 +24,97 @@ use App\Http\Requests\TelegramSubmitRequest;
 use App\Http\Resources\ClientResource;
 use App\Http\Resources\ServiceRequestResource;
 use App\Models\Client;
+use App\Models\PricingPackage;
 use App\Models\RequestFile;
 use App\Models\ServiceRequest;
 use App\Models\SupportMessage;
 use App\Services\ClickUpStatusMapper;
 use App\Services\RequestStatusTransitionService;
+use App\Support\PricingCatalog;
 use App\Support\ResolveServiceRequest;
+use App\Support\StatusLabel;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 
+use function Illuminate\Support\php_binary;
+
 class TelegramBotController extends Controller
 {
-    public function link(TelegramLinkRequest $request, PushClientToOdoo $pushClientToOdoo): JsonResponse
+    public function link(TelegramLinkRequest $request, PushClientToOdoo $pushClientToOdoo, PushClientLeadToOdoo $pushClientLeadToOdoo): JsonResponse
     {
+        $payload = [
+            'name' => $request->validated('name'),
+            'email' => $request->validated('email'),
+            'phone' => $request->validated('phone'),
+            'locale' => $request->validated('locale') ?? 'ar',
+        ];
+        if ($request->filled('company_name')) {
+            $payload['company_name'] = $request->validated('company_name');
+        }
+
         $client = Client::query()->updateOrCreate(
             ['telegram_user_id' => $request->validated('telegram_user_id')],
-            [
-                'name' => $request->validated('name'),
-                'email' => $request->validated('email'),
-                'phone' => $request->validated('phone'),
-                'locale' => $request->validated('locale') ?? 'ar',
-            ],
+            array_filter($payload, fn ($value) => $value !== null && $value !== ''),
         );
 
-        $client = $pushClientToOdoo->handle($client);
+        $this->pushClientToOdooInBackground($client, $pushClientToOdoo, $pushClientLeadToOdoo);
 
         return response()->json([
-            'data' => ClientResource::make($client),
+            'data' => array_merge(ClientResource::make($client)->resolve(), [
+                'profile_complete' => $client->profileComplete(),
+                'missing_fields' => $client->missingProfileFields(),
+            ]),
             'message' => 'Linked.',
+        ]);
+    }
+
+    public function me(Request $request): JsonResponse
+    {
+        $client = Client::query()
+            ->where('telegram_user_id', $request->query('telegram_user_id'))
+            ->firstOrFail();
+
+        return response()->json([
+            'data' => array_merge(ClientResource::make($client)->resolve(), [
+                'profile_complete' => $client->profileComplete(),
+                'missing_fields' => $client->missingProfileFields(),
+            ]),
+            'message' => 'ok',
+        ]);
+    }
+
+    public function updateProfile(Request $request, PushClientToOdoo $pushClientToOdoo, PushClientLeadToOdoo $pushClientLeadToOdoo): JsonResponse
+    {
+        $validated = $request->validate([
+            'telegram_user_id' => ['required', 'string', 'max:40'],
+            'name' => ['sometimes', 'string', 'max:120'],
+            'phone' => ['sometimes', 'string', 'max:40'],
+            'company_name' => ['sometimes', 'string', 'max:160'],
+        ]);
+
+        $client = Client::query()
+            ->where('telegram_user_id', $validated['telegram_user_id'])
+            ->firstOrFail();
+
+        $client->forceFill(array_filter([
+            'name' => $validated['name'] ?? null,
+            'phone' => $validated['phone'] ?? null,
+            'company_name' => $validated['company_name'] ?? null,
+        ], fn ($value) => $value !== null && $value !== ''))->save();
+
+        $client = $client->fresh() ?? $client;
+        $this->pushClientToOdooInBackground($client, $pushClientToOdoo, $pushClientLeadToOdoo);
+
+        return response()->json([
+            'data' => array_merge(ClientResource::make($client)->resolve(), [
+                'profile_complete' => $client->profileComplete(),
+                'missing_fields' => $client->missingProfileFields(),
+            ]),
+            'message' => 'Updated.',
         ]);
     }
 
@@ -58,6 +123,8 @@ class TelegramBotController extends Controller
         $client = Client::query()
             ->where('telegram_user_id', $request->validated('telegram_user_id'))
             ->firstOrFail();
+
+        abort_unless($client->profileComplete(), 422, 'Complete your name, phone, and company first.');
 
         $serviceRequest = $submitServiceRequest->handle($client, [
             'title' => $request->validated('title'),
@@ -79,15 +146,26 @@ class TelegramBotController extends Controller
             ->firstOrFail();
 
         $items = $client->requests()
+            ->with('pricingPackage')
             ->latest('id')
             ->get()
             ->map(fn (ServiceRequest $item) => [
                 'number' => $item->number,
                 'title' => $item->title,
                 'status' => $item->status->value,
+                'status_label' => StatusLabel::requestAr($item->status->value),
                 'execution_status' => $item->execution_status?->value,
-                'execution_status_label' => $mapper->toClientLabel($item->execution_status),
+                'execution_status_label' => $mapper->toClientLabel($item->execution_status) ?: StatusLabel::requestAr($item->status->value),
+                'package_name' => $item->pricingPackage?->name_ar ?: $item->pricingPackage?->name_en,
+                'billing_period' => $item->billing_period,
+                'amount_paid' => $item->amount_paid,
+                'amount_remaining' => $item->amount_remaining,
+                'amount_total' => $item->amount_total ?? $item->quotation_amount,
+                'allows_renewal' => (bool) $item->allows_renewal,
+                'can_renew' => (bool) $item->allows_renewal && $item->status !== RequestStatus::Cancelled,
                 'can_edit' => $item->status->allowsClientEdit(),
+                'receipt_reupload_required' => (bool) $item->receipt_reupload_required,
+                'accepts_receipt' => $item->acceptsReceiptUpload(),
             ]);
 
         return response()->json(['data' => $items, 'message' => 'ok']);
@@ -147,7 +225,7 @@ class TelegramBotController extends Controller
         ProvisionSalesClickUpTask $provisionSalesClickUpTask,
     ): JsonResponse {
         $this->assertClientOwns($request, $serviceRequest);
-        abort_unless($serviceRequest->status === RequestStatus::AwaitingPayment, 422, 'Receipt upload is only allowed while awaiting payment.');
+        abort_unless($serviceRequest->acceptsReceiptUpload(), 422, 'Receipt upload is only allowed while awaiting payment.');
 
         $validated = $request->validate([
             'telegram_user_id' => ['required', 'string'],
@@ -188,6 +266,11 @@ class TelegramBotController extends Controller
             'original_name' => $validated['file_name'],
             'path' => $path,
         ]);
+
+        $serviceRequest->forceFill([
+            'receipt_reupload_required' => false,
+            'receipt_reupload_reason' => null,
+        ])->save();
 
         $serviceRequest->load('client');
         $displayNumber = ResolveServiceRequest::displayNumber($serviceRequest);
@@ -309,6 +392,120 @@ class TelegramBotController extends Controller
         ]);
 
         return response()->json(['data' => ['stored' => true], 'message' => 'Support message saved.']);
+    }
+
+    public function catalog(Request $request, PricingCatalog $catalog): JsonResponse
+    {
+        $validated = $request->validate([
+            'telegram_user_id' => ['required', 'string'],
+            'category_id' => ['nullable', 'integer'],
+            'subcategory_id' => ['nullable', 'integer'],
+            'package_id' => ['nullable', 'integer'],
+            'offset' => ['nullable', 'integer', 'min:0'],
+        ]);
+
+        Client::query()->where('telegram_user_id', $validated['telegram_user_id'])->firstOrFail();
+
+        $offset = (int) ($validated['offset'] ?? 0);
+        $items = [];
+        $kind = 'categories';
+
+        if (filled($validated['package_id'] ?? null)) {
+            $kind = 'periods';
+            $items = [$catalog->packagePeriods((int) $validated['package_id'])];
+        } elseif (filled($validated['subcategory_id'] ?? null)) {
+            $kind = 'packages';
+            $items = $catalog->subcategoryPackages((int) $validated['subcategory_id']);
+        } elseif (filled($validated['category_id'] ?? null)) {
+            $items = $catalog->categoryChildren((int) $validated['category_id']);
+            $kind = $items[0]['type'] ?? 'packages';
+        } else {
+            $items = $catalog->categories();
+        }
+
+        $page = array_slice($items, $offset, PricingCatalog::PAGE_SIZE);
+        $nextOffset = $offset + PricingCatalog::PAGE_SIZE;
+
+        return response()->json([
+            'data' => [
+                'kind' => $kind,
+                'items' => $page,
+                'has_more' => $nextOffset < count($items),
+                'next_offset' => $nextOffset,
+            ],
+            'message' => 'ok',
+        ]);
+    }
+
+    public function catalogRequest(Request $request, CreateCatalogRequest $createCatalogRequest): JsonResponse
+    {
+        $validated = $request->validate([
+            'telegram_user_id' => ['required', 'string'],
+            'package_id' => ['required', 'integer', 'exists:pricing_packages,id'],
+            'billing_period' => ['nullable', 'string', 'max:40'],
+        ]);
+
+        $client = Client::query()
+            ->where('telegram_user_id', $validated['telegram_user_id'])
+            ->firstOrFail();
+
+        abort_unless($client->profileComplete(), 422, 'Complete your name, phone, and company first.');
+
+        $package = PricingPackage::query()->with('subcategory.category')->findOrFail($validated['package_id']);
+        $serviceRequest = $createCatalogRequest->handle($client, $package, $validated['billing_period'] ?? null);
+
+        return response()->json([
+            'data' => ServiceRequestResource::make($serviceRequest),
+            'message' => 'Created.',
+        ], 201);
+    }
+
+    public function renew(Request $request, ServiceRequest $serviceRequest, RenewSubscription $renewSubscription): ServiceRequestResource
+    {
+        $this->assertClientOwns($request, $serviceRequest);
+        $updated = $renewSubscription->handle($serviceRequest);
+
+        return ServiceRequestResource::make($updated->fresh(['client', 'subscriptions']))
+            ->additional(['message' => 'Renewal started.']);
+    }
+
+    public function declineRenewal(Request $request, ServiceRequest $serviceRequest, DeclineRenewal $declineRenewal): ServiceRequestResource
+    {
+        $this->assertClientOwns($request, $serviceRequest);
+        $updated = $declineRenewal->handle($serviceRequest);
+
+        return ServiceRequestResource::make($updated)
+            ->additional(['message' => 'Renewal declined.']);
+    }
+
+    private function pushClientToOdooInBackground(
+        Client $client,
+        PushClientToOdoo $pushClientToOdoo,
+        PushClientLeadToOdoo $pushClientLeadToOdoo,
+    ): void {
+        if (app()->runningUnitTests()) {
+            $fresh = $client->fresh() ?? $client;
+            $fresh = $pushClientToOdoo->handle($fresh);
+            $pushClientLeadToOdoo->handle($fresh);
+
+            return;
+        }
+
+        try {
+            Process::path(base_path())
+                ->timeout(120)
+                ->start([
+                    php_binary(),
+                    'artisan',
+                    'odoo:push-client',
+                    (string) $client->id,
+                ]);
+        } catch (\Throwable $exception) {
+            Log::warning('Failed to start Odoo client push process.', [
+                'client_id' => $client->id,
+                'error' => $exception->getMessage(),
+            ]);
+        }
     }
 
     private function assertClientOwns(Request $request, ServiceRequest $serviceRequest): void

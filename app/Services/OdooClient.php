@@ -105,21 +105,219 @@ class OdooClient
     }
 
     /**
-     * @param  array{name: string, contact_name?: string|null, partner_name?: string|null, stage_id?: int|null}  $values
+     * @param  array{
+     *     name: string,
+     *     contact_name?: string|null,
+     *     partner_name?: string|null,
+     *     stage_id?: int|null,
+     *     phone?: string|null,
+     *     mobile?: string|null,
+     *     email_from?: string|null,
+     *     description?: string|null,
+     *     tag_ids?: list<int>|null
+     * }  $values
      */
     public function createCrmLead(array $values): int
     {
+        $stageId = $values['stage_id'] ?? null;
+        if ($stageId === null) {
+            try {
+                $stageId = $this->ensureCrmStage('تلغرام');
+            } catch (Throwable) {
+                $stageId = null;
+            }
+        }
+
+        $tagIds = $values['tag_ids'] ?? null;
+        if (is_array($tagIds) && $tagIds !== [] && ! is_array($tagIds[0] ?? null)) {
+            $tagIds = [[6, 0, array_map('intval', $tagIds)]];
+        }
+
         $payload = array_filter([
             'name' => $values['name'],
             'contact_name' => $values['contact_name'] ?? null,
             'partner_name' => $values['partner_name'] ?? null,
-            'stage_id' => $values['stage_id'] ?? null,
+            'stage_id' => $stageId,
+            'phone' => $values['phone'] ?? $values['mobile'] ?? null,
+            'mobile' => $values['mobile'] ?? $values['phone'] ?? null,
+            'email_from' => $values['email_from'] ?? null,
+            'description' => $values['description'] ?? null,
+            'tag_ids' => $tagIds,
             'type' => 'opportunity',
         ], fn (mixed $value): bool => $value !== null && $value !== '');
 
         $leadId = $this->call('crm.lead', 'create', [$payload]);
 
         return (int) $leadId;
+    }
+
+    public function ensureCrmStage(string $name): int
+    {
+        $existing = $this->findCrmStageId($name);
+        if ($existing !== null) {
+            return $existing;
+        }
+
+        return $this->createCrmStage($name);
+    }
+
+    public function createCrmStage(string $name): int
+    {
+        $existing = $this->findCrmStageId($name);
+        if ($existing !== null) {
+            return $existing;
+        }
+
+        $stageId = $this->call('crm.stage', 'create', [[
+            'name' => trim($name),
+        ]]);
+
+        return (int) $stageId;
+    }
+
+    public function messagePost(string $model, int $recordId, string $body, bool $html = false): void
+    {
+        if ($recordId <= 0 || trim($body) === '') {
+            return;
+        }
+
+        $payload = [
+            'ids' => [$recordId],
+            'body' => $html ? $body : strip_tags($body),
+            'message_type' => 'comment',
+            'subtype_xmlid' => 'mail.mt_note',
+        ];
+
+        if ($html) {
+            $payload['body_html'] = $body;
+            $payload['body_is_html'] = true;
+        }
+
+        try {
+            $this->call($model, 'message_post', $payload);
+        } catch (Throwable $exception) {
+            Log::warning('Odoo message_post failed.', [
+                'model' => $model,
+                'record_id' => $recordId,
+                'error' => $exception->getMessage(),
+            ]);
+        }
+    }
+
+    public function markLeadRejected(int $leadId, string $noteHtml): void
+    {
+        if ($leadId <= 0) {
+            return;
+        }
+
+        try {
+            $stageId = $this->findCrmStageId('خسارة')
+                ?? $this->findCrmStageId('Lost')
+                ?? $this->findCrmStageId('lost');
+
+            $values = [
+                'color' => 1,
+                'probability' => 0,
+            ];
+            if ($stageId !== null) {
+                $values['stage_id'] = $stageId;
+            }
+
+            $this->writeRecord('crm.lead', $leadId, $values);
+            $this->messagePost('crm.lead', $leadId, $noteHtml, true);
+        } catch (Throwable $exception) {
+            Log::warning('Odoo markLeadRejected failed.', [
+                'lead_id' => $leadId,
+                'error' => $exception->getMessage(),
+            ]);
+        }
+    }
+
+    public function markLeadWon(int $leadId): void
+    {
+        if ($leadId <= 0) {
+            return;
+        }
+
+        try {
+            $stageId = $this->findCrmStageId('تم الفوز بها')
+                ?? $this->findCrmStageId('Won')
+                ?? $this->findCrmStageId('تم الفوز')
+                ?? $this->findCrmStageId('won');
+
+            if ($stageId === null) {
+                Log::warning('Odoo Won stage not found for markLeadWon.', ['lead_id' => $leadId]);
+
+                return;
+            }
+
+            $this->writeRecord('crm.lead', $leadId, [
+                'stage_id' => $stageId,
+                'probability' => 100,
+                'color' => 10,
+            ]);
+        } catch (Throwable $exception) {
+            Log::warning('Odoo markLeadWon failed.', [
+                'lead_id' => $leadId,
+                'error' => $exception->getMessage(),
+            ]);
+        }
+    }
+
+    public function ensureCrmTagId(string $tagName): ?int
+    {
+        $normalized = trim($tagName);
+        if ($normalized === '' || ! $this->configured()) {
+            return null;
+        }
+
+        try {
+            $rows = $this->searchRead('crm.tag', [['name', '=', $normalized]], ['id', 'name'], 1, 0, 'id asc');
+            if (isset($rows[0]['id'])) {
+                return (int) $rows[0]['id'];
+            }
+
+            return (int) $this->call('crm.tag', 'create', [['name' => $normalized]]);
+        } catch (Throwable $exception) {
+            Log::warning('Odoo CRM tag ensure failed.', [
+                'tag' => $normalized,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
+    /**
+     * @return array{stage: string|null, color: int|null, probability: float|null, expected_revenue: float|null, odoo_url: string}|null
+     */
+    public function leadSnapshot(int|string $leadId): ?array
+    {
+        if (! $this->configured()) {
+            return null;
+        }
+
+        try {
+            $rows = $this->searchRead('crm.lead', [['id', '=', (int) $leadId]], [
+                'id', 'stage_id', 'color', 'probability', 'expected_revenue',
+            ], 1, 0, 'id desc');
+        } catch (Throwable) {
+            return null;
+        }
+
+        if ($rows === []) {
+            return null;
+        }
+
+        $row = $rows[0];
+
+        return [
+            'stage' => $this->relationName($row['stage_id'] ?? null),
+            'color' => isset($row['color']) ? (int) $row['color'] : null,
+            'probability' => isset($row['probability']) ? (float) $row['probability'] : null,
+            'expected_revenue' => isset($row['expected_revenue']) ? (float) $row['expected_revenue'] : null,
+            'odoo_url' => $this->recordUrl('crm.lead', (int) $leadId),
+        ];
     }
 
     public function findCrmLead(string $name, ?string $partnerName = null): ?int
@@ -584,6 +782,10 @@ class OdooClient
             ];
         }
 
+        if ($method === 'message_post') {
+            return $payload;
+        }
+
         if ($method === 'search' && isset($payload[0]) && is_array($payload[0])) {
             return [
                 'domain' => $payload[0],
@@ -682,7 +884,32 @@ class OdooClient
             ]);
         }
 
+        if ($method === 'message_post') {
+            $ids = $payload['ids'] ?? [];
+            $kwargs = $payload;
+            unset($kwargs['ids']);
+
+            return $this->executeKw($uid, $model, $method, [$ids], $kwargs);
+        }
+
         return $this->execute($uid, $model, $method, [$payload]);
+    }
+
+    /**
+     * @param  list<mixed>  $args
+     * @param  array<string, mixed>  $kwargs
+     */
+    private function executeKw(int $uid, string $model, string $method, array $args, array $kwargs = []): mixed
+    {
+        return $this->jsonrpc('object', 'execute_kw', [
+            config('services.odoo.db'),
+            $uid,
+            config('services.odoo.api_key'),
+            $model,
+            $method,
+            $args,
+            $kwargs,
+        ]);
     }
 
     private function legacyUid(): int

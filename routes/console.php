@@ -11,3 +11,9 @@ Artisan::command('inspire', function () {
 Schedule::command('social:publish-due')->everyMinute()->timezone('Asia/Damascus')->withoutOverlapping();
 Schedule::command('social:sync-inbox')->everyFifteenMinutes()->withoutOverlapping();
 Schedule::command('social:sync-posts')->everyFifteenMinutes()->withoutOverlapping();
+Schedule::command('social:sync-accounts')->everyFifteenMinutes()->withoutOverlapping();
+Schedule::command('integration:process-outbox')->everyMinute()->withoutOverlapping();
+Schedule::command('odoo:reconcile')->everyMinute()->withoutOverlapping();
+Schedule::command('ops:process-reminders')->everyMinute()->timezone('Asia/Damascus')->withoutOverlapping();
+Schedule::command('ops:poll-drive')->everyFiveMinutes()->timezone('Asia/Damascus')->withoutOverlapping();
+Schedule::command('ops:clickup-due-alerts')->hourly()->timezone('Asia/Damascus')->withoutOverlapping();

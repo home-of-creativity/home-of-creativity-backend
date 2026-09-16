@@ -15,17 +15,31 @@ class ClientResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
+        $odoo = app(OdooClient::class);
+        $odooReady = $odoo->configured();
+        $live = $this->odoo_live ?? null;
+
         return [
             'id' => $this->id,
             'name' => $this->name,
+            'company_name' => $this->company_name,
+            'company_activity' => $this->company_activity,
             'email' => $this->email,
             'phone' => $this->phone,
             'locale' => $this->locale,
             'telegram_user_id' => $this->telegram_user_id,
             'odoo_partner_id' => $this->odoo_partner_id,
-            'odoo_url' => filled($this->odoo_partner_id) && app(OdooClient::class)->configured()
-                ? app(OdooClient::class)->recordUrl('res.partner', (string) $this->odoo_partner_id)
+            'odoo_lead_id' => $this->odoo_lead_id,
+            'odoo_stage_name' => $this->odoo_stage_name,
+            'odoo_url' => filled($this->odoo_partner_id) && $odooReady
+                ? $odoo->recordUrl('res.partner', (string) $this->odoo_partner_id)
+                : (filled($this->odoo_lead_id) && $odooReady
+                    ? $odoo->recordUrl('crm.lead', (string) $this->odoo_lead_id)
+                    : null),
+            'odoo_lead_url' => filled($this->odoo_lead_id) && $odooReady
+                ? $odoo->recordUrl('crm.lead', (string) $this->odoo_lead_id)
                 : null,
+            'odoo_live' => is_array($live) ? $live : null,
             'requests_count' => $this->whenCounted('requests'),
             'created_at' => $this->created_at?->toIso8601String(),
         ];

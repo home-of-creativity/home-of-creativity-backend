@@ -31,6 +31,7 @@ class PricingPackageResource extends JsonResource
             'badge_ar' => $this->badge_ar,
             'sort_order' => $this->sort_order,
             'is_published' => $this->is_published,
+            'allows_partial_payment' => $this->allows_partial_payment,
             'subcategory' => PricingSubcategoryResource::make($this->whenLoaded('subcategory')),
             'created_at' => $this->created_at?->toIso8601String(),
         ];

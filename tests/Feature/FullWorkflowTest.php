@@ -64,6 +64,8 @@ class FullWorkflowTest extends TestCase
             ->postJson('/api/bot/telegram/link', [
                 'telegram_user_id' => 'tg-full-flow',
                 'name' => 'Full Flow Client',
+                'phone' => '+963900000003',
+                'company_name' => 'شركة المسار الكامل',
                 'locale' => 'ar',
             ])->assertOk();
 

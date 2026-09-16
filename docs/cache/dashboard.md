@@ -18,11 +18,11 @@ Demo: `admin@example.com` / `password`.
 | Path | Page |
 | --- | --- |
 | `/` | Overview |
-| `/requests` `/requests/:id` | Requests |
-| `/employees` | Employees |
-| `/clients` | Clients + logos |
+| `/requests` `/requests/:id` | Requests — payment badges, remaining confirm, receipt re-request, renew, Sham Cash QR, Drive folder id |
+| `/employees` | Employees (GET pushes missing Odoo ids; **no sync button**) |
+| `/clients` | Clients + logos — company, live Odoo stage on GET |
 | `/contact` | Contact channels |
-| `/pricing` | Pricing CMS |
+| `/pricing` | Pricing CMS — every category `requires_full_payment` + `allows_renewal` badges; package partial-pay inherit/true/false |
 | `/projects` `/categories` | Portfolio |
 | `/social` `/social/compose` `/social/compose/:id` | Posts (feed, reel, story, album) |
 | `/social/calendar` `/social/inbox` `/social/accounts` | Calendar, detailed inbox (post + reply), accounts |
@@ -30,6 +30,8 @@ Demo: `admin@example.com` / `password`.
 Social nav gated by `social_abilities` (`accounts`, `create`, `approve`, `engage`).
 
 i18n: `src/i18n.ts` (ar/en). Telegram staff bot link: `VITE_TELEGRAM_STAFF_BOT`.
+
+Writes from the dashboard push to Odoo immediately. Clients GET hydrates lead stage when Odoo is configured. Confirm payment stays here (Gemini classifies title/description, not OCR).
 
 ## Do not assume
 

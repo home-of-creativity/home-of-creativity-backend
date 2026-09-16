@@ -120,6 +120,20 @@ class TelegramNotifier
         return $this->sendDocument((string) $chatId, $absolute, $caption, 'client');
     }
 
+    public function sendPaymentQr(string $chatId, string $caption, string $relativePath, string $bot = 'client'): ?string
+    {
+        $absolute = Storage::disk('local')->path($relativePath);
+        if (! is_file($absolute)) {
+            $this->send($chatId, $caption, $bot);
+
+            return null;
+        }
+
+        $mime = mime_content_type($absolute) ?: 'image/png';
+
+        return $this->sendFile($chatId, $absolute, $mime, $caption, $bot);
+    }
+
     public function sendInlineActions(string $chatId, string $text, array $buttons, string $bot = 'client'): void
     {
         $token = $this->token($bot);
@@ -144,10 +158,39 @@ class TelegramNotifier
         }
     }
 
+    /**
+     * @param  list<list<array{text: string, callback_data: string}>>  $rows
+     */
+    public function sendInlineKeyboard(string $chatId, string $text, array $rows, string $bot = 'client'): void
+    {
+        $token = $this->token($bot);
+        if ($token === '') {
+            throw new RuntimeException('Telegram bot is not configured.');
+        }
+
+        $response = Http::timeout(10)
+            ->connectTimeout(3)
+            ->retry(2, 200)
+            ->acceptJson()
+            ->post("https://api.telegram.org/bot{$token}/sendMessage", [
+                'chat_id' => $chatId,
+                'text' => $text,
+                'reply_markup' => [
+                    'inline_keyboard' => $rows,
+                ],
+            ]);
+
+        if (! $response->successful() || $response->json('ok') !== true) {
+            throw new RuntimeException('Telegram did not accept the inline message.');
+        }
+    }
+
     private function token(string $bot): string
     {
-        return $bot === 'staff'
-            ? (string) config('services.telegram.staff_bot_token')
-            : (string) config('services.telegram.bot_token');
+        return match ($bot) {
+            'staff' => (string) config('services.telegram.staff_bot_token'),
+            'admin' => (string) config('services.telegram.admin_bot_token'),
+            default => (string) config('services.telegram.bot_token'),
+        };
     }
 }

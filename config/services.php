@@ -49,7 +49,25 @@ return [
         'staff_bot_token' => env('TELEGRAM_STAFF_BOT_TOKEN'),
         'staff_bot_secret' => env('TELEGRAM_STAFF_BOT_SECRET', 'change-me-staff'),
         'staff_bot_username' => env('TELEGRAM_STAFF_BOT_USERNAME'),
+        'admin_bot_token' => env('TELEGRAM_ADMIN_BOT_TOKEN'),
+        'admin_bot_secret' => env('TELEGRAM_ADMIN_BOT_SECRET', 'change-me-admin'),
+        'admin_telegram_ids' => array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) env('TELEGRAM_ADMIN_IDS', '')),
+        ))),
         'strict' => (bool) env('TELEGRAM_STRICT', false),
+    ],
+
+    'google' => [
+        'credentials_json' => env('GOOGLE_CREDENTIALS_JSON', env('GOOGLE_SERVICE_ACCOUNT_JSON')),
+        'drive_parent_folder_id' => env('GOOGLE_DRIVE_PARENT_FOLDER_ID'),
+        'calendar_id' => env('GOOGLE_CALENDAR_ID', 'primary'),
+    ],
+
+    'elevenlabs' => [
+        'api_key' => env('ELEVENLABS_API_KEY'),
+        'timeout' => (int) env('ELEVENLABS_TIMEOUT', 60),
+        'voice_id' => env('ELEVENLABS_VOICE_ID'),
     ],
 
     'odoo' => [
@@ -66,6 +84,7 @@ return [
     'clickup' => [
         'token' => env('CLICKUP_TOKEN'),
         'space_id' => env('CLICKUP_SPACE_ID'),
+        'team_id' => env('CLICKUP_TEAM_ID'),
         'list_id' => env('CLICKUP_LIST_ID'),
         'lists' => [
             'sales' => env('CLICKUP_LIST_SALES', env('CLICKUP_LIST_ID')),

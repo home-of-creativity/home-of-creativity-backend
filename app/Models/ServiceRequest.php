@@ -26,6 +26,9 @@ class ServiceRequest extends Model
         'uuid',
         'number',
         'client_id',
+        'pricing_package_id',
+        'billing_period',
+        'payment_plan',
         'title',
         'description',
         'status',
@@ -44,6 +47,17 @@ class ServiceRequest extends Model
         'gemini_processed_at',
         'quotation_amount',
         'quotation_notes',
+        'amount_total',
+        'amount_paid',
+        'amount_remaining',
+        'requires_full_payment',
+        'allows_renewal',
+        'subscription_starts_at',
+        'subscription_ends_at',
+        'google_drive_folder_id',
+        'receipt_reupload_required',
+        'receipt_reupload_reason',
+        'odoo_won_at',
     ];
 
     protected function casts(): array
@@ -59,6 +73,15 @@ class ServiceRequest extends Model
             'paid_at' => 'datetime',
             'gemini_processed_at' => 'datetime',
             'quotation_amount' => 'decimal:2',
+            'amount_total' => 'decimal:2',
+            'amount_paid' => 'decimal:2',
+            'amount_remaining' => 'decimal:2',
+            'requires_full_payment' => 'boolean',
+            'allows_renewal' => 'boolean',
+            'subscription_starts_at' => 'datetime',
+            'subscription_ends_at' => 'datetime',
+            'receipt_reupload_required' => 'boolean',
+            'odoo_won_at' => 'datetime',
         ];
     }
 
@@ -74,6 +97,51 @@ class ServiceRequest extends Model
     public function client(): BelongsTo
     {
         return $this->belongsTo(Client::class);
+    }
+
+    public function pricingPackage(): BelongsTo
+    {
+        return $this->belongsTo(PricingPackage::class);
+    }
+
+    public function subscriptions(): HasMany
+    {
+        return $this->hasMany(Subscription::class, 'request_id');
+    }
+
+    public function paymentReminders(): HasMany
+    {
+        return $this->hasMany(PaymentReminder::class, 'request_id');
+    }
+
+    public function driveDeliveries(): HasMany
+    {
+        return $this->hasMany(DriveDelivery::class, 'request_id');
+    }
+
+    public function hasRemainingBalance(): bool
+    {
+        return (float) ($this->amount_remaining ?? 0) > 0.009;
+    }
+
+    public function isFullyPaid(): bool
+    {
+        $total = (float) ($this->amount_total ?? $this->quotation_amount ?? 0);
+
+        return $total > 0 && (float) ($this->amount_paid ?? 0) + 0.009 >= $total;
+    }
+
+    public function acceptsReceiptUpload(): bool
+    {
+        if ($this->receipt_reupload_required) {
+            return true;
+        }
+
+        if ($this->status === RequestStatus::AwaitingPayment) {
+            return true;
+        }
+
+        return $this->hasRemainingBalance();
     }
 
     public function files(): HasMany

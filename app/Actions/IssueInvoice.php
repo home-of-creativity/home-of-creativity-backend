@@ -20,22 +20,38 @@ class IssueInvoice
         private OdooClient $odoo,
     ) {}
 
-    public function handle(ServiceRequest $request): Invoice
-    {
-        return DB::transaction(function () use ($request): Invoice {
-            $existing = $request->invoices()->latest('id')->first();
+    public function handle(
+        ServiceRequest $request,
+        ?float $amount = null,
+        string $kind = 'full',
+        bool $sendPaidNotice = true,
+    ): Invoice {
+        return DB::transaction(function () use ($request, $amount, $kind, $sendPaidNotice): Invoice {
+            $existing = $request->invoices()->where('kind', $kind)->latest('id')->first();
             if ($existing) {
                 return $existing;
             }
 
-            $invoiceNumber = 'INV-'.$request->number;
-            $amount = (float) ($request->quotation_amount ?? 0);
+            $resolvedAmount = $amount;
+            if ($resolvedAmount === null || $resolvedAmount <= 0) {
+                $resolvedAmount = (float) ($request->quotation_amount ?? $request->amount_total ?? 0);
+            }
+
+            $suffix = $kind === 'full' ? '' : '-'.$kind;
+            $invoiceNumber = 'INV-'.$request->number.$suffix;
+            if ($request->invoices()->where('invoice_number', $invoiceNumber)->exists()) {
+                $invoiceNumber = 'INV-'.$request->number.'-'.now()->format('His');
+            }
+
             $paymentMethod = $request->payment_method?->value ?? PaymentMethod::Cash->value;
-            [$pdfPath, $odooInvoiceId] = $this->resolveInvoicePdf($request, $invoiceNumber, $amount, $paymentMethod);
+            [$pdfPath, $odooInvoiceId] = $this->resolveInvoicePdf($request, $invoiceNumber, $resolvedAmount, $paymentMethod);
 
             $invoice = Invoice::query()->create([
                 'request_id' => $request->id,
                 'invoice_number' => $invoiceNumber,
+                'amount' => $resolvedAmount,
+                'kind' => $kind,
+                'status' => 'issued',
                 'pdf_path' => $pdfPath,
                 'issued_at' => now(),
                 'payment_method' => $request->payment_method,
@@ -43,19 +59,21 @@ class IssueInvoice
             ]);
 
             try {
-                $fileId = $this->telegram->sendStoredDocument(
-                    $request,
-                    $pdfPath,
-                    $this->invoiceCaption($request, $amount, $paymentMethod),
-                );
-                if ($fileId) {
-                    $invoice->forceFill(['telegram_file_id' => $fileId])->save();
+                if ($pdfPath !== '') {
+                    $fileId = $this->telegram->sendStoredDocument(
+                        $request,
+                        $pdfPath,
+                        $this->invoiceCaption($request, $resolvedAmount, $paymentMethod, $kind),
+                    );
+                    if ($fileId) {
+                        $invoice->forceFill(['telegram_file_id' => $fileId])->save();
+                    }
                 }
 
-                if ($request->client?->telegram_user_id) {
+                if ($sendPaidNotice && $request->client?->telegram_user_id) {
                     $this->telegram->send(
                         (string) $request->client->telegram_user_id,
-                        "تم تأكيد الدفع بنجاح للطلب {$request->number}.",
+                        'عملية الدفع تم بنجاح سيتم العمل على متطلباتكم ويتم المراجعة بأقرب وقت',
                     );
                 }
             } catch (Throwable $exception) {
@@ -83,16 +101,24 @@ class IssueInvoice
         string $paymentMethod,
     ): array {
         if (! $this->odoo->configured()) {
-            throw ValidationException::withMessages([
-                'odoo' => 'Odoo integration is required to issue invoice PDFs.',
+            if ((bool) config('services.telegram.strict')) {
+                throw ValidationException::withMessages([
+                    'odoo' => 'Odoo integration is required to issue invoice PDFs.',
+                ]);
+            }
+
+            Log::warning('Odoo not configured; issuing local invoice without PDF.', [
+                'request' => $request->number,
             ]);
+
+            return ['', null];
         }
 
         try {
             $partnerId = $request->client?->odoo_partner_id;
             if (! $partnerId && $request->client) {
                 $partnerId = $this->odoo->createOrReusePartner(
-                    $request->client->name,
+                    $request->client->company_name ?: $request->client->name,
                     $request->client->email,
                     $request->client->phone,
                     $request->number,
@@ -126,25 +152,44 @@ class IssueInvoice
 
             return [$relativePath, $odooInvoiceId];
         } catch (ValidationException $exception) {
-            throw $exception;
+            if ((bool) config('services.telegram.strict')) {
+                throw $exception;
+            }
+
+            Log::warning('Odoo invoice PDF skipped; continuing locally.', [
+                'request' => $request->number,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return ['', null];
         } catch (Throwable $exception) {
             Log::error('Odoo invoice PDF failed.', [
                 'request' => $request->number,
                 'error' => $exception->getMessage(),
             ]);
 
-            throw ValidationException::withMessages([
-                'odoo' => 'Failed to create or download the Odoo invoice PDF.',
-            ]);
+            if ((bool) config('services.telegram.strict')) {
+                throw ValidationException::withMessages([
+                    'odoo' => 'Failed to create or download the Odoo invoice PDF.',
+                ]);
+            }
+
+            return ['', null];
         }
     }
 
-    private function invoiceCaption(ServiceRequest $request, float $amount, string $paymentMethod): string
+    private function invoiceCaption(ServiceRequest $request, float $amount, string $paymentMethod, string $kind): string
     {
         $methodLabel = $paymentMethod === PaymentMethod::Receipt->value ? 'وصل بنكي' : 'نقداً';
+        $kindLabel = match ($kind) {
+            'deposit' => 'دفعة أولى 50%',
+            'remaining' => 'المتبقي',
+            'renewal' => 'تجديد',
+            default => 'كامل المبلغ',
+        };
 
         $lines = [
-            "فاتورة #{$request->number}",
+            "فاتورة #{$request->number} ({$kindLabel})",
             "العنوان: {$request->title}",
             'المبلغ: '.number_format($amount, 2).' SYP',
             "طريقة الدفع: {$methodLabel}",
@@ -153,9 +198,6 @@ class IssueInvoice
         if (filled($request->quotation_notes)) {
             $lines[] = "تفاصيل العرض: {$request->quotation_notes}";
         }
-
-        $lines[] = '';
-        $lines[] = 'تم تأكيد الدفع. مرفق الفاتورة.';
 
         return implode("\n", $lines);
     }

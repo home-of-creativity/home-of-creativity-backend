@@ -17,6 +17,7 @@ use App\Http\Controllers\Admin\SocialAccountController as AdminSocialAccountCont
 use App\Http\Controllers\Admin\SocialInboxController as AdminSocialInboxController;
 use App\Http\Controllers\Admin\SocialPostController as AdminSocialPostController;
 use App\Http\Controllers\Admin\SocialStaffController as AdminSocialStaffController;
+use App\Http\Controllers\AdminBotController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\IntegrationController;
@@ -82,6 +83,10 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
     Route::post('requests/{service_request}/quotation', [AdminServiceRequestController::class, 'sendQuotation']);
     Route::post('requests/{service_request}/confirm-payment', [AdminServiceRequestController::class, 'confirmPayment']);
     Route::post('requests/{service_request}/retry-gemini', [AdminServiceRequestController::class, 'retryGemini']);
+    Route::post('requests/{service_request}/re-request-receipt', [AdminServiceRequestController::class, 'reRequestReceipt']);
+    Route::post('requests/{service_request}/renew', [AdminServiceRequestController::class, 'renew']);
+    Route::get('ops-settings', [AdminServiceRequestController::class, 'opsSettings']);
+    Route::post('ops-settings/sham-cash-qr', [AdminServiceRequestController::class, 'uploadShamCashQr']);
     Route::get('requests/{service_request}/files/{file}/receipt', [AdminServiceRequestController::class, 'receipt']);
     Route::post('integration-events/{integrationEvent}/retry', [AdminServiceRequestController::class, 'retryIntegrationEvent']);
     Route::get('portfolio/categories', [AdminPortfolioCategoryController::class, 'index']);
@@ -155,6 +160,10 @@ Route::prefix('integrations')->middleware(['shared.secret:services.n8n.webhook_s
 
 Route::prefix('bot/telegram')->middleware('shared.secret:services.telegram.bot_secret')->group(function () {
     Route::post('link', [TelegramBotController::class, 'link']);
+    Route::get('me', [TelegramBotController::class, 'me']);
+    Route::post('profile', [TelegramBotController::class, 'updateProfile']);
+    Route::get('catalog', [TelegramBotController::class, 'catalog']);
+    Route::post('catalog/requests', [TelegramBotController::class, 'catalogRequest']);
     Route::post('requests', [TelegramBotController::class, 'submit']);
     Route::get('requests', [TelegramBotController::class, 'index']);
     Route::patch('requests/{service_request}', [TelegramBotController::class, 'update']);
@@ -165,6 +174,8 @@ Route::prefix('bot/telegram')->middleware('shared.secret:services.telegram.bot_s
     Route::post('requests/{service_request}/complete', [TelegramBotController::class, 'complete']);
     Route::post('requests/{service_request}/receipt', [TelegramBotController::class, 'receipt']);
     Route::post('requests/{service_request}/revision', [TelegramBotController::class, 'revision']);
+    Route::post('requests/{service_request}/renew', [TelegramBotController::class, 'renew']);
+    Route::post('requests/{service_request}/decline-renewal', [TelegramBotController::class, 'declineRenewal']);
     Route::post('support', [TelegramBotController::class, 'support']);
 });
 
@@ -179,4 +190,16 @@ Route::prefix('bot/staff')->middleware('shared.secret:services.telegram.staff_bo
     Route::get('new-requests', [StaffBotController::class, 'newRequests']);
     Route::post('deliver', [StaffBotController::class, 'deliver']);
     Route::post('complete', [StaffBotController::class, 'complete']);
+    Route::post('in-progress', [StaffBotController::class, 'markInProgress']);
+    Route::get('progressable-requests', [StaffBotController::class, 'progressableRequests']);
+    Route::get('completable-requests', [StaffBotController::class, 'completableRequests']);
+});
+
+Route::prefix('bot/admin')->middleware('shared.secret:services.telegram.admin_bot_secret')->group(function () {
+    Route::get('me', [AdminBotController::class, 'me']);
+    Route::get('departments', [AdminBotController::class, 'departments']);
+    Route::get('members', [AdminBotController::class, 'members']);
+    Route::get('tasks', [AdminBotController::class, 'tasks']);
+    Route::post('guests', [AdminBotController::class, 'inviteGuest']);
+    Route::post('assign', [AdminBotController::class, 'assign']);
 });

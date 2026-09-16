@@ -28,23 +28,23 @@ Seeded: `admin@example.com` / `password` (admin), `test@example.com` / `password
 
 ## Admin (`auth:sanctum` + `admin`)
 
-Overview, contact channels, clients, employees (approve/reject), service requests (quotation, confirm-payment, retry-gemini, receipts), portfolio CMS, pricing CMS, social (accounts/posts with feed-reel-story placement, carousel, inbox with source post + message replies/staff), Odoo (status, sync partners/employees, import CRM, quotations/invoices), ClickUp members, retry integration events.
+Overview, contact channels, clients, employees (approve/reject), service requests (quotation, confirm-payment, retry-gemini, receipts, re-request-receipt, renew, Sham Cash QR), portfolio CMS, pricing CMS (`requires_full_payment` / `allows_renewal` on every category), social (accounts/posts with feed-reel-story placement, carousel, inbox with source post + message replies/staff), Odoo (status, import CRM, quotations/invoices; GET hydrates live lead/employee — no dashboard sync buttons), ClickUp members, retry integration events.
 
 ## Webhooks (`VerifySharedSecret`)
 
 `POST /webhooks/n8n` and `/integrations/{odoo/quotation,odoo/invoice,clickup/tasks,clickup/mapping,telegram/notify}`. Header `X-Webhook-Secret` or `X-N8N-Secret`. Config: `services.n8n.webhook_secret`.
 
-Bot HTTP APIs: `/bot/telegram/*` (client secret), `/bot/staff/*` (staff secret). See [bots.md](bots.md).
+Bot HTTP APIs: `/bot/telegram/*` (client secret), `/bot/staff/*` (staff secret), `/bot/admin/*` (admin secret + `TELEGRAM_ADMIN_IDS`). See [bots.md](bots.md).
 
 ## Domain hub
 
 `ServiceRequest` is the hub: files, events, briefs, revisions, ClickUp tasks, quotations, invoices, deliveries, support, integration outbox.
 
-Other models: User↔Client, Employee (telegram id, no User FK), Portfolio*, Pricing*, ShowcaseClient, ContactChannel, Social*.
+Other models: User↔Client, Employee (telegram id, no User FK; join codes `EMP-%04d` from max suffix), Portfolio*, Pricing*, ShowcaseClient, ContactChannel, Social*.
 
-Integrations live in `app/Actions/`, `app/Services/` (Odoo, ClickUp, Gemini, Telegram, Facebook Graph). Jobs: Gemini classify, integration dispatch, social publish.
+Integrations live in `app/Actions/`, `app/Services/` (Odoo, ClickUp, Gemini Arabic briefs, Telegram, Facebook Graph, Google Drive/Calendar, ElevenLabs STT). Jobs: Gemini classify, integration dispatch, social publish, Drive poll, payment reminders.
 
-Artisan: `social:publish-due` (every minute, Asia/Damascus), `social:sync-inbox` / `social:sync-posts` (15 min), `integration:process-outbox`, `e2e:purge`.
+Artisan: `social:publish-due` (every minute, Asia/Damascus), `social:sync-inbox` / `social:sync-posts` (15 min), `integration:process-outbox`, `odoo:reconcile` (every minute, rotating client batches), `ops:process-reminders` (every minute), `ops:poll-drive` (5 min, retries unsent Drive files), `ops:clickup-due-alerts` (hourly, once per task/due-day; staff chat fallback), `e2e:purge`.
 
 ## Cache / queue
 
@@ -52,10 +52,10 @@ Default `CACHE_STORE=database` (`cache` + `cache_locks` tables). Tests: array st
 
 ## Tests / CI
 
-PHPUnit `tests/Feature` + `tests/Unit`. Playwright `e2e/` (starts API + dashboard). Optional landing: `E2E_REQUIRE_LANDING=1`. Local E2E API port **8002**. CI: `.github/workflows/ci.yml` (phpunit, dashboard build, e2e with Gemini/Telegram stubs).
+PHPUnit `tests/Feature` + `tests/Unit`. Playwright `e2e/` (starts API + dashboard). Optional landing: `E2E_REQUIRE_LANDING=1`. Local E2E API port **8002**. CI: `.github/workflows/ci.yml` (placeholder; GitHub does not run Laravel). VPS deploy: `.github/workflows/deploy.yml` (SSH key secrets `SSH_HOST` / `SSH_USER` / `SSH_PRIVATE_KEY`, no password). Remote stack: `deploy/compose.yaml`.
 
-`TELEGRAM_STRICT=false` keeps quotation/invoice flows alive when Telegram is down. `GEMINI_E2E_STUB` for tests.
+`TELEGRAM_STRICT=false` keeps quotation/invoice/catalog flows alive when Telegram or Odoo is down. `GEMINI_E2E_STUB` for tests. Missing Google Drive/Calendar keys log and retry; they do not abort the request. Won in Odoo only after 100% paid. CORS also reads `CORS_ALLOWED_ORIGINS` and allows raw `http(s)://IP[:port]` for the VPS dashboard.
 
 ## Do not assume
 
-Marketing site is **not** in this repo. No public registration, no client web portal, no Docker runtime in-tree, n8n JSON in `n8n/` is not auto-deployed. Live Odoo/ClickUp/Meta need credentials.
+Marketing site is **not** in this repo. No public registration, no client web portal. VPS Docker lives in `deploy/`. n8n JSON in `n8n/` is not auto-deployed. Live Odoo/ClickUp/Meta need credentials.

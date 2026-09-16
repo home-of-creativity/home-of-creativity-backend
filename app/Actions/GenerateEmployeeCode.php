@@ -10,18 +10,19 @@ class GenerateEmployeeCode
     public function handle(): string
     {
         return DB::transaction(function () {
-            $latest = Employee::query()
+            $codes = Employee::query()
                 ->where('code', 'like', 'EMP-%')
                 ->lockForUpdate()
-                ->orderByDesc('id')
-                ->value('code');
+                ->pluck('code');
 
-            $sequence = 1;
-            if (is_string($latest) && preg_match('/EMP-(\d+)$/', $latest, $matches) === 1) {
-                $sequence = ((int) $matches[1]) + 1;
+            $sequence = 0;
+            foreach ($codes as $code) {
+                if (is_string($code) && preg_match('/EMP-(\d+)$/', $code, $matches) === 1) {
+                    $sequence = max($sequence, (int) $matches[1]);
+                }
             }
 
-            return sprintf('EMP-%04d', $sequence);
+            return sprintf('EMP-%04d', $sequence + 1);
         });
     }
 }

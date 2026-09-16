@@ -31,6 +31,7 @@ const emptyForm = {
   badge_en: "",
   badge_ar: "",
   is_published: true,
+  allows_partial_payment: "",
 };
 
 export function PricingPackagesPanel({
@@ -142,6 +143,8 @@ export function PricingPackagesPanel({
       badge_en: item.badge_en ?? "",
       badge_ar: item.badge_ar ?? "",
       is_published: item.is_published,
+      allows_partial_payment:
+        item.allows_partial_payment === true ? "true" : item.allows_partial_payment === false ? "false" : "",
     });
     setShowForm(true);
     setError("");
@@ -176,6 +179,7 @@ export function PricingPackagesPanel({
       badge_en: form.badge_en.trim() || null,
       badge_ar: form.badge_ar.trim() || null,
       is_published: form.is_published,
+      allows_partial_payment: form.allows_partial_payment === "" ? null : form.allows_partial_payment === "true",
     };
 
     if (oneTime) {
@@ -400,6 +404,18 @@ export function PricingPackagesPanel({
               {t(copy.pricingBadgeAr)}
               <input className="field" value={form.badge_ar} onChange={(e) => setForm((prev) => ({ ...prev, badge_ar: e.target.value }))} />
             </label>
+            <label className="field-label">
+              {t(copy.packagePartialPay)}
+              <select
+                className="field"
+                value={form.allows_partial_payment}
+                onChange={(e) => setForm((prev) => ({ ...prev, allows_partial_payment: e.target.value }))}
+              >
+                <option value="">{t(copy.inheritCategory)}</option>
+                <option value="true">{t(copy.partialPayment)}</option>
+                <option value="false">{t(copy.fullPayment)}</option>
+              </select>
+            </label>
             <label className="checkbox-row">
               <input type="checkbox" checked={form.is_published} onChange={(e) => setForm((prev) => ({ ...prev, is_published: e.target.checked }))} />
               {t(copy.published)}
@@ -416,15 +432,16 @@ export function PricingPackagesPanel({
               <th>{t(copy.pricingSubcategory)}</th>
               <th>{t(copy.pricingPrice)}</th>
               <th>{t(copy.featured)}</th>
+              <th>{t(copy.paymentPlan)}</th>
               <th>{t(copy.order)}</th>
               <th>{t(copy.actions)}</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <LoadingTableRow colSpan={6} label={t(copy.loading)} />
+              <LoadingTableRow colSpan={7} label={t(copy.loading)} />
             ) : items.length === 0 ? (
-              <tr><td colSpan={6}>{t(copy.empty)}</td></tr>
+              <tr><td colSpan={7}>{t(copy.empty)}</td></tr>
             ) : (
               items.map((item, index) => (
                 <tr key={item.id}>
@@ -432,6 +449,15 @@ export function PricingPackagesPanel({
                   <td>{item.subcategory ? subcategoryLabel(item.subcategory, locale) : item.subcategory_id}</td>
                   <td>{priceSummary(item)}</td>
                   <td>{item.featured ? t(copy.featured) : "—"}</td>
+                  <td>
+                    <span className={`pay-badge ${item.allows_partial_payment === false ? "pay-badge-full" : "pay-badge-partial"}`}>
+                      {item.allows_partial_payment === false
+                        ? t(copy.fullPayment)
+                        : item.allows_partial_payment === true
+                          ? t(copy.partialPayment)
+                          : t(copy.inheritCategory)}
+                    </span>
+                  </td>
                   <td>
                     <div className="order-actions">
                       <button type="button" className="btn btn-order" disabled={index === 0 || movingId === item.id} onClick={() => void move(item.id, "up")}>↑</button>

@@ -27,7 +27,7 @@ class PushEmployeeToOdoo
                     'active' => $employee->is_active,
                 ]);
 
-                return $employee;
+                return $this->reload($employee);
             }
 
             $employeeId = $this->odoo->createOrReuseEmployee(
@@ -45,6 +45,15 @@ class PushEmployeeToOdoo
             ]);
         }
 
-        return $employee->fresh() ?? $employee;
+        return $this->reload($employee);
+    }
+
+    private function reload(Employee $employee): Employee
+    {
+        if (! $employee->exists) {
+            return $employee;
+        }
+
+        return $employee->refresh();
     }
 }

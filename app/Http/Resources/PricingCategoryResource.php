@@ -23,6 +23,8 @@ class PricingCategoryResource extends JsonResource
             'lead_ar' => $this->lead_ar,
             'sort_order' => $this->sort_order,
             'is_published' => $this->is_published,
+            'requires_full_payment' => (bool) $this->requires_full_payment,
+            'allows_renewal' => (bool) $this->allows_renewal,
             'subcategories_count' => $this->whenCounted('subcategories'),
             'subcategories' => PricingSubcategoryResource::collection($this->whenLoaded('subcategories')),
             'created_at' => $this->created_at?->toIso8601String(),

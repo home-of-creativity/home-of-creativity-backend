@@ -233,6 +233,68 @@ class AdminDashboardTest extends TestCase
         ]);
     }
 
+    public function test_updating_employee_writes_odoo_ids_and_vals_positionally(): void
+    {
+        Http::preventStrayRequests();
+        config([
+            'services.odoo.enabled' => true,
+            'services.odoo.url' => 'https://odoo.test',
+            'services.odoo.db' => 'hoc',
+            'services.odoo.username' => 'admin',
+            'services.odoo.api_key' => 'secret-key',
+            'services.odoo.use_json2' => false,
+        ]);
+
+        $writeArgs = null;
+        Http::fake([
+            'https://odoo.test/jsonrpc' => function (Request $request) use (&$writeArgs) {
+                $params = $request->data()['params'] ?? [];
+                $service = $params['service'] ?? '';
+                $method = $params['method'] ?? '';
+
+                if ($service === 'common' && $method === 'authenticate') {
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => 2], 200);
+                }
+
+                $args = $params['args'] ?? [];
+                $model = (string) ($args[3] ?? '');
+                $action = (string) ($args[4] ?? '');
+                if ($model === 'hr.employee' && $action === 'write') {
+                    $writeArgs = $args[5] ?? null;
+
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => true], 200);
+                }
+
+                return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => null], 200);
+            },
+        ]);
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        $employee = Employee::factory()->create([
+            'name' => 'Sara Saleh',
+            'email' => 'sara@hoc.test',
+            'phone' => '+963999000222',
+            'profession' => EmployeeProfession::Sales,
+            'odoo_employee_id' => '66',
+        ]);
+
+        $this->putJson("/api/admin/employees/{$employee->id}", [
+            'name' => 'Sara Updated',
+            'profession' => EmployeeProfession::Sales->value,
+        ])->assertOk()
+            ->assertJsonPath('data.name', 'Sara Updated')
+            ->assertJsonPath('data.odoo_employee_id', '66');
+
+        $this->assertIsArray($writeArgs);
+        $this->assertSame([66], $writeArgs[0]);
+        $this->assertSame('Sara Updated', $writeArgs[1]['name']);
+        $this->assertArrayNotHasKey('ids', $writeArgs);
+        $this->assertArrayNotHasKey('vals', $writeArgs);
+    }
+
     public function test_admin_can_sync_odoo_employees_and_push_local_staff(): void
     {
         Http::preventStrayRequests();

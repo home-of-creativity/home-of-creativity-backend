@@ -40,4 +40,20 @@ enum RequestStatus: string
     {
         return $this === self::Submitted;
     }
+
+    public function labelAr(): string
+    {
+        return match ($this) {
+            self::Submitted => 'تم الاستلام',
+            self::QuotationSent => 'عرض سعر مرسل',
+            self::QuotationRejected => 'عرض مرفوض',
+            self::AwaitingPayment => 'بانتظار الدفع',
+            self::PaymentConfirmed => 'تم تأكيد الدفع',
+            self::InProgress => 'قيد التنفيذ',
+            self::ReadyForReview => 'بانتظار المراجعة',
+            self::RevisionRequested => 'مطلوب تعديل',
+            self::Completed => 'مكتمل',
+            self::Cancelled => 'ملغى',
+        };
+    }
 }

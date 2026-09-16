@@ -18,6 +18,8 @@ class ApproveQuotation
     public function __construct(
         private RequestStatusTransitionService $transitions,
         private NotifyEmployees $notifyEmployees,
+        private ApplyQuotationAcceptance $applyQuotationAcceptance,
+        private IssueInvoice $issueInvoice,
     ) {}
 
     public function handle(ServiceRequest $request, ?Quotation $quotation = null): ServiceRequest
@@ -31,7 +33,7 @@ class ApproveQuotation
             throw ValidationException::withMessages(['quotation' => 'No quotation found.']);
         }
 
-        return DB::transaction(function () use ($request, $quotation): ServiceRequest {
+        $updated = DB::transaction(function () use ($request, $quotation): ServiceRequest {
             QuotationDecision::query()->firstOrCreate(
                 [
                     'request_id' => $request->id,
@@ -43,7 +45,7 @@ class ApproveQuotation
 
             $updated = $this->transitions->transition($request, RequestStatus::AwaitingPayment, 'client', 'Quotation approved.');
 
-            $fresh = $updated->fresh('client') ?? $updated;
+            $fresh = $updated->fresh(['client', 'pricingPackage']) ?? $updated;
             $displayNumber = ResolveServiceRequest::displayNumber($fresh);
             $this->notifyEmployees->handle(
                 $fresh,
@@ -51,7 +53,22 @@ class ApproveQuotation
                 "✅ وافق الزبون على عرض السعر\n#{$displayNumber} — {$fresh->title}\n{$fresh->client?->name}",
             );
 
-            return $updated;
+            return $fresh;
         });
+
+        $updated = $this->applyQuotationAcceptance->handle($updated->fresh(['client', 'pricingPackage']) ?? $updated);
+
+        $due = (float) ($updated->requires_full_payment
+            ? ($updated->amount_total ?? $updated->quotation_amount ?? 0)
+            : round(((float) ($updated->amount_total ?? $updated->quotation_amount ?? 0)) * 0.5, 2));
+
+        $kind = $updated->requires_full_payment ? 'full' : 'deposit';
+        try {
+            $this->issueInvoice->handle($updated, $due, $kind, false);
+        } catch (\Throwable) {
+            // Local catalog/payment continues if Odoo PDF fails.
+        }
+
+        return $updated->fresh(['client', 'invoices', 'pricingPackage']) ?? $updated;
     }
 }

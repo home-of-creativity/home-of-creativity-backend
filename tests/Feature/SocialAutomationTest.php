@@ -13,6 +13,7 @@ use App\Models\SocialInboxItem;
 use App\Models\SocialPost;
 use App\Models\SocialPostMedia;
 use App\Models\User;
+use App\Services\SocialAccountSync;
 use App\Services\SocialPublisher;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -180,7 +181,9 @@ class SocialAutomationTest extends TestCase
             'page_id' => '111',
             'connection_status' => SocialAccountStatus::Disconnected->value,
             'is_active' => false,
+            'last_error' => 'user_disconnected',
         ]);
+        $this->assertSame(0, app(SocialAccountSync::class)->syncFromFacebook($admin->id));
     }
 
     public function test_create_permission_cannot_manage_accounts(): void
@@ -519,6 +522,52 @@ class SocialAutomationTest extends TestCase
             ->assertJsonPath('data', []);
 
         $this->assertModelMissing($post);
+    }
+
+    public function test_posts_index_prunes_deleted_facebook_posts_for_filtered_account(): void
+    {
+        Http::fake([
+            'https://graph.facebook.com/*' => Http::response([
+                'error' => [
+                    'message' => 'Unsupported get request. Object with ID does not exist',
+                    'code' => 100,
+                    'error_subcode' => 33,
+                ],
+            ], 400),
+        ]);
+
+        $admin = $this->admin();
+        Sanctum::actingAs($admin);
+
+        $keptAccount = SocialAccount::factory()->connected()->recycle($admin)->create(['page_id' => 'page-kept']);
+        $prunedAccount = SocialAccount::factory()->connected()->recycle($admin)->create(['page_id' => 'page-gone']);
+
+        $keptPost = SocialPost::factory()->recycle($admin)->create([
+            'created_by' => $admin->id,
+            'status' => SocialPostStatus::Published,
+            'published_at' => now(),
+        ]);
+        $keptPost->accounts()->attach($keptAccount->id, [
+            'status' => SocialPublishStatus::Published->value,
+            'external_id' => 'fb_other',
+        ]);
+
+        $gonePost = SocialPost::factory()->recycle($admin)->create([
+            'created_by' => $admin->id,
+            'status' => SocialPostStatus::Published,
+            'published_at' => now(),
+        ]);
+        $gonePost->accounts()->attach($prunedAccount->id, [
+            'status' => SocialPublishStatus::Published->value,
+            'external_id' => 'fb_gone',
+        ]);
+
+        $this->getJson("/api/admin/social/posts?account_id={$prunedAccount->id}")
+            ->assertOk()
+            ->assertJsonPath('data', []);
+
+        $this->assertModelMissing($gonePost);
+        $this->assertModelExists($keptPost);
     }
 
     public function test_published_post_can_be_edited_on_facebook(): void

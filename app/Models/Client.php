@@ -16,11 +16,15 @@ class Client extends Model
     protected $fillable = [
         'user_id',
         'name',
+        'company_name',
+        'company_activity',
         'email',
         'phone',
         'telegram_user_id',
         'locale',
         'odoo_partner_id',
+        'odoo_lead_id',
+        'odoo_stage_name',
     ];
 
     public function user(): BelongsTo
@@ -31,5 +35,31 @@ class Client extends Model
     public function requests(): HasMany
     {
         return $this->hasMany(ServiceRequest::class);
+    }
+
+    public function profileComplete(): bool
+    {
+        return filled($this->name)
+            && filled($this->phone)
+            && filled($this->company_name);
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function missingProfileFields(): array
+    {
+        $missing = [];
+        if (! filled($this->name)) {
+            $missing[] = 'name';
+        }
+        if (! filled($this->phone)) {
+            $missing[] = 'phone';
+        }
+        if (! filled($this->company_name)) {
+            $missing[] = 'company_name';
+        }
+
+        return $missing;
     }
 }

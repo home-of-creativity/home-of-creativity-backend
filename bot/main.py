@@ -44,6 +44,22 @@ BTN_MY = "📋 طلباتي"
 BTN_SUPPORT = "💬 دعم"
 BTN_SUBMIT = "✅ تم الإرسال"
 MAX_ATTACHMENTS = 5
+PERIOD_LABELS = {
+    "monthly": "شهري",
+    "quarterly": "ربع سنوي",
+    "semiannual": "نصف سنوي",
+    "yearly": "سنوي",
+    "one_time": "دفعة واحدة",
+}
+PROFILE_PROMPTS = {
+    "name": "ما اسمك الكامل؟",
+    "phone": "نطلب رقم الهاتف لنتواصل معك عند صدور العرض أو أي استفسار عن الطلب.\nما رقم هاتفك؟",
+    "company_name": "نطلب اسم الشركة لنصدر العرض والفاتورة باسم جهتك ونحفظ الطلب في ملفك.\nما اسم الشركة؟",
+}
+REJECT_REASONS = {
+    "rjprice": "السعر غالي",
+    "rjdelay": "تأخير بالرد",
+}
 ALLOWED_ATTACHMENT_MIMES = {
     "image/jpeg",
     "image/png",
@@ -61,6 +77,27 @@ def api_headers() -> dict[str, str]:
         "Accept": "application/json",
         "X-Webhook-Secret": BOT_SECRET,
     }
+
+
+def welcome_text(user, *, need_profile: bool) -> str:
+    raw_name = (getattr(user, "first_name", None) or getattr(user, "full_name", None) or "").strip()
+    name = escape(raw_name) if raw_name else "بك"
+    lines = [
+        f"أهلاً {name} في Home of Creativity.",
+        "هذا بوت العملاء: تطلب الخدمة، تستلم عرض السعر، وتتابع حالة طلبك من هنا.",
+    ]
+    if need_profile:
+        lines.extend(
+            [
+                "",
+                "قبل أول طلب نحتاج رقم هاتفك واسم الشركة:",
+                "• رقم الهاتف — لنتواصل معك عند صدور العرض أو أي استفسار عن الطلب.",
+                "• اسم الشركة — لنصدر العرض والفاتورة باسم جهتك ونحفظ الطلب في ملفك.",
+            ]
+        )
+    else:
+        lines.append("اختر من الأزرار أدناه لطلب جديد أو متابعة طلباتك.")
+    return "\n".join(lines)
 
 
 def main_keyboard() -> ReplyKeyboardMarkup:
@@ -212,7 +249,7 @@ async def submit_new_request(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def link_client(telegram_id: int, name: str) -> dict:
-    async with httpx.AsyncClient(timeout=12) as client:
+    async with httpx.AsyncClient(timeout=20) as client:
         response = await client.post(
             f"{API_URL}/bot/telegram/link",
             headers=api_headers(),
@@ -226,27 +263,358 @@ async def link_client(telegram_id: int, name: str) -> dict:
         return response.json()
 
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user = update.effective_user
-    if user is None or update.message is None:
+async def fetch_me(telegram_id: int) -> dict:
+    async with httpx.AsyncClient(timeout=20) as client:
+        response = await client.get(
+            f"{API_URL}/bot/telegram/me",
+            headers=api_headers(),
+            params={"telegram_user_id": str(telegram_id)},
+        )
+        response.raise_for_status()
+        return response.json().get("data") or {}
+
+
+async def patch_profile(telegram_id: int, field: str, value: str) -> dict:
+    async with httpx.AsyncClient(timeout=20) as client:
+        response = await client.post(
+            f"{API_URL}/bot/telegram/profile",
+            headers=api_headers(),
+            json={"telegram_user_id": str(telegram_id), field: value},
+        )
+        response.raise_for_status()
+        return response.json().get("data") or {}
+
+
+async def fetch_catalog(telegram_id: int, **params) -> dict:
+    query = {"telegram_user_id": str(telegram_id)}
+    query.update({key: value for key, value in params.items() if value is not None})
+    async with httpx.AsyncClient(timeout=12) as client:
+        response = await client.get(
+            f"{API_URL}/bot/telegram/catalog",
+            headers=api_headers(),
+            params=query,
+        )
+        response.raise_for_status()
+        return response.json().get("data") or {}
+
+
+def period_is_subscription(period: str) -> bool:
+    return period in {"monthly", "quarterly", "semiannual", "yearly"}
+
+
+def catalog_footer_rows(scope: str, parent: int, has_more: bool, next_offset: int) -> list[list[InlineKeyboardButton]]:
+    rows: list[list[InlineKeyboardButton]] = []
+    if has_more:
+        rows.append([InlineKeyboardButton("عرض المزيد", callback_data=f"more:{scope}:{parent}:{next_offset}")])
+    rows.append([InlineKeyboardButton("طلب يدوي", callback_data="cman")])
+    return rows
+
+
+def catalog_markup(payload: dict, *, scope: str = "root", parent: int = 0) -> InlineKeyboardMarkup:
+    kind = str(payload.get("kind") or "categories")
+    items = payload.get("items") or []
+    has_more = bool(payload.get("has_more"))
+    next_offset = int(payload.get("next_offset") or 0)
+    rows: list[list[InlineKeyboardButton]] = []
+
+    if kind in {"categories", "category"}:
+        for item in items:
+            name = str(item.get("name") or "")[:40]
+            rows.append([InlineKeyboardButton(name, callback_data=f"cat:{item['id']}")])
+    elif kind in {"subcategory", "subcategories"}:
+        for item in items:
+            name = str(item.get("name") or "")[:40]
+            rows.append([InlineKeyboardButton(name, callback_data=f"sub:{item['id']}")])
+    elif kind in {"package", "packages"}:
+        for item in items:
+            name = str(item.get("name") or "")[:40]
+            rows.append([InlineKeyboardButton(name, callback_data=f"pkg:{item['id']}")])
+    elif kind == "periods":
+        first = items[0] if items else {}
+        package_id = first.get("id")
+        for period in first.get("periods") or []:
+            label = PERIOD_LABELS.get(str(period), str(period))
+            rows.append([InlineKeyboardButton(label, callback_data=f"per:{package_id}:{period}")])
+    else:
+        for item in items:
+            item_type = str(item.get("type") or "")
+            name = str(item.get("name") or "")[:40]
+            if item_type == "subcategory":
+                rows.append([InlineKeyboardButton(name, callback_data=f"sub:{item['id']}")])
+            elif item_type == "package":
+                rows.append([InlineKeyboardButton(name, callback_data=f"pkg:{item['id']}")])
+
+    rows.extend(catalog_footer_rows(scope, parent, has_more, next_offset))
+    return InlineKeyboardMarkup(rows)
+
+
+def next_profile_field(me: dict) -> str | None:
+    missing = me.get("missing_fields") or []
+    if missing:
+        return str(missing[0])
+    if not me.get("profile_complete"):
+        if not me.get("name"):
+            return "name"
+        if not me.get("phone"):
+            return "phone"
+        if not me.get("company_name"):
+            return "company_name"
+    return None
+
+
+async def ask_profile_field(message, context: ContextTypes.DEFAULT_TYPE, field: str) -> None:
+    context.user_data["profile_field"] = field
+    await message.reply_text(PROFILE_PROMPTS.get(field, "أكمل بياناتك:"), reply_markup=main_keyboard())
+
+
+async def notify_api_failure(message) -> None:
+    if message is None:
         return
-    await link_client(user.id, user.full_name)
-    await update.message.reply_text(
-        "مرحباً في Home of Creativity.\nاختر من الأزرار أدناه:",
+    await message.reply_text(
+        "تعذر الاتصال بالخادم حالياً. أعد المحاولة بعد ثوانٍ.",
         reply_markup=main_keyboard(),
     )
 
 
-async def new_request(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if update.message is None:
-        return ConversationHandler.END
+async def apply_profile_gate(update: Update, context: ContextTypes.DEFAULT_TYPE, me: dict) -> bool:
+    message = update.message or (update.callback_query.message if update.callback_query else None)
+    if message is None:
+        return False
+    field = next_profile_field(me)
+    if field is None:
+        context.user_data.pop("profile_field", None)
+        return True
+    await ask_profile_field(message, context, field)
+    return False
+
+
+async def ensure_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    user = update.effective_user
+    message = update.message or (update.callback_query.message if update.callback_query else None)
+    if user is None or message is None:
+        return False
+    try:
+        me = await fetch_me(user.id)
+    except (httpx.TimeoutException, httpx.HTTPStatusError, httpx.RequestError):
+        await notify_api_failure(message)
+        return False
+    return await apply_profile_gate(update, context, me)
+
+
+async def capture_profile_field(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    user = update.effective_user
+    if user is None or update.message is None or not update.message.text:
+        return False
+    field = context.user_data.get("profile_field")
+    if not field:
+        return False
+    value = update.message.text.strip()
+    if not value:
+        await update.message.reply_text(PROFILE_PROMPTS.get(field, "أكمل بياناتك:"))
+        return True
+    try:
+        me = await patch_profile(user.id, field, value)
+    except httpx.HTTPStatusError:
+        await notify_api_failure(update.message)
+        return True
+    except (httpx.TimeoutException, httpx.RequestError):
+        try:
+            me = await fetch_me(user.id)
+        except (httpx.TimeoutException, httpx.HTTPStatusError, httpx.RequestError):
+            await notify_api_failure(update.message)
+            return True
+    nxt = next_profile_field(me)
+    if nxt:
+        await ask_profile_field(update.message, context, nxt)
+        return True
+    context.user_data.pop("profile_field", None)
+    await update.message.reply_text(
+        "تم حفظ بياناتك. يمكنك الآن اختيار خدمة من القائمة.",
+        reply_markup=main_keyboard(),
+    )
+    return True
+
+
+async def show_catalog(
+    message,
+    context: ContextTypes.DEFAULT_TYPE,
+    telegram_id: int,
+    *,
+    category_id: int | None = None,
+    subcategory_id: int | None = None,
+    package_id: int | None = None,
+    offset: int = 0,
+    parent: int = 0,
+) -> None:
+    parent = 0
+    scope = "root"
+    if category_id:
+        parent = category_id
+        scope = "cat"
+    if subcategory_id:
+        parent = subcategory_id
+        scope = "sub"
+
+    payload = await fetch_catalog(
+        telegram_id,
+        category_id=category_id,
+        subcategory_id=subcategory_id,
+        package_id=package_id,
+        offset=offset,
+    )
+    kind = str(payload.get("kind") or "")
+    if kind == "periods":
+        first = (payload.get("items") or [{}])[0]
+        periods = [str(item) for item in (first.get("periods") or [])]
+        subscription = [item for item in periods if period_is_subscription(item)]
+        if not subscription:
+            await create_catalog_request(message, telegram_id, int(first.get("id") or 0), None)
+            return
+        await message.reply_text(
+            f"اختر مدة الاشتراك لـ {escape(str(first.get('name') or ''))}:",
+            reply_markup=catalog_markup(payload, scope="pkg", parent=int(first.get("id") or 0)),
+        )
+        return
+
+    title = "اختر الفئة:"
+    if category_id:
+        title = "اختر الفئة الفرعية أو الباقة:"
+    if subcategory_id:
+        title = "اختر الباقة:"
+    await message.reply_text(title, reply_markup=catalog_markup(payload, scope=scope, parent=parent))
+
+
+async def create_catalog_request(message, telegram_id: int, package_id: int, period: str | None) -> None:
+    payload: dict[str, object] = {
+        "telegram_user_id": str(telegram_id),
+        "package_id": package_id,
+    }
+    if period and period != "one_time":
+        payload["billing_period"] = period
+    elif period == "one_time":
+        payload["billing_period"] = "one_time"
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.post(
+            f"{API_URL}/bot/telegram/catalog/requests",
+            headers=api_headers(),
+            json=payload,
+        )
+        if response.status_code >= 400:
+            detail = response.json().get("message", response.text) if response.headers.get("content-type", "").startswith("application/json") else response.text
+            await message.reply_text(
+                f"تعذر إنشاء الطلب: {escape(str(detail))}",
+                reply_markup=main_keyboard(),
+            )
+            return
+        result = response.json().get("data") or {}
+
+    number = escape(str(result.get("number") or ""))
+    await message.reply_text(
+        f"تم إنشاء الطلب {number} وإرسال عرض السعر.",
+        reply_markup=main_keyboard(),
+    )
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    if user is None or update.message is None:
+        return
+    try:
+        if update.effective_chat is not None:
+            await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    except Exception:
+        pass
+    try:
+        payload = await link_client(user.id, user.full_name)
+    except (httpx.TimeoutException, httpx.HTTPStatusError, httpx.RequestError):
+        await notify_api_failure(update.message)
+        return
+    me = payload.get("data") or {}
+    need_profile = next_profile_field(me) is not None
+    await update.message.reply_text(
+        welcome_text(user, need_profile=need_profile),
+        reply_markup=main_keyboard(),
+    )
+    if not await apply_profile_gate(update, context, me):
+        return
+
+
+async def begin_manual_request(message, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data["composing_request"] = True
     context.user_data["attachments"] = []
     context.user_data["description"] = ""
     context.user_data.pop("submitting", None)
     context.user_data.pop("attachment_status_message_id", None)
-    await update.message.reply_text("ما عنوان الطلب؟")
+    await message.reply_text("ما عنوان الطلب؟")
     return WAITING_TITLE
+
+
+async def new_request(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if update.message is None or update.effective_user is None:
+        return ConversationHandler.END
+    if not await ensure_profile(update, context):
+        return ConversationHandler.END
+    await show_catalog(update.message, context, update.effective_user.id)
+    return ConversationHandler.END
+
+
+async def manual_from_catalog(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if query is None or query.message is None:
+        return ConversationHandler.END
+    await query.answer()
+    if not await ensure_profile(update, context):
+        return ConversationHandler.END
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    return await begin_manual_request(query.message, context)
+
+
+async def catalog_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if query is None or query.data is None or query.from_user is None or query.message is None:
+        return
+    await query.answer()
+    if not await ensure_profile(update, context):
+        return
+
+    data = query.data
+    telegram_id = query.from_user.id
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
+    if data.startswith("cat:"):
+        category_id = int(data.split(":", 1)[1])
+        await show_catalog(query.message, context, telegram_id, category_id=category_id, parent=category_id)
+        return
+    if data.startswith("sub:"):
+        subcategory_id = int(data.split(":", 1)[1])
+        await show_catalog(query.message, context, telegram_id, subcategory_id=subcategory_id, parent=subcategory_id)
+        return
+    if data.startswith("pkg:"):
+        package_id = int(data.split(":", 1)[1])
+        await show_catalog(query.message, context, telegram_id, package_id=package_id, parent=package_id)
+        return
+    if data.startswith("per:"):
+        _, package_id, period = data.split(":", 2)
+        await create_catalog_request(query.message, telegram_id, int(package_id), period)
+        return
+    if data.startswith("more:"):
+        _, scope, parent_raw, offset_raw = data.split(":", 3)
+        parent = int(parent_raw)
+        offset = int(offset_raw)
+        kwargs: dict[str, int | None] = {"offset": offset}
+        if scope == "sub":
+            kwargs["subcategory_id"] = parent
+        elif scope == "cat":
+            kwargs["category_id"] = parent
+        await show_catalog(query.message, context, telegram_id, **kwargs)
+        return
 
 
 async def capture_title(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -332,13 +700,35 @@ async def list_requests(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
 
     lines = []
+    renew_rows: list[list[InlineKeyboardButton]] = []
     for item in items[:10]:
-        label = item.get("execution_status_label") or item.get("status")
-        lines.append(f"• {item['number']}: {item['title']} — {label}")
+        label = item.get("status_label") or item.get("execution_status_label") or item.get("status")
+        package = item.get("package_name") or "طلب يدوي"
+        period = PERIOD_LABELS.get(str(item.get("billing_period") or ""), item.get("billing_period") or "")
+        paid = item.get("amount_paid")
+        remaining = item.get("amount_remaining")
+        money = ""
+        if paid is not None or remaining is not None:
+            money = f"\n  المدفوع: {paid or 0} — المتبقي: {remaining or 0}"
+        extra = f"\n  الباقة: {package}"
+        if period:
+            extra += f" — {period}"
+        lines.append(f"• {item['number']}: {item['title']} — {label}{extra}{money}")
         if item.get("can_edit"):
             lines.append(f"  ✏️ للتعديل: /edit {item['number']}")
+        if item.get("receipt_reupload_required") or item.get("accepts_receipt"):
+            lines.append("  📎 أرسل وصل الدفع كصورة أو PDF")
+        if item.get("can_renew"):
+            renew_rows.append(
+                [
+                    InlineKeyboardButton(f"تجديد {item['number']}", callback_data=f"renew:{item['number']}"),
+                    InlineKeyboardButton("لن أجدد", callback_data=f"norenew:{item['number']}"),
+                ]
+            )
 
     await update.message.reply_text("\n".join(lines), reply_markup=main_keyboard())
+    if renew_rows:
+        await update.message.reply_text("تجديد الاشتراك:", reply_markup=InlineKeyboardMarkup(renew_rows))
 
 
 async def edit_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -490,12 +880,34 @@ async def client_request_action(update: Update, context: ContextTypes.DEFAULT_TY
             return
 
         if action == "receipt_hint":
+            context.user_data["receipt_number"] = number
             await query.edit_message_reply_markup(reply_markup=None)
             await query.message.reply_text(
                 f"أرسل صورة أو PDF لوصل الدفع للطلب #{escape(number)}.",
                 reply_markup=main_keyboard(),
             )
             return
+
+
+async def post_reject(query, number: str, reason: str) -> None:
+    user = query.from_user
+    async with httpx.AsyncClient(timeout=12) as client:
+        response = await client.post(
+            f"{API_URL}/bot/telegram/requests/{number}/reject",
+            headers=api_headers(),
+            json={"telegram_user_id": str(user.id), "reason": reason},
+        )
+        if response.status_code >= 400:
+            await api_error_alert(query, response)
+            return
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    await query.message.reply_text(
+        f"تم تسجيل رفض عرض السعر للطلب #{escape(number)}.",
+        reply_markup=main_keyboard(),
+    )
 
 
 async def quotation_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -514,20 +926,57 @@ async def quotation_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 json={"telegram_user_id": str(user.id)},
             )
             if response.status_code < 400:
+                context.user_data["receipt_number"] = number
                 await query.edit_message_reply_markup(reply_markup=None)
                 await query.message.reply_text(
                     f"تمت الموافقة على عرض السعر للطلب #{escape(number)}.\n"
-                    "يمكنك إرسال وصل الدفع كصورة أو PDF، أو انتظر تأكيد الدفع النقدي من الإدارة.",
+                    "حوّل عبر شام كاش ثم أرسل وصل الدفع كصورة أو PDF.",
                     reply_markup=main_keyboard(),
                 )
             else:
                 await api_error_alert(query, response)
             return
 
-        if action == "reject":
+        if action in REJECT_REASONS:
+            await post_reject(query, number, REJECT_REASONS[action])
+            return
+
+        if action in {"reject", "rjother"}:
             context.user_data["reject_number"] = number
             await query.edit_message_reply_markup(reply_markup=None)
-            await query.message.reply_text("ما سبب الرفض؟")
+            await query.message.reply_text("اكتب سبب رفضك:")
+            return
+
+        if action == "renew":
+            response = await client.post(
+                f"{API_URL}/bot/telegram/requests/{number}/renew",
+                headers=api_headers(),
+                json={"telegram_user_id": str(user.id)},
+            )
+            if response.status_code < 400:
+                await query.edit_message_reply_markup(reply_markup=None)
+                await query.message.reply_text(
+                    f"تم بدء تجديد الاشتراك للطلب #{escape(number)}.",
+                    reply_markup=main_keyboard(),
+                )
+            else:
+                await api_error_alert(query, response)
+            return
+
+        if action == "norenew":
+            response = await client.post(
+                f"{API_URL}/bot/telegram/requests/{number}/decline-renewal",
+                headers=api_headers(),
+                json={"telegram_user_id": str(user.id)},
+            )
+            if response.status_code < 400:
+                await query.edit_message_reply_markup(reply_markup=None)
+                await query.message.reply_text(
+                    f"لن يتم تجديد الاشتراك للطلب #{escape(number)}. يبقى حتى تاريخ انتهائه.",
+                    reply_markup=main_keyboard(),
+                )
+            else:
+                await api_error_alert(query, response)
             return
 
 
@@ -590,6 +1039,9 @@ async def capture_reject_reason(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def pending_callback_followup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if context.user_data.get("profile_field"):
+        await capture_profile_field(update, context)
+        return
     if context.user_data.get("reject_number"):
         await capture_reject_reason(update, context)
         return
@@ -631,7 +1083,14 @@ async def upload_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         requests_resp.raise_for_status()
         items = requests_resp.json().get("data", [])
-        awaiting = next((i for i in items if i.get("status") == "awaiting_payment"), None)
+        hinted = context.user_data.get("receipt_number")
+        awaiting = None
+        if hinted:
+            awaiting = next((i for i in items if i.get("number") == hinted or str(i.get("number", "")).endswith(str(hinted))), None)
+        if awaiting is None:
+            awaiting = next((i for i in items if i.get("receipt_reupload_required")), None)
+        if awaiting is None:
+            awaiting = next((i for i in items if i.get("accepts_receipt") or i.get("status") == "awaiting_payment"), None)
         if not awaiting:
             return
 
@@ -650,6 +1109,7 @@ async def upload_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await message.reply_text(f"تعذر رفع الوصل: {escape(str(detail))}", reply_markup=main_keyboard())
             return
 
+    context.user_data.pop("receipt_number", None)
     await message.reply_text(
         f"تم استلام وصل الدفع للطلب {awaiting['number']}. سيتم مراجعته من الإدارة.",
         reply_markup=main_keyboard(),
@@ -660,6 +1120,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.pop("composing_request", None)
     context.user_data.pop("submitting", None)
     context.user_data.pop("attachment_status_message_id", None)
+    context.user_data.pop("profile_field", None)
     if update.message:
         await update.message.reply_text("تم الإلغاء.", reply_markup=main_keyboard())
     return ConversationHandler.END
@@ -679,6 +1140,11 @@ async def route_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return ConversationHandler.END
 
 
+async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.effective_message if isinstance(update, Update) else None
+    await notify_api_failure(message)
+
+
 def main() -> None:
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     if not token:
@@ -694,13 +1160,23 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(
         CallbackQueryHandler(
+            catalog_action,
+            pattern=r"^(cat|sub|pkg|per|more):",
+        ),
+        group=-1,
+    )
+    application.add_handler(
+        CallbackQueryHandler(
             client_request_action,
             pattern=r"^(reqack|reqcancel|complete|revision|receipt_hint):",
         ),
         group=-1,
     )
     application.add_handler(
-        CallbackQueryHandler(quotation_action, pattern=r"^(approve|reject):"),
+        CallbackQueryHandler(
+            quotation_action,
+            pattern=r"^(approve|reject|rjprice|rjdelay|rjother|renew|norenew):",
+        ),
         group=-1,
     )
     application.add_handler(
@@ -713,6 +1189,7 @@ def main() -> None:
                 CommandHandler("new", new_request),
                 MessageHandler(filters.Regex(f"^{BTN_NEW}$"), new_request),
                 MessageHandler(filters.Regex(f"^{BTN_SUPPORT}$"), support_start),
+                CallbackQueryHandler(manual_from_catalog, pattern=r"^cman$"),
             ],
             states={
                 WAITING_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, capture_title)],
@@ -740,6 +1217,7 @@ def main() -> None:
         )
     )
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, route_text))
+    application.add_error_handler(on_error)
 
     try:
         run_application(

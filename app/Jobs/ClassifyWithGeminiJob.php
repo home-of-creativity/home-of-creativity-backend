@@ -109,7 +109,7 @@ class ClassifyWithGeminiJob implements ShouldQueue
             }
 
             if (! $fresh->invoices()->exists()) {
-                $issueInvoice->handle($fresh);
+                $issueInvoice->handle($fresh, null, 'full', false);
             }
 
             $provisionClickUpTasks->handle(

@@ -14,12 +14,20 @@ use Throwable;
 
 class SocialLandingFeed
 {
+    private bool $tokenRefreshAttempted = false;
+
+    private bool $skipCache = false;
+
+    private ?int $lastGraphStatus = null;
+
+    private ?string $lastGraphMessage = null;
+
     /**
      * @return array{profile: array<string, mixed>|null, posts: list<array{id: string, caption: string|null, media_type: string, media_url: string|null, preview_url: string|null, permalink: string|null, timestamp: string|null}>}
      */
     public function instagram(int $limit = 200): array
     {
-        return Cache::remember($this->cacheKey('instagram', $limit), 600, fn () => $this->buildInstagram($limit));
+        return $this->rememberFeed('instagram', $limit, fn () => $this->buildInstagram($limit));
     }
 
     /**
@@ -35,7 +43,29 @@ class SocialLandingFeed
      */
     public function facebook(int $limit = 200): array
     {
-        return Cache::remember($this->cacheKey('facebook', $limit), 600, fn () => $this->buildFacebook($limit));
+        return $this->rememberFeed('facebook', $limit, fn () => $this->buildFacebook($limit));
+    }
+
+    /**
+     * @param  callable(): array{profile: array<string, mixed>|null, posts: list<array{id: string, caption: string|null, media_type: string, media_url: string|null, preview_url: string|null, permalink: string|null, timestamp: string|null}>}  $builder
+     * @return array{profile: array<string, mixed>|null, posts: list<array{id: string, caption: string|null, media_type: string, media_url: string|null, preview_url: string|null, permalink: string|null, timestamp: string|null}>}
+     */
+    private function rememberFeed(string $platform, int $limit, callable $builder): array
+    {
+        $key = $this->cacheKey($platform, $limit);
+        $cached = Cache::get($key);
+        if (is_array($cached) && isset($cached['posts']) && is_array($cached['posts'])) {
+            /** @var array{profile: array<string, mixed>|null, posts: list<array{id: string, caption: string|null, media_type: string, media_url: string|null, preview_url: string|null, permalink: string|null, timestamp: string|null}>} $cached */
+            return $cached;
+        }
+
+        $this->skipCache = false;
+        $data = $builder();
+        if (! $this->skipCache) {
+            Cache::put($key, $data, 600);
+        }
+
+        return $data;
     }
 
     /**
@@ -48,9 +78,23 @@ class SocialLandingFeed
             return ['profile' => null, 'posts' => []];
         }
 
+        $profile = $this->fetchFacebookProfile($account);
+        $posts = $this->fetchFacebookPosts($account, $limit);
+        if ($posts === [] && $this->shouldRefreshTokens()) {
+            $account = $this->refreshAccountTokens() ?? $account->fresh();
+            if ($account && $account->hasToken()) {
+                $profile = $this->fetchFacebookProfile($account);
+                $posts = $this->fetchFacebookPosts($account, $limit);
+            }
+        }
+
+        if ($posts === [] && $this->lastGraphStatus !== null && $this->isExpiredTokenError($this->lastGraphMessage)) {
+            $this->skipCache = true;
+        }
+
         return [
-            'profile' => $this->fetchFacebookProfile($account),
-            'posts' => $this->fetchFacebookPosts($account, $limit),
+            'profile' => $profile,
+            'posts' => $posts,
         ];
     }
 
@@ -205,9 +249,23 @@ class SocialLandingFeed
             return ['profile' => null, 'posts' => []];
         }
 
+        $profile = $this->fetchProfile($account);
+        $posts = $this->fetchInstagramPosts($account, $limit);
+        if ($posts === [] && $this->shouldRefreshTokens()) {
+            $account = $this->refreshAccountTokens() ?? $account->fresh();
+            if ($account && $account->hasToken()) {
+                $profile = $this->fetchProfile($account);
+                $posts = $this->fetchInstagramPosts($account, $limit);
+            }
+        }
+
+        if ($posts === [] && $this->lastGraphStatus !== null && $this->isExpiredTokenError($this->lastGraphMessage)) {
+            $this->skipCache = true;
+        }
+
         return [
-            'profile' => $this->fetchProfile($account),
-            'posts' => $this->fetchInstagramPosts($account, $limit),
+            'profile' => $profile,
+            'posts' => $posts,
         ];
     }
 
@@ -342,24 +400,71 @@ class SocialLandingFeed
                 ->acceptJson()
                 ->get(FacebookGraph::url($path), FacebookGraph::withToken($query, $token));
         } catch (ConnectionException|Throwable $exception) {
+            $this->lastGraphStatus = null;
+            $this->lastGraphMessage = $exception instanceof ConnectionException ? 'connection' : $exception::class;
             Log::warning('Social landing feed failed.', [
                 'path' => $path,
-                'error' => $exception instanceof ConnectionException ? 'connection' : $exception::class,
+                'error' => $this->lastGraphMessage,
             ]);
 
             return null;
         }
 
         if (! $response->successful()) {
-            Log::warning('Social landing feed rejected.', ['path' => $path, 'status' => $response->status()]);
+            $this->lastGraphStatus = $response->status();
+            $this->lastGraphMessage = FacebookGraph::errorMessage($response->json(), $response->status());
+            Log::warning('Social landing feed rejected.', [
+                'path' => $path,
+                'status' => $response->status(),
+                'message' => $this->lastGraphMessage,
+            ]);
 
             return null;
         }
+
+        $this->lastGraphStatus = null;
+        $this->lastGraphMessage = null;
 
         /** @var array<string, mixed> $json */
         $json = $response->json() ?? [];
 
         return $json;
+    }
+
+    private function shouldRefreshTokens(): bool
+    {
+        return ! $this->tokenRefreshAttempted
+            && $this->isExpiredTokenError($this->lastGraphMessage);
+    }
+
+    private function refreshAccountTokens(): ?SocialAccount
+    {
+        $this->tokenRefreshAttempted = true;
+        $sync = app(SocialAccountSync::class);
+        if (! $sync->configured()) {
+            return null;
+        }
+
+        $sync->syncFromFacebook();
+        Cache::forget($this->cacheKey('instagram', 200));
+        Cache::forget($this->cacheKey('facebook', 200));
+        $this->lastGraphStatus = null;
+        $this->lastGraphMessage = null;
+
+        return null;
+    }
+
+    private function isExpiredTokenError(?string $message): bool
+    {
+        if (! is_string($message) || $message === '') {
+            return false;
+        }
+
+        $normalized = strtolower($message);
+
+        return str_contains($normalized, 'session has expired')
+            || str_contains($normalized, 'error validating access token')
+            || str_contains($normalized, 'access token has expired');
     }
 
     private function nullableString(mixed $value): ?string

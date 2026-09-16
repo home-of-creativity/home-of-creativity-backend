@@ -77,7 +77,7 @@ class ClickUpClient
         return $taskId;
     }
 
-    public function updateTask(string $taskId, ?string $status = null, ?string $assigneeId = null): void
+    public function updateTask(string $taskId, ?string $status = null, ?string $assigneeId = null, ?int $dueDateMs = null): void
     {
         $payload = [];
 
@@ -89,6 +89,10 @@ class ClickUpClient
             $payload['assignees'] = [
                 'add' => [ctype_digit($assigneeId) ? (int) $assigneeId : $assigneeId],
             ];
+        }
+
+        if ($dueDateMs !== null && $dueDateMs > 0) {
+            $payload['due_date'] = $dueDateMs;
         }
 
         if ($payload === []) {
@@ -168,6 +172,187 @@ class ClickUpClient
     /**
      * @return array<int, array{id: string, name: string, email: string|null}>
      */
+    public function listMembers(string $listId): array
+    {
+        $token = (string) config('services.clickup.token');
+        if ($token === '' || $listId === '') {
+            return [];
+        }
+
+        $response = Http::timeout((int) config('services.clickup.timeout', 12))
+            ->connectTimeout(3)
+            ->acceptJson()
+            ->withHeaders(['Authorization' => $token])
+            ->get('https://api.clickup.com/api/v2/list/'.$listId.'/member');
+
+        if (! $response->successful()) {
+            return [];
+        }
+
+        return $this->mapMembers($response->json('members') ?? []);
+    }
+
+    /**
+     * @return list<array{id: string, name: string, status: string|null, url: string|null, assignees: list<array{id: string, name: string}>}>
+     */
+    public function getTasks(string $listId): array
+    {
+        $token = (string) config('services.clickup.token');
+        if ($token === '' || $listId === '') {
+            return [];
+        }
+
+        try {
+            $response = Http::timeout((int) config('services.clickup.timeout', 12))
+                ->connectTimeout(3)
+                ->acceptJson()
+                ->withHeaders(['Authorization' => $token])
+                ->get('https://api.clickup.com/api/v2/list/'.$listId.'/task', [
+                    'archived' => 'false',
+                    'include_closed' => 'false',
+                ]);
+        } catch (\Throwable) {
+            return [];
+        }
+
+        if (! $response->successful()) {
+            return [];
+        }
+
+        $tasks = [];
+        foreach ($response->json('tasks') ?? [] as $task) {
+            if (! is_array($task)) {
+                continue;
+            }
+            $assignees = [];
+            foreach ($task['assignees'] ?? [] as $assignee) {
+                if (! is_array($assignee)) {
+                    continue;
+                }
+                $id = $assignee['id'] ?? null;
+                if ($id === null || $id === '') {
+                    continue;
+                }
+                $assignees[] = [
+                    'id' => (string) $id,
+                    'name' => (string) ($assignee['username'] ?? $assignee['email'] ?? $id),
+                ];
+            }
+            $tasks[] = [
+                'id' => (string) ($task['id'] ?? ''),
+                'name' => (string) ($task['name'] ?? ''),
+                'status' => is_array($task['status'] ?? null)
+                    ? (string) ($task['status']['status'] ?? '')
+                    : (isset($task['status']) ? (string) $task['status'] : null),
+                'url' => isset($task['url']) ? (string) $task['url'] : null,
+                'due_date' => $task['due_date'] ?? null,
+                'assignees' => $assignees,
+            ];
+        }
+
+        return $tasks;
+    }
+
+    /**
+     * @return list<array{id: string, name: string, status: string|null, url: string|null, due_date: mixed, assignees: list<array{id: string, name: string}>}>
+     */
+    public function listTasksForList(string $listId): array
+    {
+        return $this->getTasks($listId);
+    }
+
+    /**
+     * Best-effort guest invite (ClickUp team guest / shared guest APIs vary by plan).
+     *
+     * @param  list<string>  $listIds
+     * @return array{ok: bool, message: string, raw?: mixed}
+     */
+    public function inviteGuest(string $email, array $listIds = []): array
+    {
+        $token = (string) config('services.clickup.token');
+        if ($token === '') {
+            return ['ok' => false, 'message' => 'ClickUp is not configured.'];
+        }
+
+        $email = trim($email);
+        if ($email === '' || ! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return ['ok' => false, 'message' => 'A valid email is required.'];
+        }
+
+        $teamId = $this->resolveTeamId($token);
+        if ($teamId === null) {
+            return ['ok' => false, 'message' => 'Could not resolve ClickUp team id for guest invite.'];
+        }
+
+        $payload = [
+            'email' => $email,
+            'can_edit_tags' => false,
+            'can_see_time_spent' => false,
+            'can_see_time_estimated' => false,
+            'can_create_views' => false,
+        ];
+        if ($listIds !== []) {
+            $payload['permission_level'] = 'read';
+        }
+
+        $response = Http::timeout((int) config('services.clickup.timeout', 12))
+            ->connectTimeout(3)
+            ->acceptJson()
+            ->withHeaders(['Authorization' => $token])
+            ->post("https://api.clickup.com/api/v2/team/{$teamId}/guest", $payload);
+
+        if ($response->successful()) {
+            return ['ok' => true, 'message' => 'Guest invite sent.', 'raw' => $response->json()];
+        }
+
+        // Soft-fail with clear error — plans without guest seats often 403.
+        $err = $response->json('err')
+            ?? $response->json('ECODE')
+            ?? $response->json('message')
+            ?? $response->body();
+
+        return [
+            'ok' => false,
+            'message' => 'ClickUp guest invite failed: '.(is_string($err) ? $err : json_encode($err)),
+            'raw' => $response->json(),
+        ];
+    }
+
+    private function resolveTeamId(string $token): ?string
+    {
+        $configured = config('services.clickup.team_id') ?? config('services.clickup.space_id');
+        if (is_string($configured) && $configured !== '') {
+            // Prefer dedicated team_id when set; space_id alone is not always the team id.
+        }
+
+        $teamConfigured = config('services.clickup.team_id');
+        if (is_string($teamConfigured) && $teamConfigured !== '') {
+            return $teamConfigured;
+        }
+
+        $response = Http::timeout((int) config('services.clickup.timeout', 12))
+            ->connectTimeout(3)
+            ->acceptJson()
+            ->withHeaders(['Authorization' => $token])
+            ->get('https://api.clickup.com/api/v2/team');
+
+        if (! $response->successful()) {
+            return null;
+        }
+
+        $teams = $response->json('teams') ?? [];
+        if (! is_array($teams) || $teams === []) {
+            return null;
+        }
+
+        $first = $teams[0];
+
+        return is_array($first) && isset($first['id']) ? (string) $first['id'] : null;
+    }
+
+    /**
+     * @return array<int, array{id: string, name: string, email: string|null}>
+     */
     public function members(): array
     {
         $token = (string) config('services.clickup.token');
@@ -216,6 +401,45 @@ class ClickUpClient
         }
 
         return array_values($members);
+    }
+
+    /**
+     * @return array<int, array{id: string, name: string, email: string|null}>
+     */
+    public function membersForList(string $listId): array
+    {
+        $token = (string) config('services.clickup.token');
+        if ($token === '' || $listId === '') {
+            return [];
+        }
+
+        $response = Http::timeout((int) config('services.clickup.timeout', 12))
+            ->connectTimeout(3)
+            ->acceptJson()
+            ->withHeaders(['Authorization' => $token])
+            ->get('https://api.clickup.com/api/v2/list/'.$listId.'/member');
+
+        if (! $response->successful()) {
+            return [];
+        }
+
+        return $this->mapMembers($response->json('members') ?? []);
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function departmentLists(): array
+    {
+        $lists = [];
+        foreach (['sales', 'design', 'content', 'programming', 'photography'] as $key) {
+            $id = config("services.clickup.lists.{$key}");
+            if (is_string($id) && $id !== '') {
+                $lists[$key] = $id;
+            }
+        }
+
+        return $lists;
     }
 
     /**

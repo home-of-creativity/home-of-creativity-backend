@@ -90,6 +90,8 @@ class EmployeeTest extends TestCase
             ->postJson('/api/bot/telegram/link', [
                 'telegram_user_id' => 'tg-client-1',
                 'name' => 'Client One',
+                'phone' => '+963900000001',
+                'company_name' => 'شركة العميل',
                 'locale' => 'ar',
             ])->assertOk();
 
@@ -118,7 +120,11 @@ class EmployeeTest extends TestCase
         ]);
 
         Employee::factory()->sales()->create(['telegram_user_id' => '6350001']);
-        $client = Client::factory()->create(['telegram_user_id' => 'tg-client-attach']);
+        $client = Client::factory()->create([
+            'telegram_user_id' => 'tg-client-attach',
+            'phone' => '+963900000002',
+            'company_name' => 'شركة المرفقات',
+        ]);
 
         $png = base64_encode((string) base64_decode(
             'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
@@ -215,6 +221,8 @@ class EmployeeTest extends TestCase
             ->postJson('/api/bot/telegram/link', [
                 'telegram_user_id' => 'tg-client-1',
                 'name' => 'Client One',
+                'phone' => '+963900000001',
+                'company_name' => 'شركة العميل',
                 'locale' => 'ar',
             ])->assertOk();
 
@@ -486,6 +494,19 @@ class EmployeeTest extends TestCase
             ->assertJsonPath('data.status', 'pending');
 
         $this->assertDatabaseCount('employees', 1);
+    }
+
+    public function test_staff_join_allocates_next_free_employee_code(): void
+    {
+        Employee::factory()->create(['code' => 'EMP-0003']);
+        Employee::factory()->create(['code' => 'EMP-0001']);
+
+        $this->withHeaders(['X-Webhook-Secret' => 'change-me-staff'])
+            ->postJson('/api/bot/staff/join', [
+                'telegram_user_id' => '9002',
+                'name' => 'New Staff',
+            ])->assertCreated()
+            ->assertJsonPath('data.code', 'EMP-0004');
     }
 
     public function test_pending_staff_cannot_reply(): void

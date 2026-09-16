@@ -21,6 +21,7 @@ class StoreClientRequest extends FormRequest
             'email' => ['nullable', 'email', 'max:255'],
             'phone' => ['nullable', 'string', 'max:40'],
             'telegram_user_id' => ['nullable', 'string', 'max:40'],
+            'company_name' => ['nullable', 'string', 'max:160'],
             'locale' => ['nullable', 'string', 'in:ar,en'],
         ];
     }

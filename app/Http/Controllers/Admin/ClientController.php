@@ -13,11 +13,32 @@ use Illuminate\Http\JsonResponse;
 
 class ClientController extends Controller
 {
-    public function index(PaginatedIndexRequest $request)
+    public function index(PaginatedIndexRequest $request, OdooClient $odoo)
     {
-        return ClientResource::collection(
-            Client::query()->withCount('requests')->latest('id')->paginate($request->perPage())
-        )->additional(['message' => 'ok']);
+        $paginator = Client::query()->withCount('requests')->latest('id')->paginate($request->perPage());
+
+        if ($odoo->configured()) {
+            $paginator->getCollection()->transform(function (Client $client) use ($odoo): Client {
+                if (! filled($client->odoo_lead_id)) {
+                    return $client;
+                }
+
+                $snapshot = $odoo->leadSnapshot((int) $client->odoo_lead_id);
+                if ($snapshot === null) {
+                    return $client;
+                }
+
+                if (($snapshot['stage'] ?? null) !== $client->odoo_stage_name) {
+                    $client->forceFill(['odoo_stage_name' => $snapshot['stage']])->save();
+                }
+
+                $client->setAttribute('odoo_live', $snapshot);
+
+                return $client;
+            });
+        }
+
+        return ClientResource::collection($paginator)->additional(['message' => 'ok']);
     }
 
     public function store(StoreClientRequest $request, StoreClient $storeClient, OdooClient $odoo): JsonResponse

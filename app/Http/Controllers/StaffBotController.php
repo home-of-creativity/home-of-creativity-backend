@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Actions\CompleteRequest;
+use App\Actions\DispatchStatusWorkflow;
 use App\Actions\RecordDelivery;
 use App\Actions\RequestStaffJoin;
 use App\Actions\SendQuotation;
@@ -16,8 +17,10 @@ use App\Http\Resources\EmployeeResource;
 use App\Http\Resources\ServiceRequestResource;
 use App\Models\Employee;
 use App\Models\ServiceRequest;
+use App\Services\RequestStatusTransitionService;
 use App\Services\TelegramNotifier;
 use App\Support\ResolveServiceRequest;
+use App\Support\StatusLabel;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -121,7 +124,7 @@ class StaffBotController extends Controller
         abort_unless($employee->isSales(), 403, 'Only sales staff can list client conversations.');
 
         $items = ServiceRequest::query()
-            ->with('client')
+            ->with(['client', 'pricingPackage'])
             ->whereIn('status', [
                 RequestStatus::Submitted,
                 RequestStatus::QuotationSent,
@@ -131,13 +134,7 @@ class StaffBotController extends Controller
             ->latest('id')
             ->limit(20)
             ->get()
-            ->map(fn (ServiceRequest $item) => [
-                'number' => $item->number,
-                'display_number' => ResolveServiceRequest::displayNumber($item),
-                'title' => $item->title,
-                'status' => $item->status->value,
-                'client_name' => $item->client?->name,
-            ]);
+            ->map(fn (ServiceRequest $item) => $this->staffCard($item));
 
         return response()->json(['data' => $items, 'message' => 'ok']);
     }
@@ -148,18 +145,12 @@ class StaffBotController extends Controller
         abort_unless($employee->isSales(), 403, 'Only sales staff can send quotations.');
 
         $items = ServiceRequest::query()
-            ->with('client')
+            ->with(['client', 'pricingPackage'])
             ->whereIn('status', [RequestStatus::Submitted, RequestStatus::QuotationRejected])
             ->latest('id')
             ->limit(20)
             ->get()
-            ->map(fn (ServiceRequest $item) => [
-                'number' => $item->number,
-                'display_number' => ResolveServiceRequest::displayNumber($item),
-                'title' => $item->title,
-                'status' => $item->status->value,
-                'client_name' => $item->client?->name,
-            ]);
+            ->map(fn (ServiceRequest $item) => $this->staffCard($item));
 
         return response()->json(['data' => $items, 'message' => 'ok']);
     }
@@ -204,7 +195,7 @@ class StaffBotController extends Controller
         $employee = $this->approvedEmployee($request);
 
         $tasks = ServiceRequest::query()
-            ->with(['client', 'clickupTasks', 'revisions'])
+            ->with(['client', 'clickupTasks', 'revisions', 'pricingPackage'])
             ->whereIn('status', [
                 RequestStatus::InProgress,
                 RequestStatus::RevisionRequested,
@@ -214,17 +205,12 @@ class StaffBotController extends Controller
             ->latest('id')
             ->limit(20)
             ->get()
-            ->map(fn (ServiceRequest $item) => [
-                'number' => $item->number,
-                'display_number' => ResolveServiceRequest::displayNumber($item),
-                'title' => $item->title,
-                'status' => $item->status->value,
-                'client_name' => $item->client?->name,
+            ->map(fn (ServiceRequest $item) => array_merge($this->staffCard($item), [
                 'clickup_url' => $item->clickupTasks->firstWhere('employee_id', $employee->id)?->clickup_url,
                 'revision_comments' => $item->status === RequestStatus::RevisionRequested
                     ? $item->revisions->sortByDesc('id')->first()?->comments
                     : null,
-            ]);
+            ]));
 
         return response()->json(['data' => $tasks, 'message' => 'ok']);
     }
@@ -235,19 +221,15 @@ class StaffBotController extends Controller
         abort_unless($employee->isSales(), 403, 'Only sales staff can list new intake requests.');
 
         $items = ServiceRequest::query()
-            ->with(['client', 'clickupTasks'])
+            ->with(['client', 'clickupTasks', 'pricingPackage'])
             ->where('status', RequestStatus::Submitted)
             ->latest('id')
             ->limit(20)
             ->get()
-            ->map(fn (ServiceRequest $item) => [
-                'number' => $item->number,
-                'display_number' => ResolveServiceRequest::displayNumber($item),
-                'title' => $item->title,
-                'client_name' => $item->client?->name,
+            ->map(fn (ServiceRequest $item) => array_merge($this->staffCard($item), [
                 'description' => $item->description,
                 'sales_clickup_url' => $item->clickupTasks->firstWhere('task_type', 'sales')?->clickup_url,
-            ]);
+            ]));
 
         return response()->json(['data' => $items, 'message' => 'ok']);
     }
@@ -338,6 +320,89 @@ class StaffBotController extends Controller
             'data' => ServiceRequestResource::make($updated),
             'message' => 'Completed.',
         ]);
+    }
+
+    public function markInProgress(
+        Request $request,
+        ResolveServiceRequest $resolveServiceRequest,
+        RequestStatusTransitionService $transitions,
+        DispatchStatusWorkflow $dispatchStatusWorkflow,
+    ): JsonResponse {
+        $employee = $this->approvedEmployee($request);
+        $validated = $request->validate([
+            'telegram_user_id' => ['required', 'string'],
+            'request_number' => ['required', 'string'],
+        ]);
+
+        $serviceRequest = $resolveServiceRequest->byReference($validated['request_number']);
+        abort_unless(in_array($serviceRequest->status, [
+            RequestStatus::PaymentConfirmed,
+            RequestStatus::InProgress,
+        ], true), 422, 'Only paid requests can move to in progress.');
+
+        if ($serviceRequest->status !== RequestStatus::InProgress) {
+            $serviceRequest = $transitions->transition($serviceRequest, RequestStatus::InProgress, 'staff:'.$employee->code);
+            $dispatchStatusWorkflow->handle($serviceRequest, RequestStatus::InProgress);
+        }
+
+        return response()->json([
+            'data' => ServiceRequestResource::make($serviceRequest->fresh(['client'])),
+            'message' => 'In progress.',
+        ]);
+    }
+
+    public function progressableRequests(Request $request): JsonResponse
+    {
+        $employee = $this->approvedEmployee($request);
+
+        $items = ServiceRequest::query()
+            ->with(['client', 'pricingPackage', 'clickupTasks.employee'])
+            ->where('status', RequestStatus::PaymentConfirmed)
+            ->latest('id')
+            ->limit(20)
+            ->get()
+            ->map(fn (ServiceRequest $item) => $this->staffCard($item));
+
+        return response()->json(['data' => $items, 'message' => 'ok']);
+    }
+
+    public function completableRequests(Request $request): JsonResponse
+    {
+        $employee = $this->approvedEmployee($request);
+        abort_unless($employee->isSales(), 403, 'Only sales staff can complete requests.');
+
+        $items = ServiceRequest::query()
+            ->with(['client', 'pricingPackage', 'clickupTasks.employee'])
+            ->where('status', RequestStatus::ReadyForReview)
+            ->latest('id')
+            ->limit(20)
+            ->get()
+            ->map(fn (ServiceRequest $item) => $this->staffCard($item));
+
+        return response()->json(['data' => $items, 'message' => 'ok']);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function staffCard(ServiceRequest $item): array
+    {
+        $assignee = $item->relationLoaded('clickupTasks')
+            ? $item->clickupTasks->map(fn ($task) => $task->employee?->name)->filter()->unique()->implode('، ')
+            : '';
+
+        return [
+            'number' => $item->number,
+            'display_number' => ResolveServiceRequest::displayNumber($item),
+            'title' => $item->title,
+            'status' => $item->status->value,
+            'status_label' => StatusLabel::requestAr($item->status->value),
+            'client_name' => $item->client?->name,
+            'company_name' => $item->client?->company_name,
+            'package_name' => $item->pricingPackage?->name_ar ?: $item->pricingPackage?->name_en,
+            'is_manual' => $item->pricing_package_id === null,
+            'assignee' => $assignee !== '' ? $assignee : null,
+        ];
     }
 
     private function approvedEmployee(Request $request): Employee

@@ -27,6 +27,8 @@ class PricingSeeder extends Seeder
                 'lead_ar' => $categoryData['lead']['ar'],
                 'sort_order' => $sort,
                 'is_published' => true,
+                'requires_full_payment' => ($categoryData['id'] ?? '') === 'reach',
+                'allows_renewal' => false,
             ]);
 
             $subSort = 0;
@@ -68,6 +70,7 @@ class PricingSeeder extends Seeder
                         'badge_ar' => $planData['badge']['ar'] ?? null,
                         'sort_order' => $planSort,
                         'is_published' => true,
+                        'allows_partial_payment' => isset($planData['reach']) ? false : null,
                     ]);
                 }
             }

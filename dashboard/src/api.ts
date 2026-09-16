@@ -121,11 +121,17 @@ export type SocialInboxItem = {
 export type Client = {
   id: number;
   name: string;
+  company_name?: string | null;
+  company_activity?: string | null;
   email: string | null;
   phone: string | null;
   telegram_user_id: string | null;
   odoo_partner_id?: string | null;
+  odoo_lead_id?: string | null;
+  odoo_stage_name?: string | null;
   odoo_url?: string | null;
+  odoo_lead_url?: string | null;
+  odoo_live?: { stage?: string | null; name?: string | null } | null;
   requests_count?: number;
 };
 
@@ -202,6 +208,20 @@ export type ServiceRequest = {
   gemini_error?: string | null;
   quotation_amount?: string | null;
   quotation_notes?: string | null;
+  billing_period?: string | null;
+  payment_plan?: string | null;
+  requires_full_payment?: boolean;
+  allows_renewal?: boolean;
+  amount_total?: string | number | null;
+  amount_paid?: string | number | null;
+  amount_remaining?: string | number | null;
+  subscription_starts_at?: string | null;
+  subscription_ends_at?: string | null;
+  google_drive_folder_id?: string | null;
+  receipt_reupload_required?: boolean;
+  receipt_reupload_reason?: string | null;
+  can_renew?: boolean;
+  paid_at?: string | null;
   briefs?: Brief[];
   files?: RequestFile[];
   quotations?: Quotation[];
@@ -276,6 +296,8 @@ export type PricingCategory = {
   lead_ar: string | null;
   sort_order: number;
   is_published: boolean;
+  requires_full_payment?: boolean;
+  allows_renewal?: boolean;
   subcategories_count?: number;
 };
 
@@ -328,6 +350,7 @@ export type PricingPackage = {
   badge_ar: string | null;
   sort_order: number;
   is_published: boolean;
+  allows_partial_payment?: boolean | null;
   subcategory?: PricingSubcategory;
 };
 
@@ -491,6 +514,23 @@ export const api = {
   retryGemini(id: number) {
     return request<Envelope<ServiceRequest>>(`/admin/requests/${id}/retry-gemini`, { method: "POST" });
   },
+  reRequestReceipt(id: number, reason?: string) {
+    return request<Envelope<ServiceRequest>>(`/admin/requests/${id}/re-request-receipt`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    });
+  },
+  renewRequest(id: number) {
+    return request<Envelope<ServiceRequest>>(`/admin/requests/${id}/renew`, { method: "POST" });
+  },
+  opsSettings() {
+    return request<Envelope<{ sham_cash_qr: boolean }>>("/admin/ops-settings");
+  },
+  uploadShamCashQr(file: File) {
+    const form = new FormData();
+    form.append("file", file);
+    return submitForm<Envelope<{ sham_cash_qr: boolean }>>("/admin/ops-settings/sham-cash-qr", "POST", form);
+  },
   async receiptBlob(requestId: number, fileId: number) {
     const headers = new Headers({ Accept: "application/octet-stream" });
     const token = getToken();
@@ -502,7 +542,7 @@ export const api = {
   clients(page = 1) {
     return request<Paginated<Client>>(`/admin/clients${queryString({ page })}`);
   },
-  createClient(payload: { name: string; email?: string; phone?: string; telegram_user_id?: string }) {
+  createClient(payload: { name: string; email?: string; phone?: string; telegram_user_id?: string; company_name?: string }) {
     return request<Envelope<Client>>("/admin/clients", {
       method: "POST",
       body: JSON.stringify(payload),
@@ -679,6 +719,8 @@ export const api = {
     lead_ar?: string | null;
     sort_order?: number;
     is_published?: boolean;
+    requires_full_payment?: boolean;
+    allows_renewal?: boolean;
   }) {
     return request<Envelope<PricingCategory>>("/admin/pricing/categories", {
       method: "POST",
@@ -693,6 +735,8 @@ export const api = {
     lead_ar: string | null;
     sort_order: number;
     is_published: boolean;
+    requires_full_payment?: boolean;
+    allows_renewal?: boolean;
   }>) {
     return request<Envelope<PricingCategory>>(`/admin/pricing/categories/${id}`, {
       method: "PUT",

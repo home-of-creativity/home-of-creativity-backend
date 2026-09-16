@@ -21,6 +21,12 @@ class UpdatePricingPackageRequest extends FormRequest
                 $merged[$key] = filter_var($this->input($key), FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE) ?? false;
             }
         }
+        if ($this->has('allows_partial_payment')) {
+            $value = $this->input('allows_partial_payment');
+            $merged['allows_partial_payment'] = $value === null || $value === ''
+                ? null
+                : filter_var($value, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE);
+        }
         if ($merged !== []) {
             $this->merge($merged);
         }
@@ -73,6 +79,7 @@ class UpdatePricingPackageRequest extends FormRequest
             'badge_ar' => ['nullable', 'string', 'max:80'],
             'sort_order' => ['sometimes', 'integer', 'min:0', 'max:9999'],
             'is_published' => ['sometimes', 'boolean'],
+            'allows_partial_payment' => ['nullable', 'boolean'],
         ];
     }
 }

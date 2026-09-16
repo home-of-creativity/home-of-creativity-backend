@@ -50,7 +50,7 @@ def _telegram_proxy() -> str | None:
     if host == "" or host.endswith("trycloudflare.com"):
         return None
     # Laravel / Vite / Next / webhook listeners are not HTTP CONNECT proxies.
-    if host in {"127.0.0.1", "localhost", "::1"} and port in {3000, 5173, 8000, 8444, 8445}:
+    if host in {"127.0.0.1", "localhost", "::1"} and port in {3000, 5173, 8000, 8444, 8445, 8446}:
         return None
     if scheme not in {"http", "https", "socks5", "socks5h"}:
         return None

@@ -25,7 +25,6 @@ export function Employees({ t }: { locale: Locale; t: (c: { ar: string; en: stri
   const [approvingId, setApprovingId] = useState<number | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [odooReady, setOdooReady] = useState(false);
-  const [notice, setNotice] = useState("");
   const staffBot = import.meta.env.VITE_TELEGRAM_STAFF_BOT as string | undefined;
 
   function load() {
@@ -43,18 +42,6 @@ export function Employees({ t }: { locale: Locale; t: (c: { ar: string; en: stri
     load();
     api.odooStatus().then((res) => setOdooReady(res.data.configured)).catch(() => setOdooReady(false));
   }, []);
-
-  async function syncOdoo() {
-    setError("");
-    setNotice("");
-    try {
-      const res = await api.syncOdooEmployees();
-      setNotice(`${t(copy.odooSyncDone)}: ${res.data.created} / ${res.data.updated}`);
-      load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t(copy.saveFailed));
-    }
-  }
 
   function startAdd() {
     setEditingId(null);
@@ -178,13 +165,7 @@ export function Employees({ t }: { locale: Locale; t: (c: { ar: string; en: stri
           <p className="page-lede">{t(copy.employeesLede)}</p>
         </div>
         <div className="toolbar">
-          {odooReady ? (
-            <button type="button" className="btn btn-teal" onClick={() => void syncOdoo()}>
-              {t(copy.odooSync)}
-            </button>
-          ) : (
-            <span className="muted">{t(copy.odooNotConfigured)}</span>
-          )}
+          {!odooReady ? <span className="muted">{t(copy.odooNotConfigured)}</span> : null}
           <button type="button" className="btn btn-primary" onClick={startAdd}>
             {t(copy.addEmployee)}
           </button>
@@ -197,7 +178,6 @@ export function Employees({ t }: { locale: Locale; t: (c: { ar: string; en: stri
       </header>
 
       <p className="notice notice-info">{t(copy.joinHint)}</p>
-      {notice ? <p className="notice notice-info">{notice}</p> : null}
 
       {pending.length > 0 ? (
         <section className="card pending-card">

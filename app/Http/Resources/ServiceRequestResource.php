@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Enums\RequestStatus;
 use App\Models\ServiceRequest;
 use App\Services\ClickUpStatusMapper;
 use App\Services\OdooClient;
@@ -48,6 +49,22 @@ class ServiceRequestResource extends JsonResource
             'gemini_processed_at' => $this->gemini_processed_at?->toIso8601String(),
             'quotation_amount' => $this->quotation_amount,
             'quotation_notes' => $this->quotation_notes,
+            'pricing_package_id' => $this->pricing_package_id,
+            'billing_period' => $this->billing_period,
+            'payment_plan' => $this->payment_plan,
+            'requires_full_payment' => (bool) $this->requires_full_payment,
+            'allows_renewal' => (bool) $this->allows_renewal,
+            'amount_total' => $this->amount_total,
+            'amount_paid' => $this->amount_paid,
+            'amount_remaining' => $this->amount_remaining,
+            'subscription_starts_at' => $this->subscription_starts_at?->toIso8601String(),
+            'subscription_ends_at' => $this->subscription_ends_at?->toIso8601String(),
+            'google_drive_folder_id' => $this->google_drive_folder_id,
+            'receipt_reupload_required' => (bool) $this->receipt_reupload_required,
+            'receipt_reupload_reason' => $this->receipt_reupload_reason,
+            'can_renew' => (bool) $this->allows_renewal && $this->status !== RequestStatus::Cancelled,
+            'pricing_package' => $this->whenLoaded('pricingPackage'),
+            'subscriptions' => $this->whenLoaded('subscriptions'),
             'client' => ClientResource::make($this->whenLoaded('client')),
             'briefs' => $this->whenLoaded('briefs'),
             'events' => $this->whenLoaded('events'),

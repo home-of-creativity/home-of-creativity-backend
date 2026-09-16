@@ -1135,6 +1135,45 @@ html[dir="rtl"] .back-link span {
   color: var(--brand-muted);
 }
 
+.badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0 0 1rem;
+}
+
+.pay-badge,
+.renew-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-inline-end: 0.35rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.pay-badge-full {
+  background: color-mix(in srgb, var(--brand-purple) 16%, white);
+  color: color-mix(in srgb, var(--brand-purple) 70%, var(--brand-ink));
+}
+
+.pay-badge-partial {
+  background: color-mix(in srgb, var(--brand-teal) 16%, white);
+  color: color-mix(in srgb, var(--brand-teal) 60%, var(--brand-ink));
+}
+
+.renew-badge-on {
+  background: color-mix(in srgb, var(--brand-orange) 18%, white);
+  color: color-mix(in srgb, var(--brand-orange) 70%, var(--brand-ink));
+}
+
+.renew-badge-off {
+  background: color-mix(in srgb, var(--brand-ink) 8%, white);
+  color: color-mix(in srgb, var(--brand-ink) 70%, white);
+}
+
 .pending-card {
   margin-bottom: 1.25rem;
 }

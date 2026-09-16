@@ -26,6 +26,7 @@ class PricingPackage extends Model
         'badge_ar',
         'sort_order',
         'is_published',
+        'allows_partial_payment',
     ];
 
     /**
@@ -42,6 +43,7 @@ class PricingPackage extends Model
             'featured' => 'boolean',
             'sort_order' => 'integer',
             'is_published' => 'boolean',
+            'allows_partial_payment' => 'boolean',
         ];
     }
 
