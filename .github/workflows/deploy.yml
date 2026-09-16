@@ -34,8 +34,13 @@ jobs:
           key_file="$(mktemp)"
           askpass_file="$(mktemp)"
           trap 'rm -f "$key_file" "$askpass_file"' EXIT
-          printf '%s\n' "$SSH_PRIVATE_KEY" > "$key_file"
+          umask 177
+          printf '%s\n' "$SSH_PRIVATE_KEY" | tr -d '\r' > "$key_file"
           chmod 600 "$key_file"
+          if ! grep -q 'BEGIN OPENSSH PRIVATE KEY' "$key_file"; then
+            echo "SSH_PRIVATE_KEY secret is missing OpenSSH header. Re-run deploy/push-github-secrets.ps1"
+            exit 1
+          fi
 
           if [ -n "${SSH_PASSPHRASE:-}" ]; then
             export SSH_PASSPHRASE
