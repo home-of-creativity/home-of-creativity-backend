@@ -27,7 +27,7 @@ for _ in $(seq 1 60); do
   sleep 5
 done
 
-docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml exec -T hoc-api php artisan migrate --force
+# hoc-api entrypoint already runs migrate --force and storage:link on start.
 docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml exec -T hoc-api php artisan storage:link || true
 docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml exec -T hoc-api php artisan config:cache
 docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml exec -T hoc-api php artisan route:cache
