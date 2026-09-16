@@ -25,8 +25,8 @@ class ServiceRequestFactory extends Factory
         return [
             'number' => sprintf('REQ-%d-%06d', now()->year, $sequence++),
             'client_id' => Client::factory(),
-            'title' => fake()->sentence(4),
-            'description' => fake()->paragraph(),
+            'title' => $this->faker->sentence(4),
+            'description' => $this->faker->paragraph(),
             'status' => RequestStatus::Submitted,
             'source' => RequestSource::Website,
         ];
