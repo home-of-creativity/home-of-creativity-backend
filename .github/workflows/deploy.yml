@@ -71,7 +71,7 @@ jobs:
           mkdir -p ~/.ssh
           ssh-keyscan -p "$PORT" -H "$SSH_HOST" >> ~/.ssh/known_hosts
 
-          SSH=(ssh -p "$PORT" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes)
+          SSH=(ssh -p "$PORT" -o StrictHostKeyChecking=yes)
           "${SSH[@]}" "${SSH_USER}@${SSH_HOST}" "mkdir -p '$REMOTE'"
 
           rsync -az \
@@ -88,7 +88,7 @@ jobs:
             --exclude 'bot/.env' \
             --exclude 'playwright-report/' \
             --exclude 'test-results/' \
-            -e "ssh -p $PORT -o IdentitiesOnly=yes" \
+            -e "ssh -p $PORT" \
             ./ "${SSH_USER}@${SSH_HOST}:${REMOTE}/"
 
           "${SSH[@]}" "${SSH_USER}@${SSH_HOST}" "bash '$REMOTE/deploy/remote.sh'"
