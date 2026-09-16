@@ -33,4 +33,4 @@ docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml exec -T hoc-api ph
 docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml exec -T hoc-api php artisan route:cache
 docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml exec -T hoc-api php artisan view:cache || true
 
-echo "Deploy finished. API: http://$(hostname -I | awk '{print $1}')/up"
+echo "Deploy finished. API: https://hoc.agency/up"

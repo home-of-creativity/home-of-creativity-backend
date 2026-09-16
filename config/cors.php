@@ -19,6 +19,7 @@ return [
     ))),
     'allowed_origins_patterns' => [
         '#^https://[a-z0-9-]+\.trycloudflare\.com$#',
+        '#^https://(www\.)?hoc\.agency$#',
         '#^http://10\.\d+\.\d+\.\d+:(3000|3001|5173)$#',
         '#^https?://(\d{1,3}\.){3}\d{1,3}(:\d+)?$#',
     ],

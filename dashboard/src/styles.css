@@ -2078,7 +2078,7 @@ html[dir="rtl"] .back-link span {
 }
 
 .social-phone-draft-chip {
-  margin-inline-start: auto;
+    margin-inline-start: auto;
   padding: 0.12rem 0.45rem;
   border-radius: 999px;
   background: var(--brand-orange);

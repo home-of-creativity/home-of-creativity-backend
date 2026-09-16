@@ -63,7 +63,7 @@ services:
     ports:
       - "5173:5173"
     environment:
-      VITE_API_URL: ${APP_URL:-http://127.0.0.1}/api
+      VITE_API_URL: ${APP_URL:-https://hoc.agency}/api
     command: sh -c "npm install && npm run build && npx vite preview --host 0.0.0.0 --port 5173 --strictPort"
     depends_on:
       hoc-api:
@@ -96,10 +96,13 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
+      - "443:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ../:/var/www/hoc:ro
       - /var/www/landing/design:/var/www/design:ro
+      - hoc_caddy_data:/data
+      - hoc_caddy_config:/config
     depends_on:
       - hoc-api
       - hoc-dashboard
@@ -153,3 +156,5 @@ volumes:
   hoc_mysql:
   hoc_vendor:
   hoc_dashboard_node_modules:
+  hoc_caddy_data:
+  hoc_caddy_config:

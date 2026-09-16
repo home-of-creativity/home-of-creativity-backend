@@ -52,7 +52,7 @@ Default `CACHE_STORE=database` (`cache` + `cache_locks` tables). Tests: array st
 
 ## Tests / CI
 
-PHPUnit `tests/Feature` + `tests/Unit`. Playwright `e2e/` (starts API + dashboard). Optional landing: `E2E_REQUIRE_LANDING=1`. Local E2E API port **8002**. CI: `.github/workflows/ci.yml` (placeholder; GitHub does not run Laravel). VPS deploy: `.github/workflows/deploy.yml` (SSH key secrets `SSH_HOST` / `SSH_USER` / `SSH_PRIVATE_KEY`, no password). Remote stack: `deploy/compose.yaml`.
+PHPUnit `tests/Feature` + `tests/Unit`. Playwright `e2e/` (starts API + dashboard). Optional landing: `E2E_REQUIRE_LANDING=1`. Local E2E API port **8002**. CI: `.github/workflows/ci.yml` (placeholder; GitHub does not run Laravel). VPS deploy: `.github/workflows/deploy.yml` (SSH key secrets `SSH_HOST` / `SSH_USER` / `SSH_PRIVATE_KEY`, no password). Remote stack: `deploy/compose.yaml` with Caddy TLS for **https://hoc.agency**.
 
 `TELEGRAM_STRICT=false` keeps quotation/invoice/catalog flows alive when Telegram or Odoo is down. `GEMINI_E2E_STUB` for tests. Missing Google Drive/Calendar keys log and retry; they do not abort the request. Won in Odoo only after 100% paid. CORS also reads `CORS_ALLOWED_ORIGINS` and allows raw `http(s)://IP[:port]` for the VPS dashboard.
 
