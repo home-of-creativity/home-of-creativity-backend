@@ -1,36 +1,9 @@
-:80 {
-	header {
-		X-Content-Type-Options nosniff
-		Referrer-Policy strict-origin-when-cross-origin
-		X-Frame-Options SAMEORIGIN
-	}
+{
+	email admin@hoc.agency
+}
 
-	handle /home-of-creativity-profile* {
-		root * /var/www/design
-		encode gzip
-		try_files {path} {path}/index.html
-		file_server
-	}
-
-	handle /staff* {
-		reverse_proxy hoc-dashboard:5173
-	}
-
-	handle /assets* {
-		reverse_proxy hoc-dashboard:5173
-	}
-
-	handle /storage* {
-		root * /var/www/hoc/storage/app/public
-		uri strip_prefix /storage
-		header {
-			Accept-Ranges bytes
-			Cache-Control "public, max-age=86400"
-		}
-		file_server
-	}
-
-	handle {
+(hoc_api_routes) {
+	handle /api* {
 		root * /var/www/hoc/public
 		encode gzip
 		request_body {
@@ -43,4 +16,74 @@
 		}
 		file_server
 	}
+
+	handle /up {
+		root * /var/www/hoc/public
+		php_fastcgi hoc-api:9000
+	}
+
+	handle /storage* {
+		root * /var/www/hoc/storage/app/public
+		uri strip_prefix /storage
+		header {
+			Accept-Ranges bytes
+			Cache-Control "public, max-age=86400"
+		}
+		file_server
+	}
+}
+
+(hoc_app) {
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		X-Frame-Options SAMEORIGIN
+	}
+
+	@oldBase path /home-of-creativity-profile /home-of-creativity-profile/*
+	handle @oldBase {
+		uri strip_prefix /home-of-creativity-profile
+		redir {scheme}://{host}{uri} permanent
+	}
+
+	import hoc_api_routes
+
+	handle /staff* {
+		reverse_proxy hoc-dashboard:5173
+	}
+
+	handle /assets* {
+		reverse_proxy hoc-dashboard:5173
+	}
+
+	handle {
+		root * /var/www/design
+		encode gzip
+		try_files {path} {path}/ {path}/index.html /index.html
+		file_server
+	}
+}
+
+:80 {
+	import hoc_app
+}
+
+www.hoc.agency {
+	redir https://hoc.agency{uri} permanent
+}
+
+api.hoc.agency {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+	import hoc_api_routes
+}
+
+hoc.agency {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	}
+	import hoc_app
 }
