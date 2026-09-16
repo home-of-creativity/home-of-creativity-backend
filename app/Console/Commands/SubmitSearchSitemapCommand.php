@@ -10,7 +10,7 @@ class SubmitSearchSitemapCommand extends Command
 {
     protected $signature = 'seo:submit-sitemap {--url= : Full sitemap URL}';
 
-    protected $description = 'Ping Google and submit the marketing sitemap to Search Console.';
+    protected $description = 'Notify IndexNow and submit the marketing sitemap to Search Console.';
 
     public function handle(GoogleServiceAccount $google): int
     {
@@ -22,15 +22,7 @@ class SubmitSearchSitemapCommand extends Command
             return self::SUCCESS;
         }
 
-        $ping = Http::timeout(12)
-            ->connectTimeout(5)
-            ->get('https://www.google.com/ping', ['sitemap' => $sitemap]);
-
-        if ($ping->successful()) {
-            $this->info('Google sitemap ping accepted.');
-        } else {
-            $this->warn('Google sitemap ping returned HTTP '.$ping->status().'.');
-        }
+        $this->notifyIndexNow($sitemap);
 
         $token = $google->searchConsoleToken();
         if ($token === null) {
@@ -58,5 +50,42 @@ class SubmitSearchSitemapCommand extends Command
         $this->warn('Search Console API HTTP '.$submit->status().': '.$submit->body());
 
         return self::SUCCESS;
+    }
+
+    private function notifyIndexNow(string $sitemap): void
+    {
+        $key = (string) config('services.google.indexnow_key');
+        if ($key === '') {
+            $this->comment('IndexNow skipped (INDEXNOW_KEY empty).');
+
+            return;
+        }
+
+        $host = parse_url((string) config('services.google.search_site_url', 'https://hoc.agency/'), PHP_URL_HOST) ?: 'hoc.agency';
+        $origin = 'https://'.$host;
+        $payload = [
+            'host' => $host,
+            'key' => $key,
+            'keyLocation' => $origin.'/'.$key.'.txt',
+            'urlList' => [
+                $origin.'/',
+                $origin.'/pricing/',
+                $sitemap,
+            ],
+        ];
+
+        $ping = Http::timeout(12)
+            ->connectTimeout(5)
+            ->acceptJson()
+            ->asJson()
+            ->post('https://api.indexnow.org/indexnow', $payload);
+
+        if ($ping->successful() || $ping->status() === 202) {
+            $this->info('IndexNow accepted.');
+
+            return;
+        }
+
+        $this->warn('IndexNow returned HTTP '.$ping->status().'.');
     }
 }

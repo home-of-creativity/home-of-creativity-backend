@@ -64,6 +64,7 @@ return [
         'calendar_id' => env('GOOGLE_CALENDAR_ID', 'primary'),
         'search_site_url' => env('GOOGLE_SEARCH_SITE_URL', 'https://hoc.agency/'),
         'search_sitemap_url' => env('GOOGLE_SEARCH_SITEMAP_URL', 'https://hoc.agency/sitemap.xml'),
+        'indexnow_key' => env('INDEXNOW_KEY', 'c4e8a91b7d2f40c6a5e13b8f0d9c276a'),
     ],
 
     'elevenlabs' => [
