@@ -17,20 +17,20 @@ fi
 mkdir -p storage/logs storage/framework/{cache,sessions,views} bootstrap/cache
 chmod -R ug+rwx storage bootstrap/cache || true
 
-docker compose -f deploy/compose.yaml up -d --build
+docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml up -d --build
 
 echo "Waiting for API php-fpm..."
 for _ in $(seq 1 60); do
-  if docker compose -f deploy/compose.yaml exec -T hoc-api php artisan --version >/dev/null 2>&1; then
+  if docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml exec -T hoc-api php artisan --version >/dev/null 2>&1; then
     break
   fi
   sleep 5
 done
 
-docker compose -f deploy/compose.yaml exec -T hoc-api php artisan migrate --force
-docker compose -f deploy/compose.yaml exec -T hoc-api php artisan storage:link || true
-docker compose -f deploy/compose.yaml exec -T hoc-api php artisan config:cache
-docker compose -f deploy/compose.yaml exec -T hoc-api php artisan route:cache
-docker compose -f deploy/compose.yaml exec -T hoc-api php artisan view:cache || true
+docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml exec -T hoc-api php artisan migrate --force
+docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml exec -T hoc-api php artisan storage:link || true
+docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml exec -T hoc-api php artisan config:cache
+docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml exec -T hoc-api php artisan route:cache
+docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml exec -T hoc-api php artisan view:cache || true
 
 echo "Deploy finished. API: http://$(hostname -I | awk '{print $1}')/up"
