@@ -29,8 +29,12 @@ done
 
 # hoc-api entrypoint already runs migrate --force and storage:link on start.
 docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml exec -T hoc-api php artisan storage:link || true
+
+echo "Running database seeders..."
+docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml exec -T hoc-api php artisan db:seed --force
+
 docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml exec -T hoc-api php artisan config:cache
 docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml exec -T hoc-api php artisan route:cache
 docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml exec -T hoc-api php artisan view:cache || true
 
-echo "Deploy finished. API: https://hoc.agency/up"
+echo "Deploy finished. API: https://api.hoc.agency/up | Site: https://hoc.agency"
