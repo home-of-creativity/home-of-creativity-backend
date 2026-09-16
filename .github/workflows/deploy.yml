@@ -22,10 +22,29 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Start SSH agent
-        uses: webfactory/ssh-agent@v0.9.1
-        with:
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
-          ssh-passphrase: ${{ secrets.SSH_PASSPHRASE }}
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_PASSPHRASE: ${{ secrets.SSH_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          eval "$(ssh-agent -s)"
+          echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> "$GITHUB_ENV"
+          echo "SSH_AGENT_PID=$SSH_AGENT_PID" >> "$GITHUB_ENV"
+
+          key_file="$(mktemp)"
+          askpass_file="$(mktemp)"
+          trap 'rm -f "$key_file" "$askpass_file"' EXIT
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$key_file"
+          chmod 600 "$key_file"
+
+          if [ -n "${SSH_PASSPHRASE:-}" ]; then
+            export SSH_PASSPHRASE
+            printf '%s\n' '#!/bin/sh' 'exec printf "%s" "$SSH_PASSPHRASE"' > "$askpass_file"
+            chmod 700 "$askpass_file"
+            DISPLAY=:0 SSH_ASKPASS="$askpass_file" SSH_ASKPASS_REQUIRE=force ssh-add "$key_file" < /dev/null
+          else
+            ssh-add "$key_file" < /dev/null
+          fi
 
       - name: Sync and restart on the server
         env:
