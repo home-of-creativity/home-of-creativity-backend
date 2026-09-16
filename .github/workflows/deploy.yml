@@ -1,5 +1,5 @@
 # Deploy the Laravel API, staff dashboard, and bots to the VPS over SSH.
-# Auth is an SSH private key — do not set a deploy password.
+# Secrets: SSH_PRIVATE_KEY (+ SSH_PASSPHRASE if the key is encrypted).
 name: Deploy (SSH)
 
 on:
@@ -25,6 +25,7 @@ jobs:
         uses: webfactory/ssh-agent@v0.9.1
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+          ssh-passphrase: ${{ secrets.SSH_PASSPHRASE }}
 
       - name: Sync and restart on the server
         env:
