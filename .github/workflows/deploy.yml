@@ -57,10 +57,12 @@ jobs:
           SSH_USER: ${{ secrets.SSH_USER }}
           SSH_PORT: ${{ secrets.SSH_PORT }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          BACKEND_ENV_FILE_B64: ${{ secrets.BACKEND_ENV_FILE_B64 }}
         run: |
           set -euo pipefail
           : "${SSH_HOST:?Set repository secret SSH_HOST to the server IP}"
           : "${SSH_USER:?Set repository secret SSH_USER (for example root)}"
+          : "${BACKEND_ENV_FILE_B64:?Set repository secret BACKEND_ENV_FILE_B64 (run deploy/push-backend-env-secret.ps1)}"
           PORT="${SSH_PORT:-22}"
           REMOTE="${DEPLOY_PATH:-/var/www/landing/backend}"
           case "$REMOTE" in
@@ -90,5 +92,7 @@ jobs:
             --exclude 'test-results/' \
             -e "ssh -p $PORT" \
             ./ "${SSH_USER}@${SSH_HOST}:${REMOTE}/"
+
+          echo "$BACKEND_ENV_FILE_B64" | base64 -d | tr -d '\r' | "${SSH[@]}" "${SSH_USER}@${SSH_HOST}" "umask 177; cat > '$REMOTE/.env' && chmod 600 '$REMOTE/.env'"
 
           "${SSH[@]}" "${SSH_USER}@${SSH_HOST}" "bash '$REMOTE/deploy/remote.sh'"
