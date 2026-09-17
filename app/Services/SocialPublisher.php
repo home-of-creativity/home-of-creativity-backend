@@ -26,7 +26,7 @@ class SocialPublisher
             return $this->fail('Account is disabled.');
         }
 
-        if ($account->hasToken() && in_array($account->platform, [SocialPlatform::Facebook, SocialPlatform::Instagram, SocialPlatform::Threads], true)) {
+        if ($account->hasToken() && in_array($account->platform, [SocialPlatform::Facebook, SocialPlatform::Instagram, SocialPlatform::Threads, SocialPlatform::Linkedin], true)) {
             return $this->publishViaGraph($account, $post);
         }
 
@@ -40,6 +40,10 @@ class SocialPublisher
     {
         if (! $account->hasToken()) {
             return null;
+        }
+
+        if ($account->platform === SocialPlatform::Linkedin) {
+            return $this->isLinkedInPostLive($externalId, (string) $account->access_token);
         }
 
         try {
@@ -83,6 +87,10 @@ class SocialPublisher
             return $this->fail('threads_edit_unsupported');
         }
 
+        if ($account->platform === SocialPlatform::Linkedin) {
+            return $this->fail('linkedin_edit_unsupported');
+        }
+
         $field = $account->platform === SocialPlatform::Instagram ? 'caption' : 'message';
 
         try {
@@ -116,6 +124,10 @@ class SocialPublisher
     {
         if (! $account->hasToken()) {
             return $this->fail('Account is not connected.');
+        }
+
+        if ($account->platform === SocialPlatform::Linkedin) {
+            return $this->deleteLinkedInPost($externalId, (string) $account->access_token);
         }
 
         $token = (string) $account->access_token;
@@ -162,7 +174,7 @@ class SocialPublisher
             return $this->fail('Account is not connected.');
         }
 
-        if (! in_array($account->platform, [SocialPlatform::Facebook, SocialPlatform::Instagram, SocialPlatform::Threads], true)) {
+        if (! in_array($account->platform, [SocialPlatform::Facebook, SocialPlatform::Instagram, SocialPlatform::Threads, SocialPlatform::Linkedin], true)) {
             return $this->publishViaN8n($account, null, [
                 'event' => 'social.inbox.reply',
                 'external_id' => $externalId,
@@ -184,6 +196,14 @@ class SocialPublisher
                 'text' => $body,
                 'reply_to_id' => $externalId,
             ], $token);
+        }
+
+        if ($account->platform === SocialPlatform::Linkedin) {
+            if ($kind !== 'comment') {
+                return $this->fail('linkedin_messages_unsupported');
+            }
+
+            return $this->linkedinReply($account, $externalId, $body, $token);
         }
 
         if ($kind === 'comment') {
@@ -217,6 +237,14 @@ class SocialPublisher
         $placement = $post->placement instanceof SocialPlacement ? $post->placement : SocialPlacement::Feed;
 
         try {
+            if ($account->platform === SocialPlatform::Linkedin) {
+                if ($placement !== SocialPlacement::Feed) {
+                    return $this->fail('linkedin_placement_unsupported');
+                }
+
+                return $this->publishLinkedin($account, $post, $pageId, $media);
+            }
+
             if ($account->platform === SocialPlatform::Threads) {
                 return $this->publishThreads($account, $post, $media);
             }
@@ -319,6 +347,342 @@ class SocialPublisher
         }
 
         return $this->uploadFacebookFile($pageId, $token, $first, unpublished: false, caption: $post->body);
+    }
+
+    /**
+     * @param  Collection<int, SocialPostMedia>  $media
+     * @return array{ok: bool, external_id: ?string, error: ?string}
+     */
+    private function publishLinkedin(SocialAccount $account, SocialPost $post, string $organizationId, Collection $media): array
+    {
+        $token = (string) $account->access_token;
+        $author = LinkedInGraph::organizationUrn($organizationId);
+        $images = $media->where('kind', 'image')->values();
+        $videos = $media->where('kind', 'video')->values();
+
+        if ($videos->isNotEmpty()) {
+            $upload = $this->linkedinUploadVideo($author, $videos->first(), $token);
+            if (! $upload['ok'] || ! filled($upload['urn'])) {
+                return $this->fail($upload['error'] ?? 'linkedin_media_missing');
+            }
+
+            return $this->linkedinCreatePost($author, $post->body, [
+                'media' => ['id' => $upload['urn']],
+            ], $token);
+        }
+
+        if ($images->isNotEmpty()) {
+            $uploaded = [];
+            foreach ($images as $image) {
+                $upload = $this->linkedinUploadImage($author, $image, $token);
+                if (! $upload['ok'] || ! filled($upload['urn'])) {
+                    return $this->fail($upload['error'] ?? 'linkedin_media_missing');
+                }
+                $uploaded[] = $upload['urn'];
+            }
+
+            $content = count($uploaded) > 1
+                ? ['multiImage' => ['images' => array_map(static fn (string $urn) => ['id' => $urn], $uploaded)]]
+                : ['media' => ['id' => $uploaded[0]]];
+
+            return $this->linkedinCreatePost($author, $post->body, $content, $token);
+        }
+
+        return $this->linkedinCreatePost($author, $post->body, null, $token);
+    }
+
+    /**
+     * @param  array{media?: array{id: string}, multiImage?: array{images: list<array{id: string}>}}|null  $content
+     * @return array{ok: bool, external_id: ?string, error: ?string}
+     */
+    private function linkedinCreatePost(string $author, string $body, ?array $content, string $token): array
+    {
+        $payload = [
+            'author' => $author,
+            'commentary' => $body,
+            'visibility' => 'PUBLIC',
+            'distribution' => [
+                'feedDistribution' => 'MAIN_FEED',
+                'targetEntities' => [],
+                'thirdPartyDistributionChannels' => [],
+            ],
+            'lifecycleState' => 'PUBLISHED',
+            'isReshareDisabledByAuthor' => false,
+        ];
+        if ($content !== null) {
+            $payload['content'] = $content;
+        }
+
+        $response = Http::timeout((int) config('services.social.timeout', 20))
+            ->connectTimeout(3)
+            ->withHeaders(LinkedInGraph::authHeaders($token))
+            ->post(LinkedInGraph::restUrl('posts'), $payload);
+
+        if (! $response->successful()) {
+            return $this->fail($this->linkedinError($response->json(), $response->status()));
+        }
+
+        $externalId = $response->header('x-restli-id') ?: data_get($response->json(), 'id');
+
+        return [
+            'ok' => true,
+            'external_id' => is_string($externalId) && $externalId !== '' ? $externalId : null,
+            'error' => null,
+        ];
+    }
+
+    /**
+     * @return array{ok: bool, urn: ?string, error: ?string}
+     */
+    private function linkedinUploadImage(string $author, SocialPostMedia $media, string $token): array
+    {
+        $disk = Storage::disk('public');
+        if (! $disk->exists((string) $media->path)) {
+            return ['ok' => false, 'urn' => null, 'error' => 'Media file is missing.'];
+        }
+
+        $contents = $disk->get((string) $media->path);
+        if (! is_string($contents) || $contents === '') {
+            return ['ok' => false, 'urn' => null, 'error' => 'Media file is empty.'];
+        }
+
+        $init = Http::timeout((int) config('services.social.timeout', 20))
+            ->connectTimeout(3)
+            ->withHeaders(LinkedInGraph::authHeaders($token))
+            ->post(LinkedInGraph::restUrl('images?action=initializeUpload'), [
+                'initializeUploadRequest' => ['owner' => $author],
+            ]);
+
+        if (! $init->successful()) {
+            return ['ok' => false, 'urn' => null, 'error' => $this->linkedinError($init->json(), $init->status())];
+        }
+
+        $uploadUrl = data_get($init->json(), 'value.uploadUrl');
+        $imageUrn = data_get($init->json(), 'value.image');
+        if (! is_string($uploadUrl) || $uploadUrl === '' || ! is_string($imageUrn) || $imageUrn === '') {
+            return ['ok' => false, 'urn' => null, 'error' => 'linkedin_media_missing'];
+        }
+
+        $upload = Http::timeout((int) config('services.social.upload_timeout', 60))
+            ->connectTimeout(10)
+            ->withHeaders(['Authorization' => 'Bearer '.$token])
+            ->withBody($contents, $media->mime ?: 'application/octet-stream')
+            ->put($uploadUrl);
+
+        if (! $upload->successful()) {
+            return ['ok' => false, 'urn' => null, 'error' => 'linkedin_media_fetch'];
+        }
+
+        return ['ok' => true, 'urn' => $imageUrn, 'error' => null];
+    }
+
+    /**
+     * @return array{ok: bool, urn: ?string, error: ?string}
+     */
+    private function linkedinUploadVideo(string $author, SocialPostMedia $media, string $token): array
+    {
+        $disk = Storage::disk('public');
+        if (! $disk->exists((string) $media->path)) {
+            return ['ok' => false, 'urn' => null, 'error' => 'Media file is missing.'];
+        }
+
+        $contents = $disk->get((string) $media->path);
+        if (! is_string($contents) || $contents === '') {
+            return ['ok' => false, 'urn' => null, 'error' => 'Media file is empty.'];
+        }
+
+        $init = Http::timeout((int) config('services.social.timeout', 20))
+            ->connectTimeout(3)
+            ->withHeaders(LinkedInGraph::authHeaders($token))
+            ->post(LinkedInGraph::restUrl('videos?action=initializeUpload'), [
+                'initializeUploadRequest' => [
+                    'owner' => $author,
+                    'fileSizeBytes' => strlen($contents),
+                    'uploadCaptions' => false,
+                    'uploadThumbnail' => false,
+                ],
+            ]);
+
+        if (! $init->successful()) {
+            return ['ok' => false, 'urn' => null, 'error' => $this->linkedinError($init->json(), $init->status())];
+        }
+
+        $videoUrn = data_get($init->json(), 'value.video');
+        $instructions = data_get($init->json(), 'value.uploadInstructions');
+        $uploadToken = data_get($init->json(), 'value.uploadToken');
+        if (! is_string($videoUrn) || $videoUrn === '' || ! is_array($instructions) || $instructions === []) {
+            return ['ok' => false, 'urn' => null, 'error' => 'linkedin_media_missing'];
+        }
+
+        $partIds = [];
+        foreach ($instructions as $instruction) {
+            $uploadUrl = data_get($instruction, 'uploadUrl');
+            $firstByte = (int) data_get($instruction, 'firstByte', 0);
+            $lastByte = (int) data_get($instruction, 'lastByte', strlen($contents) - 1);
+            if (! is_string($uploadUrl) || $uploadUrl === '') {
+                return ['ok' => false, 'urn' => null, 'error' => 'linkedin_media_missing'];
+            }
+
+            $chunk = substr($contents, $firstByte, $lastByte - $firstByte + 1);
+            $part = Http::timeout((int) config('services.social.upload_timeout', 60))
+                ->connectTimeout(10)
+                ->withHeaders(['Authorization' => 'Bearer '.$token])
+                ->withBody($chunk, 'application/octet-stream')
+                ->put($uploadUrl);
+
+            if (! $part->successful()) {
+                return ['ok' => false, 'urn' => null, 'error' => 'linkedin_media_fetch'];
+            }
+
+            $etag = $part->header('ETag');
+            if (is_string($etag) && $etag !== '') {
+                $partIds[] = $etag;
+            }
+        }
+
+        $finish = Http::timeout((int) config('services.social.timeout', 20))
+            ->connectTimeout(3)
+            ->withHeaders(LinkedInGraph::authHeaders($token))
+            ->post(LinkedInGraph::restUrl('videos?action=finalizeUpload'), [
+                'finalizeUploadRequest' => array_filter([
+                    'video' => $videoUrn,
+                    'uploadToken' => is_string($uploadToken) ? $uploadToken : '',
+                    'uploadedPartIds' => $partIds,
+                ], static fn ($value) => $value !== ''),
+            ]);
+
+        if (! $finish->successful()) {
+            return ['ok' => false, 'urn' => null, 'error' => $this->linkedinError($finish->json(), $finish->status())];
+        }
+
+        $waitError = $this->waitForLinkedInVideo($videoUrn, $token);
+        if (is_string($waitError)) {
+            return ['ok' => false, 'urn' => null, 'error' => $waitError];
+        }
+
+        return ['ok' => true, 'urn' => $videoUrn, 'error' => null];
+    }
+
+    private function waitForLinkedInVideo(string $videoUrn, string $token): ?string
+    {
+        $attempts = 30;
+        $delayUs = 2_000_000;
+
+        for ($attempt = 0; $attempt < $attempts; $attempt++) {
+            if ($attempt > 0) {
+                usleep($delayUs);
+            }
+
+            $status = Http::timeout(10)
+                ->connectTimeout(3)
+                ->withHeaders(LinkedInGraph::authHeaders($token))
+                ->get(LinkedInGraph::restUrl('videos/'.rawurlencode($videoUrn)));
+
+            $state = data_get($status->json(), 'status');
+            if ($state === 'AVAILABLE') {
+                return null;
+            }
+            if ($state === 'PROCESSING_FAILED') {
+                return 'linkedin_media_processing';
+            }
+        }
+
+        return 'linkedin_media_processing';
+    }
+
+    private function isLinkedInPostLive(string $externalId, string $token): ?bool
+    {
+        try {
+            $response = Http::timeout(5)
+                ->connectTimeout(3)
+                ->withHeaders(LinkedInGraph::authHeaders($token))
+                ->get(LinkedInGraph::restUrl('posts/'.rawurlencode($externalId)));
+        } catch (ConnectionException|Throwable) {
+            return null;
+        }
+
+        if ($response->successful()) {
+            return true;
+        }
+
+        if ($response->notFound() || $response->status() === 410) {
+            return false;
+        }
+
+        return null;
+    }
+
+    /**
+     * @return array{ok: bool, external_id: ?string, error: ?string}
+     */
+    private function deleteLinkedInPost(string $externalId, string $token): array
+    {
+        $response = Http::timeout((int) config('services.social.timeout', 20))
+            ->connectTimeout(3)
+            ->withHeaders(LinkedInGraph::authHeaders($token))
+            ->delete(LinkedInGraph::restUrl('posts/'.rawurlencode($externalId)));
+
+        if ($response->successful() || $response->notFound()) {
+            return ['ok' => true, 'external_id' => $externalId, 'error' => null];
+        }
+
+        return $this->fail($this->linkedinError($response->json(), $response->status()));
+    }
+
+    /**
+     * @return array{ok: bool, external_id: ?string, error: ?string}
+     */
+    private function linkedinReply(SocialAccount $account, string $parentCommentUrn, string $body, string $token): array
+    {
+        $shareUrn = $this->linkedinShareUrnFromCommentUrn($parentCommentUrn);
+        if ($shareUrn === null) {
+            return $this->fail('linkedin_comment_target_missing');
+        }
+
+        $response = Http::timeout((int) config('services.social.timeout', 20))
+            ->connectTimeout(3)
+            ->withHeaders(LinkedInGraph::authHeaders($token))
+            ->post(LinkedInGraph::restUrl('socialActions/'.rawurlencode($shareUrn).'/comments'), [
+                'actor' => LinkedInGraph::organizationUrn((string) $account->page_id),
+                'object' => $shareUrn,
+                'message' => ['text' => $body],
+                'parentComment' => $parentCommentUrn,
+            ]);
+
+        if (! $response->successful()) {
+            return $this->fail($this->linkedinError($response->json(), $response->status()));
+        }
+
+        $externalId = $response->header('x-restli-id') ?: data_get($response->json(), 'id');
+
+        return [
+            'ok' => true,
+            'external_id' => is_string($externalId) && $externalId !== '' ? $externalId : null,
+            'error' => null,
+        ];
+    }
+
+    /**
+     * Parses "urn:li:comment:(<shareUrn>,<commentId>)" and returns the share/post URN.
+     */
+    private function linkedinShareUrnFromCommentUrn(string $commentUrn): ?string
+    {
+        if (preg_match('/^urn:li:comment:\((.+),[^,)]+\)$/', $commentUrn, $matches) !== 1) {
+            return null;
+        }
+
+        return $matches[1];
+    }
+
+    private function linkedinError(mixed $json, int $status): string
+    {
+        $message = LinkedInGraph::errorMessage($json, $status);
+        $lower = strtolower($message);
+        if ($status === 403 || str_contains($lower, 'permission') || str_contains($lower, 'not authorized')) {
+            return 'linkedin_missing_permission';
+        }
+
+        return $message;
     }
 
     /**

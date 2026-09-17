@@ -1,20 +1,11 @@
-import { useEffect, useState, type FormEvent } from "react";
-import { FormDialog } from "../../components/FormDialog";
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { toast } from "sonner";
+import { ConfirmAction } from "../../components/ConfirmAction";
 import { LoadingTableRow } from "../../components/LoadingTableRow";
 import { api, type PricingCategory } from "../../api";
 import { copy, type Locale } from "../../i18n";
 import { categoryLabel } from "./utils";
-
-const emptyForm = {
-  slug: "",
-  name_en: "",
-  name_ar: "",
-  lead_en: "",
-  lead_ar: "",
-  is_published: true,
-  requires_full_payment: false,
-  allows_renewal: false,
-};
 
 export function PricingCategoriesPanel({
   locale,
@@ -27,10 +18,7 @@ export function PricingCategoriesPanel({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
   const [movingId, setMovingId] = useState<number | null>(null);
-  const [form, setForm] = useState(emptyForm);
 
   function load() {
     setLoading(true);
@@ -45,72 +33,17 @@ export function PricingCategoriesPanel({
     load();
   }, []);
 
-  function resetForm() {
-    setEditingId(null);
-    setForm(emptyForm);
-    setShowForm(false);
-    setError("");
-  }
-
-  function startAdd() {
-    setEditingId(null);
-    setForm(emptyForm);
-    setError("");
-    setShowForm(true);
-  }
-
-  function startEdit(item: PricingCategory) {
-    setEditingId(item.id);
-    setForm({
-      slug: item.slug,
-      name_en: item.name_en,
-      name_ar: item.name_ar,
-      lead_en: item.lead_en ?? "",
-      lead_ar: item.lead_ar ?? "",
-      is_published: item.is_published,
-      requires_full_payment: Boolean(item.requires_full_payment),
-      allows_renewal: Boolean(item.allows_renewal),
-    });
-    setShowForm(true);
-    setError("");
-  }
-
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    setError("");
-    setNotice("");
-    const payload = {
-      slug: form.slug.trim(),
-      name_en: form.name_en.trim(),
-      name_ar: form.name_ar.trim(),
-      lead_en: form.lead_en.trim() || null,
-      lead_ar: form.lead_ar.trim() || null,
-      is_published: form.is_published,
-      requires_full_payment: form.requires_full_payment,
-      allows_renewal: form.allows_renewal,
-    };
-
-    try {
-      if (editingId) await api.updatePricingCategory(editingId, payload);
-      else await api.createPricingCategory(payload);
-      resetForm();
-      setNotice(t(copy.savePricingCategory));
-      load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t(copy.savePortfolioFailed));
-    }
-  }
-
   async function remove(id: number) {
-    if (!window.confirm(t(copy.confirmDelete))) return;
     setError("");
     try {
       await api.deletePricingCategory(id);
-      if (editingId === id) resetForm();
       load();
       setNotice(t(copy.deleted));
+      toast.success(t(copy.deleteSuccess));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t(copy.savePortfolioFailed));
+      const message = err instanceof Error ? err.message : t(copy.savePortfolioFailed);
+      setError(message);
+      toast.error(message);
     }
   }
 
@@ -119,7 +52,6 @@ export function PricingCategoriesPanel({
     setError("");
     try {
       await api.deleteAllPricingCategories();
-      resetForm();
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : t(copy.savePortfolioFailed));
@@ -143,63 +75,16 @@ export function PricingCategoriesPanel({
   return (
     <>
       <div className="toolbar">
-        <button type="button" className="btn btn-primary" onClick={startAdd}>
+        <Link className="btn btn-primary" to="/pricing/categories/new">
           {t(copy.addPricingCategory)}
-        </button>
+        </Link>
         <button type="button" className="btn btn-ghost" onClick={() => void removeAll()} disabled={items.length === 0}>
           {t(copy.deleteAll)}
         </button>
       </div>
 
       {notice ? <p className="muted">{notice}</p> : null}
-      {!showForm && error ? <p className="error">{error}</p> : null}
-
-      {showForm ? (
-        <FormDialog
-          title={editingId ? t(copy.edit) : t(copy.addPricingCategory)}
-          onClose={resetForm}
-          onSubmit={submit}
-          submitLabel={t(copy.savePricingCategory)}
-          cancelLabel={t(copy.cancel)}
-          closeLabel={t(copy.close)}
-          error={error}
-        >
-          <div className="portfolio-form-grid">
-            <label className="field-label">
-              {t(copy.slug)}
-              <input className="field" value={form.slug} onChange={(e) => setForm((prev) => ({ ...prev, slug: e.target.value }))} required pattern="[a-z0-9_-]+" />
-            </label>
-            <label className="field-label">
-              {t(copy.titleEn)}
-              <input className="field" value={form.name_en} onChange={(e) => setForm((prev) => ({ ...prev, name_en: e.target.value }))} required />
-            </label>
-            <label className="field-label">
-              {t(copy.titleAr)}
-              <input className="field" value={form.name_ar} onChange={(e) => setForm((prev) => ({ ...prev, name_ar: e.target.value }))} required />
-            </label>
-            <label className="field-label">
-              {t(copy.leadEn)}
-              <textarea className="field" rows={3} value={form.lead_en} onChange={(e) => setForm((prev) => ({ ...prev, lead_en: e.target.value }))} />
-            </label>
-            <label className="field-label">
-              {t(copy.leadAr)}
-              <textarea className="field" rows={3} value={form.lead_ar} onChange={(e) => setForm((prev) => ({ ...prev, lead_ar: e.target.value }))} />
-            </label>
-            <label className="checkbox-row">
-              <input type="checkbox" checked={form.is_published} onChange={(e) => setForm((prev) => ({ ...prev, is_published: e.target.checked }))} />
-              {t(copy.published)}
-            </label>
-            <label className="checkbox-row">
-              <input type="checkbox" checked={form.requires_full_payment} onChange={(e) => setForm((prev) => ({ ...prev, requires_full_payment: e.target.checked }))} />
-              {t(copy.fullPayment)}
-            </label>
-            <label className="checkbox-row">
-              <input type="checkbox" checked={form.allows_renewal} onChange={(e) => setForm((prev) => ({ ...prev, allows_renewal: e.target.checked }))} />
-              {t(copy.renewalOn)}
-            </label>
-          </div>
-        </FormDialog>
-      ) : null}
+      {error ? <p className="error">{error}</p> : null}
 
       <div className="table-wrap">
         <table>
@@ -243,8 +128,8 @@ export function PricingCategoriesPanel({
                   </td>
                   <td>{item.is_published ? t(copy.published) : t(copy.inactive)}</td>
                   <td className="actions-cell">
-                    <button type="button" className="btn btn-ghost" onClick={() => startEdit(item)}>{t(copy.edit)}</button>
-                    <button type="button" className="btn btn-ghost" onClick={() => void remove(item.id)}>{t(copy.delete)}</button>
+                    <Link className="btn btn-ghost" to={`/pricing/categories/${item.id}/edit`}>{t(copy.edit)}</Link>
+                    <ConfirmAction label={t(copy.delete)} yesLabel={t(copy.delete)} noLabel={t(copy.cancel)} onConfirm={() => void remove(item.id)} />
                   </td>
                 </tr>
               ))

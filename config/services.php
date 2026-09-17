@@ -141,4 +141,16 @@ return [
         'scopes' => env('THREADS_OAUTH_SCOPES', 'threads_basic,threads_content_publish,threads_read_replies,threads_manage_replies'),
     ],
 
+    'linkedin' => [
+        'client_id' => trim((string) env('LINKEDIN_CLIENT_ID', '')),
+        'client_secret' => trim((string) env('LINKEDIN_CLIENT_SECRET', '')),
+        'redirect_uri' => trim((string) env('LINKEDIN_REDIRECT_URI', 'https://hoc.agency/auth/linkedin/callback')),
+        'dashboard_accounts_url' => trim((string) env('LINKEDIN_DASHBOARD_URL', 'https://hoc.agency/dashboard/social/accounts')),
+        'oauth_host' => env('LINKEDIN_OAUTH_HOST', 'https://www.linkedin.com/oauth/v2'),
+        'api_base' => env('LINKEDIN_API_BASE', 'https://api.linkedin.com/v2'),
+        'rest_base' => env('LINKEDIN_REST_BASE', 'https://api.linkedin.com/rest'),
+        'api_version' => env('LINKEDIN_API_VERSION', '202409'),
+        'scopes' => env('LINKEDIN_OAUTH_SCOPES', 'r_organization_social,w_organization_social,rw_organization_admin'),
+    ],
+
 ];

@@ -1,4 +1,6 @@
 import { useSearchParams } from "react-router-dom";
+import { PageHeader } from "../components/PageHeader";
+import { Tabs } from "../components/Tabs";
 import { copy, type Locale } from "../i18n";
 import { PricingCategoriesPanel } from "./pricing/PricingCategoriesPanel";
 import { PricingPackagesPanel } from "./pricing/PricingPackagesPanel";
@@ -36,28 +38,14 @@ export function Pricing({ locale, t }: { locale: Locale; t: (c: { ar: string; en
 
   return (
     <>
-      <header className="page-head">
-        <div>
-          <p className="eyebrow">{t(copy.brandMark)}</p>
-          <h1 className="page-title">{t(copy.pricingTitle)}</h1>
-          <p className="page-lede">{t(copy.pricingLede)}</p>
-        </div>
-      </header>
+      <PageHeader eyebrow={t(copy.brandMark)} title={t(copy.pricingTitle)} lede={t(copy.pricingLede)} />
 
-      <div className="tabs" role="tablist" aria-label={t(copy.pricingTitle)}>
-        {tabs.map((entry) => (
-          <button
-            key={entry}
-            type="button"
-            role="tab"
-            aria-selected={tab === entry}
-            className={tab === entry ? "tab is-active" : "tab"}
-            onClick={() => setTab(entry)}
-          >
-            {tabLabel(entry, t)}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        value={tab}
+        onValueChange={(next) => setTab(next as Tab)}
+        ariaLabel={t(copy.pricingTitle)}
+        items={tabs.map((entry) => ({ value: entry, label: tabLabel(entry, t) }))}
+      />
 
       {tab === "categories" ? <PricingCategoriesPanel locale={locale} t={t} /> : null}
       {tab === "subcategories" ? <PricingSubcategoriesPanel locale={locale} t={t} /> : null}

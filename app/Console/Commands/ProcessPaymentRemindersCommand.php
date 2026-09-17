@@ -6,6 +6,7 @@ use App\Models\PaymentReminder;
 use App\Models\ServiceRequest;
 use App\Services\GoogleCalendarClient;
 use App\Services\TelegramNotifier;
+use App\Support\Money;
 use App\Support\ResolveServiceRequest;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
@@ -70,7 +71,7 @@ class ProcessPaymentRemindersCommand extends Command
                 if ($reminder->kind === PaymentReminder::KIND_REMAINING) {
                     $telegram->send(
                         (string) $chatId,
-                        "تذكير بسداد المتبقي للطلب #{$ref}.\nالمتبقي: ".number_format((float) $request->amount_remaining, 2).' SYP',
+                        "تذكير بسداد المتبقي للطلب #{$ref}.\nالمتبقي: ".Money::format($request->amount_remaining),
                     );
                 } else {
                     $telegram->sendInlineKeyboard(

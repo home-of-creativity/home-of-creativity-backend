@@ -7,6 +7,7 @@ export type SocialPageGroup = {
   facebook?: SocialAccount;
   instagram?: SocialAccount;
   threads?: SocialAccount;
+  linkedin?: SocialAccount;
   accounts: SocialAccount[];
 };
 
@@ -33,30 +34,85 @@ export function groupSocialPages(accounts: SocialAccount[]): SocialPageGroup[] {
   for (const account of accounts) {
     if (account.platform === "facebook") continue;
 
-    const matchedFacebook = facebooks.find((facebook) => {
-      if (account.facebook_page_id && (facebook.facebook_page_id === account.facebook_page_id || facebook.page_id === account.facebook_page_id)) {
-        return true;
-      }
-      return (account.platform === "instagram" || account.platform === "threads") && facebook.name === account.name;
-    });
+    let matchedFacebook = matchFacebookPage(account, facebooks, groups);
+    if (account.platform === "threads" && !matchedFacebook && facebooks.length === 1) {
+      matchedFacebook = facebooks[0];
+    }
+
     const key = matchedFacebook
       ? matchedFacebook.facebook_page_id || matchedFacebook.page_id || `fb-${matchedFacebook.id}`
       : pageGroupKey(account);
-    const current = groups.get(key) ?? { key, name: account.name, accounts: [] };
-    current.accounts.push(account);
-    if (account.platform === "instagram") {
-      current.instagram = account;
-    }
-    if (account.platform === "threads") {
-      current.threads = account;
-    }
-    if (!current.facebook) {
-      current.name = account.name;
-    }
-    groups.set(key, current);
+    attachAccount(groups, key, account, matchedFacebook?.name);
   }
 
   return [...groups.values()];
+}
+
+function matchFacebookPage(
+  account: SocialAccount,
+  facebooks: SocialAccount[],
+  groups: Map<string, SocialPageGroup>,
+): SocialAccount | undefined {
+  const byPageId = facebooks.find((facebook) => Boolean(
+    account.facebook_page_id
+    && (facebook.facebook_page_id === account.facebook_page_id || facebook.page_id === account.facebook_page_id),
+  ));
+  if (byPageId) return byPageId;
+
+  const byName = facebooks.find((facebook) => (
+    (account.platform === "instagram" || account.platform === "threads")
+    && facebook.name === account.name
+  ));
+  if (byName) return byName;
+
+  if (account.platform !== "threads" || !account.handle) return undefined;
+
+  const handle = account.handle.replace(/^@/, "").toLowerCase();
+  const byInstagramHandle = [...groups.values()].find((group) => {
+    const igHandle = group.instagram?.handle?.replace(/^@/, "").toLowerCase();
+    return Boolean(igHandle && igHandle === handle);
+  });
+
+  return byInstagramHandle?.facebook;
+}
+
+function attachAccount(
+  groups: Map<string, SocialPageGroup>,
+  key: string,
+  account: SocialAccount,
+  fallbackName?: string,
+): void {
+  const current = groups.get(key) ?? { key, name: fallbackName || account.name, accounts: [] };
+  if (!current.accounts.some((item) => item.id === account.id)) {
+    current.accounts.push(account);
+  }
+  if (account.platform === "instagram") {
+    current.instagram = account;
+  }
+  if (account.platform === "threads") {
+    current.threads = account;
+  }
+  if (account.platform === "linkedin") {
+    current.linkedin = account;
+  }
+  if (!current.facebook) {
+    current.name = account.name;
+  }
+  groups.set(key, current);
+}
+
+export function threadsAccountForPage(page: SocialPageGroup, accounts: SocialAccount[]): SocialAccount | undefined {
+  return page.threads ?? accounts.find((account) => account.platform === "threads");
+}
+
+export function pagePublishAccountIds(page: SocialPageGroup, accounts: SocialAccount[]): number[] {
+  const ids = page.accounts.map((account) => account.id);
+  const threads = threadsAccountForPage(page, accounts);
+  if (threads && !ids.includes(threads.id)) {
+    ids.push(threads.id);
+  }
+
+  return ids;
 }
 
 export const socialPlatforms = ["facebook", "instagram", "threads", "linkedin", "x", "tiktok", "youtube"] as const;
@@ -77,6 +133,7 @@ export function pageChannelSummary(page: SocialPageGroup, t: (c: Copy) => string
     page.facebook ? t(copy.facebook) : null,
     page.instagram ? t(copy.instagram) : null,
     page.threads ? t(copy.threads) : null,
+    page.linkedin ? t(copy.linkedin) : null,
   ].filter((label): label is string => Boolean(label));
 
   if (labels.length > 0) {
@@ -137,6 +194,14 @@ export function facebookErrorMessage(error: string, t: (c: Copy) => string) {
   return error.length > 0 ? error : t(copy.socialFacebookError);
 }
 
+export function linkedinOauthMessage(code: string, t: (c: Copy) => string) {
+  if (code === "denied") return t(copy.socialLinkedinOauthDenied);
+  if (code === "invalid_state") return t(copy.socialLinkedinOauthInvalid);
+  if (code === "token_exchange") return t(copy.socialLinkedinOauthToken);
+  if (code === "no_organizations") return t(copy.socialLinkedinOauthNoOrganizations);
+  return t(copy.socialLinkedinOauthInvalid);
+}
+
 export function socialAccountStatusLabel(item: { connection_status: string; last_error: string | null }, t: (c: Copy) => string) {
   if (item.connection_status === "error" && item.last_error) {
     return facebookErrorMessage(item.last_error, t);
@@ -166,6 +231,27 @@ export function publishErrorMessage(error: string, t: (c: Copy) => string) {
   }
   if (error.includes("threads_token_missing")) {
     return t(copy.socialThreadsTokenMissing);
+  }
+  if (error.includes("linkedin_missing_permission")) {
+    return t(copy.socialLinkedinMissingPermission);
+  }
+  if (error.includes("linkedin_edit_unsupported")) {
+    return t(copy.socialLinkedinEditUnsupported);
+  }
+  if (error.includes("linkedin_placement_unsupported")) {
+    return t(copy.socialLinkedinPlacementUnsupported);
+  }
+  if (error.includes("linkedin_media_processing")) {
+    return t(copy.socialLinkedinMediaProcessing);
+  }
+  if (error.includes("linkedin_media_fetch") || error.includes("linkedin_media_missing")) {
+    return t(copy.socialLinkedinMediaMissing);
+  }
+  if (error.includes("linkedin_messages_unsupported")) {
+    return t(copy.socialLinkedinMessagesUnsupported);
+  }
+  if (error.includes("linkedin_comment_target_missing")) {
+    return t(copy.socialLinkedinCommentTargetMissing);
   }
   if (error.includes("facebook_unsupported_post") || error.toLowerCase().includes("unsupported post request")) {
     return t(copy.socialFacebookUnsupportedPost);
@@ -213,6 +299,15 @@ export function inboxErrorMessage(error: string, t: (c: Copy) => string) {
   }
   if (error.includes("facebook_new_pages") || error.toLowerCase().includes("new pages experience")) {
     return t(copy.socialFacebookNewPages);
+  }
+  if (error.includes("linkedin_missing_permission")) {
+    return t(copy.socialLinkedinMissingPermission);
+  }
+  if (error.includes("linkedin_messages_unsupported")) {
+    return t(copy.socialLinkedinMessagesUnsupported);
+  }
+  if (error.includes("linkedin_comment_target_missing")) {
+    return t(copy.socialLinkedinCommentTargetMissing);
   }
 
   return error.length > 0 ? error : t(copy.loading);

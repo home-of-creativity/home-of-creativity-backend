@@ -1,0 +1,86 @@
+---
+description: Dashboard UI architecture — dedicated pages, ConfirmAction, PageHeader/FormPage/FormSection, Linktree-style social tiles.
+globs: backend/dashboard/**
+alwaysApply: false
+---
+
+# Dashboard architecture (staff SPA only)
+
+Scoped to `backend/dashboard/**` — the Vite/React staff SPA. Does not apply to `design/` (Next.js
+marketing site) or the Laravel API, which have their own conventions.
+
+## Add / edit is always a dedicated route, never a popup dialog
+
+- Every list page renders a table or card list plus a `<Link>` to `/entity/new` and
+  `/entity/:id/edit` (or a nested variant like `/entity/:id/approve`).
+- The add/edit screen itself is a separate `*Form.tsx` component built with `FormPage` +
+  `FormSection` (see below), rendered at its own route in `App.tsx`.
+- `FormDialog` (`src/components/FormDialog.tsx`) is legacy. Do not use it for new modules or
+  reintroduce it for one already converted. Check `src/pages/**` for the current `*Form.tsx`
+  pattern before adding a new CRUD module (e.g. `EmployeeForm.tsx`, `ClientForm.tsx`,
+  `PortfolioProjectForm.tsx`, `ReelForm.tsx`, `PricingCategoryForm.tsx`).
+- List pages stay thin: fetch, render rows/cards, and link out. They hold no field state for the
+  form itself — that lives in the `*Form.tsx` component, which owns its own load/submit/navigate
+  cycle and returns to the list route (or a relevant tab query, e.g. `/pricing?tab=packages`) on
+  success.
+
+## Every destructive action uses `ConfirmAction`, never `window.confirm`
+
+- Import `ConfirmAction` from `src/components/ConfirmAction.tsx` for delete/remove/reject actions
+  on a single row. It flips inline to "Sure? Yes / No" instead of a native browser dialog.
+- Bulk "delete all" actions may keep `window.confirm` since there is no per-row inline slot for
+  them, but any new single-item destructive action must use `ConfirmAction`.
+
+## Every page header uses `PageHeader`
+
+- Use `src/components/PageHeader.tsx` for the top-of-page title block on every page (list pages,
+  detail pages, and inside `FormPage` where relevant). It supports `eyebrow`, `title`, `lede`,
+  optional `breadcrumbs` (for detail pages like `RequestDetail`), and a right-aligned `actions`
+  slot for the primary buttons.
+- Do not hand-roll a new `<header className="page-head">` block — reuse `PageHeader`.
+
+## Every multi-field create/edit form uses `FormPage` + `FormSection`
+
+- `src/components/FormPage.tsx` provides the sticky back-link/save/cancel header, error/notice
+  banner, and body grid for a dedicated add/edit route. Pass `wide` when the form needs a
+  two-column layout (fields + media preview), as in `PortfolioProjectForm.tsx` and `ReelForm.tsx`.
+- `src/components/FormSection.tsx` groups related fields under a titled card (e.g. "Basic info",
+  "Media", "Pricing") inside a `FormPage`. Do not dump every field into one flat `.form-grid` —
+  split multi-topic forms into 2+ `FormSection`s.
+- Use the `field-span` / `checkbox-row` classes on a field wrapper to make it span both grid
+  columns inside a `FormSection`.
+
+## Overview-style stats use `StatCard` / `DonutStat`
+
+- `src/components/StatCard.tsx` for a single accent metric card (icon + label + value).
+- `src/components/DonutStat.tsx` for a status/category breakdown instead of a flat list of cards.
+  Build the `slices` array from the same status-tone mapping already used for `status-*` CSS
+  classes so colors stay consistent with the rest of the app.
+
+## Sidebar shows live counts, not static labels
+
+- `App.tsx`'s `Shell` fetches lightweight counts (pending employees, open requests) on an
+  interval and renders them with the `.nav-badge` class inside `.nav-link-row`. Add a new badge
+  the same way if a module needs one — do not hardcode a count in copy.
+
+## Social module: platform/placement choices render as tiles, never raw radio/checkbox lists
+
+- `src/pages/social/PlacementTile.tsx` — one tile per platform + placement combination (icon,
+  brand color, toggle, eligibility state). Used by `SocialCompose` (picking where a post goes) and
+  informs the same visual language in `SocialAccounts` and `SocialPosts`.
+- `src/pages/social/EligibilityBadge.tsx` — inline reason a tile is disabled right now (e.g. "add
+  a video to enable Reels"), computed live from the post's current media/body, not from a
+  post-submit error. Reuse the existing helpers in `src/pages/social/helpers.ts`
+  (`socialStoryNeedsMedia`, `socialReelNeedsVideo`, `socialInstagramNeedsMedia`) as the source of
+  truth for eligibility — do not duplicate that logic.
+- `SocialPosts.tsx` and `SocialAccounts.tsx` render cards/tiles (`.social-card`,
+  `.social-account-tile`), not `<table>` rows. Add/edit for a social account is a dedicated route
+  (`/social/accounts/new`, `/social/accounts/:id/edit`) via `SocialAccountForm.tsx`, following the
+  same `FormPage` pattern as every other module.
+
+## Visual restraint
+
+- One brand accent per screen. Use `var(--brand-orange)` for primary actions and active nav
+  state, `var(--brand-teal)` for positive/success states, and neutral white/off-white surfaces
+  (`--brand-cream`, `--brand-off-white`) otherwise. Do not stack multiple gradients on the same
+  card — gradients are reserved for the sidebar and hero-style accent cards.

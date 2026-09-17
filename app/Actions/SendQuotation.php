@@ -10,6 +10,7 @@ use App\Models\ServiceRequest;
 use App\Services\OdooClient;
 use App\Services\RequestStatusTransitionService;
 use App\Services\TelegramNotifier;
+use App\Support\Money;
 use App\Support\ResolveServiceRequest;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -36,6 +37,7 @@ class SendQuotation
         ?Employee $employee = null,
         ?array $lines = null,
         bool $skipStatusTransition = false,
+        ?bool $requiresFullPayment = null,
     ): Quotation {
         if (! $skipStatusTransition && ! in_array($request->status, [RequestStatus::Submitted, RequestStatus::QuotationRejected], true)) {
             throw ValidationException::withMessages([
@@ -50,7 +52,7 @@ class SendQuotation
             $notes = $this->formatQuotationLines($lines);
         }
 
-        $quotation = DB::transaction(function () use ($request, $amount, $notes, $actor, $lines, $skipStatusTransition): Quotation {
+        $quotation = DB::transaction(function () use ($request, $amount, $notes, $actor, $lines, $skipStatusTransition, $requiresFullPayment): Quotation {
             $version = ((int) $request->quotations()->max('version')) + 1;
             $pdfPath = $this->resolveQuotationPdf($request, $amount, $notes, $version, $lines);
 
@@ -63,10 +65,15 @@ class SendQuotation
                 'sent_at' => now(),
             ]);
 
-            $request->forceFill([
+            $payload = [
                 'quotation_amount' => $amount,
                 'quotation_notes' => $notes,
-            ])->save();
+            ];
+            if ($requiresFullPayment !== null) {
+                $payload['requires_full_payment'] = $requiresFullPayment;
+                $payload['payment_plan'] = $requiresFullPayment ? 'full' : 'partial';
+            }
+            $request->forceFill($payload)->save();
 
             if (! $skipStatusTransition) {
                 $this->transitions->transition($request, RequestStatus::QuotationSent, $actor, "Quotation v{$version} sent.");
@@ -209,7 +216,7 @@ class SendQuotation
         $lines = [
             "عرض سعر #{$request->number} (v{$version})",
             "العنوان: {$request->title}",
-            'المبلغ: '.number_format($amount, 2).' SYP',
+            'المبلغ: '.Money::format($amount),
         ];
 
         if (filled($notes)) {
@@ -237,7 +244,7 @@ class SendQuotation
                 $number = $index + 1;
                 $units = (float) ($line['units'] ?? 1);
                 $unitPrice = (float) $line['amount'];
-                $row = "{$number}. {$line['title']} — {$units} × ".number_format($unitPrice, 2).' SYP = '.number_format($units * $unitPrice, 2).' SYP';
+                $row = "{$number}. {$line['title']} — {$units} × ".Money::format($unitPrice).' = '.Money::format($units * $unitPrice);
                 if (filled($line['notes'] ?? null)) {
                     $row .= "\n   {$line['notes']}";
                 }

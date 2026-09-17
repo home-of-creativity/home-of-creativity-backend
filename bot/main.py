@@ -1,6 +1,7 @@
 import base64
 import os
 from html import escape
+from io import BytesIO
 from pathlib import Path
 
 import httpx
@@ -117,6 +118,68 @@ def main_keyboard() -> ReplyKeyboardMarkup:
         [[KeyboardButton(BTN_NEW), KeyboardButton(BTN_MY)], [KeyboardButton(BTN_SUPPORT)]],
         resize_keyboard=True,
     )
+
+
+def default_sham_cash_caption(number: str) -> str:
+    return (
+        f"تمت الموافقة على عرض السعر للطلب #{escape(number)}.\n"
+        "حوّل عبر شام كاش باستخدام الرمز، ثم أرسل إثبات التحويل كصورة أو PDF."
+    )
+
+
+async def send_sham_cash_qr(query, number: str, response) -> None:
+    body: dict = {}
+    try:
+        parsed = response.json()
+        if isinstance(parsed, dict):
+            body = parsed
+    except Exception:
+        body = {}
+
+    payload = body.get("sham_cash_qr") if isinstance(body.get("sham_cash_qr"), dict) else {}
+    caption = str(payload.get("caption") or "").strip() or default_sham_cash_caption(number)
+    delivered = bool(payload.get("delivered"))
+    encoded = payload.get("content_base64")
+    raw = None
+    file_name = str(payload.get("file_name") or "sham-cash-qr.png")
+    mime = str(payload.get("mime_type") or "").lower()
+
+    if encoded and not delivered:
+        try:
+            raw = base64.b64decode(encoded)
+        except Exception:
+            raw = None
+
+    if raw is None and payload.get("qr_available") and not delivered:
+        try:
+            async with httpx.AsyncClient(timeout=12) as client:
+                image = await client.get(
+                    f"{API_URL}/bot/telegram/sham-cash-qr",
+                    headers=api_headers(),
+                )
+            if image.status_code < 400 and image.content:
+                raw = image.content
+                mime = (image.headers.get("content-type") or mime).split(";")[0].strip().lower()
+        except Exception:
+            raw = None
+
+    if raw:
+        buffer = BytesIO(raw)
+        buffer.name = file_name
+        await query.message.reply_photo(
+            photo=buffer,
+            caption=caption,
+            reply_markup=main_keyboard(),
+        )
+        return
+
+    if delivered and payload.get("qr_available"):
+        caption = (
+            f"تمت الموافقة على عرض السعر للطلب #{escape(number)}.\n"
+            "رمز شام كاش للتحويل أعلاه. بعد التحويل أرسل إثبات الدفع كصورة أو PDF."
+        )
+
+    await query.message.reply_text(caption, reply_markup=main_keyboard())
 
 
 def body_keyboard() -> ReplyKeyboardMarkup:
@@ -447,6 +510,29 @@ async def capture_profile_field(update: Update, context: ContextTypes.DEFAULT_TY
     return True
 
 
+async def send_catalog_view(message, text: str, markup=None, *, replace: bool = False) -> None:
+    if replace:
+        try:
+            await message.edit_text(text, reply_markup=markup)
+            return
+        except Exception:
+            pass
+    kwargs = {}
+    if markup is not None:
+        kwargs["reply_markup"] = markup
+    await message.reply_text(text, **kwargs)
+
+
+async def send_catalog_result(message, text: str, *, replace: bool = False) -> None:
+    if replace:
+        try:
+            await message.edit_text(text)
+            return
+        except Exception:
+            pass
+    await message.reply_text(text, reply_markup=main_keyboard())
+
+
 async def show_catalog(
     message,
     context: ContextTypes.DEFAULT_TYPE,
@@ -457,6 +543,7 @@ async def show_catalog(
     package_id: int | None = None,
     offset: int = 0,
     parent: int = 0,
+    replace: bool = False,
 ) -> None:
     parent = 0
     scope = "root"
@@ -480,11 +567,13 @@ async def show_catalog(
         periods = [str(item) for item in (first.get("periods") or [])]
         subscription = [item for item in periods if period_is_subscription(item)]
         if not subscription:
-            await create_catalog_request(message, telegram_id, int(first.get("id") or 0), None)
+            await create_catalog_request(message, telegram_id, int(first.get("id") or 0), None, replace=replace)
             return
-        await message.reply_text(
+        await send_catalog_view(
+            message,
             f"اختر مدة الاشتراك لـ {escape(str(first.get('name') or ''))}:",
-            reply_markup=catalog_markup(payload, scope="pkg", parent=int(first.get("id") or 0)),
+            catalog_markup(payload, scope="pkg", parent=int(first.get("id") or 0)),
+            replace=replace,
         )
         return
 
@@ -493,10 +582,22 @@ async def show_catalog(
         title = "اختر الفئة الفرعية أو الباقة:"
     if subcategory_id:
         title = "اختر الباقة:"
-    await message.reply_text(title, reply_markup=catalog_markup(payload, scope=scope, parent=parent))
+    await send_catalog_view(
+        message,
+        title,
+        catalog_markup(payload, scope=scope, parent=parent),
+        replace=replace,
+    )
 
 
-async def create_catalog_request(message, telegram_id: int, package_id: int, period: str | None) -> None:
+async def create_catalog_request(
+    message,
+    telegram_id: int,
+    package_id: int,
+    period: str | None,
+    *,
+    replace: bool = False,
+) -> None:
     payload: dict[str, object] = {
         "telegram_user_id": str(telegram_id),
         "package_id": package_id,
@@ -514,17 +615,19 @@ async def create_catalog_request(message, telegram_id: int, package_id: int, per
         )
         if response.status_code >= 400:
             detail = response.json().get("message", response.text) if response.headers.get("content-type", "").startswith("application/json") else response.text
-            await message.reply_text(
+            await send_catalog_result(
+                message,
                 f"تعذر إنشاء الطلب: {escape(str(detail))}",
-                reply_markup=main_keyboard(),
+                replace=replace,
             )
             return
         result = response.json().get("data") or {}
 
     number = escape(str(result.get("number") or ""))
-    await message.reply_text(
+    await send_catalog_result(
+        message,
         f"تم إنشاء الطلب {number} وإرسال عرض السعر.",
-        reply_markup=main_keyboard(),
+        replace=replace,
     )
 
 
@@ -552,13 +655,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
 
-async def begin_manual_request(message, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def begin_manual_request(message, context: ContextTypes.DEFAULT_TYPE, *, replace: bool = False) -> int:
     context.user_data["composing_request"] = True
     context.user_data["attachments"] = []
     context.user_data["description"] = ""
     context.user_data.pop("submitting", None)
     context.user_data.pop("attachment_status_message_id", None)
-    await message.reply_text("ما عنوان الطلب؟")
+    await send_catalog_view(message, "ما عنوان الطلب؟", None, replace=replace)
     return WAITING_TITLE
 
 
@@ -578,11 +681,7 @@ async def manual_from_catalog(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.answer()
     if not await ensure_profile(update, context):
         return ConversationHandler.END
-    try:
-        await query.edit_message_reply_markup(reply_markup=None)
-    except Exception:
-        pass
-    return await begin_manual_request(query.message, context)
+    return await begin_manual_request(query.message, context, replace=True)
 
 
 async def catalog_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -595,26 +694,22 @@ async def catalog_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     data = query.data
     telegram_id = query.from_user.id
-    try:
-        await query.edit_message_reply_markup(reply_markup=None)
-    except Exception:
-        pass
 
     if data.startswith("cat:"):
         category_id = int(data.split(":", 1)[1])
-        await show_catalog(query.message, context, telegram_id, category_id=category_id, parent=category_id)
+        await show_catalog(query.message, context, telegram_id, category_id=category_id, parent=category_id, replace=True)
         return
     if data.startswith("sub:"):
         subcategory_id = int(data.split(":", 1)[1])
-        await show_catalog(query.message, context, telegram_id, subcategory_id=subcategory_id, parent=subcategory_id)
+        await show_catalog(query.message, context, telegram_id, subcategory_id=subcategory_id, parent=subcategory_id, replace=True)
         return
     if data.startswith("pkg:"):
         package_id = int(data.split(":", 1)[1])
-        await show_catalog(query.message, context, telegram_id, package_id=package_id, parent=package_id)
+        await show_catalog(query.message, context, telegram_id, package_id=package_id, parent=package_id, replace=True)
         return
     if data.startswith("per:"):
         _, package_id, period = data.split(":", 2)
-        await create_catalog_request(query.message, telegram_id, int(package_id), period)
+        await create_catalog_request(query.message, telegram_id, int(package_id), period, replace=True)
         return
     if data.startswith("more:"):
         _, scope, parent_raw, offset_raw = data.split(":", 3)
@@ -625,7 +720,7 @@ async def catalog_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             kwargs["subcategory_id"] = parent
         elif scope == "cat":
             kwargs["category_id"] = parent
-        await show_catalog(query.message, context, telegram_id, **kwargs)
+        await show_catalog(query.message, context, telegram_id, replace=True, **kwargs)
         return
 
 
@@ -721,7 +816,7 @@ async def list_requests(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         remaining = item.get("amount_remaining")
         money = ""
         if paid is not None or remaining is not None:
-            money = f"\n  المدفوع: {paid or 0} — المتبقي: {remaining or 0}"
+            money = f"\n  المدفوع: {paid or 0} USD — المتبقي: {remaining or 0} USD"
         extra = f"\n  الباقة: {package}"
         if period:
             extra += f" — {period}"
@@ -940,11 +1035,7 @@ async def quotation_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             if response.status_code < 400:
                 context.user_data["receipt_number"] = number
                 await query.edit_message_reply_markup(reply_markup=None)
-                await query.message.reply_text(
-                    f"تمت الموافقة على عرض السعر للطلب #{escape(number)}.\n"
-                    "حوّل عبر شام كاش ثم أرسل وصل الدفع كصورة أو PDF.",
-                    reply_markup=main_keyboard(),
-                )
+                await send_sham_cash_qr(query, number, response)
             else:
                 await api_error_alert(query, response)
             return

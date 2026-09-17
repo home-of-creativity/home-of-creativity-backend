@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { toast } from "sonner";
 import { api, canSocial, type PageMeta, type SocialPost } from "../../api";
 import { useAuth } from "../../auth";
-import { LoadingTableRow } from "../../components/LoadingTableRow";
+import { ConfirmAction } from "../../components/ConfirmAction";
 import { Pagination } from "../../components/Pagination";
 import { copy, type Locale } from "../../i18n";
 import { SocialChrome } from "./SocialChrome";
@@ -70,14 +71,15 @@ export function SocialPosts({ locale, t }: { locale: Locale; t: (c: { ar: string
   }
 
   async function remove(id: number) {
-    const item = items.find((post) => post.id === id);
-    if (!window.confirm(item?.status === "published" ? t(copy.socialDeleteLive) : t(copy.delete))) return;
     setBusyId(id);
     try {
       await api.deleteSocialPost(id);
       load();
+      toast.success(t(copy.deleteSuccess));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t(copy.loading));
+      const message = err instanceof Error ? err.message : t(copy.loading);
+      setError(message);
+      toast.error(message);
     } finally {
       setBusyId(null);
     }
@@ -112,89 +114,69 @@ export function SocialPosts({ locale, t }: { locale: Locale; t: (c: { ar: string
         ) : null}
       </div>
       {error ? <p className="error">{error}</p> : null}
-      <div className="table-wrap card">
-        <table className="table-flush">
-          <thead>
-            <tr>
-              <th>{t(copy.socialBody)}</th>
-              <th>{t(copy.status)}</th>
-              <th>{t(copy.socialPickAccounts)}</th>
-              <th>{t(copy.socialCreatedBy)}</th>
-              <th>{t(copy.socialApprovedBy)}</th>
-              <th>{t(copy.socialPublishedAt)}</th>
-              <th>{t(copy.actions)}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? <LoadingTableRow colSpan={7} label={t(copy.loading)} /> : null}
-            {!loading && items.length === 0 ? (
-              <tr>
-                <td colSpan={7}>{t(copy.socialNoPosts)}</td>
-              </tr>
-            ) : null}
-            {items.map((item) => {
-              const canApprove = item.status === "draft" || item.status === "failed";
-              const canPublishNow = item.status === "draft" || item.status === "scheduled" || item.status === "failed";
-              const canDelete = item.is_deletable !== false && item.status !== "publishing";
-              const cover = item.media?.[0];
-              return (
-                <tr key={item.id}>
-                  <td>
-                    <Link className="table-link social-post-cell" to={`/social/compose/${item.id}`}>
-                      {cover ? (
-                        cover.kind === "video" ? (
-                          <video className="social-post-thumb" src={cover.url ?? undefined} muted />
-                        ) : (
-                          <img className="social-post-thumb" src={cover.url ?? ""} alt={cover.original_name} />
-                        )
-                      ) : (
-                        <span className="social-post-thumb social-post-thumb-empty" aria-hidden="true" />
-                      )}
-                      <span>
-                        {item.body.slice(0, 80) || "—"}
-                        <small className="muted"> · {socialPlacementLabel(item.placement, t)}</small>
-                      </span>
-                    </Link>
-                  </td>
-                  <td>
-                    <span className={`status status-${item.status}`}>{socialStatusLabel(item.status, t)}</span>
-                    {item.last_error ? (
-                      <p className="muted" title={item.last_error}>
-                        {publishErrorMessage(item.last_error, t)}
-                      </p>
-                    ) : null}
-                  </td>
-                  <td>{item.accounts?.map((account) => account.name).join(" · ") || "—"}</td>
-                  <td>{item.created_by?.name ?? "—"}</td>
-                  <td>{item.approved_by?.name ?? "—"}</td>
-                  <td>{formatWhen(item.published_at ?? item.scheduled_at, locale)}</td>
-                  <td className="row-actions">
-                    {canSocial(user, "approve") && canApprove ? (
-                      <button type="button" className="btn btn-ghost" disabled={busyId === item.id} onClick={() => void approve(item.id)}>
-                        {t(copy.socialApprove)}
-                      </button>
-                    ) : null}
-                    {canSocial(user, "approve") && canPublishNow ? (
-                      <button type="button" className="btn btn-ghost" disabled={busyId === item.id} onClick={() => void publish(item.id)}>
-                        {t(copy.socialPublishNow)}
-                      </button>
-                    ) : null}
-                    {canSocial(user, "create") && canDelete ? (
-                      <button
-                        type="button"
-                        className="btn btn-ghost"
-                        disabled={busyId === item.id}
-                        onClick={() => void remove(item.id)}
-                      >
-                        {t(copy.delete)}
-                      </button>
-                    ) : null}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      {loading ? <p className="muted">{t(copy.loading)}</p> : null}
+      {!loading && items.length === 0 ? <p className="card social-inbox-empty">{t(copy.socialNoPosts)}</p> : null}
+      <div className="social-card-list">
+        {items.map((item) => {
+          const canApprove = item.status === "draft" || item.status === "failed";
+          const canPublishNow = item.status === "draft" || item.status === "scheduled" || item.status === "failed";
+          const canDelete = item.is_deletable !== false && item.status !== "publishing";
+          const cover = item.media?.[0];
+          return (
+            <article key={item.id} className="social-card">
+              {cover ? (
+                cover.kind === "video" ? (
+                  <video className="social-card-thumb" src={cover.url ?? undefined} muted />
+                ) : (
+                  <img className="social-card-thumb" src={cover.url ?? ""} alt={cover.original_name} />
+                )
+              ) : (
+                <span className="social-card-thumb social-post-thumb-empty" aria-hidden="true" />
+              )}
+              <div className="social-card-body">
+                <Link className="social-card-title" to={`/social/compose/${item.id}`}>
+                  {item.body.slice(0, 100) || "—"}
+                </Link>
+                <p className="social-card-meta">
+                  <span className={`status status-${item.status}`}>{socialStatusLabel(item.status, t)}</span>
+                  <span className="muted"> · {socialPlacementLabel(item.placement, t)}</span>
+                  <span className="muted"> · {item.accounts?.map((account) => account.name).join(" + ") || "—"}</span>
+                </p>
+                <p className="social-card-meta muted">
+                  {t(copy.socialCreatedBy)}: {item.created_by?.name ?? "—"} · {t(copy.socialApprovedBy)}: {item.approved_by?.name ?? "—"} ·{" "}
+                  {formatWhen(item.published_at ?? item.scheduled_at, locale)}
+                </p>
+                {item.last_error ? (
+                  <p className="muted" title={item.last_error}>
+                    {publishErrorMessage(item.last_error, t)}
+                  </p>
+                ) : null}
+              </div>
+              <div className="social-card-actions">
+                {canSocial(user, "approve") && canApprove ? (
+                  <button type="button" className="btn btn-ghost" disabled={busyId === item.id} onClick={() => void approve(item.id)}>
+                    {t(copy.socialApprove)}
+                  </button>
+                ) : null}
+                {canSocial(user, "approve") && canPublishNow ? (
+                  <button type="button" className="btn btn-ghost" disabled={busyId === item.id} onClick={() => void publish(item.id)}>
+                    {t(copy.socialPublishNow)}
+                  </button>
+                ) : null}
+                {canSocial(user, "create") && canDelete ? (
+                  <ConfirmAction
+                    label={t(copy.delete)}
+                    confirmLabel={item.status === "published" ? t(copy.socialDeleteLive) : undefined}
+                    yesLabel={t(copy.delete)}
+                    noLabel={t(copy.cancel)}
+                    disabled={busyId === item.id}
+                    onConfirm={() => void remove(item.id)}
+                  />
+                ) : null}
+              </div>
+            </article>
+          );
+        })}
       </div>
       <Pagination meta={meta} disabled={loading} onPage={setPage} t={t} />
     </SocialChrome>

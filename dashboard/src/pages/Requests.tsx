@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type PageMeta, type ServiceRequest } from "../api";
 import { LoadingTableRow } from "../components/LoadingTableRow";
+import { PageHeader } from "../components/PageHeader";
 import { Pagination } from "../components/Pagination";
 import { copy, sources, statuses, type Locale } from "../i18n";
 
@@ -29,13 +30,7 @@ export function Requests({ t }: { locale: Locale; t: (c: { ar: string; en: strin
 
   return (
     <>
-      <header className="page-head">
-        <div>
-          <p className="eyebrow">{t(copy.brandMark)}</p>
-          <h1 className="page-title">{t(copy.requests)}</h1>
-          <p className="page-lede">{t(copy.requestsLede)}</p>
-        </div>
-      </header>
+      <PageHeader eyebrow={t(copy.brandMark)} title={t(copy.requests)} lede={t(copy.requestsLede)} />
       <div className="toolbar filter-bar">
         <label className="filter-label" htmlFor="request-status-filter">
           {t(copy.status)}

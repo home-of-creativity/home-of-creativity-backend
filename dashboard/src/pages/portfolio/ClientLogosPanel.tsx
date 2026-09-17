@@ -1,17 +1,12 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { FormDialog } from "../../components/FormDialog";
+import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import { toast } from "sonner";
+import { ConfirmAction } from "../../components/ConfirmAction";
 import { LoadingLottie } from "../../components/LoadingLottie";
 import { LoadingTableRow } from "../../components/LoadingTableRow";
 import { api, type PageMeta, type ShowcaseClient } from "../../api";
 import { Pagination } from "../../components/Pagination";
 import { copy, type Locale } from "../../i18n";
-
-const emptyClientForm = {
-  name: "",
-  website_url: "",
-  sort_order: "",
-  is_published: true,
-};
 
 export function ClientLogosPanel({ t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
   const [clients, setClients] = useState<ShowcaseClient[]>([]);
@@ -20,12 +15,6 @@ export function ClientLogosPanel({ t }: { locale: Locale; t: (c: { ar: string; e
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [form, setForm] = useState(emptyClientForm);
-  const [logo, setLogo] = useState<File | null>(null);
-  const [currentLogoUrl, setCurrentLogoUrl] = useState<string | null>(null);
-  const [logoPreview, setLogoPreview] = useState<string | null>(null);
 
   const publishedClients = useMemo(() => clients.filter((item) => item.is_published), [clients]);
 
@@ -48,74 +37,17 @@ export function ClientLogosPanel({ t }: { locale: Locale; t: (c: { ar: string; e
     load();
   }, [page]);
 
-  function resetForm() {
-    setEditingId(null);
-    setForm(emptyClientForm);
-    setLogo(null);
-    setCurrentLogoUrl(null);
-    setLogoPreview(null);
-    setShowForm(false);
-    setError("");
-  }
-
-  function startAdd() {
-    setEditingId(null);
-    setForm(emptyClientForm);
-    setLogo(null);
-    setCurrentLogoUrl(null);
-    setLogoPreview(null);
-    setError("");
-    setShowForm(true);
-  }
-
-  function startEdit(item: ShowcaseClient) {
-    setEditingId(item.id);
-    setForm({
-      name: item.name,
-      website_url: item.website_url ?? "",
-      sort_order: String(item.sort_order),
-      is_published: item.is_published,
-    });
-    setLogo(null);
-    setCurrentLogoUrl(item.logo_url);
-    setLogoPreview(null);
-    setShowForm(true);
-    setError("");
-    setNotice("");
-  }
-
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    setError("");
-    setNotice("");
-    const payload = new FormData();
-    payload.set("name", form.name.trim());
-    payload.set("website_url", form.website_url.trim());
-    payload.set("sort_order", form.sort_order.trim() || "0");
-    payload.set("is_published", form.is_published ? "1" : "0");
-    if (logo) payload.set("logo", logo);
-
-    try {
-      if (editingId) await api.updateShowcaseClient(editingId, payload);
-      else await api.createShowcaseClient(payload);
-      resetForm();
-      setNotice(t(copy.saveShowcaseClient));
-      load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t(copy.savePortfolioFailed));
-    }
-  }
-
   async function remove(id: number) {
-    if (!window.confirm(t(copy.confirmDelete))) return;
     setError("");
     try {
       await api.deleteShowcaseClient(id);
-      if (editingId === id) resetForm();
       setNotice(t(copy.deleted));
+      toast.success(t(copy.deleteSuccess));
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t(copy.savePortfolioFailed));
+      const message = err instanceof Error ? err.message : t(copy.savePortfolioFailed);
+      setError(message);
+      toast.error(message);
     }
   }
 
@@ -124,7 +56,6 @@ export function ClientLogosPanel({ t }: { locale: Locale; t: (c: { ar: string; e
     setError("");
     try {
       await api.deleteAllShowcaseClients();
-      resetForm();
       setPage(1);
       load();
     } catch (err) {
@@ -135,16 +66,16 @@ export function ClientLogosPanel({ t }: { locale: Locale; t: (c: { ar: string; e
   return (
     <>
       <div className="toolbar">
-        <button type="button" className="btn btn-primary" onClick={startAdd}>
+        <Link className="btn btn-primary" to="/clients/logos/new">
           {t(copy.addShowcaseClient)}
-        </button>
+        </Link>
         <button type="button" className="btn btn-ghost" onClick={() => void removeAll()} disabled={clients.length === 0}>
           {t(copy.deleteAll)}
         </button>
       </div>
 
       {notice ? <p className="muted">{notice}</p> : null}
-      {!showForm && error ? <p className="error">{error}</p> : null}
+      {error ? <p className="error">{error}</p> : null}
 
       <section className="card logo-showcase-card">
         <div className="logo-showcase-head">
@@ -171,68 +102,6 @@ export function ClientLogosPanel({ t }: { locale: Locale; t: (c: { ar: string; e
           )}
         </div>
       </section>
-
-      {showForm ? (
-        <FormDialog
-          title={editingId ? t(copy.edit) : t(copy.addShowcaseClient)}
-          onClose={resetForm}
-          onSubmit={submit}
-          submitLabel={t(copy.saveShowcaseClient)}
-          cancelLabel={t(copy.cancel)}
-          closeLabel={t(copy.close)}
-          error={error}
-        >
-          <div className="portfolio-form-grid">
-            <label className="field-label">
-              {t(copy.client)}
-              <input className="field" value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} required />
-            </label>
-            <label className="field-label">
-              {t(copy.website)}
-              <input
-                className="field"
-                type="url"
-                value={form.website_url}
-                onChange={(e) => setForm((prev) => ({ ...prev, website_url: e.target.value }))}
-                placeholder="https://"
-              />
-            </label>
-            <label className="field-label">
-              {t(copy.sortOrder)}
-              <input
-                className="field"
-                type="number"
-                min={0}
-                value={form.sort_order}
-                onChange={(e) => setForm((prev) => ({ ...prev, sort_order: e.target.value }))}
-              />
-            </label>
-            <label className="field-label">
-              {t(copy.logoFile)}
-              <input
-                className="field"
-                type="file"
-                accept="image/png,image/jpeg,image/webp,image/svg+xml"
-                onChange={(e) => {
-                  const file = e.target.files?.[0] ?? null;
-                  setLogo(file);
-                  setLogoPreview(file ? URL.createObjectURL(file) : null);
-                }}
-              />
-            </label>
-            {(logoPreview ?? currentLogoUrl) ? (
-              <div className="form-media-preview">
-                <img src={logoPreview ?? currentLogoUrl ?? ""} alt="" className="form-media-preview-img" />
-                <p className="muted">{logoPreview ? t(copy.replaceLogo) : t(copy.currentLogo)}</p>
-              </div>
-            ) : null}
-            <label className="checkbox-row">
-              <input type="checkbox" checked={form.is_published} onChange={(e) => setForm((prev) => ({ ...prev, is_published: e.target.checked }))} />
-              {t(copy.published)}
-            </label>
-          </div>
-        </FormDialog>
-      ) : null}
 
       <div className="table-wrap">
         <table>
@@ -265,12 +134,15 @@ export function ClientLogosPanel({ t }: { locale: Locale; t: (c: { ar: string; e
                   <td>{item.sort_order}</td>
                   <td>{item.is_published ? t(copy.published) : t(copy.inactive)}</td>
                   <td className="actions-cell">
-                    <button type="button" className="btn btn-ghost" onClick={() => startEdit(item)}>
+                    <Link className="btn btn-ghost" to={`/clients/logos/${item.id}/edit`}>
                       {t(copy.edit)}
-                    </button>
-                    <button type="button" className="btn btn-ghost" onClick={() => void remove(item.id)}>
-                      {t(copy.delete)}
-                    </button>
+                    </Link>
+                    <ConfirmAction
+                      label={t(copy.delete)}
+                      yesLabel={t(copy.delete)}
+                      noLabel={t(copy.cancel)}
+                      onConfirm={() => void remove(item.id)}
+                    />
                   </td>
                 </tr>
               ))

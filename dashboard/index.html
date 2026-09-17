@@ -10,6 +10,35 @@
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
+    <style>
+      html { direction: rtl; }
+      html[dir="ltr"] { direction: ltr; }
+    </style>
+    <script>
+      (function () {
+        try {
+          var l = null;
+          try {
+            l = localStorage.getItem("hoc-dash-locale");
+          } catch (e) {}
+          if (l !== "ar" && l !== "en") l = "ar";
+          var h = document.documentElement;
+          h.lang = l;
+          h.dir = l === "ar" ? "rtl" : "ltr";
+          h.style.direction = h.dir;
+        } catch (e) {}
+        try {
+          var theme = null;
+          try {
+            theme = localStorage.getItem("hoc-dash-theme");
+          } catch (e) {}
+          if (theme !== "dark" && theme !== "light") {
+            theme = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+          }
+          if (theme === "dark") document.documentElement.dataset.theme = "dark";
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

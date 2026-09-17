@@ -502,8 +502,8 @@ export const api = {
   sendQuotation(
     id: number,
     payload:
-      | { lines: Array<{ title: string; amount: number; units?: number; notes?: string }> }
-      | { amount: number; notes?: string },
+      | { lines: Array<{ title: string; amount: number; units?: number; notes?: string }>; requires_full_payment?: boolean }
+      | { amount: number; notes?: string; requires_full_payment?: boolean },
   ) {
     return request<Envelope<ServiceRequest>>(`/admin/requests/${id}/quotation`, {
       method: "POST",
@@ -544,8 +544,8 @@ export const api = {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return response.blob();
   },
-  clients(page = 1) {
-    return request<Paginated<Client>>(`/admin/clients${queryString({ page })}`);
+  clients(page = 1, search?: string) {
+    return request<Paginated<Client>>(`/admin/clients${queryString({ page, search: search || undefined })}`);
   },
   createClient(payload: { name: string; email?: string; phone?: string; telegram_user_id?: string; company_name?: string }) {
     return request<Envelope<Client>>("/admin/clients", {
@@ -871,10 +871,16 @@ export const api = {
       threads_error?: string | null;
       threads_oauth_configured?: boolean;
       threads_redirect_uri?: string | null;
+      linkedin_oauth_configured?: boolean;
+      linkedin_redirect_uri?: string | null;
+      linkedin_error?: string | null;
     }>("/admin/social/accounts");
   },
   threadsConnect() {
     return request<{ data: { authorize_url: string; redirect_uri: string } }>("/admin/social/threads/connect");
+  },
+  linkedinConnect() {
+    return request<{ data: { authorize_url: string; redirect_uri: string } }>("/admin/social/linkedin/connect");
   },
   createSocialAccount(payload: Partial<SocialAccount> & { platform: string; name: string; access_token?: string }) {
     return request<Envelope<SocialAccount>>("/admin/social/accounts", {

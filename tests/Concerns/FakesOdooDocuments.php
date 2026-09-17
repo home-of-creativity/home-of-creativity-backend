@@ -50,8 +50,10 @@ trait FakesOdooDocuments
                     $model === 'res.partner' && $action === 'write' => Http::response(['jsonrpc' => '2.0', 'result' => true], 200),
                     $model === 'res.partner' && $action === 'unlink' => Http::response(['jsonrpc' => '2.0', 'result' => true], 200),
                     $model === 'hr.employee' && $action === 'search' => Http::response(['jsonrpc' => '2.0', 'result' => []], 200),
+                    $model === 'hr.employee' && $action === 'search_read' => Http::response(['jsonrpc' => '2.0', 'result' => []], 200),
                     $model === 'hr.employee' && $action === 'create' => Http::response(['jsonrpc' => '2.0', 'result' => 91], 200),
                     $model === 'hr.employee' && $action === 'write' => Http::response(['jsonrpc' => '2.0', 'result' => true], 200),
+                    $model === 'hr.employee' && $action === 'unlink' => Http::response(['jsonrpc' => '2.0', 'result' => true], 200),
                     $model === 'res.currency' && $action === 'search_read' => Http::response(['jsonrpc' => '2.0', 'result' => [['id' => 1, 'name' => 'SYP']]], 200),
                     $model === 'crm.stage' && $action === 'search_read' => Http::response(['jsonrpc' => '2.0', 'result' => [
                         ['id' => 11, 'name' => 'تلغرام'],

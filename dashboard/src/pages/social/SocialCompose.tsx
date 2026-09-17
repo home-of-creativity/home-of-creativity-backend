@@ -2,10 +2,35 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, canSocial, type SocialAccount, type SocialPost, type SocialPostMedia } from "../../api";
 import { useAuth } from "../../auth";
+import { ConfirmAction } from "../../components/ConfirmAction";
+import { DateTimeField } from "../../components/DateTimeField";
+import { FileDropzone } from "../../components/FileDropzone";
 import { copy, socialActivities, type Locale } from "../../i18n";
+import { SocialBrandIcon } from "../../components/SocialBrandIcon";
 import { SocialChrome } from "./SocialChrome";
 import { SocialPhonePreview } from "./SocialPhonePreview";
-import { formatWhen, fromLocalInput, groupSocialPages, pageChannelSummary, pageGroupKey, publishErrorMessage, socialPlacementLabel, socialStatusLabel, toLocalInput } from "./helpers";
+import { PlacementTile } from "./PlacementTile";
+import { formatWhen, fromLocalInput, groupSocialPages, pageChannelSummary, pageGroupKey, pagePublishAccountIds, publishErrorMessage, socialPlacementLabel, socialStatusLabel, threadsAccountForPage, toLocalInput } from "./helpers";
+
+type SocialPlacementValue = "feed" | "story" | "reel";
+
+function comboEligible(platform: string, placementValue: SocialPlacementValue, hasMedia: boolean, hasVideo: boolean): boolean {
+  if (platform === "instagram") return hasMedia && (placementValue !== "reel" || hasVideo);
+  if (platform === "facebook") {
+    if (placementValue === "story") return hasMedia;
+    if (placementValue === "reel") return hasVideo;
+    return true;
+  }
+  if (platform === "linkedin") return placementValue === "feed";
+  return true;
+}
+
+function comboReason(platform: string, placementValue: SocialPlacementValue, t: (c: { ar: string; en: string }) => string): string | undefined {
+  if (placementValue === "reel") return t(copy.socialReelNeedsVideo);
+  if (placementValue === "story") return t(copy.socialStoryNeedsMedia);
+  if (platform === "instagram") return t(copy.socialInstagramNeedsMedia);
+  return undefined;
+}
 
 export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
   const { user } = useAuth();
@@ -16,6 +41,7 @@ export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: stri
   const [post, setPost] = useState<SocialPost | null>(null);
   const [body, setBody] = useState("");
   const [placement, setPlacement] = useState("feed");
+  const [hoverPlacement, setHoverPlacement] = useState<string | null>(null);
   const [accountIds, setAccountIds] = useState<number[]>([]);
   const [pageKey, setPageKey] = useState("");
   const [scheduledAt, setScheduledAt] = useState("");
@@ -54,8 +80,10 @@ export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: stri
   const pages = useMemo(() => groupSocialPages(accounts), [accounts]);
   const selectedPage = pages.find((page) => page.key === pageKey) ?? null;
   const selectedAccounts = accounts.filter((account) => accountIds.includes(account.id));
+  const threadsOption = selectedPage ? threadsAccountForPage(selectedPage, accounts) : undefined;
   const instagramSelected = selectedAccounts.some((account) => account.platform === "instagram");
   const hasMedia = files.length > 0 || existingMedia.length > 0;
+  const hasVideo = files.some((file) => file.type.startsWith("video/")) || existingMedia.some((item) => item.kind === "video");
   const isPublished = post?.status === "published";
   const editable = !post || post.is_editable !== false;
 
@@ -66,22 +94,30 @@ export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: stri
       setPageKey(pageGroupKey(fromSelection));
       return;
     }
-    if (!postId && pages.length === 1) {
-      const only = pages[0];
-      setPageKey(only.key);
-      setAccountIds(only.accounts.map((account) => account.id));
+    if (!postId && pages.length > 0) {
+      const first = pages[0];
+      setPageKey(first.key);
+      setAccountIds(pagePublishAccountIds(first, accounts));
     }
   }, [accounts, accountIds, pageKey, pages, postId]);
 
   function selectPage(key: string) {
     const page = pages.find((item) => item.key === key);
     setPageKey(key);
-    setAccountIds(page ? page.accounts.map((account) => account.id) : []);
+    setAccountIds(page ? pagePublishAccountIds(page, accounts) : []);
   }
 
-  function toggleAccount(accountId: number) {
-    setAccountIds((current) => (current.includes(accountId) ? current.filter((value) => value !== accountId) : [...current, accountId]));
+  function toggleCombo(accountId: number, comboPlacement: SocialPlacementValue) {
+    const isOn = accountIds.includes(accountId) && placement === comboPlacement;
+    if (isOn) {
+      setAccountIds((current) => current.filter((value) => value !== accountId));
+      return;
+    }
+    setPlacement(comboPlacement);
+    setAccountIds((current) => (current.includes(accountId) ? current : [...current, accountId]));
   }
+
+  const previewPlacement = hoverPlacement ?? placement;
 
   function buildForm(intent: "draft" | "schedule" | "publish") {
     const form = new FormData();
@@ -109,7 +145,6 @@ export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: stri
       setError(t(copy.socialStoryNeedsMedia));
       return;
     }
-    const hasVideo = files.some((file) => file.type.startsWith("video/")) || existingMedia.some((item) => item.kind === "video");
     if (intent !== "draft" && placement === "reel" && !hasVideo) {
       setError(t(copy.socialReelNeedsVideo));
       return;
@@ -141,34 +176,21 @@ export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: stri
             <span>{t(copy.socialBody)}</span>
             <textarea className="field" rows={8} value={body} disabled={!editable} onChange={(event) => setBody(event.target.value)} required />
           </label>
-          <fieldset className="field-label">
-            <legend>{t(copy.socialPlacement)}</legend>
-            <p className="muted">{t(copy.socialPlacementHint)}</p>
-            <div className="social-account-picks" role="radiogroup" aria-label={t(copy.socialPlacement)}>
-              {(["feed", "reel", "story"] as const).map((value) => (
-                <label key={value} className="check-row">
-                  <input
-                    type="radio"
-                    name="social-placement"
-                    checked={placement === value}
-                    disabled={!editable}
-                    onChange={() => setPlacement(value)}
-                  />
-                  <span>{socialPlacementLabel(value, t)}</span>
-                </label>
-              ))}
-            </div>
-          </fieldset>
           <label className="field-label">
             <span>{t(copy.socialMedia)}</span>
-            <input
-              className="field"
-              type="file"
-              accept="image/*,video/*"
+            <FileDropzone
+              accept={{ "image/*": [], "video/*": [] }}
               multiple
               disabled={!editable}
-              onChange={(event) => setFiles(Array.from(event.target.files ?? []))}
+              hint={t(copy.dropzoneHintMultiple)}
+              activeHint={t(copy.dropzoneActive)}
+              onFiles={(nextFiles) => setFiles(nextFiles)}
             />
+            {files.length > 0 ? (
+              <p className="muted">
+                {files.length} {locale === "ar" ? "ملف مختار" : "file(s) selected"}
+              </p>
+            ) : null}
           </label>
           {existingMedia.length > 0 ? (
             <ul className="social-media-list">
@@ -215,48 +237,52 @@ export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: stri
           {selectedPage ? (
             <fieldset className="field-label">
               <legend>{t(copy.socialPickPlatforms)}</legend>
-              <p className="muted">{t(copy.socialBothPlatformsHint)}</p>
-              <div className="social-account-picks">
-                {selectedPage.facebook ? (
-                  <label className="check-row">
-                    <input
-                      type="checkbox"
-                      checked={accountIds.includes(selectedPage.facebook.id)}
-                      disabled={!editable}
-                      onChange={() => toggleAccount(selectedPage.facebook!.id)}
-                    />
-                    <span>{t(copy.facebook)}</span>
-                  </label>
-                ) : null}
-                {selectedPage.instagram ? (
-                  <label className="check-row">
-                    <input
-                      type="checkbox"
-                      checked={accountIds.includes(selectedPage.instagram.id)}
-                      disabled={!editable}
-                      onChange={() => toggleAccount(selectedPage.instagram!.id)}
-                    />
-                    <span>{t(copy.instagram)}</span>
-                  </label>
-                ) : null}
-                {selectedPage.threads ? (
-                  <label className="check-row">
-                    <input
-                      type="checkbox"
-                      checked={accountIds.includes(selectedPage.threads.id)}
-                      disabled={!editable}
-                      onChange={() => toggleAccount(selectedPage.threads!.id)}
-                    />
-                    <span>{t(copy.threads)}</span>
-                  </label>
-                ) : null}
+              <p className="muted">{t(copy.socialPlacementHint)}</p>
+              <div className="placement-tile-list">
+                {(
+                  [
+                    selectedPage.facebook
+                      ? { account: selectedPage.facebook, tone: "facebook" as const, label: t(copy.facebook), placements: ["feed", "story", "reel"] as SocialPlacementValue[] }
+                      : null,
+                    selectedPage.instagram
+                      ? { account: selectedPage.instagram, tone: "instagram" as const, label: t(copy.instagram), placements: ["feed", "story", "reel"] as SocialPlacementValue[] }
+                      : null,
+                    threadsOption
+                      ? { account: threadsOption, tone: "threads" as const, label: t(copy.threads), placements: ["feed"] as SocialPlacementValue[] }
+                      : null,
+                    selectedPage.linkedin
+                      ? { account: selectedPage.linkedin, tone: "linkedin" as const, label: t(copy.linkedin), placements: ["feed"] as SocialPlacementValue[] }
+                      : null,
+                  ] as Array<{ account: SocialAccount; tone: "facebook" | "instagram" | "threads" | "linkedin"; label: string; placements: SocialPlacementValue[] } | null>
+                )
+                  .filter((group): group is { account: SocialAccount; tone: "facebook" | "instagram" | "threads" | "linkedin"; label: string; placements: SocialPlacementValue[] } => group !== null)
+                  .flatMap((group) =>
+                  group.placements.map((value) => {
+                    const on = accountIds.includes(group.account.id) && placement === value;
+                    const eligible = comboEligible(group.account.platform, value, hasMedia, hasVideo);
+                    return (
+                      <PlacementTile
+                        key={`${group.account.id}-${value}`}
+                        icon={<SocialBrandIcon platform={group.account.platform} />}
+                        iconTone={group.tone}
+                        title={`${group.label} · ${socialPlacementLabel(value, t)}`}
+                        on={on}
+                        disabled={!editable}
+                        eligible={eligible}
+                        eligibleLabel={comboReason(group.account.platform, value, t)}
+                        focused={hoverPlacement === value && on}
+                        onToggle={() => toggleCombo(group.account.id, value)}
+                        onHoverChange={(hovering) => setHoverPlacement(hovering ? value : null)}
+                      />
+                    );
+                  }),
+                )}
               </div>
-              {instagramSelected && !hasMedia ? <p className="muted">{t(copy.socialInstagramNeedsMedia)}</p> : null}
             </fieldset>
           ) : null}
           <label className="field-label">
             <span>{t(copy.socialScheduleAt)}</span>
-            <input className="field" type="datetime-local" value={scheduledAt} disabled={!editable} onChange={(event) => setScheduledAt(event.target.value)} />
+            <DateTimeField value={scheduledAt} onChange={setScheduledAt} disabled={!editable} locale={locale} placeholder={t(copy.socialScheduleAt)} />
           </label>
           {editable && canSocial(user, "create") ? (
             <div className="toolbar">
@@ -266,12 +292,13 @@ export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: stri
                     {t(copy.socialSaveChanges)}
                   </button>
                   {postId ? (
-                    <button
-                      type="button"
-                      className="btn"
+                    <ConfirmAction
+                      label={t(copy.delete)}
+                      confirmLabel={t(copy.socialDeleteLive)}
+                      yesLabel={t(copy.delete)}
+                      noLabel={t(copy.cancel)}
                       disabled={saving}
-                      onClick={() => {
-                        if (!window.confirm(t(copy.socialDeleteLive))) return;
+                      onConfirm={() => {
                         setSaving(true);
                         api
                           .deleteSocialPost(postId)
@@ -279,9 +306,7 @@ export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: stri
                           .catch((err) => setError(err instanceof Error ? err.message : t(copy.loading)))
                           .finally(() => setSaving(false));
                       }}
-                    >
-                      {t(copy.delete)}
-                    </button>
+                    />
                   ) : null}
                 </>
               ) : (
@@ -305,13 +330,13 @@ export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: stri
         <aside className="card social-preview" aria-live="polite">
           <p className="eyebrow">{t(copy.socialPreview)}</p>
           {post ? <span className={`status status-${post.status}`}>{socialStatusLabel(post.status, t)}</span> : null}
-          <p className="muted">{socialPlacementLabel(placement, t)}</p>
+          <p className="muted">{socialPlacementLabel(previewPlacement, t)}</p>
           {post?.last_error ? <p className="error">{publishErrorMessage(post.last_error, t)}</p> : null}
           <SocialPhonePreview
             locale={locale}
             t={t}
             accounts={selectedAccounts}
-            placement={placement}
+            placement={previewPlacement}
             body={body}
             existingMedia={existingMedia}
             files={previewFiles}

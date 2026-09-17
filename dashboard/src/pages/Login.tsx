@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../auth";
 import { LoadingLottie } from "../components/LoadingLottie";
 import { copy, type Copy, type Locale } from "../i18n";
@@ -16,11 +16,14 @@ export function Login({
   setLocale: (next: Locale) => void;
 }) {
   const { user, login, ready } = useAuth();
+  const location = useLocation();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [phase, setPhase] = useState<LoginPhase>("idle");
   const [error, setError] = useState("");
   const [redirect, setRedirect] = useState(false);
+  const fromPath = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname;
+  const afterLoginPath = fromPath && fromPath !== "/login" ? fromPath : "/";
 
   useEffect(() => {
     if (phase !== "success") return;
@@ -37,11 +40,11 @@ export function Login({
   }
 
   if (user?.is_admin && phase === "idle") {
-    return <Navigate to="/" replace />;
+    return <Navigate to={afterLoginPath} replace />;
   }
 
   if (redirect && user?.is_admin) {
-    return <Navigate to="/" replace />;
+    return <Navigate to={afterLoginPath} replace />;
   }
 
   const busy = phase === "loading" || phase === "success";

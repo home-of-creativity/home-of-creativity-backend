@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { DonutStat } from "../components/DonutStat";
 import { LoadingLottie } from "../components/LoadingLottie";
+import { PageHeader } from "../components/PageHeader";
+import { StatCard } from "../components/StatCard";
 import { IconClients, IconRequests } from "../components/icons";
 import { api, type ServiceRequest } from "../api";
 import { copy, statuses, type Locale } from "../i18n";
@@ -8,6 +11,13 @@ import { copy, statuses, type Locale } from "../i18n";
 const ORANGE_STATUSES = new Set(["quotation_sent", "ai_analyzing", "revision_requested"]);
 const TEAL_STATUSES = new Set(["payment_confirmed", "completed", "approved", "in_progress"]);
 const DANGER_STATUSES = new Set(["quotation_rejected", "cancelled"]);
+
+const TONE_COLOR: Record<string, string> = {
+  orange: "var(--brand-orange)",
+  teal: "var(--brand-teal)",
+  danger: "#c0392b",
+  default: "var(--brand-purple)",
+};
 
 function statusTone(status: string) {
   if (ORANGE_STATUSES.has(status)) return "orange";
@@ -27,44 +37,32 @@ export function Overview({ t }: { locale: Locale; t: (c: { ar: string; en: strin
 
   if (!data) return <LoadingLottie variant="page" label={t(copy.loading)} />;
 
+  const statusTotal = Object.values(data.by_status).reduce((sum, value) => sum + value, 0);
+  const slices = Object.entries(data.by_status).map(([status, value]) => ({
+    key: status,
+    value,
+    color: TONE_COLOR[statusTone(status)],
+    label: t(statuses[status] ?? { ar: status, en: status }),
+  }));
+
   return (
     <>
-      <header className="page-head">
-        <div>
-          <p className="eyebrow">{t(copy.brandMark)}</p>
-          <h1 className="page-title">{t(copy.overview)}</h1>
-          <p className="page-lede">{t(copy.overviewLede)}</p>
-        </div>
-      </header>
+      <PageHeader eyebrow={t(copy.brandMark)} title={t(copy.overview)} lede={t(copy.overviewLede)} />
+
       <div className="cards">
-        <article className="card card-accent">
-          <div className="card-head">
-            <span className="card-icon">
-              <IconClients aria-hidden />
-            </span>
-            <span className="muted">{t(copy.clientsCount)}</span>
-          </div>
-          <strong>{data.clients}</strong>
-        </article>
-        <article className="card card-accent">
-          <div className="card-head">
-            <span className="card-icon">
-              <IconRequests aria-hidden />
-            </span>
-            <span className="muted">{t(copy.requestsCount)}</span>
-          </div>
-          <strong>{data.requests}</strong>
-        </article>
-        {Object.entries(data.by_status).map(([status, total]) => (
-          <article className="card" key={status}>
-            <div className="card-head">
-              <span className={`card-dot card-dot-${statusTone(status)}`} aria-hidden />
-              <span className="muted">{t(statuses[status] ?? { ar: status, en: status })}</span>
-            </div>
-            <strong>{total}</strong>
-          </article>
-        ))}
+        <StatCard icon={<IconClients aria-hidden />} label={t(copy.clientsCount)} value={data.clients} />
+        <StatCard icon={<IconRequests aria-hidden />} label={t(copy.requestsCount)} value={data.requests} />
       </div>
+
+      <section className="panel recent-panel">
+        <div className="panel-head">
+          <h2>{t(copy.status)}</h2>
+        </div>
+        <div style={{ padding: "0.5rem 1.15rem 1.25rem" }}>
+          <DonutStat slices={slices} total={statusTotal} centerLabel={t(copy.status)} emptyLabel={t(copy.empty)} />
+        </div>
+      </section>
+
       <section className="panel recent-panel">
         <div className="panel-head">
           <h2>{t(copy.recent)}</h2>

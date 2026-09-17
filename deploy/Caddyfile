@@ -59,10 +59,10 @@
 
 	import hoc_api_routes
 
-	redir /staff /dashboard/login 308
-	redir /staff/ /dashboard/login 308
+	redir /staff /dashboard 308
+	redir /staff/ /dashboard 308
 	@oldStaff path_regexp oldstaff ^/staff(/.*)$
-	redir @oldStaff /dashboard{re.oldstaff.1}? 308
+	redir @oldStaff /dashboard{re.oldstaff.1} 308
 
 	redir /dashboard /dashboard/ 308
 

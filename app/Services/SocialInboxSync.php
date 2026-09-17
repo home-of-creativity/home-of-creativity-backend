@@ -7,6 +7,7 @@ use App\Enums\SocialPlatform;
 use App\Models\SocialAccount;
 use App\Models\SocialInboxItem;
 use App\Models\SocialPostAccount;
+use Carbon\Carbon;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -36,7 +37,7 @@ class SocialInboxSync
             return 0;
         }
 
-        if (! in_array($account->platform, [SocialPlatform::Facebook, SocialPlatform::Instagram, SocialPlatform::Threads], true)) {
+        if (! in_array($account->platform, [SocialPlatform::Facebook, SocialPlatform::Instagram, SocialPlatform::Threads, SocialPlatform::Linkedin], true)) {
             return 0;
         }
 
@@ -46,6 +47,14 @@ class SocialInboxSync
             $imported += $this->importCommentsFromPublishedTargets($account);
             $this->pruneDeletedComments($account);
 
+            return $imported;
+        }
+
+        if ($account->platform === SocialPlatform::Linkedin) {
+            $imported += $this->importCommentsFromPublishedTargets($account);
+
+            // LinkedIn comments can't be cheaply re-checked for liveness (no single-object
+            // Graph-style lookup), so imported comments are left in place instead of pruned.
             return $imported;
         }
 
@@ -145,6 +154,12 @@ class SocialInboxSync
             ->limit(20)
             ->get()
             ->each(function (SocialPostAccount $target) use ($account, &$imported): void {
+                if ($account->platform === SocialPlatform::Linkedin) {
+                    $imported += $this->importLinkedInComments($account, (string) $target->external_id);
+
+                    return;
+                }
+
                 $fields = $account->platform === SocialPlatform::Instagram
                     ? 'id,caption,permalink,media_type,media_url,thumbnail_url,comments.limit(50){id,text,username,timestamp,from}'
                     : ($account->platform === SocialPlatform::Threads
@@ -169,6 +184,46 @@ class SocialInboxSync
             });
 
         return $imported;
+    }
+
+    private function importLinkedInComments(SocialAccount $account, string $shareUrn): int
+    {
+        if ($shareUrn === '') {
+            return 0;
+        }
+
+        $payload = $this->linkedinGet($account, 'socialActions/'.rawurlencode($shareUrn).'/comments');
+        if ($payload === null) {
+            return 0;
+        }
+
+        $elements = data_get($payload, 'elements');
+        $comments = [];
+        if (is_array($elements)) {
+            foreach ($elements as $element) {
+                $rawId = data_get($element, 'id');
+                if (! is_string($rawId) && ! is_numeric($rawId)) {
+                    continue;
+                }
+
+                $createdMs = data_get($element, 'created.time');
+
+                $comments[] = [
+                    'id' => sprintf('urn:li:comment:(%s,%s)', $shareUrn, $rawId),
+                    'message' => data_get($element, 'message.text'),
+                    'from' => [
+                        'id' => data_get($element, 'actor'),
+                    ],
+                    'created_time' => is_numeric($createdMs)
+                        ? Carbon::createFromTimestampMs((int) $createdMs)->toIso8601String()
+                        : null,
+                ];
+            }
+        }
+
+        return $this->syncCommentsForPost($account, $shareUrn, $comments, [
+            'source_external_id' => $shareUrn,
+        ]);
     }
 
     private function importMessages(SocialAccount $account): int
@@ -411,6 +466,45 @@ class SocialInboxSync
                 $this->lastError = $message;
             }
             Log::warning('Social inbox sync rejected.', [
+                'path' => $path,
+                'status' => $response->status(),
+            ]);
+
+            return null;
+        }
+
+        /** @var array<string, mixed> $json */
+        $json = $response->json() ?? [];
+
+        return $json;
+    }
+
+    /**
+     * @param  array<string, string>  $query
+     * @return array<string, mixed>|null
+     */
+    private function linkedinGet(SocialAccount $account, string $path, array $query = []): ?array
+    {
+        try {
+            $response = Http::timeout((int) config('services.social.timeout', 20))
+                ->connectTimeout(3)
+                ->withHeaders(LinkedInGraph::authHeaders((string) $account->access_token))
+                ->get(LinkedInGraph::restUrl($path), $query);
+        } catch (ConnectionException|Throwable $exception) {
+            $this->lastError = $exception->getMessage();
+            Log::warning('LinkedIn inbox sync failed.', [
+                'path' => $path,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return null;
+        }
+
+        if (! $response->successful()) {
+            if (! $response->notFound()) {
+                $this->lastError = LinkedInGraph::errorMessage($response->json(), $response->status());
+            }
+            Log::warning('LinkedIn inbox sync rejected.', [
                 'path' => $path,
                 'status' => $response->status(),
             ]);

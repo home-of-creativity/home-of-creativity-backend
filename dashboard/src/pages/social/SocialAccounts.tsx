@@ -1,22 +1,13 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { useSearchParams } from "react-router-dom";
-import { FormDialog } from "../../components/FormDialog";
-import { LoadingTableRow } from "../../components/LoadingTableRow";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
+import { ConfirmAction } from "../../components/ConfirmAction";
 import { SocialBrandIcon } from "../../components/SocialBrandIcon";
 import { api, canSocial, type SocialAbility, type SocialAccount, type SocialStaff } from "../../api";
 import { useAuth } from "../../auth";
 import { copy, type Locale } from "../../i18n";
 import { SocialChrome } from "./SocialChrome";
-import { facebookErrorMessage, groupSocialPages, platformLabel, socialAccountStatusLabel, socialPlatforms, socialStatusLabel } from "./helpers";
-
-const emptyForm = {
-  platform: "facebook",
-  name: "",
-  handle: "",
-  page_id: "",
-  access_token: "",
-  is_active: true,
-};
+import { facebookErrorMessage, groupSocialPages, linkedinOauthMessage, platformLabel, socialAccountStatusLabel, socialStatusLabel } from "./helpers";
 
 const abilities: { key: SocialAbility; label: typeof copy.socialPermAccounts }[] = [
   { key: "accounts", label: copy.socialPermAccounts },
@@ -40,9 +31,10 @@ export function SocialAccounts({ locale, t }: { locale: Locale; t: (c: { ar: str
   const [facebookPagesFound, setFacebookPagesFound] = useState<number | null>(null);
   const [threadsOauthConfigured, setThreadsOauthConfigured] = useState(false);
   const [threadsRedirectUri, setThreadsRedirectUri] = useState("");
-  const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [form, setForm] = useState(emptyForm);
+  const [linkedinOauthConfigured, setLinkedinOauthConfigured] = useState(false);
+  const [linkedinRedirectUri, setLinkedinRedirectUri] = useState("");
+  const [linkedinError, setLinkedinError] = useState("");
+  const [connectingLinkedin, setConnectingLinkedin] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
 
   function load() {
@@ -60,6 +52,9 @@ export function SocialAccounts({ locale, t }: { locale: Locale; t: (c: { ar: str
         setFacebookPagesFound(typeof accounts.facebook_pages_found === "number" ? accounts.facebook_pages_found : null);
         setThreadsOauthConfigured(Boolean(accounts.threads_oauth_configured));
         setThreadsRedirectUri(accounts.threads_redirect_uri ?? "");
+        setLinkedinOauthConfigured(Boolean(accounts.linkedin_oauth_configured));
+        setLinkedinRedirectUri(accounts.linkedin_redirect_uri ?? "");
+        setLinkedinError(accounts.linkedin_error ?? "");
       })
       .catch((err) => setError(err instanceof Error ? err.message : t(copy.loading)))
       .finally(() => setLoading(false));
@@ -72,7 +67,9 @@ export function SocialAccounts({ locale, t }: { locale: Locale; t: (c: { ar: str
   useEffect(() => {
     const connected = searchParams.get("threads");
     const oauthErrorCode = searchParams.get("threads_error");
-    if (connected !== "connected" && !oauthErrorCode) {
+    const linkedinConnected = searchParams.get("linkedin");
+    const linkedinErrorCode = searchParams.get("linkedin_error");
+    if (connected !== "connected" && !oauthErrorCode && linkedinConnected !== "connected" && !linkedinErrorCode) {
       return;
     }
 
@@ -82,11 +79,19 @@ export function SocialAccounts({ locale, t }: { locale: Locale; t: (c: { ar: str
     } else if (oauthErrorCode) {
       setOauthNotice("");
       setOauthError(threadsOauthMessage(oauthErrorCode, t));
+    } else if (linkedinConnected === "connected") {
+      setOauthNotice(t(copy.socialLinkedinConnected));
+      setOauthError("");
+    } else if (linkedinErrorCode) {
+      setOauthNotice("");
+      setOauthError(linkedinOauthMessage(linkedinErrorCode, t));
     }
 
     const next = new URLSearchParams(searchParams);
     next.delete("threads");
     next.delete("threads_error");
+    next.delete("linkedin");
+    next.delete("linkedin_error");
     setSearchParams(next, { replace: true });
   }, [searchParams, setSearchParams, t]);
 
@@ -102,36 +107,15 @@ export function SocialAccounts({ locale, t }: { locale: Locale; t: (c: { ar: str
     }
   }
 
-  function startEdit(item: SocialAccount) {
-    setEditingId(item.id);
-    setForm({
-      platform: item.platform,
-      name: item.name,
-      handle: item.handle ?? "",
-      page_id: item.page_id ?? "",
-      access_token: "",
-      is_active: item.is_active,
-    });
-    setShowForm(true);
-  }
-
-  async function save(event: FormEvent) {
-    event.preventDefault();
+  async function connectLinkedin() {
+    setConnectingLinkedin(true);
+    setError("");
     try {
-      const payload = {
-        platform: form.platform,
-        name: form.name,
-        handle: form.handle || null,
-        page_id: form.page_id || null,
-        is_active: form.is_active,
-        ...(form.access_token ? { access_token: form.access_token } : {}),
-      };
-      if (editingId) await api.updateSocialAccount(editingId, payload);
-      else await api.createSocialAccount(payload);
-      setShowForm(false);
-      load();
+      const result = await api.linkedinConnect();
+      window.location.assign(result.data.authorize_url);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t(copy.loading));
+      setError(err instanceof Error ? err.message : t(copy.socialLinkedinOauthMissing));
+      setConnectingLinkedin(false);
     }
   }
 
@@ -148,13 +132,15 @@ export function SocialAccounts({ locale, t }: { locale: Locale; t: (c: { ar: str
   }
 
   async function remove(id: number) {
-    if (!window.confirm(t(copy.delete))) return;
     setBusyId(id);
     try {
       await api.deleteSocialAccount(id);
       load();
+      toast.success(t(copy.deleteSuccess));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t(copy.loading));
+      const message = err instanceof Error ? err.message : t(copy.loading);
+      setError(message);
+      toast.error(message);
     } finally {
       setBusyId(null);
     }
@@ -186,12 +172,22 @@ export function SocialAccounts({ locale, t }: { locale: Locale; t: (c: { ar: str
     <SocialChrome locale={locale} t={t} user={user} title={copy.socialAccounts} lede={copy.socialAccountsLede}>
       {canSocial(user, "accounts") ? (
         <div className="toolbar">
+          <Link className="btn btn-primary" to="/social/accounts/new">
+            {t(copy.socialAddAccount)}
+          </Link>
           {threadsOauthConfigured ? (
-            <button type="button" className="btn btn-primary" disabled={connecting} onClick={() => void connectThreads()}>
+            <button type="button" className="btn" disabled={connecting} onClick={() => void connectThreads()}>
               {t(copy.socialConnectThreads)}
             </button>
           ) : (
             <p className="notice notice-info">{t(copy.socialThreadsOauthMissing)}</p>
+          )}
+          {linkedinOauthConfigured ? (
+            <button type="button" className="btn" disabled={connectingLinkedin} onClick={() => void connectLinkedin()}>
+              {t(copy.socialConnectLinkedin)}
+            </button>
+          ) : (
+            <p className="notice notice-info">{t(copy.socialLinkedinOauthMissing)}</p>
           )}
         </div>
       ) : null}
@@ -201,42 +197,35 @@ export function SocialAccounts({ locale, t }: { locale: Locale; t: (c: { ar: str
           <code dir="ltr">{threadsRedirectUri}</code>
         </p>
       ) : null}
+      {linkedinRedirectUri ? (
+        <p className="notice notice-info">
+          {t(copy.socialLinkedinRedirectHint)}{" "}
+          <code dir="ltr">{linkedinRedirectUri}</code>
+        </p>
+      ) : null}
       {oauthNotice ? <p className="notice notice-info">{oauthNotice}</p> : null}
       {oauthError ? <p className="error">{oauthError}</p> : null}
-      {error && !showForm ? <p className="error">{error}</p> : null}
+      {error ? <p className="error">{error}</p> : null}
       {facebookError ? <p className="error">{facebookErrorMessage(facebookError, t)}</p> : null}
       {threadsError ? <p className="error">{facebookErrorMessage(threadsError, t)}</p> : null}
+      {linkedinError ? <p className="error">{facebookErrorMessage(linkedinError, t)}</p> : null}
       {facebookPagesFound !== null && facebookPagesFound > 0 ? (
         <p className="notice notice-info">{t(copy.socialFacebookPagesFound).replace("{count}", String(facebookPagesFound))}</p>
       ) : null}
-      <div className="table-wrap card">
-        <table className="table-flush">
-          <thead>
-            <tr>
-              <th>{t(copy.employeeName)}</th>
-              <th>{t(copy.socialHandle)}</th>
-              <th>{t(copy.status)}</th>
-              <th>{t(copy.actions)}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? <LoadingTableRow colSpan={4} label={t(copy.loading)} /> : null}
-            {!loading && pages.length === 0 ? (
-              <tr>
-                <td colSpan={4}>{t(copy.socialNoAccounts)}</td>
-              </tr>
-            ) : null}
-            {pages.map((page) => (
-              <tr key={page.key}>
-                <td>
-                  <strong className="client-name">{page.name}</strong>
-                  <div className="social-page-channels">
-                    {page.facebook ? (
-                      <span className="social-account-name">
-                        <SocialBrandIcon platform="facebook" />
-                        {t(copy.facebook)}
-                      </span>
-                    ) : null}
+      {loading ? <p className="muted">{t(copy.loading)}</p> : null}
+      {!loading && pages.length === 0 ? <p className="card social-inbox-empty">{t(copy.socialNoAccounts)}</p> : null}
+      <div className="social-account-tile-grid">
+        {pages.map((page) => (
+          <article key={page.key} className="social-account-tile">
+            <header className="social-account-tile-head">
+              <strong className="social-account-tile-name">{page.name}</strong>
+              <div className="social-page-channels">
+                {page.facebook ? (
+                  <>
+                    <span className="social-account-name">
+                      <SocialBrandIcon platform="facebook" />
+                      {t(copy.facebook)}
+                    </span>
                     {page.instagram ? (
                       <span className="social-account-name">
                         <SocialBrandIcon platform="instagram" />
@@ -253,48 +242,49 @@ export function SocialAccounts({ locale, t }: { locale: Locale; t: (c: { ar: str
                     ) : (
                       <small className="muted">{t(copy.socialNoThreads)}</small>
                     )}
+                  </>
+                ) : (
+                  <span className="social-account-name">
+                    <SocialBrandIcon platform={page.accounts[0]?.platform ?? ""} />
+                    {platformLabel(page.accounts[0]?.platform ?? "", t)}
+                  </span>
+                )}
+              </div>
+            </header>
+            {page.accounts.map((item) => (
+              <div key={item.id} className="social-page-status">
+                <div>
+                  <span dir="ltr">
+                    {platformLabel(item.platform, t)} · {accountHandle(item)}
+                  </span>
+                  <br />
+                  <span className={`status ${item.connection_status === "error" ? "status-failed" : item.is_active ? "status-published" : "status-failed"}`}>
+                    {accountStatus(item)}
+                  </span>
+                  <small> · {item.has_token ? t(copy.socialHasToken) : t(copy.socialNoToken)}</small>
+                  {socialAccountStatusLabel(item, t) ? <small className="error-inline">{socialAccountStatusLabel(item, t)}</small> : null}
+                </div>
+                {canSocial(user, "accounts") ? (
+                  <div className="row-actions">
+                    <Link className="btn btn-ghost" to={`/social/accounts/${item.id}/edit`}>
+                      {t(copy.edit)}
+                    </Link>
+                    <button type="button" className="btn btn-ghost" disabled={busyId === item.id} onClick={() => void toggle(item.id)}>
+                      {item.is_active ? t(copy.socialToggleOff) : t(copy.socialToggleOn)}
+                    </button>
+                    <ConfirmAction
+                      label={t(copy.delete)}
+                      yesLabel={t(copy.delete)}
+                      noLabel={t(copy.cancel)}
+                      disabled={busyId === item.id}
+                      onConfirm={() => void remove(item.id)}
+                    />
                   </div>
-                </td>
-                <td>
-                  {page.accounts.map((item) => (
-                    <div key={item.id} dir="ltr">
-                      {platformLabel(item.platform, t)} · {accountHandle(item)}
-                    </div>
-                  ))}
-                </td>
-                <td>
-                  {page.accounts.map((item) => (
-                    <div key={item.id} className="social-page-status">
-                      <span className={`status ${item.connection_status === "error" ? "status-failed" : item.is_active ? "status-published" : "status-failed"}`}>
-                        {accountStatus(item)}
-                      </span>
-                      <small>{item.has_token ? t(copy.socialHasToken) : t(copy.socialNoToken)}</small>
-                      {socialAccountStatusLabel(item, t) ? <small className="error-inline">{socialAccountStatusLabel(item, t)}</small> : null}
-                    </div>
-                  ))}
-                </td>
-                <td>
-                  {canSocial(user, "accounts")
-                    ? page.accounts.map((item) => (
-                        <div key={item.id} className="row-actions">
-                          <small>{platformLabel(item.platform, t)}</small>
-                          <button type="button" className="btn btn-ghost" onClick={() => startEdit(item)}>
-                            {t(copy.edit)}
-                          </button>
-                          <button type="button" className="btn btn-ghost" disabled={busyId === item.id} onClick={() => void toggle(item.id)}>
-                            {item.is_active ? t(copy.socialToggleOff) : t(copy.socialToggleOn)}
-                          </button>
-                          <button type="button" className="btn btn-ghost" disabled={busyId === item.id} onClick={() => void remove(item.id)}>
-                            {t(copy.delete)}
-                          </button>
-                        </div>
-                      ))
-                    : null}
-                </td>
-              </tr>
+                ) : null}
+              </div>
             ))}
-          </tbody>
-        </table>
+          </article>
+        ))}
       </div>
 
       {canSocial(user, "accounts") && staff.length > 0 ? (
@@ -336,54 +326,6 @@ export function SocialAccounts({ locale, t }: { locale: Locale; t: (c: { ar: str
             </table>
           </div>
         </section>
-      ) : null}
-
-      {showForm ? (
-        <FormDialog
-          title={editingId ? t(copy.edit) : t(copy.socialAddAccount)}
-          onClose={() => setShowForm(false)}
-          onSubmit={(event) => void save(event)}
-          submitLabel={t(copy.socialSaveAccount)}
-          cancelLabel={t(copy.cancel)}
-          closeLabel={t(copy.close)}
-          error={error}
-        >
-          <label className="field-label">
-            <span>{t(copy.socialPlatform)}</span>
-            <select className="field" value={form.platform} onChange={(event) => setForm((current) => ({ ...current, platform: event.target.value }))}>
-              {socialPlatforms.map((platform) => (
-                <option key={platform} value={platform}>
-                  {platformLabel(platform, t)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field-label">
-            <span>{t(copy.employeeName)}</span>
-            <input className="field" value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} required />
-          </label>
-          <label className="field-label">
-            <span>{t(copy.socialHandle)}</span>
-            <input className="field" value={form.handle} onChange={(event) => setForm((current) => ({ ...current, handle: event.target.value }))} />
-          </label>
-          <label className="field-label">
-            <span>{t(copy.socialPageId)}</span>
-            <input className="field" value={form.page_id} onChange={(event) => setForm((current) => ({ ...current, page_id: event.target.value }))} />
-          </label>
-          <label className="field-label">
-            <span>{t(copy.socialToken)}</span>
-            <input className="field" type="password" autoComplete="off" value={form.access_token} onChange={(event) => setForm((current) => ({ ...current, access_token: event.target.value }))} />
-            <small className="muted">{t(copy.socialTokenHint)}</small>
-          </label>
-          <label className="check-row">
-            <input
-              type="checkbox"
-              checked={form.is_active}
-              onChange={(event) => setForm((current) => ({ ...current, is_active: event.target.checked }))}
-            />
-            <span>{form.is_active ? t(copy.socialToggleOn) : t(copy.socialToggleOff)}</span>
-          </label>
-        </FormDialog>
       ) : null}
     </SocialChrome>
   );

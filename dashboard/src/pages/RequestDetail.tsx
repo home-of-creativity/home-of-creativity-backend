@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { LoadingLottie } from "../components/LoadingLottie";
+import { PageHeader } from "../components/PageHeader";
 import { api, type ServiceRequest } from "../api";
 import { copy, sources, statuses, type Locale } from "../i18n";
 
@@ -35,6 +36,7 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
   const [receiptReason, setReceiptReason] = useState("");
   const [hasQr, setHasQr] = useState(false);
   const [receivedAmount, setReceivedAmount] = useState("");
+  const [requiresFullPayment, setRequiresFullPayment] = useState(false);
 
   useEffect(() => {
     if (!receiptUrl) return;
@@ -63,6 +65,7 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
             setStatus(res.data.status);
             if (ops) setHasQr(Boolean(ops.data.sham_cash_qr));
             setReceivedAmount(res.data.expected_due != null ? String(res.data.expected_due) : "");
+            setRequiresFullPayment(Boolean(res.data.requires_full_payment));
           }
         })
         .catch(() => {
@@ -139,7 +142,7 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
     setError("");
     setSendingQuotation(true);
     try {
-      const res = await api.sendQuotation(item.id, { lines });
+      const res = await api.sendQuotation(item.id, { lines, requires_full_payment: requiresFullPayment });
       setItem(res.data);
       setStatus(res.data.status);
       setQuotationLines([createQuotationLine()]);
@@ -218,23 +221,28 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
   const canConfirmRemaining = remaining > 0.009 && Boolean(item.paid_at);
   const receipts = item.files?.filter((file) => file.kind === "payment_receipt") ?? [];
   const attachments = item.files?.filter((file) => file.kind === "brief_attachment") ?? [];
+  const quotationTotal = quotationLines.reduce((sum, line) => {
+    const amount = Number(line.amount);
+    const units = Number(line.units || 1);
+    if (!Number.isFinite(amount) || !Number.isFinite(units) || amount <= 0 || units <= 0) {
+      return sum;
+    }
+    return sum + amount * units;
+  }, 0);
+  const firstPaymentAmount = requiresFullPayment ? quotationTotal : Math.round(quotationTotal * 50) / 100;
 
   return (
     <div className="detail">
-      <Link className="back-link" to="/requests">
-        <span aria-hidden="true">←</span>
-        {t(copy.back)}
-      </Link>
-      <header className="page-head">
-        <div>
-          <p className="eyebrow">{item.client?.name ?? t(copy.client)}</p>
-          <h1 className="page-title">{item.number}</h1>
-          <p className="page-lede">{item.title}</p>
-        </div>
-        <p className={`status status-${item.status}`} data-testid="request-status">
-          {t(statuses[item.status] ?? { ar: item.status, en: item.status })}
-        </p>
-      </header>
+      <PageHeader
+        breadcrumbs={[{ label: t(copy.requests), to: "/requests" }, { label: item.number }]}
+        title={item.number}
+        lede={item.title}
+        actions={
+          <p className={`status status-${item.status}`} data-testid="request-status">
+            {t(statuses[item.status] ?? { ar: item.status, en: item.status })}
+          </p>
+        }
+      />
       <p className="badge-row">
         <span className={`pay-badge ${item.requires_full_payment ? "pay-badge-full" : "pay-badge-partial"}`}>
           {item.requires_full_payment ? t(copy.fullPayment) : t(copy.partialPayment)}
@@ -315,16 +323,24 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
             </dd>
           </div>
           <div>
+            <dt>{t(copy.paymentPlan)}</dt>
+            <dd>{item.requires_full_payment ? t(copy.fullPayment) : t(copy.partialPayment)}</dd>
+          </div>
+          <div>
+            <dt>{t(copy.expectedDue)}</dt>
+            <dd>{item.expected_due != null ? `${item.expected_due} USD` : "—"}</dd>
+          </div>
+          <div>
             <dt>{t(copy.paidAmount)}</dt>
             <dd>
-              {item.amount_paid ?? "—"}
+              {item.amount_paid != null ? `${item.amount_paid} USD` : "—"}
               {item.paid_percent != null ? ` (${item.paid_percent}%)` : ""}
             </dd>
           </div>
           <div>
             <dt>{t(copy.remainingBalance)}</dt>
             <dd>
-              {item.amount_remaining ?? "—"}
+              {item.amount_remaining != null ? `${item.amount_remaining} USD` : "—"}
               {item.remaining_percent != null ? ` (${item.remaining_percent}%)` : ""}
             </dd>
           </div>
@@ -339,7 +355,7 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
             <ul>
               {item.quotations.map((quote) => (
                 <li key={quote.id}>
-                  v{quote.version} · {quote.amount}
+                  v{quote.version} · {quote.amount} USD
                   {quote.sent_at ? ` · ${quote.sent_at}` : ""}
                 </li>
               ))}
@@ -408,6 +424,23 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
         <section className="card action-card">
           <h2 className="form-title">{t(copy.sendQuotation)}</h2>
           <form className="quotation-form" onSubmit={sendQuotation}>
+            <label className="field-label" htmlFor="quotation-payment-plan">
+              {t(copy.paymentPlan)}
+              <select
+                id="quotation-payment-plan"
+                className="field"
+                value={requiresFullPayment ? "full" : "partial"}
+                onChange={(e) => setRequiresFullPayment(e.target.value === "full")}
+              >
+                <option value="partial">{t(copy.partialPayment)}</option>
+                <option value="full">{t(copy.fullPayment)}</option>
+              </select>
+            </label>
+            <p className="muted" role="status">
+              {t(copy.quotationTotal)}: {quotationTotal ? `${quotationTotal} USD` : "—"}
+              {" · "}
+              {t(copy.firstPaymentAmount)}: {quotationTotal ? `${firstPaymentAmount} USD` : "—"}
+            </p>
             <div className="quotation-lines">
               {quotationLines.map((line, index) => (
                 <div className="quotation-line" key={line.id}>
@@ -437,6 +470,7 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
                     value={line.units}
                     onChange={(e) => updateQuotationLine(line.id, { units: e.target.value })}
                     placeholder={t(copy.lineUnits)}
+                    aria-label={t(copy.lineUnits)}
                     required
                   />
                   <input
@@ -541,8 +575,12 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
             {t(copy.reRequestReceipt)}
           </button>
         </div>
+      </section>
+      <section className="card action-card">
+        <h2 className="form-title">{t(copy.shamCashQr)} {hasQr ? "✓" : ""}</h2>
+        <p className="muted">{t(copy.shamCashQrHelp)}</p>
         <label className="field-label">
-          {t(copy.shamCashQr)} {hasQr ? "✓" : ""}
+          {t(copy.uploadQr)}
           <input
             className="field"
             type="file"

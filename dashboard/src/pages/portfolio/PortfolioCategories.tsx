@@ -1,16 +1,12 @@
-import { useEffect, useState, type FormEvent } from "react";
-import { FormDialog } from "../../components/FormDialog";
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { toast } from "sonner";
+import { ConfirmAction } from "../../components/ConfirmAction";
 import { LoadingTableRow } from "../../components/LoadingTableRow";
+import { PageHeader } from "../../components/PageHeader";
 import { api, type PortfolioCategory } from "../../api";
 import { copy, type Locale } from "../../i18n";
 import { categoryLabel } from "./utils";
-
-const emptyCategoryForm = {
-  slug: "",
-  name_en: "",
-  name_ar: "",
-  is_published: true,
-};
 
 export function PortfolioCategories({
   locale,
@@ -23,10 +19,7 @@ export function PortfolioCategories({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
   const [movingId, setMovingId] = useState<number | null>(null);
-  const [form, setForm] = useState(emptyCategoryForm);
 
   function load() {
     setLoading(true);
@@ -41,64 +34,17 @@ export function PortfolioCategories({
     load();
   }, []);
 
-  function resetForm() {
-    setEditingId(null);
-    setForm(emptyCategoryForm);
-    setShowForm(false);
-    setError("");
-  }
-
-  function startAdd() {
-    setEditingId(null);
-    setForm(emptyCategoryForm);
-    setError("");
-    setShowForm(true);
-  }
-
-  function startEdit(item: PortfolioCategory) {
-    setEditingId(item.id);
-    setForm({
-      slug: item.slug,
-      name_en: item.name_en,
-      name_ar: item.name_ar,
-      is_published: item.is_published,
-    });
-    setShowForm(true);
-    setError("");
-  }
-
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    setError("");
-    setNotice("");
-    const payload = {
-      slug: form.slug.trim(),
-      name_en: form.name_en.trim(),
-      name_ar: form.name_ar.trim(),
-      is_published: form.is_published,
-    };
-
-    try {
-      if (editingId) await api.updatePortfolioCategory(editingId, payload);
-      else await api.createPortfolioCategory(payload);
-      resetForm();
-      setNotice(t(copy.savePortfolioCategory));
-      load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t(copy.savePortfolioFailed));
-    }
-  }
-
   async function remove(id: number) {
-    if (!window.confirm(t(copy.confirmDelete))) return;
     setError("");
     try {
       await api.deletePortfolioCategory(id);
-      if (editingId === id) resetForm();
-      load();
       setNotice(t(copy.deleted));
+      toast.success(t(copy.deleteSuccess));
+      load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t(copy.savePortfolioFailed));
+      const message = err instanceof Error ? err.message : t(copy.savePortfolioFailed);
+      setError(message);
+      toast.error(message);
     }
   }
 
@@ -107,7 +53,6 @@ export function PortfolioCategories({
     setError("");
     try {
       await api.deleteAllPortfolioCategories();
-      resetForm();
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : t(copy.savePortfolioFailed));
@@ -130,56 +75,24 @@ export function PortfolioCategories({
 
   return (
     <>
-      <header className="page-head">
-        <div>
-          <p className="eyebrow">{t(copy.brandMark)}</p>
-          <h1 className="page-title">{t(copy.portfolioTabCategories)}</h1>
-          <p className="page-lede">{t(copy.categoriesLede)}</p>
-        </div>
-      </header>
-
-      <div className="toolbar">
-        <button type="button" className="btn btn-primary" onClick={startAdd}>
-          {t(copy.addPortfolioCategory)}
-        </button>
-        <button type="button" className="btn btn-ghost" onClick={() => void removeAll()} disabled={categories.length === 0}>
-          {t(copy.deleteAll)}
-        </button>
-      </div>
+      <PageHeader
+        eyebrow={t(copy.brandMark)}
+        title={t(copy.portfolioTabCategories)}
+        lede={t(copy.categoriesLede)}
+        actions={
+          <>
+            <Link className="btn btn-primary" to="/categories/new">
+              {t(copy.addPortfolioCategory)}
+            </Link>
+            <button type="button" className="btn btn-ghost" onClick={() => void removeAll()} disabled={categories.length === 0}>
+              {t(copy.deleteAll)}
+            </button>
+          </>
+        }
+      />
 
       {notice ? <p className="muted">{notice}</p> : null}
-      {!showForm && error ? <p className="error">{error}</p> : null}
-
-      {showForm ? (
-        <FormDialog
-          title={editingId ? t(copy.edit) : t(copy.addPortfolioCategory)}
-          onClose={resetForm}
-          onSubmit={submit}
-          submitLabel={t(copy.savePortfolioCategory)}
-          cancelLabel={t(copy.cancel)}
-          closeLabel={t(copy.close)}
-          error={error}
-        >
-          <div className="portfolio-form-grid">
-            <label className="field-label">
-              {t(copy.slug)}
-              <input className="field" value={form.slug} onChange={(e) => setForm((prev) => ({ ...prev, slug: e.target.value }))} required pattern="[a-z0-9_-]+" />
-            </label>
-            <label className="field-label">
-              {t(copy.titleEn)}
-              <input className="field" value={form.name_en} onChange={(e) => setForm((prev) => ({ ...prev, name_en: e.target.value }))} required />
-            </label>
-            <label className="field-label">
-              {t(copy.titleAr)}
-              <input className="field" value={form.name_ar} onChange={(e) => setForm((prev) => ({ ...prev, name_ar: e.target.value }))} required />
-            </label>
-            <label className="checkbox-row">
-              <input type="checkbox" checked={form.is_published} onChange={(e) => setForm((prev) => ({ ...prev, is_published: e.target.checked }))} />
-              {t(copy.published)}
-            </label>
-          </div>
-        </FormDialog>
-      ) : null}
+      {error ? <p className="error">{error}</p> : null}
 
       <div className="table-wrap">
         <table>
@@ -230,12 +143,15 @@ export function PortfolioCategories({
                   </td>
                   <td>{item.is_published ? t(copy.published) : t(copy.inactive)}</td>
                   <td className="actions-cell">
-                    <button type="button" className="btn btn-ghost" onClick={() => startEdit(item)}>
+                    <Link className="btn btn-ghost" to={`/categories/${item.id}/edit`}>
                       {t(copy.edit)}
-                    </button>
-                    <button type="button" className="btn btn-ghost" onClick={() => void remove(item.id)}>
-                      {t(copy.delete)}
-                    </button>
+                    </Link>
+                    <ConfirmAction
+                      label={t(copy.delete)}
+                      yesLabel={t(copy.delete)}
+                      noLabel={t(copy.cancel)}
+                      onConfirm={() => void remove(item.id)}
+                    />
                   </td>
                 </tr>
               ))

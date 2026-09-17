@@ -41,7 +41,21 @@ class ClientController extends Controller
             }
         }
 
-        $paginator = Client::query()->withCount('requests')->latest('id')->paginate($request->perPage());
+        $search = trim((string) $request->query('search', ''));
+
+        $paginator = Client::query()
+            ->visibleOnDashboard()
+            ->withCount('requests')
+            ->when($search !== '', function ($query) use ($search) {
+                $query->where(function ($inner) use ($search) {
+                    $inner->where('name', 'like', "%{$search}%")
+                        ->orWhere('email', 'like', "%{$search}%")
+                        ->orWhere('phone', 'like', "%{$search}%")
+                        ->orWhere('company_name', 'like', "%{$search}%");
+                });
+            })
+            ->latest('id')
+            ->paginate($request->perPage());
 
         if ($odoo->configured()) {
             $paginator->setCollection(

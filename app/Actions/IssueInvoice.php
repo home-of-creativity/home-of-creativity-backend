@@ -7,6 +7,7 @@ use App\Models\Invoice;
 use App\Models\ServiceRequest;
 use App\Services\OdooClient;
 use App\Services\TelegramNotifier;
+use App\Support\Money;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -205,9 +206,9 @@ class IssueInvoice
         $lines = [
             "فاتورة #{$request->number} ({$kindLabel})",
             "العنوان: {$request->title}",
-            'هذه الدفعة: '.number_format($amount, 2).' SYP',
-            'المدفوع: '.number_format($paid, 2)." SYP ({$paidPercent}%)",
-            'المتبقي: '.number_format($remaining, 2)." SYP ({$remainingPercent}%)",
+            'هذه الدفعة: '.Money::format($amount),
+            'المدفوع: '.Money::format($paid)." ({$paidPercent}%)",
+            'المتبقي: '.Money::format($remaining)." ({$remainingPercent}%)",
             "طريقة الدفع: {$methodLabel}",
         ];
 

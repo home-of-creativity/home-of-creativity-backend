@@ -32,6 +32,7 @@ use App\Services\ClickUpStatusMapper;
 use App\Services\RequestStatusTransitionService;
 use App\Support\PricingCatalog;
 use App\Support\ResolveServiceRequest;
+use App\Support\ShamCashQr;
 use App\Support\StatusLabel;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -39,6 +40,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 use function Illuminate\Support\php_binary;
 
@@ -199,9 +201,24 @@ class TelegramBotController extends Controller
     {
         $this->assertClientOwns($request, $serviceRequest);
         $updated = $approveQuotation->handle($serviceRequest);
+        $additional = ['message' => 'Approved.'];
+        if (is_array($approveQuotation->clientPaymentNotice)) {
+            $additional['sham_cash_qr'] = ShamCashQr::toBotPayload($approveQuotation->clientPaymentNotice);
+        }
 
         return ServiceRequestResource::make($updated->fresh('client'))
-            ->additional(['message' => 'Approved.']);
+            ->additional($additional);
+    }
+
+    public function shamCashQr(): BinaryFileResponse
+    {
+        $absolute = ShamCashQr::absolutePath();
+        abort_unless(filled($absolute), 404, 'Sham Cash QR is not configured.');
+
+        return response()->file($absolute, [
+            'Content-Type' => mime_content_type($absolute) ?: 'image/png',
+            'Content-Disposition' => 'inline; filename="'.basename($absolute).'"',
+        ]);
     }
 
     public function reject(Request $request, ServiceRequest $serviceRequest, RejectQuotation $rejectQuotation): ServiceRequestResource
@@ -483,6 +500,10 @@ class TelegramBotController extends Controller
         PushClientToOdoo $pushClientToOdoo,
         PushClientLeadToOdoo $pushClientLeadToOdoo,
     ): void {
+        if (! $client->readyForOdoo()) {
+            return;
+        }
+
         if (app()->runningUnitTests()) {
             $fresh = $client->fresh() ?? $client;
             $fresh = $pushClientToOdoo->handle($fresh);

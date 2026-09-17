@@ -18,7 +18,7 @@ class OverviewController extends Controller
 
         return response()->json([
             'data' => [
-                'clients' => Client::query()->count(),
+                'clients' => Client::query()->visibleOnDashboard()->count(),
                 'requests' => ServiceRequest::query()->count(),
                 'by_status' => $byStatus,
             ],

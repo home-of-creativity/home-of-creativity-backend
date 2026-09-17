@@ -11,6 +11,7 @@ use App\Enums\SocialPublishStatus;
 use App\Models\SocialAccount;
 use App\Models\SocialInboxItem;
 use App\Models\SocialPost;
+use App\Models\SocialPostAccount;
 use App\Models\SocialPostMedia;
 use App\Models\User;
 use App\Services\SocialAccountSync;
@@ -338,6 +339,219 @@ class SocialAutomationTest extends TestCase
             ->assertRedirect('https://hoc.agency/dashboard/social/accounts?threads_error=invalid_state');
     }
 
+    public function test_linkedin_connect_uses_hoc_agency_callback(): void
+    {
+        config([
+            'services.linkedin.client_id' => 'linkedin-client-id',
+            'services.linkedin.client_secret' => 'linkedin-client-secret',
+        ]);
+
+        Sanctum::actingAs($this->admin());
+
+        $response = $this->getJson('/api/admin/social/linkedin/connect')
+            ->assertOk()
+            ->assertJsonPath('data.redirect_uri', 'https://hoc.agency/auth/linkedin/callback');
+
+        $authorizeUrl = $response->json('data.authorize_url');
+        $this->assertIsString($authorizeUrl);
+
+        $query = [];
+        parse_str(parse_url($authorizeUrl, PHP_URL_QUERY) ?: '', $query);
+
+        $this->assertSame('linkedin-client-id', $query['client_id'] ?? null);
+        $this->assertSame('https://hoc.agency/auth/linkedin/callback', $query['redirect_uri'] ?? null);
+        $this->assertSame('code', $query['response_type'] ?? null);
+        $this->assertNotEmpty($query['state'] ?? null);
+        $this->assertStringContainsString('w_organization_social', (string) ($query['scope'] ?? ''));
+        $this->assertStringStartsWith('https://www.linkedin.com/oauth/v2/authorization', $authorizeUrl);
+    }
+
+    public function test_linkedin_connect_requires_oauth_credentials(): void
+    {
+        config([
+            'services.linkedin.client_id' => '',
+            'services.linkedin.client_secret' => '',
+        ]);
+
+        Sanctum::actingAs($this->admin());
+
+        $this->getJson('/api/admin/social/linkedin/connect')
+            ->assertUnprocessable()
+            ->assertJsonPath('message', 'LinkedIn OAuth is not configured.');
+    }
+
+    public function test_guest_cannot_start_linkedin_oauth(): void
+    {
+        $this->getJson('/api/admin/social/linkedin/connect')->assertUnauthorized();
+    }
+
+    public function test_linkedin_oauth_callback_connects_organization_accounts(): void
+    {
+        config([
+            'services.linkedin.client_id' => 'linkedin-client-id',
+            'services.linkedin.client_secret' => 'linkedin-client-secret',
+        ]);
+
+        Http::fake(function (Request $request) {
+            $url = $request->url();
+            if (str_contains($url, '/oauth/v2/accessToken')) {
+                return Http::response([
+                    'access_token' => 'linkedin-user-token',
+                    'expires_in' => 5184000,
+                ], 200);
+            }
+            if (str_contains($url, 'organizationAcls')) {
+                return Http::response([
+                    'elements' => [[
+                        'organization' => 'urn:li:organization:998877',
+                        'organization~' => [
+                            'localizedName' => 'Home of Creativity',
+                            'vanityName' => 'home-of-creativity',
+                        ],
+                    ]],
+                ], 200);
+            }
+
+            return Http::response(['message' => 'unexpected'], 500);
+        });
+
+        $admin = $this->admin();
+        Cache::put('linkedin_oauth_state:oauth-state', ['user_id' => $admin->id], 600);
+
+        $this->get('/auth/linkedin/callback?code=auth-code&state=oauth-state')
+            ->assertRedirect('https://hoc.agency/dashboard/social/accounts?linkedin=connected');
+
+        $account = SocialAccount::query()->where('platform', SocialPlatform::Linkedin)->first();
+        $this->assertNotNull($account);
+        $this->assertSame('998877', $account->page_id);
+        $this->assertSame('Home of Creativity', $account->name);
+        $this->assertSame('home-of-creativity', $account->handle);
+        $this->assertSame('linkedin-user-token', $account->access_token);
+        $this->assertSame(SocialAccountStatus::Connected, $account->connection_status);
+        $this->assertTrue($account->token_expires_at?->greaterThan(now()->addDays(50)) ?? false);
+        $this->assertNull(Cache::get('linkedin_oauth_state:oauth-state'));
+    }
+
+    public function test_linkedin_oauth_callback_rejects_invalid_state(): void
+    {
+        $this->get('/auth/linkedin/callback?code=auth-code&state=missing')
+            ->assertRedirect('https://hoc.agency/dashboard/social/accounts?linkedin_error=invalid_state');
+    }
+
+    public function test_admin_can_publish_text_to_linkedin(): void
+    {
+        Http::fake(function (Request $request) {
+            if (str_contains($request->url(), '/rest/posts')) {
+                return Http::response(null, 201, ['x-restli-id' => 'urn:li:share:778899']);
+            }
+
+            return Http::response(['message' => 'unexpected'], 500);
+        });
+
+        $admin = $this->admin();
+        Sanctum::actingAs($admin);
+
+        $account = SocialAccount::factory()->connected()->recycle($admin)->create([
+            'platform' => SocialPlatform::Linkedin,
+            'name' => 'Home of Creativity',
+            'handle' => 'home-of-creativity',
+            'page_id' => '998877',
+            'access_token' => 'linkedin-user-token',
+        ]);
+
+        $this->post('/api/admin/social/posts', [
+            'body' => 'Hello LinkedIn.',
+            'account_ids' => [$account->id],
+            'intent' => 'publish',
+        ], ['Accept' => 'application/json'])
+            ->assertCreated()
+            ->assertJsonPath('data.status', SocialPostStatus::Published->value);
+
+        Http::assertSent(function (Request $request) {
+            return $request->method() === 'POST'
+                && str_contains($request->url(), '/rest/posts')
+                && $request['author'] === 'urn:li:organization:998877'
+                && $request['commentary'] === 'Hello LinkedIn.'
+                && $request->hasHeader('LinkedIn-Version');
+        });
+    }
+
+    public function test_inbox_sync_imports_linkedin_comments(): void
+    {
+        Http::fake([
+            '*/rest/socialActions/*' => Http::response([
+                'elements' => [[
+                    'id' => '778899',
+                    'message' => ['text' => 'Great work!'],
+                    'actor' => 'urn:li:person:abc123',
+                    'created' => ['time' => now()->valueOf()],
+                ]],
+            ], 200),
+        ]);
+
+        $admin = $this->admin();
+        Sanctum::actingAs($admin);
+
+        $account = SocialAccount::factory()->connected()->recycle($admin)->create([
+            'platform' => SocialPlatform::Linkedin,
+            'name' => 'Home of Creativity',
+            'page_id' => '998877',
+            'access_token' => 'linkedin-user-token',
+        ]);
+
+        $post = SocialPost::factory()->recycle($admin)->create();
+        SocialPostAccount::query()->create([
+            'social_post_id' => $post->id,
+            'social_account_id' => $account->id,
+            'status' => SocialPublishStatus::Published,
+            'external_id' => 'urn:li:share:778899',
+        ]);
+
+        $this->getJson('/api/admin/social/inbox')
+            ->assertOk()
+            ->assertJsonFragment(['body' => 'Great work!', 'kind' => 'comment']);
+
+        $item = SocialInboxItem::query()->where('social_account_id', $account->id)->first();
+        $this->assertNotNull($item);
+        $this->assertSame('urn:li:comment:(urn:li:share:778899,778899)', $item->external_id);
+        $this->assertSame('urn:li:share:778899', $item->source_external_id);
+    }
+
+    public function test_staff_can_reply_to_linkedin_comment(): void
+    {
+        Http::fake([
+            '*/rest/socialActions/*' => Http::response(null, 201, ['x-restli-id' => 'urn:li:comment:(urn:li:share:778899,999)']),
+        ]);
+
+        $admin = $this->admin();
+        Sanctum::actingAs($admin);
+
+        $account = SocialAccount::factory()->connected()->recycle($admin)->create([
+            'platform' => SocialPlatform::Linkedin,
+            'name' => 'Home of Creativity',
+            'page_id' => '998877',
+            'access_token' => 'linkedin-user-token',
+        ]);
+
+        $item = SocialInboxItem::factory()->recycle($account)->create([
+            'kind' => SocialInboxKind::Comment,
+            'external_id' => 'urn:li:comment:(urn:li:share:778899,778899)',
+            'source_external_id' => 'urn:li:share:778899',
+        ]);
+
+        $this->postJson("/api/admin/social/inbox/{$item->id}/reply", [
+            'body' => 'Thanks for the kind words!',
+        ])->assertOk()
+            ->assertJsonPath('data.is_replied', true);
+
+        Http::assertSent(function (Request $request) {
+            return $request->method() === 'POST'
+                && str_contains($request->url(), '/rest/socialActions/urn%3Ali%3Ashare%3A778899/comments')
+                && $request['actor'] === 'urn:li:organization:998877'
+                && $request['parentComment'] === 'urn:li:comment:(urn:li:share:778899,778899)';
+        });
+    }
+
     public function test_facebook_sync_keeps_oauth_threads_account(): void
     {
         config([
@@ -646,17 +860,17 @@ class SocialAutomationTest extends TestCase
         $this->assertTrue($result['ok'], (string) $result['error']);
         $this->assertSame('ig_reel', $result['external_id']);
 
-        Http::assertSent(fn ($request) => $request->method() === 'POST'
+        Http::assertSent(fn (Request $request) => $request->method() === 'POST'
             && str_contains($request->url(), '/media')
             && ! str_contains($request->url(), 'media_publish')
             && $request['media_type'] === 'REELS'
             && $request['upload_type'] === 'resumable'
             && ! isset($request['video_url']));
-        Http::assertSent(fn ($request) => $request->method() === 'POST'
+        Http::assertSent(fn (Request $request) => $request->method() === 'POST'
             && str_contains($request->url(), 'rupload.facebook.com/ig-api-upload')
-            && str_contains(implode(';', $request->header('Content-Type')), 'application/octet-stream')
-            && ($request->header('file_size')[0] ?? null) === '2048'
-            && ($request->header('offset')[0] ?? null) === '0');
+            && str_contains(implode(';', $this->headerLines($request, 'Content-Type')), 'application/octet-stream')
+            && $this->headerLine($request, 'file_size') === '2048'
+            && $this->headerLine($request, 'offset') === '0');
         Http::assertNotSent(fn ($request) => str_contains($request->url(), '/videos') || str_contains($request->url(), '/photos'));
     }
 
@@ -708,13 +922,11 @@ class SocialAutomationTest extends TestCase
         $result = app(SocialPublisher::class)->publish($account, $post->fresh(['media']));
         $this->assertTrue($result['ok'], (string) $result['error']);
 
-        $uploads = collect(Http::recorded())
-            ->filter(fn ($pair) => str_contains($pair[0]->url(), 'rupload.facebook.com'))
-            ->values();
+        $uploads = $this->recordedRequestsMatching('rupload.facebook.com');
         $this->assertCount(2, $uploads);
-        $this->assertSame('0', $uploads[0][0]->header('offset')[0] ?? null);
-        $this->assertSame((string) $bytes, $uploads[0][0]->header('file_size')[0] ?? null);
-        $this->assertSame((string) (4 * 1024 * 1024), $uploads[1][0]->header('offset')[0] ?? null);
+        $this->assertSame('0', $this->headerLine($uploads[0], 'offset'));
+        $this->assertSame((string) $bytes, $this->headerLine($uploads[0], 'file_size'));
+        $this->assertSame((string) (4 * 1024 * 1024), $this->headerLine($uploads[1], 'offset'));
     }
 
     public function test_instagram_reel_surfaces_rupload_debug_info_on_400(): void
@@ -1371,8 +1583,11 @@ class SocialAutomationTest extends TestCase
 
         Http::assertSent(fn ($request) => $request->method() === 'POST'
             && str_contains($request->url(), '/photos')
-            && collect($request->data())->contains(fn ($part) => ($part['name'] ?? null) === 'published'
-                && ($part['contents'] ?? null) === 'false'));
+            && collect($request->data())->contains(function (mixed $part): bool {
+                return is_array($part)
+                    && ($part['name'] ?? null) === 'published'
+                    && ($part['contents'] ?? null) === 'false';
+            }));
         Http::assertSent(fn ($request) => $request->method() === 'POST'
             && str_contains($request->url(), '/photo_stories')
             && ($request['photo_id'] ?? null) === 'photo_1');
@@ -1943,6 +2158,44 @@ class SocialAutomationTest extends TestCase
         return User::factory()->admin()->create([
             'social_permissions' => $permissions,
         ]);
+    }
+
+    /**
+     * @return list<Request>
+     */
+    private function recordedRequestsMatching(string $needle): array
+    {
+        $matches = [];
+
+        foreach (Http::recorded() as $pair) {
+            if (! is_array($pair) || ! isset($pair[0]) || ! $pair[0] instanceof Request) {
+                continue;
+            }
+
+            if (str_contains($pair[0]->url(), $needle)) {
+                $matches[] = $pair[0];
+            }
+        }
+
+        return $matches;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function headerLines(Request $request, string $name): array
+    {
+        $header = $request->header($name);
+        if (is_array($header)) {
+            return array_values(array_filter($header, is_string(...)));
+        }
+
+        return is_string($header) ? [$header] : [];
+    }
+
+    private function headerLine(Request $request, string $name): ?string
+    {
+        return $this->headerLines($request, $name)[0] ?? null;
     }
 
     private function fakeFacebookResumableVideo(string $edge, string $postId): void

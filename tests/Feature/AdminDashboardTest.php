@@ -102,6 +102,75 @@ class AdminDashboardTest extends TestCase
         $this->assertSame('submitted', $serviceRequest->fresh()?->status->value);
     }
 
+    public function test_admin_quotation_partial_payment_sets_first_due_from_line_quantity(): void
+    {
+        Http::fake();
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        $client = Client::factory()->create(['telegram_user_id' => 'tg-partial-qty']);
+        $serviceRequest = ServiceRequest::factory()->for($client)->create([
+            'status' => RequestStatus::Submitted,
+        ]);
+
+        $this->postJson("/api/admin/requests/{$serviceRequest->id}/quotation", [
+            'lines' => [
+                ['title' => 'تصميم', 'amount' => 200, 'units' => 2],
+            ],
+            'requires_full_payment' => false,
+        ])->assertOk()
+            ->assertJsonPath('data.requires_full_payment', false)
+            ->assertJsonPath('data.payment_plan', 'partial');
+
+        $this->assertEquals(400, (float) $serviceRequest->fresh()?->quotation_amount);
+
+        $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
+            ->postJson("/api/bot/telegram/requests/{$serviceRequest->number}/approve", [
+                'telegram_user_id' => 'tg-partial-qty',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.requires_full_payment', false)
+            ->assertJsonPath('data.payment_plan', 'partial');
+
+        $approved = $serviceRequest->fresh();
+        $this->assertNotNull($approved);
+        $this->assertEqualsWithDelta(400, (float) $approved->amount_total, 0.01);
+        $this->assertEqualsWithDelta(200, $approved->expectedDue(), 0.01);
+    }
+
+    public function test_admin_quotation_full_payment_sets_full_due_amount(): void
+    {
+        Http::fake();
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        $client = Client::factory()->create(['telegram_user_id' => 'tg-full-qty']);
+        $serviceRequest = ServiceRequest::factory()->for($client)->create([
+            'status' => RequestStatus::Submitted,
+        ]);
+
+        $this->postJson("/api/admin/requests/{$serviceRequest->id}/quotation", [
+            'lines' => [
+                ['title' => 'حملة', 'amount' => 150, 'units' => 2],
+            ],
+            'requires_full_payment' => true,
+        ])->assertOk()
+            ->assertJsonPath('data.requires_full_payment', true)
+            ->assertJsonPath('data.payment_plan', 'full');
+
+        $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
+            ->postJson("/api/bot/telegram/requests/{$serviceRequest->number}/approve", [
+                'telegram_user_id' => 'tg-full-qty',
+            ])
+            ->assertOk();
+
+        $approved = $serviceRequest->fresh();
+        $this->assertNotNull($approved);
+        $this->assertEqualsWithDelta(300, $approved->expectedDue(), 0.01);
+    }
+
     public function test_admin_requests_are_paginated(): void
     {
         $admin = User::factory()->create();
@@ -143,6 +212,47 @@ class AdminDashboardTest extends TestCase
             ->assertOk()
             ->assertJsonCount(1, 'data')
             ->assertJsonPath('meta.current_page', 3);
+    }
+
+    public function test_incomplete_telegram_clients_are_hidden_until_profile_complete(): void
+    {
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
+            ->postJson('/api/bot/telegram/link', [
+                'telegram_user_id' => 'tg-hidden',
+                'name' => 'Ali',
+                'locale' => 'ar',
+            ])->assertOk()
+            ->assertJsonPath('data.profile_complete', false);
+
+        $stub = Client::query()->where('telegram_user_id', 'tg-hidden')->firstOrFail();
+
+        $this->getJson('/api/admin/clients')
+            ->assertOk()
+            ->assertJsonMissing(['id' => $stub->id]);
+
+        $this->getJson('/api/admin/overview')
+            ->assertOk()
+            ->assertJsonPath('data.clients', 0);
+
+        $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
+            ->postJson('/api/bot/telegram/profile', [
+                'telegram_user_id' => 'tg-hidden',
+                'phone' => '+963911111111',
+                'company_name' => 'شركة علي',
+            ])->assertOk()
+            ->assertJsonPath('data.profile_complete', true);
+
+        $this->getJson('/api/admin/clients')
+            ->assertOk()
+            ->assertJsonFragment(['id' => $stub->id, 'telegram_user_id' => 'tg-hidden']);
+
+        $this->getJson('/api/admin/overview')
+            ->assertOk()
+            ->assertJsonPath('data.clients', 1);
     }
 
     public function test_admin_can_create_client_and_push_to_odoo(): void
@@ -784,6 +894,152 @@ class AdminDashboardTest extends TestCase
             'email' => 'designer@hoc.test',
             'odoo_employee_id' => '92',
         ]);
+    }
+
+    public function test_admin_employees_index_imports_odoo_staff_without_a_sync_button(): void
+    {
+        Cache::flush();
+        Http::preventStrayRequests();
+        $this->fakeOdooDocuments();
+        Http::fake([
+            'https://odoo.test/jsonrpc' => function (Request $request) {
+                $params = $request->data()['params'] ?? [];
+                $service = $params['service'] ?? '';
+                $method = $params['method'] ?? '';
+
+                if ($service === 'common' && $method === 'authenticate') {
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => 2], 200);
+                }
+
+                $args = $params['args'] ?? [];
+                $model = (string) ($args[3] ?? '');
+                $action = (string) ($args[4] ?? '');
+
+                if ($model === 'hr.employee' && $action === 'search_read') {
+                    return Http::response(['jsonrpc' => '2.0', 'result' => [[
+                        'id' => 66,
+                        'name' => 'Odoo Staff',
+                        'work_email' => 'staff@hoc.test',
+                        'work_phone' => '+963222',
+                        'mobile_phone' => false,
+                        'barcode' => 'EMP-0099',
+                        'active' => true,
+                    ]]], 200);
+                }
+
+                if ($model === 'hr.employee' && $action === 'search') {
+                    return Http::response(['jsonrpc' => '2.0', 'result' => []], 200);
+                }
+
+                return Http::response(['jsonrpc' => '2.0', 'result' => null], 200);
+            },
+        ]);
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        $this->getJson('/api/admin/employees')
+            ->assertOk()
+            ->assertJsonFragment(['email' => 'staff@hoc.test']);
+
+        $this->assertDatabaseHas('employees', [
+            'name' => 'Odoo Staff',
+            'email' => 'staff@hoc.test',
+            'odoo_employee_id' => '66',
+        ]);
+    }
+
+    public function test_admin_employees_index_hydrates_live_odoo_fields(): void
+    {
+        Cache::flush();
+        Http::preventStrayRequests();
+        $this->fakeOdooDocuments();
+        Http::fake([
+            'https://odoo.test/jsonrpc' => function (Request $request) {
+                $params = $request->data()['params'] ?? [];
+                if (($params['service'] ?? '') === 'common') {
+                    return Http::response(['jsonrpc' => '2.0', 'result' => 2], 200);
+                }
+
+                $args = $params['args'] ?? [];
+                if (($args[3] ?? null) === 'hr.employee' && ($args[4] ?? null) === 'search_read') {
+                    return Http::response(['jsonrpc' => '2.0', 'result' => [[
+                        'id' => 66,
+                        'name' => 'Live Name',
+                        'work_email' => 'live@hoc.test',
+                        'work_phone' => '+963333',
+                        'mobile_phone' => false,
+                        'barcode' => 'EMP-0066',
+                        'active' => true,
+                    ]]], 200);
+                }
+
+                return Http::response(['jsonrpc' => '2.0', 'result' => []], 200);
+            },
+        ]);
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        Employee::factory()->create([
+            'name' => 'Stale',
+            'email' => 'stale@hoc.test',
+            'odoo_employee_id' => '66',
+        ]);
+
+        $this->getJson('/api/admin/employees')
+            ->assertOk()
+            ->assertJsonPath('data.0.name', 'Live Name')
+            ->assertJsonPath('data.0.email', 'live@hoc.test');
+    }
+
+    public function test_admin_delete_employee_unlinks_odoo_record(): void
+    {
+        Http::preventStrayRequests();
+        $this->fakeOdooDocuments();
+        Http::fake($this->odooDocumentsHttpFake());
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        $employee = Employee::factory()->create([
+            'odoo_employee_id' => '66',
+            'telegram_user_id' => null,
+        ]);
+
+        $this->deleteJson("/api/admin/employees/{$employee->id}")
+            ->assertOk();
+
+        $this->assertDatabaseMissing('employees', ['id' => $employee->id]);
+        Http::assertSent(function (Request $request): bool {
+            $args = $request->data()['params']['args'] ?? [];
+
+            return ($args[3] ?? null) === 'hr.employee' && ($args[4] ?? null) === 'unlink';
+        });
+    }
+
+    public function test_admin_employees_index_removes_local_row_deleted_in_odoo(): void
+    {
+        Cache::flush();
+        Http::preventStrayRequests();
+        $this->fakeOdooDocuments();
+        Http::fake($this->odooDocumentsHttpFake());
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        $employee = Employee::factory()->create([
+            'odoo_employee_id' => '66',
+            'telegram_user_id' => null,
+        ]);
+
+        $this->getJson('/api/admin/employees')->assertOk();
+
+        $this->assertDatabaseMissing('employees', ['id' => $employee->id]);
     }
 
     public function test_sync_partners_pushes_local_clients_without_odoo_id(): void

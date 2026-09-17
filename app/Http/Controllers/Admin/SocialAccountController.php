@@ -10,6 +10,7 @@ use App\Http\Requests\StoreSocialAccountRequest;
 use App\Http\Requests\UpdateSocialAccountRequest;
 use App\Http\Resources\SocialAccountResource;
 use App\Models\SocialAccount;
+use App\Services\LinkedInGraph;
 use App\Services\SocialAccountSync;
 use App\Services\SocialActivityLogger;
 use App\Services\ThreadsGraph;
@@ -49,6 +50,9 @@ class SocialAccountController extends Controller
             'threads_error' => $this->sync->threadsError,
             'threads_oauth_configured' => ThreadsGraph::oauthConfigured(),
             'threads_redirect_uri' => ThreadsGraph::redirectUri(),
+            'linkedin_oauth_configured' => LinkedInGraph::oauthConfigured(),
+            'linkedin_redirect_uri' => LinkedInGraph::redirectUri(),
+            'linkedin_error' => $this->sync->linkedinError,
         ]);
     }
 

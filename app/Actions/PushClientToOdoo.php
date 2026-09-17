@@ -12,6 +12,10 @@ class PushClientToOdoo
 
     public function handle(Client $client, bool $writeExisting = false): Client
     {
+        if (! $client->readyForOdoo()) {
+            return $client;
+        }
+
         if (! $this->odoo->configured()) {
             return $client;
         }

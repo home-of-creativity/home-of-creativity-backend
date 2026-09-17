@@ -201,9 +201,9 @@ async def on_select_quote_request(update: Update, context: ContextTypes.DEFAULT_
     request_ref = query.data.split(":", 1)[1]
     context.user_data["quote_request"] = request_ref
     try:
-        await query.edit_message_text(f"الطلب #{escape(request_ref)} — ما مبلغ عرض السعر؟")
+        await query.edit_message_text(f"الطلب #{escape(request_ref)} — ما مبلغ عرض السعر بالدولار؟")
     except Exception:
-        await query.message.reply_text(f"الطلب #{escape(request_ref)} — ما مبلغ عرض السعر؟")
+        await query.message.reply_text(f"الطلب #{escape(request_ref)} — ما مبلغ عرض السعر بالدولار؟")
     return WAITING_QUOTE_AMOUNT
 
 
@@ -260,7 +260,7 @@ async def capture_quote_notes(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text(
         f"✅ تم إرسال عرض السعر v{escape(str(data.get('quotation_version', '')))} "
         f"للطلب #{escape(request_ref)}.\n"
-        f"المبلغ: {escape(str(data.get('amount', '')))}",
+        f"المبلغ: {escape(str(data.get('amount', '')))} USD",
         reply_markup=staff_keyboard(await lookup_employee(user.id)),
     )
     return ConversationHandler.END

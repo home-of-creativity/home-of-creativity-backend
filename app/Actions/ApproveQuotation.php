@@ -15,6 +15,9 @@ use Illuminate\Validation\ValidationException;
 
 class ApproveQuotation
 {
+    /** @var array{caption: string, qr_available: bool, delivered: bool}|null */
+    public ?array $clientPaymentNotice = null;
+
     public function __construct(
         private RequestStatusTransitionService $transitions,
         private NotifyEmployees $notifyEmployees,
@@ -56,6 +59,7 @@ class ApproveQuotation
         });
 
         $updated = $this->applyQuotationAcceptance->handle($updated->fresh(['client', 'pricingPackage']) ?? $updated);
+        $this->clientPaymentNotice = $this->applyQuotationAcceptance->clientNotice;
 
         return $updated->fresh(['client', 'invoices', 'pricingPackage']) ?? $updated;
     }

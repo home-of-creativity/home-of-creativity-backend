@@ -983,6 +983,41 @@ class OdooClient
     }
 
     /**
+     * @return array{name: string|null, email: string|null, phone: string|null, barcode: string|null, active: bool, odoo_url: string}|null
+     */
+    public function employeeSnapshot(int|string $employeeId): ?array
+    {
+        if (! $this->configured()) {
+            return null;
+        }
+
+        try {
+            $rows = $this->searchRead('hr.employee', [['id', '=', (int) $employeeId]], [
+                'id', 'name', 'work_email', 'work_phone', 'mobile_phone', 'barcode', 'active',
+            ], 1, 0, 'id desc');
+        } catch (Throwable) {
+            return null;
+        }
+
+        if ($rows === []) {
+            return null;
+        }
+
+        $row = $rows[0];
+
+        return [
+            'name' => filled($row['name'] ?? null) ? (string) $row['name'] : null,
+            'email' => filled($row['work_email'] ?? null) ? (string) $row['work_email'] : null,
+            'phone' => filled($row['work_phone'] ?? null)
+                ? (string) $row['work_phone']
+                : (filled($row['mobile_phone'] ?? null) ? (string) $row['mobile_phone'] : null),
+            'barcode' => filled($row['barcode'] ?? null) ? (string) $row['barcode'] : null,
+            'active' => (bool) ($row['active'] ?? true),
+            'odoo_url' => $this->recordUrl('hr.employee', (int) $employeeId),
+        ];
+    }
+
+    /**
      * @param  array<string, mixed>  $values
      */
     public function writeRecord(string $model, int|string $recordId, array $values): void

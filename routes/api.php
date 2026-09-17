@@ -22,6 +22,7 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\IntegrationController;
 use App\Http\Controllers\LandingReelController;
+use App\Http\Controllers\LinkedInOAuthController;
 use App\Http\Controllers\N8nWebhookController;
 use App\Http\Controllers\PortfolioController;
 use App\Http\Controllers\PricingController;
@@ -133,6 +134,8 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
     Route::delete('pricing/packages/{pricing_package}', [AdminPricingPackageController::class, 'destroy']);
     Route::get('social/threads/connect', [ThreadsOAuthController::class, 'redirect'])
         ->middleware('throttle:10,1');
+    Route::get('social/linkedin/connect', [LinkedInOAuthController::class, 'redirect'])
+        ->middleware('throttle:10,1');
     Route::get('social/accounts', [AdminSocialAccountController::class, 'index']);
     Route::post('social/accounts', [AdminSocialAccountController::class, 'store']);
     Route::put('social/accounts/{social_account}', [AdminSocialAccountController::class, 'update']);
@@ -172,6 +175,7 @@ Route::prefix('bot/telegram')->middleware('shared.secret:services.telegram.bot_s
     Route::post('requests', [TelegramBotController::class, 'submit']);
     Route::get('requests', [TelegramBotController::class, 'index']);
     Route::patch('requests/{service_request}', [TelegramBotController::class, 'update']);
+    Route::get('sham-cash-qr', [TelegramBotController::class, 'shamCashQr']);
     Route::post('requests/{service_request}/approve', [TelegramBotController::class, 'approve']);
     Route::post('requests/{service_request}/reject', [TelegramBotController::class, 'reject']);
     Route::post('requests/{service_request}/acknowledge', [TelegramBotController::class, 'acknowledge']);

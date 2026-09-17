@@ -1,9 +1,13 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Search } from "lucide-react";
+import { toast } from "sonner";
+import { Link, useSearchParams } from "react-router-dom";
 import { api, type Client, type OdooInvoice, type OdooQuotation, type PageMeta } from "../api";
-import { FormDialog } from "../components/FormDialog";
+import { ConfirmAction } from "../components/ConfirmAction";
 import { LoadingTableRow } from "../components/LoadingTableRow";
+import { PageHeader } from "../components/PageHeader";
 import { Pagination } from "../components/Pagination";
+import { Tabs } from "../components/Tabs";
 import { copy, type Locale } from "../i18n";
 import { ClientLogosPanel } from "./portfolio/ClientLogosPanel";
 
@@ -50,14 +54,15 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
   const [odooReady, setOdooReady] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-  const [companyName, setCompanyName] = useState("");
   const [importingCrm, setImportingCrm] = useState(false);
   const excelInputRef = useRef<HTMLInputElement>(null);
+  const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedQuery(query.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [query]);
 
   useEffect(() => {
     api.odooStatus().then((res) => setOdooReady(res.data.configured)).catch(() => setOdooReady(false));
@@ -86,7 +91,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                 setOdooReady(true);
                 setError("");
               })
-            : api.clients(page).then((res) => {
+            : api.clients(page, debouncedQuery).then((res) => {
                 if (cancelled) return;
                 setItems(res.data);
                 setMeta(res.meta);
@@ -121,7 +126,11 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [tab, page, t]);
+  }, [tab, page, debouncedQuery, t]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedQuery]);
 
   async function importCrmExcel(file: File) {
     setError("");
@@ -148,181 +157,96 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
     }
   }
 
-  function resetForm() {
-    setEditingId(null);
-    setName("");
-    setEmail("");
-    setPhone("");
-    setCompanyName("");
-    setShowForm(false);
-    setError("");
-  }
-
-  function startAdd() {
-    setEditingId(null);
-    setName("");
-    setEmail("");
-    setPhone("");
-    setCompanyName("");
-    setShowForm(true);
-    setError("");
-  }
-
-  function startEdit(item: Client) {
-    setEditingId(item.id);
-    setName(item.name);
-    setEmail(item.email ?? "");
-    setPhone(item.phone ?? "");
-    setCompanyName(item.company_name ?? "");
-    setShowForm(true);
-    setError("");
-  }
-
-  async function saveClient(event: FormEvent) {
-    event.preventDefault();
-    setError("");
-    setNotice("");
-    try {
-      const payload = {
-        name,
-        email: email || undefined,
-        phone: phone || undefined,
-        company_name: companyName || undefined,
-      };
-      if (editingId) {
-        await api.updateClient(editingId, payload);
-      } else {
-        await api.createClient(payload);
-      }
-      resetForm();
-      setNotice(t(copy.saveClient));
-      const list = await api.clients(page);
-      setItems(list.data);
-      setMeta(list.meta);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t(copy.saveFailed));
-    }
-  }
-
   async function removeClient(id: number) {
-    if (!window.confirm(t(copy.confirmDelete))) return;
     setError("");
     setNotice("");
     try {
       await api.deleteClient(id);
-      if (editingId === id) resetForm();
       setNotice(t(copy.deleted));
-      const list = await api.clients(page);
+      toast.success(t(copy.deleteSuccess));
+      const list = await api.clients(page, debouncedQuery);
       setItems(list.data);
       setMeta(list.meta);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t(copy.saveFailed));
+      const message = err instanceof Error ? err.message : t(copy.saveFailed);
+      setError(message);
+      toast.error(message);
     }
   }
 
   return (
     <>
-      <header className="page-head">
-        <div>
-          <p className="eyebrow">{t(copy.brandMark)}</p>
-          <h1 className="page-title">{t(copy.clients)}</h1>
-          <p className="page-lede">
-            {tab === "logos" ? t(copy.clientLogosLede) : t(copy.clientsLede)}
-          </p>
-        </div>
-        {tab === "clients" ? (
-          <div className="toolbar">
-            {odooReady ? (
-              <>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  disabled={importingCrm}
-                  onClick={() => excelInputRef.current?.click()}
-                >
-                  {importingCrm ? t(copy.odooImportCrmLoading) : t(copy.odooImportCrmExcel)}
-                </button>
-                <input
-                  ref={excelInputRef}
-                  type="file"
-                  accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                  hidden
-                  onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    if (file) void importCrmExcel(file);
-                  }}
-                />
-              </>
-            ) : (
-              <span className="muted">{t(copy.odooNotConfigured)}</span>
-            )}
-            <button type="button" className="btn btn-primary" onClick={startAdd}>
-              {t(copy.addClient)}
-            </button>
-            <a className="btn btn-telegram" href={`https://t.me/${TELEGRAM_BOT}`} target="_blank" rel="noreferrer">
-              {t(copy.signupCta)}
-            </a>
-          </div>
-        ) : null}
-      </header>
+      <PageHeader
+        eyebrow={t(copy.brandMark)}
+        title={t(copy.clients)}
+        lede={tab === "logos" ? t(copy.clientLogosLede) : t(copy.clientsLede)}
+        actions={
+          tab === "clients" ? (
+            <>
+              {odooReady ? (
+                <>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    disabled={importingCrm}
+                    onClick={() => excelInputRef.current?.click()}
+                  >
+                    {importingCrm ? t(copy.odooImportCrmLoading) : t(copy.odooImportCrmExcel)}
+                  </button>
+                  <input
+                    ref={excelInputRef}
+                    type="file"
+                    accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    hidden
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) void importCrmExcel(file);
+                    }}
+                  />
+                </>
+              ) : (
+                <span className="muted">{t(copy.odooNotConfigured)}</span>
+              )}
+              <Link className="btn btn-primary" to="/clients/new">
+                {t(copy.addClient)}
+              </Link>
+              <a className="btn btn-telegram" href={`https://t.me/${TELEGRAM_BOT}`} target="_blank" rel="noreferrer">
+                {t(copy.signupCta)}
+              </a>
+            </>
+          ) : undefined
+        }
+      />
 
-      <div className="tabs" role="tablist" aria-label={t(copy.clients)}>
-        {tabs.map((key) => (
-          <button
-            key={key}
-            type="button"
-            role="tab"
-            aria-selected={tab === key}
-            className={tab === key ? "tab is-active" : "tab"}
-            onClick={() => {
-              setTab(key);
-              setError("");
-              setShowForm(false);
-            }}
-          >
-            {tabLabel(key, t)}
-          </button>
-        ))}
-      </div>
-
-      {tab === "clients" && showForm ? (
-        <FormDialog
-          title={editingId ? t(copy.editClient) : t(copy.addClient)}
-          onClose={resetForm}
-          onSubmit={saveClient}
-          submitLabel={t(copy.saveClient)}
-          cancelLabel={t(copy.cancel)}
-          closeLabel={t(copy.close)}
-          error={error}
-        >
-          <div className="portfolio-form-grid">
-            <label className="field-label">
-              {t(copy.client)}
-              <input className="field" value={name} onChange={(e) => setName(e.target.value)} required />
-            </label>
-            <label className="field-label">
-              {t(copy.email)}
-              <input className="field" type="email" dir="ltr" value={email} onChange={(e) => setEmail(e.target.value)} />
-            </label>
-            <label className="field-label">
-              {t(copy.phone)}
-              <input className="field" dir="ltr" value={phone} onChange={(e) => setPhone(e.target.value)} />
-            </label>
-            <label className="field-label">
-              {t(copy.company)}
-              <input className="field" value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
-            </label>
-          </div>
-        </FormDialog>
-      ) : null}
+      <Tabs
+        value={tab}
+        onValueChange={(next) => {
+          setTab(next as Tab);
+          setError("");
+        }}
+        ariaLabel={t(copy.clients)}
+        items={tabs.map((key) => ({ value: key, label: tabLabel(key, t) }))}
+      />
 
       {tab === "clients" && notice ? <p className="notice">{notice}</p> : null}
-      {tab === "clients" && !showForm && error ? <p className="error">{error}</p> : null}
+      {tab === "clients" && error ? <p className="error">{error}</p> : null}
 
       {tab === "logos" ? <ClientLogosPanel locale={locale} t={t} /> : null}
 
       {tab === "clients" ? (
         <>
+          <div className="search-bar">
+            <Search size={16} aria-hidden="true" />
+            <input
+              type="search"
+              className="field"
+              placeholder={t(copy.searchClients)}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              aria-label={t(copy.search)}
+            />
+          </div>
+
           <div className="table-wrap">
             <table>
               <thead>
@@ -343,7 +267,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                   <LoadingTableRow colSpan={9} label={t(copy.loading)} />
                 ) : items.length === 0 ? (
                   <tr>
-                    <td colSpan={9}>{t(copy.empty)}</td>
+                    <td colSpan={9}>{debouncedQuery ? t(copy.noSearchResults) : t(copy.empty)}</td>
                   </tr>
                 ) : (
                   items.map((item) => (
@@ -372,15 +296,16 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                         )}
                       </td>
                       <td>{item.requests_count ?? 0}</td>
-                      <td>
-                        <div className="row-actions">
-                          <button className="btn" type="button" onClick={() => startEdit(item)}>
-                            {t(copy.editEmployee)}
-                          </button>
-                          <button className="btn" type="button" onClick={() => void removeClient(item.id)}>
-                            {t(copy.deleteEmployee)}
-                          </button>
-                        </div>
+                      <td className="actions-cell">
+                        <Link className="btn btn-ghost" to={`/clients/${item.id}/edit`}>
+                          {t(copy.editEmployee)}
+                        </Link>
+                        <ConfirmAction
+                          label={t(copy.deleteEmployee)}
+                          yesLabel={t(copy.delete)}
+                          noLabel={t(copy.cancel)}
+                          onConfirm={() => void removeClient(item.id)}
+                        />
                       </td>
                     </tr>
                   ))

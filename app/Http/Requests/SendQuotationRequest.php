@@ -24,6 +24,16 @@ class SendQuotationRequest extends FormRequest
             'lines.*.amount' => ['required', 'numeric', 'min:0.01'],
             'lines.*.units' => ['nullable', 'numeric', 'min:0.01'],
             'lines.*.notes' => ['nullable', 'string', 'max:2000'],
+            'requires_full_payment' => ['sometimes', 'boolean'],
         ];
+    }
+
+    protected function prepareForValidation(): void
+    {
+        if ($this->has('requires_full_payment')) {
+            $this->merge([
+                'requires_full_payment' => filter_var($this->input('requires_full_payment'), FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE),
+            ]);
+        }
     }
 }

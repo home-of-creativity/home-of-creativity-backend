@@ -96,6 +96,9 @@ class ServiceRequestController extends Controller
         SendQuotation $sendQuotation,
     ): ServiceRequestResource {
         $lines = $request->validated('lines');
+        $requiresFullPayment = $request->has('requires_full_payment')
+            ? (bool) $request->validated('requires_full_payment')
+            : null;
         $sendQuotation->handle(
             $serviceRequest,
             $lines
@@ -105,6 +108,8 @@ class ServiceRequestController extends Controller
             'admin',
             null,
             $lines,
+            false,
+            $requiresFullPayment,
         );
 
         return ServiceRequestResource::make($serviceRequest->fresh([

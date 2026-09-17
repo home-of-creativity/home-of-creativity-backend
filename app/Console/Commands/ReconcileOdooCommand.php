@@ -2,9 +2,11 @@
 
 namespace App\Console\Commands;
 
-use App\Actions\PushClientLeadToOdoo;
-use App\Actions\PushClientToOdoo;
+use App\Actions\HydrateClientFromOdoo;
+use App\Actions\HydrateEmployeeFromOdoo;
+use App\Actions\ImportOdooCrmClients;
 use App\Actions\PushEmployeeToOdoo;
+use App\Actions\SyncOdooEmployees;
 use App\Models\Client;
 use App\Models\Employee;
 use App\Services\OdooClient;
@@ -17,12 +19,14 @@ class ReconcileOdooCommand extends Command
 {
     protected $signature = 'odoo:reconcile {--limit=50}';
 
-    protected $description = 'Safety-net pull of Odoo lead/partner snapshots and push unsynced local writes.';
+    protected $description = 'Pull Odoo CRM/HR changes into the dashboard and push unsynced local writes.';
 
     public function handle(
         OdooClient $odoo,
-        PushClientToOdoo $pushClientToOdoo,
-        PushClientLeadToOdoo $pushClientLeadToOdoo,
+        ImportOdooCrmClients $importOdooCrmClients,
+        SyncOdooEmployees $syncOdooEmployees,
+        HydrateClientFromOdoo $hydrateClientFromOdoo,
+        HydrateEmployeeFromOdoo $hydrateEmployeeFromOdoo,
         PushEmployeeToOdoo $pushEmployeeToOdoo,
     ): int {
         if (! $odoo->configured()) {
@@ -30,19 +34,26 @@ class ReconcileOdooCommand extends Command
         }
 
         $limit = max(1, (int) $this->option('limit'));
-        $clients = $this->nextClientBatch($limit);
 
-        foreach ($clients as $client) {
+        try {
+            $importOdooCrmClients->handle($limit);
+        } catch (\Throwable $exception) {
+            Log::warning('odoo:reconcile CRM pull failed.', [
+                'error' => $exception->getMessage(),
+            ]);
+        }
+
+        try {
+            $syncOdooEmployees->handle($limit);
+        } catch (\Throwable $exception) {
+            Log::warning('odoo:reconcile HR pull failed.', [
+                'error' => $exception->getMessage(),
+            ]);
+        }
+
+        foreach ($this->nextClientBatch($limit) as $client) {
             try {
-                $pushClientToOdoo->handle($client);
-                $pushClientLeadToOdoo->handle($client->fresh() ?? $client);
-                $fresh = $client->fresh() ?? $client;
-                if (filled($fresh->odoo_lead_id)) {
-                    $snapshot = $odoo->leadSnapshot((int) $fresh->odoo_lead_id);
-                    if ($snapshot && ($snapshot['stage'] ?? null) !== $fresh->odoo_stage_name) {
-                        $fresh->forceFill(['odoo_stage_name' => $snapshot['stage']])->save();
-                    }
-                }
+                $hydrateClientFromOdoo->handle($client);
             } catch (\Throwable $exception) {
                 Log::warning('odoo:reconcile client failed.', [
                     'client_id' => $client->id,
@@ -52,14 +63,17 @@ class ReconcileOdooCommand extends Command
         }
 
         $employees = Employee::query()
-            ->whereNull('odoo_employee_id')
             ->orderBy('id')
             ->limit($limit)
             ->get();
 
         foreach ($employees as $employee) {
             try {
-                $pushEmployeeToOdoo->handle($employee);
+                if (filled($employee->odoo_employee_id)) {
+                    $hydrateEmployeeFromOdoo->handle($employee);
+                } else {
+                    $pushEmployeeToOdoo->handle($employee);
+                }
             } catch (\Throwable $exception) {
                 Log::warning('odoo:reconcile employee failed.', [
                     'employee_id' => $employee->id,

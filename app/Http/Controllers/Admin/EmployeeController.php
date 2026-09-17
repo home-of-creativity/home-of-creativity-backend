@@ -2,8 +2,11 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Actions\DeleteEmployee;
 use App\Actions\GenerateEmployeeCode;
+use App\Actions\HydrateEmployeeFromOdoo;
 use App\Actions\PushEmployeeToOdoo;
+use App\Actions\SyncOdooEmployees;
 use App\Enums\EmployeeStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\ApproveEmployeeRequest;
@@ -15,27 +18,47 @@ use App\Services\ClickUpClient;
 use App\Services\OdooClient;
 use App\Services\TelegramNotifier;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
+use Throwable;
 
 class EmployeeController extends Controller
 {
-    public function index(OdooClient $odoo, PushEmployeeToOdoo $pushEmployeeToOdoo)
-    {
+    public function index(
+        OdooClient $odoo,
+        SyncOdooEmployees $syncOdooEmployees,
+        HydrateEmployeeFromOdoo $hydrateEmployeeFromOdoo,
+    ) {
         if ($odoo->configured()) {
-            Employee::query()
-                ->whereNull('odoo_employee_id')
-                ->limit(25)
-                ->get()
-                ->each(fn (Employee $employee) => $pushEmployeeToOdoo->handle($employee));
+            try {
+                Cache::remember('odoo:hr:index-pull', 10, function () use ($syncOdooEmployees): bool {
+                    $syncOdooEmployees->handle(200);
+
+                    return true;
+                });
+            } catch (Throwable $exception) {
+                Log::warning('Odoo HR pull on employees index failed.', [
+                    'error' => $exception->getMessage(),
+                ]);
+            }
         }
 
-        return EmployeeResource::collection(
-            Employee::query()
-                ->orderByRaw("CASE status WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 ELSE 2 END")
-                ->latest('id')
-                ->paginate(50)
-        )->additional(['message' => 'ok']);
+        $paginator = Employee::query()
+            ->orderByRaw("CASE status WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 ELSE 2 END")
+            ->latest('id')
+            ->paginate(50);
+
+        if ($odoo->configured()) {
+            $paginator->setCollection(
+                $paginator->getCollection()
+                    ->map(fn (Employee $employee): Employee => $hydrateEmployeeFromOdoo->handle($employee))
+                    ->filter(fn (Employee $employee): bool => $employee->exists)
+                    ->values()
+            );
+        }
+
+        return EmployeeResource::collection($paginator)->additional(['message' => 'ok']);
     }
 
     public function store(
@@ -51,14 +74,14 @@ class EmployeeController extends Controller
         $employee = $pushEmployeeToOdoo->handle(Employee::query()->create($data));
 
         return EmployeeResource::make($employee)
-            ->additional(['message' => 'Created.'])
+            ->additional(['message' => 'Employee created and linked to Odoo.'])
             ->response()
             ->setStatusCode(201);
     }
 
-    public function show(Employee $employee): EmployeeResource
+    public function show(Employee $employee, HydrateEmployeeFromOdoo $hydrateEmployeeFromOdoo): EmployeeResource
     {
-        return EmployeeResource::make($employee)
+        return EmployeeResource::make($hydrateEmployeeFromOdoo->handle($employee))
             ->additional(['message' => 'ok']);
     }
 
@@ -67,16 +90,16 @@ class EmployeeController extends Controller
         $employee->fill($request->validated())->save();
 
         return EmployeeResource::make($pushEmployeeToOdoo->handle($employee->refresh()))
-            ->additional(['message' => 'Updated.']);
+            ->additional(['message' => 'Employee updated in dashboard and Odoo.']);
     }
 
-    public function destroy(Employee $employee)
+    public function destroy(Employee $employee, DeleteEmployee $deleteEmployee)
     {
-        $employee->delete();
+        $deleteEmployee->handle($employee);
 
         return response()->json([
             'data' => null,
-            'message' => 'Deleted.',
+            'message' => 'Employee deleted from dashboard and Odoo.',
         ]);
     }
 
@@ -144,7 +167,7 @@ class EmployeeController extends Controller
 
         try {
             $telegram->send($chatId, $text, $bot);
-        } catch (\Throwable $exception) {
+        } catch (Throwable $exception) {
             Log::warning('Employee decision notify failed.', [
                 'employee_id' => $employee->id,
                 'error' => $exception->getMessage(),

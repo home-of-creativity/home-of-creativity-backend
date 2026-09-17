@@ -13,16 +13,19 @@ use App\Enums\RequestStatus;
 use App\Models\ClickUpTask;
 use App\Models\Client;
 use App\Models\DriveDelivery;
+use App\Models\OpsSetting;
 use App\Models\PaymentReminder;
 use App\Models\PricingCategory;
 use App\Models\PricingPackage;
 use App\Models\PricingSubcategory;
+use App\Models\Quotation;
 use App\Models\RequestFile;
 use App\Models\ServiceRequest;
 use App\Models\User;
 use App\Services\GoogleDriveClient;
 use App\Support\PaymentPlanResolver;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -63,6 +66,34 @@ class ClientOpsAutomationTest extends TestCase
                 'package_id' => $package->id,
                 'billing_period' => 'monthly',
             ])->assertStatus(422);
+    }
+
+    public function test_incomplete_telegram_profile_does_not_push_odoo(): void
+    {
+        Http::preventStrayRequests();
+        $this->fakeOdooDocuments();
+        Http::fake($this->odooDocumentsHttpFake());
+        config(['services.gemini.e2e_stub' => true]);
+
+        $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
+            ->postJson('/api/bot/telegram/link', [
+                'telegram_user_id' => 'tg-no-odoo',
+                'name' => 'Ali',
+                'locale' => 'ar',
+            ])->assertOk()
+            ->assertJsonPath('data.profile_complete', false);
+
+        $client = Client::query()->where('telegram_user_id', 'tg-no-odoo')->firstOrFail();
+        $this->assertNull($client->odoo_partner_id);
+        $this->assertNull($client->odoo_lead_id);
+
+        Http::assertNotSent(function (Request $request): bool {
+            $args = $request->data()['params']['args'] ?? [];
+            $action = $args[4] ?? null;
+
+            return in_array($action, ['create', 'createOrReusePartner'], true)
+                && in_array($args[3] ?? null, ['res.partner', 'crm.lead'], true);
+        });
     }
 
     public function test_complete_profile_creates_odoo_lead_on_telegram_stage(): void
@@ -377,6 +408,90 @@ class ClientOpsAutomationTest extends TestCase
             'Accept' => 'application/json',
         ])->assertOk();
         $this->getJson('/api/admin/ops-settings')->assertOk()->assertJsonPath('data.sham_cash_qr', true);
+    }
+
+    public function test_approving_quotation_returns_shared_sham_cash_qr_for_the_bot(): void
+    {
+        Storage::fake('local');
+        Http::fake();
+
+        $path = UploadedFile::fake()->image('sham-cash.png')->store('payment', 'local');
+        OpsSetting::setValue('sham_cash_qr_path', $path);
+
+        $client = Client::factory()->create(['telegram_user_id' => 'tg-sham-cash']);
+        $request = ServiceRequest::factory()->for($client)->create([
+            'status' => RequestStatus::QuotationSent,
+        ]);
+        Quotation::query()->create([
+            'request_id' => $request->id,
+            'version' => 1,
+            'amount' => 800,
+            'sent_at' => now(),
+        ]);
+
+        $response = $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
+            ->postJson("/api/bot/telegram/requests/{$request->number}/approve", [
+                'telegram_user_id' => 'tg-sham-cash',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'awaiting_payment')
+            ->assertJsonPath('sham_cash_qr.qr_available', true)
+            ->assertJsonPath('sham_cash_qr.delivered', false)
+            ->assertJsonPath('sham_cash_qr.file_name', basename((string) $path));
+
+        $this->assertNotEmpty($response->json('sham_cash_qr.content_base64'));
+
+        $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
+            ->get('/api/bot/telegram/sham-cash-qr')
+            ->assertOk()
+            ->assertHeader('content-type', 'image/png');
+    }
+
+    public function test_approving_quotation_sends_sham_cash_qr_when_telegram_is_configured(): void
+    {
+        Storage::fake('local');
+        config(['services.telegram.bot_token' => 'client-token']);
+        Http::fake([
+            'https://api.telegram.org/*' => Http::response([
+                'ok' => true,
+                'result' => ['photo' => [['file_id' => 'qr-1']]],
+            ], 200),
+        ]);
+
+        $path = UploadedFile::fake()->image('sham-cash.png')->store('payment', 'local');
+        OpsSetting::setValue('sham_cash_qr_path', $path);
+
+        $client = Client::factory()->create(['telegram_user_id' => 'tg-sham-sent']);
+        $request = ServiceRequest::factory()->for($client)->create([
+            'status' => RequestStatus::QuotationSent,
+            'quotation_amount' => 400,
+        ]);
+        Quotation::query()->create([
+            'request_id' => $request->id,
+            'version' => 1,
+            'amount' => 400,
+            'sent_at' => now(),
+        ]);
+
+        $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
+            ->postJson("/api/bot/telegram/requests/{$request->number}/approve", [
+                'telegram_user_id' => 'tg-sham-sent',
+            ])
+            ->assertOk()
+            ->assertJsonPath('sham_cash_qr.qr_available', true)
+            ->assertJsonPath('sham_cash_qr.delivered', true)
+            ->assertJsonPath('sham_cash_qr.content_base64', null);
+
+        Http::assertSent(function (Request $httpRequest): bool {
+            if (! str_contains($httpRequest->url(), 'botclient-token/sendPhoto')) {
+                return false;
+            }
+
+            $payload = $httpRequest->data();
+            $caption = (string) ($payload['caption'] ?? $httpRequest->body());
+
+            return str_contains($caption, 'USD');
+        });
     }
 
     public function test_clickup_due_alert_is_idempotent_and_covers_just_passed_due(): void

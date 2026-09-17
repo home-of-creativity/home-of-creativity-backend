@@ -4,14 +4,47 @@ export type Copy = { ar: string; en: string };
 const STORAGE = "hoc-dash-locale";
 
 export function readLocale(): Locale {
-  const stored = localStorage.getItem(STORAGE);
-  return stored === "en" || stored === "ar" ? stored : "ar";
+  try {
+    const stored = localStorage.getItem(STORAGE);
+    return stored === "en" || stored === "ar" ? stored : "ar";
+  } catch {
+    return "ar";
+  }
 }
 
 export function applyLocale(locale: Locale) {
-  localStorage.setItem(STORAGE, locale);
-  document.documentElement.lang = locale;
-  document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
+  try {
+    localStorage.setItem(STORAGE, locale);
+  } catch {
+    /* private mode */
+  }
+  const html = document.documentElement;
+  html.lang = locale;
+  html.dir = locale === "ar" ? "rtl" : "ltr";
+  html.style.direction = html.dir;
+}
+
+export type Theme = "light" | "dark";
+const THEME_STORAGE = "hoc-dash-theme";
+
+export function readTheme(): Theme {
+  try {
+    const stored = localStorage.getItem(THEME_STORAGE);
+    if (stored === "dark" || stored === "light") return stored;
+  } catch {
+    /* private mode */
+  }
+  return typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+export function applyTheme(theme: Theme) {
+  try {
+    localStorage.setItem(THEME_STORAGE, theme);
+  } catch {
+    /* private mode */
+  }
+  if (theme === "dark") document.documentElement.dataset.theme = "dark";
+  else delete document.documentElement.dataset.theme;
 }
 
 export const copy = {
@@ -48,7 +81,7 @@ export const copy = {
   odooDate: { ar: "التاريخ", en: "Date" },
   odooReference: { ar: "المرجع", en: "Reference" },
   employees: { ar: "الموظفون", en: "Employees" },
-  employeesLede: { ar: "الموظف ينضم من بوت الفريق. أنت توافق وتعيّن المهنة وتربطه بـ ClickUp وOdoo.", en: "Staff join from the team bot. You approve, set the role, and link ClickUp and Odoo." },
+  employeesLede: { ar: "الموظفون في الداشبورد وOdoo يتزامنون تلقائياً في الاتجاهين: إضافة وتعديل وحذف وقراءة.", en: "Dashboard and Odoo employees stay in sync both ways: create, update, delete, and read." },
   odooEmployee: { ar: "موظف Odoo", en: "Odoo employee" },
   addEmployee: { ar: "إضافة موظف", en: "Add employee" },
   editEmployee: { ar: "تعديل", en: "Edit" },
@@ -94,6 +127,25 @@ export const copy = {
   loginRedirecting: { ar: "جاري تحويلك للوحة التحكم…", en: "Redirecting to dashboard…" },
   logout: { ar: "خروج", en: "Log out" },
   language: { ar: "English", en: "العربية" },
+  darkMode: { ar: "الوضع الداكن", en: "Dark mode" },
+  lightMode: { ar: "الوضع الفاتح", en: "Light mode" },
+  search: { ar: "بحث", en: "Search" },
+  searchEmployees: { ar: "بحث بالاسم أو الرمز أو تيليجرام…", en: "Search by name, code, or Telegram…" },
+  searchClients: { ar: "بحث بالاسم أو البريد أو الهاتف…", en: "Search by name, email, or phone…" },
+  noSearchResults: { ar: "لا نتائج مطابقة.", en: "No matching results." },
+  dropzoneHint: { ar: "اسحب الملف وأسقطه هنا، أو اضغط للاختيار", en: "Drag & drop a file here, or click to browse" },
+  dropzoneHintMultiple: { ar: "اسحب الملفات وأسقطها هنا، أو اضغط للاختيار", en: "Drag & drop files here, or click to browse" },
+  dropzoneActive: { ar: "أسقط الملف هنا…", en: "Drop the file here…" },
+  reelVideoRequired: { ar: "يرجى اختيار فيديو الريل.", en: "Please choose the reel video." },
+  commandPaletteLabel: { ar: "لوحة الأوامر", en: "Command palette" },
+  commandPalettePlaceholder: { ar: "اكتب للبحث عن صفحة أو إجراء…", en: "Type to search a page or action…" },
+  commandPaletteHint: { ar: "Ctrl+K للفتح", en: "Ctrl+K to open" },
+  commandGroupPages: { ar: "الصفحات", en: "Pages" },
+  commandGroupActions: { ar: "إجراءات سريعة", en: "Quick actions" },
+  fieldRequired: { ar: "هذا الحقل مطلوب.", en: "This field is required." },
+  invalidEmail: { ar: "صيغة البريد الإلكتروني غير صحيحة.", en: "Enter a valid email address." },
+  invalidUrl: { ar: "صيغة الرابط غير صحيحة.", en: "Enter a valid URL." },
+  invalidNumber: { ar: "أدخل رقماً صحيحاً.", en: "Enter a valid number." },
   menu: { ar: "القائمة", en: "Menu" },
   closeMenu: { ar: "إغلاق القائمة", en: "Close menu" },
   clientsCount: { ar: "العملاء", en: "Clients" },
@@ -109,15 +161,15 @@ export const copy = {
   markCash: { ar: "دفع نقدي", en: "Mark cash paid" },
   sendQuotation: { ar: "إرسال عرض سعر", en: "Send quotation" },
   sendingQuotation: { ar: "جاري الإرسال…", en: "Sending…" },
-  amount: { ar: "سعر الوحدة (SYP)", en: "Unit price (SYP)" },
-  lineUnits: { ar: "الوحدات", en: "Units" },
+  amount: { ar: "سعر الوحدة (USD)", en: "Unit price (USD)" },
+  lineUnits: { ar: "الكمية", en: "Quantity" },
   lineTitle: { ar: "البند / القسم", en: "Line item" },
   quotationNotes: { ar: "ملاحظات العرض", en: "Quotation notes" },
   addQuotationLine: { ar: "إضافة بند", en: "Add line" },
   removeQuotationLine: { ar: "حذف البند", en: "Remove line" },
   retryGemini: { ar: "إعادة Gemini", en: "Retry Gemini" },
   retryIntegration: { ar: "إعادة التكامل", en: "Retry integration" },
-  receipts: { ar: "وصولات الدفع", en: "Payment receipts" },
+  receipts: { ar: "وصولات الزبون", en: "Client receipts" },
   attachments: { ar: "مرفقات الطلب", en: "Request attachments" },
   viewReceipt: { ar: "عرض الوصل", en: "View receipt" },
   viewAttachment: { ar: "عرض المرفق", en: "View attachment" },
@@ -126,6 +178,8 @@ export const copy = {
   executionStatus: { ar: "حالة التنفيذ", en: "Execution status" },
   paymentBlocked: { ar: "لا يمكن تأكيد الدفع قبل موافقة العميل على العرض.", en: "Payment cannot be confirmed before the client approves the quotation." },
   saveFailed: { ar: "تعذر حفظ الحالة.", en: "Could not save the status." },
+  saveSuccess: { ar: "تم الحفظ بنجاح.", en: "Saved successfully." },
+  deleteSuccess: { ar: "تم الحذف بنجاح.", en: "Deleted successfully." },
   description: { ar: "الوصف", en: "Description" },
   phone: { ar: "الهاتف", en: "Phone" },
   company: { ar: "الشركة", en: "Company" },
@@ -146,11 +200,14 @@ export const copy = {
   receivedAmount: { ar: "المبلغ المستلم", en: "Amount received" },
   expectedDue: { ar: "المطلوب حسب الخطة", en: "Expected due" },
   confirmRemaining: { ar: "تأكيد المتبقي", en: "Confirm remaining" },
-  shamCashQr: { ar: "QR شام كاش", en: "Sham Cash QR" },
+  shamCashQr: { ar: "QR شام كاش العام", en: "Shared Sham Cash QR" },
+  shamCashQrHelp: { ar: "رمز تحويل واحد لكل الزبائن. يُرسل مع البوت عند الموافقة على عرض السعر.", en: "One transfer QR for every client. Sent with the bot when a quotation is approved." },
   uploadQr: { ar: "رفع QR", en: "Upload QR" },
   qrSaved: { ar: "تم حفظ رمز التحويل.", en: "Payment QR saved." },
   driveFolder: { ar: "مجلد Drive", en: "Drive folder" },
   paymentPlan: { ar: "خطة الدفع", en: "Payment plan" },
+  firstPaymentAmount: { ar: "كمية الدفعة الأولى", en: "First payment amount" },
+  quotationTotal: { ar: "إجمالي العرض", en: "Quotation total" },
   telegram: { ar: "تيليجرام", en: "Telegram" },
   odooPartner: { ar: "عميل Odoo", en: "Odoo partner" },
   odooQuote: { ar: "عرض Odoo", en: "Odoo quotation" },
@@ -406,6 +463,21 @@ export const copy = {
   socialThreadsMediaFetch: { ar: "ثريدز يحتاج رابطاً عاماً للصورة أو الفيديو. انشر من الدومين العام أو أعد المحاولة بصورة JPEG.", en: "Threads needs a public image or video URL. Publish from the public domain, or retry with a JPEG." },
   socialThreadsMediaProcessing: { ar: "ثريدز ما زال يعالج الملف. انتظر دقيقة ثم أعد النشر.", en: "Threads is still processing the file. Wait a minute, then publish again." },
   socialThreadsEditUnsupported: { ar: "ثريدز لا يدعم تعديل المنشور بعد النشر، فأعيد نشره من جديد.", en: "Threads cannot edit a live post, so it was republished." },
+  socialConnectLinkedin: { ar: "ربط لينكدإن", en: "Connect LinkedIn" },
+  socialLinkedinConnected: { ar: "تم ربط صفحة لينكدإن. يمكنك النشر عليها من التحرير.", en: "LinkedIn is connected. You can publish to it from Compose." },
+  socialLinkedinOauthMissing: { ar: "أضف LINKEDIN_CLIENT_ID وLINKEDIN_CLIENT_SECRET في الخادم ثم أعد نشر الـ API. عنوان إعادة التوجيه في LinkedIn يجب أن يطابق المسار أدناه حرفياً.", en: "Set LINKEDIN_CLIENT_ID and LINKEDIN_CLIENT_SECRET on the server, then redeploy the API. The LinkedIn redirect URI must match the path below exactly." },
+  socialLinkedinRedirectHint: { ar: "عنوان إعادة التوجيه في تطبيق LinkedIn:", en: "LinkedIn app OAuth redirect URI:" },
+  socialLinkedinOauthDenied: { ar: "أُلغي ربط لينكدإن.", en: "LinkedIn connection was cancelled." },
+  socialLinkedinOauthInvalid: { ar: "انتهت صلاحية جلسة الربط. اضغط «ربط لينكدإن» مرة أخرى.", en: "The connect session expired. Click Connect LinkedIn again." },
+  socialLinkedinOauthToken: { ar: "لينكدإن رفضت تبديل الرمز. تأكد من LINKEDIN_CLIENT_ID وLINKEDIN_CLIENT_SECRET وعنوان إعادة التوجيه.", en: "LinkedIn rejected the token exchange. Check LINKEDIN_CLIENT_ID, LINKEDIN_CLIENT_SECRET, and the redirect URI." },
+  socialLinkedinOauthNoOrganizations: { ar: "لم يتم العثور على أي صفحة شركة تديرها على لينكدإن. تأكد أنك مسؤول (Admin) على صفحة الشركة ثم أعد المحاولة.", en: "No company Pages you administer were found on LinkedIn. Make sure you're an admin of the company Page, then try again." },
+  socialLinkedinMissingPermission: { ar: "لينكدإن رفض النشر بسبب نقص صلاحية. أعد ربط الحساب وتأكد من صلاحيات w_organization_social.", en: "LinkedIn rejected the post due to a missing permission. Reconnect the account and confirm w_organization_social access." },
+  socialLinkedinEditUnsupported: { ar: "لينكدإن لا يدعم تعديل المنشور بعد النشر.", en: "LinkedIn cannot edit a post after it's live." },
+  socialLinkedinPlacementUnsupported: { ar: "لينكدإن يدعم منشورات الخلاصة (Feed) فقط، وليس القصص أو الريلز.", en: "LinkedIn only supports feed posts, not stories or reels." },
+  socialLinkedinMediaProcessing: { ar: "لينكدإن ما زال يعالج الفيديو. انتظر قليلاً ثم أعد النشر.", en: "LinkedIn is still processing the video. Wait a moment, then publish again." },
+  socialLinkedinMediaMissing: { ar: "تعذر رفع الوسائط إلى لينكدإن.", en: "Could not upload the media to LinkedIn." },
+  socialLinkedinMessagesUnsupported: { ar: "لينكدإن لا يدعم الرسائل الخاصة عبر هذا الربط، فقط الردود على التعليقات.", en: "LinkedIn does not support private messages through this connection, only comment replies." },
+  socialLinkedinCommentTargetMissing: { ar: "تعذر تحديد المنشور الأصلي لهذا التعليق على لينكدإن.", en: "Could not determine the original LinkedIn post for this comment." },
   socialNoPosts: { ar: "لا توجد منشورات.", en: "No posts yet." },
   socialNoInbox: { ar: "لا توجد تعليقات أو رسائل.", en: "No comments or messages." },
   socialReply: { ar: "رد", en: "Reply" },

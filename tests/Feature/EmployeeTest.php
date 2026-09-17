@@ -481,7 +481,7 @@ class EmployeeTest extends TestCase
 
         $this->deleteJson("/api/admin/employees/{$employee->id}")
             ->assertOk()
-            ->assertJsonPath('message', 'Deleted.');
+            ->assertJsonPath('message', 'Employee deleted from dashboard and Odoo.');
     }
 
     public function test_staff_can_join_without_typing_ids(): void

@@ -1,11 +1,23 @@
-import { LoadingLottie } from "./LoadingLottie";
+import Skeleton from "react-loading-skeleton";
+import "react-loading-skeleton/dist/skeleton.css";
 
-export function LoadingTableRow({ colSpan, label }: { colSpan: number; label?: string }) {
+export function LoadingTableRow({ colSpan, label, rows = 4 }: { colSpan: number; label?: string; rows?: number }) {
   return (
-    <tr>
-      <td colSpan={colSpan} className="loading-cell">
-        <LoadingLottie label={label} />
-      </td>
-    </tr>
+    <>
+      {Array.from({ length: rows }).map((_, index) => (
+        <tr key={index} className="skeleton-row" aria-hidden="true">
+          <td colSpan={colSpan}>
+            <Skeleton height={16} borderRadius={6} />
+          </td>
+        </tr>
+      ))}
+      {label ? (
+        <tr className="sr-only-row">
+          <td colSpan={colSpan} className="sr-only">
+            {label}
+          </td>
+        </tr>
+      ) : null}
+    </>
   );
 }

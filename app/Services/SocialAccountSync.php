@@ -9,6 +9,7 @@ use DateTimeInterface;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Throwable;
 
 class SocialAccountSync
@@ -16,6 +17,8 @@ class SocialAccountSync
     public ?string $lastError = null;
 
     public ?string $threadsError = null;
+
+    public ?string $linkedinError = null;
 
     public int $facebookPagesFound = 0;
 
@@ -29,6 +32,11 @@ class SocialAccountSync
     public function threadsConfigured(): bool
     {
         return ThreadsGraph::configured();
+    }
+
+    public function linkedinConfigured(): bool
+    {
+        return LinkedInGraph::oauthConfigured();
     }
 
     public function syncFromFacebook(?int $connectedBy = null): int
@@ -150,6 +158,105 @@ class SocialAccountSync
         );
 
         return $this->isManuallyDisconnected($account) ? null : $account;
+    }
+
+    /**
+     * @return list<SocialAccount>
+     */
+    public function connectLinkedInToken(string $accessToken, ?int $connectedBy = null, ?DateTimeInterface $expiresAt = null): array
+    {
+        $this->linkedinError = null;
+        $organizations = $this->fetchLinkedInOrganizations($accessToken);
+        if ($organizations === null) {
+            return [];
+        }
+
+        if ($organizations === []) {
+            $this->linkedinError = 'no_organizations';
+
+            return [];
+        }
+
+        $accounts = [];
+        foreach ($organizations as $organization) {
+            $account = $this->upsertAccount(
+                SocialPlatform::Linkedin,
+                $organization['id'],
+                $organization['name'],
+                $organization['vanity'] ?? $organization['name'],
+                $accessToken,
+                $connectedBy,
+                null,
+                null,
+                $expiresAt,
+                true,
+            );
+
+            if (! $this->isManuallyDisconnected($account)) {
+                $accounts[] = $account;
+            }
+        }
+
+        return $accounts;
+    }
+
+    /**
+     * @return list<array{id: string, name: string, vanity: ?string}>|null
+     */
+    private function fetchLinkedInOrganizations(string $token): ?array
+    {
+        try {
+            $response = Http::timeout((int) config('services.social.timeout', 20))
+                ->connectTimeout(3)
+                ->acceptJson()
+                ->withHeaders(LinkedInGraph::authHeaders($token))
+                ->get(LinkedInGraph::apiUrl('organizationAcls'), [
+                    'q' => 'roleAssignee',
+                    'role' => 'ADMINISTRATOR',
+                    'projection' => '(elements*(organization,organization~(localizedName,vanityName)))',
+                ]);
+        } catch (ConnectionException|Throwable $exception) {
+            $this->linkedinError = $exception->getMessage();
+            Log::warning('LinkedIn organization lookup failed.', [
+                'error' => $exception->getMessage(),
+            ]);
+
+            return null;
+        }
+
+        if (! $response->successful()) {
+            $this->linkedinError = LinkedInGraph::errorMessage($response->json(), $response->status());
+            Log::warning('LinkedIn organization lookup rejected.', [
+                'status' => $response->status(),
+            ]);
+
+            return null;
+        }
+
+        $elements = data_get($response->json(), 'elements');
+        if (! is_array($elements)) {
+            return [];
+        }
+
+        $organizations = [];
+        foreach ($elements as $element) {
+            $urn = data_get($element, 'organization');
+            if (! is_string($urn) || $urn === '') {
+                continue;
+            }
+
+            $id = Str::afterLast($urn, ':');
+            $name = data_get($element, 'organization~.localizedName');
+            $vanity = data_get($element, 'organization~.vanityName');
+
+            $organizations[] = [
+                'id' => $id,
+                'name' => is_string($name) && $name !== '' ? $name : $id,
+                'vanity' => is_string($vanity) && $vanity !== '' ? $vanity : null,
+            ];
+        }
+
+        return $organizations;
     }
 
     private function syncStandaloneThreads(?int $connectedBy): int
