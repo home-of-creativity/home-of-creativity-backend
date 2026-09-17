@@ -64,7 +64,23 @@ services:
       - "5173:5173"
     environment:
       VITE_API_URL: ${APP_URL:-https://hoc.agency}/api
-    command: sh -c "npm install && npm run build && npx vite preview --host 0.0.0.0 --port 5173 --strictPort"
+    # Keep preview-only after first boot so deploys can rebuild dist without
+    # taking :5173 down for the whole npm install + vite build.
+    command: >
+      sh -c "if [ ! -f dist/index.html ]; then npm install && npm run build; fi
+      && npx vite preview --host 0.0.0.0 --port 5173 --strictPort"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://127.0.0.1:5173/dashboard/',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 36
+      start_period: 180s
     depends_on:
       hoc-api:
         condition: service_started
@@ -104,8 +120,10 @@ services:
       - hoc_caddy_data:/data
       - hoc_caddy_config:/config
     depends_on:
-      - hoc-api
-      - hoc-dashboard
+      hoc-api:
+        condition: service_started
+      hoc-dashboard:
+        condition: service_healthy
 
   hoc-client-bot:
     image: python:3.12-slim

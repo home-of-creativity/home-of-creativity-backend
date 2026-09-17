@@ -17,40 +17,54 @@ fi
 mkdir -p storage/logs storage/framework/{cache,sessions,views} bootstrap/cache
 chmod -R ug+rwx storage bootstrap/cache || true
 
-docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml up -d --build
+COMPOSE=(docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml)
+
+"${COMPOSE[@]}" up -d --build
+
+echo "Building dashboard from synced source (preview stays up until restart)..."
+"${COMPOSE[@]}" exec -T hoc-dashboard npm install
+"${COMPOSE[@]}" exec -T hoc-dashboard npm run build
+echo "Restarting dashboard preview..."
+"${COMPOSE[@]}" restart hoc-dashboard
+
+echo "Waiting for dashboard preview..."
+dashboard_ready=0
+for _ in $(seq 1 60); do
+  if "${COMPOSE[@]}" exec -T hoc-dashboard node -e "require('http').get('http://127.0.0.1:5173/dashboard/',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"; then
+    dashboard_ready=1
+    break
+  fi
+  sleep 2
+done
+if [[ "$dashboard_ready" != 1 ]]; then
+  echo "Dashboard preview did not become ready."
+  "${COMPOSE[@]}" logs --tail 80 hoc-dashboard
+  exit 1
+fi
 
 # Caddyfile is a single-file bind-mount. rsync replaces files via temp+rename
-# (a new inode), which can detach that bind mount from ever seeing updates —
-# so `caddy reload` alone can keep reading a stale cached file forever. Force
-# a full recreate of hoc-edge every deploy so it re-mounts the current file.
+# (a new inode), which can detach that bind mount from ever seeing updates.
+# Recreate hoc-edge only after the dashboard is serving so /dashboard is not 502.
 echo "Recreating edge (Caddy) so it picks up the current Caddyfile..."
-docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml up -d --force-recreate hoc-edge
-
-# hoc-dashboard's command runs `npm install && npm run build` once at
-# container startup, then serves that dist/ forever. `up -d` won't recreate
-# it just because the synced dashboard source changed, so every deploy would
-# keep serving a stale build. Force a recreate so it rebuilds from the code
-# that was just rsynced.
-echo "Rebuilding dashboard (this runs npm install + build, can take a bit)..."
-docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml up -d --force-recreate hoc-dashboard
+"${COMPOSE[@]}" up -d --force-recreate --wait --wait-timeout 60 hoc-edge
 
 echo "Waiting for API php-fpm..."
 for _ in $(seq 1 60); do
-  if docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml exec -T hoc-api php artisan --version >/dev/null 2>&1; then
+  if "${COMPOSE[@]}" exec -T hoc-api php artisan --version >/dev/null 2>&1; then
     break
   fi
   sleep 5
 done
 
 # hoc-api entrypoint already runs migrate --force and storage:link on start.
-docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml exec -T hoc-api php artisan storage:link || true
+"${COMPOSE[@]}" exec -T hoc-api php artisan storage:link || true
 
 echo "Running database seeders..."
-docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml exec -T hoc-api php artisan db:seed --force
+"${COMPOSE[@]}" exec -T hoc-api php artisan db:seed --force
 
-docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml exec -T hoc-api php artisan config:cache
-docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml exec -T hoc-api php artisan route:cache
-docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml exec -T hoc-api php artisan view:cache || true
-docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml exec -T hoc-api php artisan seo:submit-sitemap || true
+"${COMPOSE[@]}" exec -T hoc-api php artisan config:cache
+"${COMPOSE[@]}" exec -T hoc-api php artisan route:cache
+"${COMPOSE[@]}" exec -T hoc-api php artisan view:cache || true
+"${COMPOSE[@]}" exec -T hoc-api php artisan seo:submit-sitemap || true
 
 echo "Deploy finished. API: https://api.hoc.agency/up | Site: https://hoc.agency"
