@@ -179,7 +179,7 @@ export function matchesSocialPlacement(post: { placement?: string; media?: { kin
   if (placement === "reel") {
     return value === "reel" || (value === "feed" && (post.media ?? []).some((item) => item.kind === "video"));
   }
-  return value !== "story";
+  return value === "feed";
 }
 
 export function socialStatusLabel(status: string, t: (c: Copy) => string) {

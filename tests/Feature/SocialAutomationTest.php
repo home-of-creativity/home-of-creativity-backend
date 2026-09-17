@@ -943,6 +943,62 @@ class SocialAutomationTest extends TestCase
         Http::assertSent(fn ($request) => str_contains($request->url(), '/media_publish'));
     }
 
+    public function test_instagram_container_status_backs_off_after_connection_errors(): void
+    {
+        Storage::fake('public');
+        $statusChecks = 0;
+        Http::fake(function ($request) use (&$statusChecks) {
+            $url = $request->url();
+            if (str_contains($url, 'rupload.facebook.com')) {
+                return Http::response(['success' => true, 'message' => 'Upload successful.'], 200);
+            }
+            if (str_contains($url, '/photos')) {
+                return Http::response(['id' => 'fb_photo'], 200);
+            }
+            if (str_contains($url, 'fb_photo')) {
+                return Http::response(['images' => [['source' => 'https://cdn.example.test/photo.jpg', 'width' => 1080]]], 200);
+            }
+            if (str_contains($url, '/media_publish')) {
+                return Http::response(['id' => 'ig_88'], 200);
+            }
+            if (str_contains($url, '/media')) {
+                return Http::response(['id' => 'ig_container'], 200);
+            }
+            if (str_contains($url, 'ig_container')) {
+                $statusChecks++;
+                if ($statusChecks === 1) {
+                    throw new ConnectionException('cURL error 28: Resolving timed out after 3002 milliseconds');
+                }
+
+                return Http::response(['status_code' => 'FINISHED'], 200);
+            }
+
+            return Http::response(['id' => 'ok'], 200);
+        });
+
+        $admin = $this->admin();
+        Sanctum::actingAs($admin);
+        $account = SocialAccount::factory()->connected()->recycle($admin)->create([
+            'platform' => SocialPlatform::Instagram,
+            'name' => 'Damastech.ae',
+            'page_id' => '222',
+            'facebook_page_id' => '111',
+        ]);
+
+        $started = microtime(true);
+        $this->post('/api/admin/social/posts', [
+            'body' => 'اهلا ومرحبا',
+            'account_ids' => [$account->id],
+            'intent' => 'publish',
+            'media' => [UploadedFile::fake()->image('hero.jpg')],
+        ], ['Accept' => 'application/json'])
+            ->assertCreated()
+            ->assertJsonPath('data.status', SocialPostStatus::Published->value);
+
+        $this->assertGreaterThanOrEqual(0.4, microtime(true) - $started);
+        $this->assertSame(2, $statusChecks);
+    }
+
     public function test_admin_can_publish_video_to_instagram_without_remote_fetch(): void
     {
         Storage::fake('public');

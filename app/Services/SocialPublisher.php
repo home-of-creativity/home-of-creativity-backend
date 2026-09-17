@@ -1373,6 +1373,8 @@ class SocialPublisher
                     return $this->connectionError($exception);
                 }
 
+                usleep($delayUs);
+
                 continue;
             }
 
@@ -1576,7 +1578,7 @@ class SocialPublisher
                 : 'image/jpeg';
             $upload = $this->uploadResumableBinary(
                 ThreadsGraph::ruploadUrl($container['id']),
-                $binary,
+                (string) $binary,
                 $media,
                 $token,
                 $container['id'],
@@ -1646,6 +1648,8 @@ class SocialPublisher
                 if ($timeouts >= 3) {
                     return $this->connectionError($exception);
                 }
+
+                usleep($delayUs);
 
                 continue;
             }
