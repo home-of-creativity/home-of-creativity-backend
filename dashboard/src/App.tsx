@@ -66,7 +66,7 @@ function Shell({ locale, setLocale }: { locale: Locale; setLocale: (next: Locale
     return () => window.removeEventListener("keydown", onKey);
   }, [navOpen]);
 
-  if (!user?.is_admin) return <Navigate to="/staff" replace />;
+  if (!user?.is_admin) return <Navigate to="/login" replace />;
 
   return (
     <div className={navOpen ? "app-shell nav-open" : "app-shell"}>
@@ -184,7 +184,7 @@ function Shell({ locale, setLocale }: { locale: Locale; setLocale: (next: Locale
 function Guarded({ children }: { children: ReactNode }) {
   const { user, ready } = useAuth();
   if (!ready) return <LoadingLottie variant="page" label={copy.loading[readLocale()]} />;
-  if (!user?.is_admin) return <Navigate to="/staff" replace />;
+  if (!user?.is_admin) return <Navigate to="/login" replace />;
   return children;
 }
 
@@ -204,8 +204,8 @@ export function App() {
   return (
     <AuthProvider>
       <Routes>
-        <Route path="/staff" element={<Login locale={locale} t={t} setLocale={setLocale} />} />
-        <Route path="/login" element={<Navigate to="/staff" replace />} />
+        <Route path="/login" element={<Login locale={locale} t={t} setLocale={setLocale} />} />
+        <Route path="/staff" element={<Navigate to="/login" replace />} />
         <Route
           element={
             <Guarded>

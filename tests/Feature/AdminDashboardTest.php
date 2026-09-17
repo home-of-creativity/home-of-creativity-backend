@@ -12,6 +12,7 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Laravel\Sanctum\Sanctum;
 use Tests\Concerns\FakesOdooDocuments;
@@ -147,19 +148,8 @@ class AdminDashboardTest extends TestCase
     public function test_admin_can_create_client_and_push_to_odoo(): void
     {
         Http::preventStrayRequests();
-        config([
-            'services.odoo.enabled' => true,
-            'services.odoo.url' => 'https://odoo.test',
-            'services.odoo.db' => 'hoc',
-            'services.odoo.username' => 'admin',
-            'services.odoo.api_key' => 'secret-key',
-        ]);
-        Http::fake([
-            'https://odoo.test/jsonrpc' => Http::sequence()
-                ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => 2], 200)
-                ->push(['jsonrpc' => '2.0', 'id' => 2, 'result' => []], 200)
-                ->push(['jsonrpc' => '2.0', 'id' => 3, 'result' => 44], 200),
-        ]);
+        $this->fakeOdooDocuments();
+        Http::fake($this->odooDocumentsHttpFake());
 
         $admin = User::factory()->create();
         $admin->forceFill(['is_admin' => true])->save();
@@ -171,11 +161,13 @@ class AdminDashboardTest extends TestCase
             'phone' => '+963999000111',
         ])->assertCreated()
             ->assertJsonPath('data.name', 'Studio Client')
-            ->assertJsonPath('data.odoo_partner_id', '44');
+            ->assertJsonPath('data.odoo_partner_id', '44')
+            ->assertJsonPath('data.odoo_lead_id', '77');
 
         $this->assertDatabaseHas('clients', [
             'email' => 'studio@hoc.test',
             'odoo_partner_id' => '44',
+            'odoo_lead_id' => '77',
         ]);
     }
 
@@ -255,6 +247,7 @@ class AdminDashboardTest extends TestCase
 
     public function test_admin_clients_index_pulls_live_odoo_crm_fields(): void
     {
+        Cache::flush();
         Http::preventStrayRequests();
         $this->fakeOdooDocuments();
         Http::fake($this->odooDocumentsHttpFake());
@@ -279,6 +272,7 @@ class AdminDashboardTest extends TestCase
 
     public function test_admin_clients_index_imports_odoo_crm_without_a_sync_button(): void
     {
+        Cache::flush();
         Http::preventStrayRequests();
         $this->fakeOdooDocuments();
         Http::fake($this->odooDocumentsHttpFake());
@@ -296,6 +290,143 @@ class AdminDashboardTest extends TestCase
             'odoo_lead_id' => '77',
             'odoo_partner_id' => '44',
         ]);
+    }
+
+    public function test_clients_index_pushes_dashboard_clients_missing_odoo_leads(): void
+    {
+        Cache::flush();
+        Http::preventStrayRequests();
+        $this->fakeOdooDocuments();
+        Http::fake([
+            'https://odoo.test/jsonrpc' => function (Request $request) {
+                $params = $request->data()['params'] ?? [];
+                if (($params['service'] ?? '') === 'common') {
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => 2], 200);
+                }
+
+                $args = $params['args'] ?? [];
+                $model = (string) ($args[3] ?? '');
+                $action = (string) ($args[4] ?? '');
+
+                if ($model === 'crm.lead' && $action === 'search_read') {
+                    $domain = $args[5][0] ?? [];
+                    foreach ($domain as $clause) {
+                        if (($clause[0] ?? '') === 'id') {
+                            return Http::response(['jsonrpc' => '2.0', 'result' => [[
+                                'id' => 801,
+                                'stage_id' => [11, 'تلغرام'],
+                                'contact_name' => 'Prodesign',
+                                'partner_name' => 'Prodesign',
+                                'email_from' => false,
+                                'phone' => '0957470371',
+                                'partner_id' => [58, 'Prodesign'],
+                            ]]], 200);
+                        }
+                    }
+
+                    return Http::response(['jsonrpc' => '2.0', 'result' => []], 200);
+                }
+
+                if ($model === 'crm.lead' && $action === 'create') {
+                    return Http::response(['jsonrpc' => '2.0', 'result' => 801], 200);
+                }
+
+                if ($model === 'res.partner' && $action === 'search_read') {
+                    return Http::response(['jsonrpc' => '2.0', 'result' => []], 200);
+                }
+
+                if ($model === 'res.partner' && $action === 'search') {
+                    return Http::response(['jsonrpc' => '2.0', 'result' => []], 200);
+                }
+
+                if ($model === 'crm.stage' && $action === 'search_read') {
+                    return Http::response(['jsonrpc' => '2.0', 'result' => [
+                        ['id' => 11, 'name' => 'تلغرام'],
+                    ]], 200);
+                }
+
+                if ($model === 'crm.team' && $action === 'search_read') {
+                    return Http::response(['jsonrpc' => '2.0', 'result' => [
+                        ['id' => 21, 'name' => 'تلغرام'],
+                    ]], 200);
+                }
+
+                return Http::response(['jsonrpc' => '2.0', 'result' => true], 200);
+            },
+        ]);
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        Client::factory()->create([
+            'name' => 'Prodesign',
+            'company_name' => 'Prodesign',
+            'phone' => '0957470371',
+            'odoo_partner_id' => '58',
+            'odoo_lead_id' => null,
+        ]);
+
+        $this->getJson('/api/admin/clients')
+            ->assertOk()
+            ->assertJsonPath('data.0.odoo_lead_id', '801')
+            ->assertJsonPath('data.0.odoo_stage_name', 'تلغرام');
+
+        Http::assertSent(function (Request $request): bool {
+            $args = $request->data()['params']['args'] ?? [];
+
+            return ($args[3] ?? null) === 'crm.lead' && ($args[4] ?? null) === 'create';
+        });
+    }
+
+    public function test_clients_index_imports_odoo_leads_from_any_pipeline_stage(): void
+    {
+        Cache::flush();
+        Http::preventStrayRequests();
+        $this->fakeOdooDocuments();
+        Http::fake([
+            'https://odoo.test/jsonrpc' => function (Request $request) {
+                $params = $request->data()['params'] ?? [];
+                if (($params['service'] ?? '') === 'common') {
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => 2], 200);
+                }
+
+                $args = $params['args'] ?? [];
+                $model = (string) ($args[3] ?? '');
+                $action = (string) ($args[4] ?? '');
+
+                if ($model === 'crm.lead' && $action === 'search_read') {
+                    return Http::response(['jsonrpc' => '2.0', 'result' => [[
+                        'id' => 902,
+                        'name' => 'Qualified deal',
+                        'contact_name' => 'Pipeline Client',
+                        'partner_name' => 'Pipeline Co',
+                        'partner_id' => [90, 'Pipeline Co'],
+                        'email_from' => 'pipeline@hoc.test',
+                        'phone' => '+963700000000',
+                        'stage_id' => [12, 'مؤهل'],
+                    ]]], 200);
+                }
+
+                if ($model === 'res.partner' && $action === 'search_read') {
+                    return Http::response(['jsonrpc' => '2.0', 'result' => []], 200);
+                }
+
+                return Http::response(['jsonrpc' => '2.0', 'result' => true], 200);
+            },
+        ]);
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        $this->getJson('/api/admin/clients')
+            ->assertOk()
+            ->assertJsonFragment([
+                'email' => 'pipeline@hoc.test',
+                'odoo_lead_id' => '902',
+                'odoo_stage_name' => 'مؤهل',
+            ]);
     }
 
     public function test_admin_lists_confirmed_odoo_quotations_from_live_odoo(): void
@@ -344,6 +475,54 @@ class AdminDashboardTest extends TestCase
             ->assertJsonPath('data.0.amount_total', 250);
     }
 
+    public function test_admin_lists_odoo_invoices_from_live_odoo(): void
+    {
+        Http::preventStrayRequests();
+        config([
+            'services.odoo.enabled' => true,
+            'services.odoo.url' => 'https://odoo.test',
+            'services.odoo.db' => 'hoc',
+            'services.odoo.username' => 'admin',
+            'services.odoo.api_key' => 'secret-key',
+            'services.odoo.use_json2' => false,
+        ]);
+        Http::fake([
+            'https://odoo.test/jsonrpc' => function (Request $request) {
+                $params = $request->data()['params'] ?? [];
+                if (($params['service'] ?? '') === 'common') {
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => 2], 200);
+                }
+
+                $args = $params['args'] ?? [];
+                if (($args[3] ?? null) === 'account.move' && ($args[4] ?? null) === 'search_read') {
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => [[
+                        'id' => 501,
+                        'name' => 'INV/2026/0001',
+                        'partner_id' => [44, 'Damastech'],
+                        'amount_total' => 250,
+                        'state' => 'posted',
+                        'payment_state' => 'not_paid',
+                        'invoice_origin' => 'S00031',
+                        'ref' => 'REQ-2026-000001',
+                        'invoice_date' => '2026-09-17',
+                    ]]], 200);
+                }
+
+                return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => []], 200);
+            },
+        ]);
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        $this->getJson('/api/admin/odoo/invoices')
+            ->assertOk()
+            ->assertJsonPath('data.0.state', 'posted')
+            ->assertJsonPath('data.0.payment_state', 'not_paid')
+            ->assertJsonPath('data.0.amount_total', 250);
+    }
+
     public function test_admin_request_show_hydrates_live_odoo_quotation_and_invoice(): void
     {
         Http::preventStrayRequests();
@@ -355,9 +534,8 @@ class AdminDashboardTest extends TestCase
             'services.odoo.api_key' => 'secret-key',
             'services.odoo.use_json2' => false,
         ]);
-        $seen = [];
         Http::fake([
-            'https://odoo.test/jsonrpc' => function (Request $request) use (&$seen) {
+            'https://odoo.test/jsonrpc' => function (Request $request) {
                 $params = $request->data()['params'] ?? [];
                 if (($params['service'] ?? '') === 'common') {
                     return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => 2], 200);
@@ -366,7 +544,6 @@ class AdminDashboardTest extends TestCase
                 $args = $params['args'] ?? [];
                 $model = $args[3] ?? null;
                 $action = $args[4] ?? null;
-                $seen[] = $model.'.'.$action;
 
                 if ($model === 'sale.order' && $action === 'search_read') {
                     return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => [[
@@ -409,9 +586,7 @@ class AdminDashboardTest extends TestCase
             'quotation_amount' => 10,
         ]);
 
-        $response = $this->getJson("/api/admin/requests/{$serviceRequest->id}");
-        $this->assertContains('account.move.search_read', $seen, json_encode($seen));
-        $response
+        $this->getJson("/api/admin/requests/{$serviceRequest->id}")
             ->assertOk()
             ->assertJsonPath('data.odoo_quotation_id', '301')
             ->assertJsonPath('data.odoo_invoice_id', '501')

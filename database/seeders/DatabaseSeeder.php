@@ -111,7 +111,6 @@ class DatabaseSeeder extends Seeder
         $this->call(PortfolioSeeder::class);
         $this->call(PricingSeeder::class);
         $this->call(ContactSeeder::class);
-        $this->call(LandingReelSeeder::class);
         $this->syncSocialAccounts($admin->id);
     }
 

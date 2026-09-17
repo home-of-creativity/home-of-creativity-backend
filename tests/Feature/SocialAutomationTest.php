@@ -313,7 +313,7 @@ class SocialAutomationTest extends TestCase
         Cache::put('threads_oauth_state:oauth-state', ['user_id' => $admin->id], 600);
 
         $this->get('/auth/threads/callback?code=auth-code&state=oauth-state')
-            ->assertRedirect('https://hoc.agency/staff/social/accounts?threads=connected');
+            ->assertRedirect('https://hoc.agency/dashboard/social/accounts?threads=connected');
 
         $account = SocialAccount::query()->where('platform', SocialPlatform::Threads)->first();
         $this->assertNotNull($account);
@@ -335,7 +335,7 @@ class SocialAutomationTest extends TestCase
     public function test_threads_oauth_callback_rejects_invalid_state(): void
     {
         $this->get('/auth/threads/callback?code=auth-code&state=missing')
-            ->assertRedirect('https://hoc.agency/staff/social/accounts?threads_error=invalid_state');
+            ->assertRedirect('https://hoc.agency/dashboard/social/accounts?threads_error=invalid_state');
     }
 
     public function test_facebook_sync_keeps_oauth_threads_account(): void

@@ -8,7 +8,7 @@ test.describe("Staff dashboard", () => {
       localStorage.removeItem("hoc-staff-token");
     });
     await page.goto(`${DASHBOARD}/login`, { waitUntil: "networkidle" });
-    await expect(page).toHaveURL(/127\.0\.0\.1:5173\/staff/);
+    await expect(page).toHaveURL(/127\.0\.0\.1:5173\/dashboard(\/login)?\/?/);
     await expect(page.getByRole("heading", { name: /Staff login|دخول الفريق/ })).toBeVisible();
     await expect(page.getByRole("link", { name: /Open Telegram bot|فتح بوت تيليجرام/ })).toHaveCount(1);
     await page.getByLabel(/Email|البريد/).fill("test@example.com");

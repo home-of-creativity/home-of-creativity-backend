@@ -60,6 +60,6 @@
         <env name="THREADS_APP_ID" value=""/>
         <env name="THREADS_APP_SECRET" value=""/>
         <env name="THREADS_REDIRECT_URI" value="https://hoc.agency/auth/threads/callback"/>
-        <env name="THREADS_DASHBOARD_URL" value="https://hoc.agency/staff/social/accounts"/>
+        <env name="THREADS_DASHBOARD_URL" value="https://hoc.agency/dashboard/social/accounts" force="true"/>
     </php>
 </phpunit>

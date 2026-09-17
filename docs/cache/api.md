@@ -11,7 +11,7 @@ Health: `GET /up`. Web: `GET /` → default welcome (not the marketing site).
 - `POST /auth/register` → **403** (accounts only via Telegram bot).
 - Admin: `users.is_admin` + `EnsureAdmin`. Policy: `ServiceRequestPolicy`.
 - **No Filament.** `dont-discover` leftovers only.
-- Threads OAuth: staff `GET /api/admin/social/threads/connect` (Sanctum + admin + accounts ability) → Meta authorize URL. Public web `GET /auth/threads/callback` (Caddy `/auth*` on hoc.agency and api.hoc.agency). Canonical redirect URI `https://hoc.agency/auth/threads/callback`. After success, redirect `https://hoc.agency/staff/social/accounts?threads=connected`.
+- Threads OAuth: staff `GET /api/admin/social/threads/connect` (Sanctum + admin + accounts ability) → Meta authorize URL. Public web `GET /auth/threads/callback` (Caddy `/auth*` on hoc.agency and api.hoc.agency). Canonical redirect URI `https://hoc.agency/auth/threads/callback`. After success, redirect `https://hoc.agency/dashboard/social/accounts?threads=connected`.
 
 Seeded: `admin@example.com` / `password` (admin), `test@example.com` / `password` (client).
 
@@ -19,7 +19,7 @@ Seeded: `admin@example.com` / `password` (admin), `test@example.com` / `password
 
 | Method | Path |
 | --- | --- |
-| GET | `/pricing` `/contact` |
+| GET | `/pricing` `/contact` `/reels` |
 | GET | `/portfolio/clients` `/portfolio/projects` `/portfolio/projects/{id}` |
 | GET | `/social/instagram-feed` `/social/facebook-feed` |
 
@@ -31,7 +31,7 @@ Admin confirm-payment (`POST /admin/requests/{id}/confirm-payment`) requires `pa
 
 ## Admin (`auth:sanctum` + `admin`)
 
-Overview, contact channels, clients (CRUD syncs Odoo CRM partner+lead immediately; GET pulls live Odoo rows every 15s in the dashboard), employees (approve/reject), service requests (quotation/invoice hydrate from live Odoo on GET, confirm-payment, retry-gemini, receipts, re-request-receipt, renew, Sham Cash QR), portfolio CMS, pricing CMS (`requires_full_payment` / `allows_renewal` on every category), social (accounts/posts with feed-reel-story placement; Facebook Page stories/reels use `/photo_stories`, `/video_stories`, `/video_reels` + rupload; carousel; inbox with source post + message replies/staff; New Pages Experience uses photos/videos and Instagram `/media` instead of `/published_posts` `/feed` `/conversations`; Threads OAuth at `GET /auth/threads/callback` (Caddy `/auth*` → Laravel) and `GET /api/admin/social/threads/connect`; default redirect `https://hoc.agency/auth/threads/callback`; long-lived token stored on `SocialAccount`; also accepts `THREADS_ACCESS_TOKEN`; publishes via `graph.threads.net`), Odoo (status, Excel CRM import, live quotations/invoices on GET — **no dashboard sync buttons**), ClickUp members, retry integration events.
+Overview, contact channels, clients (CRUD and GET keep Odoo CRM partner+lead in sync both ways: dashboard clients become opportunities, Odoo leads at any pipeline stage appear locally; Excel import remains, **no CRM import button**), employees (approve/reject), service requests (quotation/invoice hydrate from live Odoo on GET, confirm-payment, retry-gemini, receipts, re-request-receipt, renew, Sham Cash QR), portfolio CMS, landing reels CMS (`GET/POST /admin/reels`; published clips on public `GET /reels`; no bundled seeder), pricing CMS (`requires_full_payment` / `allows_renewal` on every category), social (accounts/posts with feed-reel-story placement; Facebook Page stories/reels use `/photo_stories`, `/video_stories`, `/video_reels` + rupload; carousel; inbox with source post + message replies/staff; New Pages Experience uses photos/videos and Instagram `/media` instead of `/published_posts` `/feed` `/conversations`; Threads OAuth at `GET /auth/threads/callback` (Caddy `/auth*` → Laravel) and `GET /api/admin/social/threads/connect`; default redirect `https://hoc.agency/auth/threads/callback`; long-lived token stored on `SocialAccount`; also accepts `THREADS_ACCESS_TOKEN`; publishes via `graph.threads.net`), Odoo (status, Excel CRM import, live quotations/invoices on GET — **no dashboard sync buttons**), ClickUp members, retry integration events.
 
 ## Webhooks (`VerifySharedSecret`)
 
@@ -43,7 +43,7 @@ Bot HTTP APIs: `/bot/telegram/*` (client secret), `/bot/staff/*` (staff secret),
 
 `ServiceRequest` is the hub: files, events, briefs, revisions, ClickUp tasks, quotations, invoices, deliveries, support, integration outbox.
 
-Other models: User↔Client, Employee (telegram id, no User FK; join codes `EMP-%04d` from max suffix), Portfolio*, Pricing*, ShowcaseClient, ContactChannel, Social*.
+Other models: User↔Client, Employee (telegram id, no User FK; join codes `EMP-%04d` from max suffix), Portfolio*, Pricing*, LandingReel, ShowcaseClient, ContactChannel, Social*.
 
 Integrations live in `app/Actions/`, `app/Services/` (Odoo, ClickUp, Gemini Arabic briefs, Telegram, Facebook Graph, Threads Graph, Google Drive/Calendar, ElevenLabs STT). Jobs: Gemini classify, integration dispatch, social publish, Drive poll, payment reminders.
 

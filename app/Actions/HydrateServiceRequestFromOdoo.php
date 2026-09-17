@@ -17,30 +17,44 @@ class HydrateServiceRequestFromOdoo
             return $request;
         }
 
+        $quotationLive = null;
+        $invoiceLive = null;
+
         try {
-            $this->hydrateQuotation($request);
-            $this->hydrateInvoice($request);
+            $quotationLive = $this->hydrateQuotation($request);
         } catch (Throwable $exception) {
-            Log::warning('Odoo hydrate for service request failed.', [
+            Log::warning('Odoo quotation hydrate failed.', [
                 'request_id' => $request->id,
                 'error' => $exception->getMessage(),
             ]);
         }
 
-        $quotationLive = $request->getAttribute('odoo_quotation_live');
-        $invoiceLive = $request->getAttribute('odoo_invoice_live');
+        try {
+            $invoiceLive = $this->hydrateInvoice($request, is_array($quotationLive) ? $quotationLive : null);
+        } catch (Throwable $exception) {
+            Log::warning('Odoo invoice hydrate failed.', [
+                'request_id' => $request->id,
+                'error' => $exception->getMessage(),
+            ]);
+        }
+
         $fresh = $request->fresh() ?? $request;
         if (is_array($quotationLive)) {
             $fresh->setAttribute('odoo_quotation_live', $quotationLive);
+            $fresh->syncOriginalAttribute('odoo_quotation_live');
         }
         if (is_array($invoiceLive)) {
             $fresh->setAttribute('odoo_invoice_live', $invoiceLive);
+            $fresh->syncOriginalAttribute('odoo_invoice_live');
         }
 
         return $fresh;
     }
 
-    private function hydrateQuotation(ServiceRequest $request): void
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function hydrateQuotation(ServiceRequest $request): ?array
     {
         $quotation = null;
         if (filled($request->odoo_quotation_id)) {
@@ -50,7 +64,7 @@ class HydrateServiceRequestFromOdoo
             $quotation = $this->odoo->findQuotationForRequest($request->number);
         }
         if ($quotation === null) {
-            return;
+            return null;
         }
 
         $payload = [
@@ -60,25 +74,34 @@ class HydrateServiceRequestFromOdoo
             $payload['quotation_amount'] = $quotation['amount_total'];
         }
         $request->forceFill($payload)->save();
-        $request->setAttribute('odoo_quotation_live', $quotation);
+
+        return $quotation;
     }
 
-    private function hydrateInvoice(ServiceRequest $request): void
+    /**
+     * @param  array<string, mixed>|null  $quotationLive
+     * @return array<string, mixed>|null
+     */
+    private function hydrateInvoice(ServiceRequest $request, ?array $quotationLive): ?array
     {
         $invoice = null;
         if (filled($request->odoo_invoice_id)) {
             $invoice = $this->odoo->invoiceSnapshot((int) $request->odoo_invoice_id);
         }
         if ($invoice === null) {
-            $invoice = $this->odoo->findInvoiceForRequest($request->number);
+            $quotationName = is_array($quotationLive) && filled($quotationLive['name'] ?? null)
+                ? (string) $quotationLive['name']
+                : null;
+            $invoice = $this->odoo->findInvoiceForRequest($request->number, $quotationName);
         }
         if ($invoice === null) {
-            return;
+            return null;
         }
 
         $request->forceFill([
             'odoo_invoice_id' => (string) $invoice['id'],
         ])->save();
-        $request->setAttribute('odoo_invoice_live', $invoice);
+
+        return $invoice;
     }
 }

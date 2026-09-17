@@ -83,9 +83,9 @@ class OdooClient
             'partner_name' => $this->relationName($row['partner_id'] ?? null),
             'amount_total' => (float) ($row['amount_total'] ?? 0),
             'state' => (string) ($row['state'] ?? ''),
-            'client_order_ref' => filled($row['client_order_ref'] ?? null) ? (string) $row['client_order_ref'] : null,
-            'origin' => filled($row['origin'] ?? null) ? (string) $row['origin'] : null,
-            'date_order' => filled($row['date_order'] ?? null) ? (string) $row['date_order'] : null,
+            'client_order_ref' => $this->optionalString($row['client_order_ref'] ?? null),
+            'origin' => $this->optionalString($row['origin'] ?? null),
+            'date_order' => $this->optionalString($row['date_order'] ?? null),
             'odoo_url' => $this->recordUrl('sale.order', (int) $row['id']),
         ];
     }
@@ -103,9 +103,9 @@ class OdooClient
             'amount_total' => (float) ($row['amount_total'] ?? 0),
             'state' => (string) ($row['state'] ?? ''),
             'payment_state' => (string) ($row['payment_state'] ?? ''),
-            'invoice_origin' => filled($row['invoice_origin'] ?? null) ? (string) $row['invoice_origin'] : null,
-            'ref' => filled($row['ref'] ?? null) ? (string) $row['ref'] : null,
-            'invoice_date' => filled($row['invoice_date'] ?? null) ? (string) $row['invoice_date'] : null,
+            'invoice_origin' => $this->optionalString($row['invoice_origin'] ?? null),
+            'ref' => $this->optionalString($row['ref'] ?? null),
+            'invoice_date' => $this->optionalString($row['invoice_date'] ?? null),
             'odoo_url' => $this->recordUrl('account.move', (int) $row['id']),
         ];
     }
@@ -129,9 +129,9 @@ class OdooClient
             return null;
         }
 
-        $rows = $this->searchRead('sale.order', [['id', '=', $id]], $this->quotationFields(), 1);
+        $row = $this->firstRecord($this->searchRead('sale.order', [['id', '=', $id]], $this->quotationFields(), 1, 0, 'id desc'));
 
-        return isset($rows[0]) ? $this->mapQuotation($rows[0]) : null;
+        return $row === null ? null : $this->mapQuotation($row);
     }
 
     /**
@@ -143,13 +143,13 @@ class OdooClient
             return null;
         }
 
-        $rows = $this->searchRead('sale.order', [
+        $row = $this->firstRecord($this->searchRead('sale.order', [
             '|',
             ['client_order_ref', '=', $requestNumber],
             ['origin', '=', $requestNumber],
-        ], $this->quotationFields(), 1, 0, 'id desc');
+        ], $this->quotationFields(), 1, 0, 'id desc'));
 
-        return isset($rows[0]) ? $this->mapQuotation($rows[0]) : null;
+        return $row === null ? null : $this->mapQuotation($row);
     }
 
     /**
@@ -173,28 +173,37 @@ class OdooClient
             return null;
         }
 
-        $rows = $this->searchRead('account.move', [['id', '=', $id]], $this->invoiceFields(), 1);
+        $row = $this->firstRecord($this->searchRead('account.move', [['id', '=', $id]], $this->invoiceFields(), 1, 0, 'id desc'));
 
-        return isset($rows[0]) ? $this->mapInvoice($rows[0]) : null;
+        return $row === null ? null : $this->mapInvoice($row);
     }
 
     /**
      * @return array<string, mixed>|null
      */
-    public function findInvoiceForRequest(string $requestNumber): ?array
+    public function findInvoiceForRequest(string $requestNumber, ?string $quotationName = null): ?array
     {
-        if ($requestNumber === '') {
-            return null;
+        $refs = [];
+        if ($requestNumber !== '') {
+            $refs[] = $requestNumber;
+        }
+        if (filled($quotationName) && ! in_array($quotationName, $refs, true)) {
+            $refs[] = $quotationName;
         }
 
-        $rows = $this->searchRead('account.move', [
-            ['move_type', '=', 'out_invoice'],
-            '|',
-            ['invoice_origin', '=', $requestNumber],
-            ['ref', '=', $requestNumber],
-        ], $this->invoiceFields(), 1, 0, 'id desc');
+        foreach ($refs as $ref) {
+            foreach (['invoice_origin', 'ref'] as $field) {
+                $row = $this->firstRecord($this->searchRead('account.move', [
+                    ['move_type', '=', 'out_invoice'],
+                    [$field, '=', $ref],
+                ], $this->invoiceFields(), 1, 0, 'id desc'));
+                if ($row !== null) {
+                    return $this->mapInvoice($row);
+                }
+            }
+        }
 
-        return isset($rows[0]) ? $this->mapInvoice($rows[0]) : null;
+        return null;
     }
 
     /**
@@ -691,14 +700,14 @@ class OdooClient
     }
 
     /**
-     * @return list<array{lead_id: int, name: string, email: string|null, phone: string|null, company_name: string|null, odoo_partner_id: string|null, odoo_url: string}>
+     * @return list<array{lead_id: int, name: string, email: string|null, phone: string|null, company_name: string|null, odoo_partner_id: string|null, odoo_stage_name: string|null, odoo_url: string}>
      */
     public function listCrmClients(int $limit = 200, int $offset = 0): array
     {
         $rows = $this->searchRead('crm.lead', [
             ['active', '=', true],
         ], [
-            'id', 'name', 'contact_name', 'partner_name', 'partner_id', 'email_from', 'phone',
+            'id', 'name', 'contact_name', 'partner_name', 'partner_id', 'email_from', 'phone', 'stage_id',
         ], $limit, $offset, 'write_date desc');
 
         $clients = [];
@@ -746,6 +755,7 @@ class OdooClient
                 'phone' => $phone,
                 'company_name' => $company,
                 'odoo_partner_id' => $partnerId > 0 ? (string) $partnerId : null,
+                'odoo_stage_name' => $this->relationName($row['stage_id'] ?? null),
                 'odoo_url' => $partnerId > 0
                     ? $this->recordUrl('res.partner', $partnerId)
                     : $this->recordUrl('crm.lead', $leadId),
@@ -1012,7 +1022,7 @@ class OdooClient
      * @param  list<string>  $fields
      * @return list<array<string, mixed>>
      */
-    private function searchRead(string $model, array $domain, array $fields, int $limit, int $offset, string $order): array
+    private function searchRead(string $model, array $domain, array $fields, int $limit = 80, int $offset = 0, string $order = ''): array
     {
         $result = $this->call($model, 'search_read', [
             'domain' => $domain,
@@ -1025,6 +1035,25 @@ class OdooClient
         return is_array($result) ? $result : [];
     }
 
+    /**
+     * @param  array<mixed>  $rows
+     * @return array<string, mixed>|null
+     */
+    private function firstRecord(array $rows): ?array
+    {
+        if (isset($rows['id']) && is_numeric($rows['id'])) {
+            return $rows;
+        }
+
+        foreach ($rows as $row) {
+            if (is_array($row) && isset($row['id']) && is_numeric($row['id'])) {
+                return $row;
+            }
+        }
+
+        return null;
+    }
+
     private function relationName(mixed $value): ?string
     {
         if (! is_array($value)) {
@@ -1032,6 +1061,15 @@ class OdooClient
         }
 
         return isset($value[1]) ? (string) $value[1] : null;
+    }
+
+    private function optionalString(mixed $value): ?string
+    {
+        if ($value === false || $value === null || $value === '') {
+            return null;
+        }
+
+        return (string) $value;
     }
 
     private function resolveCurrencyId(): ?int

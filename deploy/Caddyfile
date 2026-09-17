@@ -59,11 +59,14 @@
 
 	import hoc_api_routes
 
-	handle /staff* {
-		reverse_proxy hoc-dashboard:5173
-	}
+	redir /staff /dashboard/login 308
+	redir /staff/ /dashboard/login 308
+	@oldStaff path_regexp oldstaff ^/staff(/.*)$
+	redir @oldStaff /dashboard{re.oldstaff.1}? 308
 
-	handle /assets* {
+	redir /dashboard /dashboard/ 308
+
+	handle /dashboard* {
 		reverse_proxy hoc-dashboard:5173
 	}
 

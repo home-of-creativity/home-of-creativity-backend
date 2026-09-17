@@ -11,6 +11,8 @@ class ImportOdooCrmClients
     public function __construct(
         private OdooClient $odoo,
         private SyncOdooPartners $syncOdooPartners,
+        private PushClientToOdoo $pushClientToOdoo,
+        private PushClientLeadToOdoo $pushClientLeadToOdoo,
     ) {}
 
     /**
@@ -31,12 +33,13 @@ class ImportOdooCrmClients
 
         $fromCrm = $this->importFromCrmLeads($limit);
         $fromPartners = $this->syncOdooPartners->handle($limit);
+        $pushedLeads = $this->pushMissingLeads();
 
         return [
             'imported' => $fromCrm['created'] + $fromCrm['updated'] + $fromPartners['created'] + $fromPartners['updated'],
             'created' => $fromCrm['created'] + $fromPartners['created'],
             'updated' => $fromCrm['updated'] + $fromPartners['updated'],
-            'pushed' => $fromPartners['pushed'],
+            'pushed' => $fromPartners['pushed'] + $pushedLeads,
             'crm_leads' => $fromCrm['synced'],
             'partners' => $fromPartners['synced'],
         ];
@@ -59,6 +62,7 @@ class ImportOdooCrmClients
                 companyName: $lead['company_name'] ?? null,
                 odooPartnerId: $lead['odoo_partner_id'],
                 odooLeadId: (string) $lead['lead_id'],
+                odooStageName: $lead['odoo_stage_name'] ?? null,
             );
 
             if ($result === 'created') {
@@ -82,6 +86,7 @@ class ImportOdooCrmClients
         ?string $companyName,
         ?string $odooPartnerId,
         ?string $odooLeadId,
+        ?string $odooStageName = null,
     ): ?string {
         $client = null;
 
@@ -108,6 +113,7 @@ class ImportOdooCrmClients
             'company_name' => $companyName,
             'odoo_partner_id' => $odooPartnerId,
             'odoo_lead_id' => $odooLeadId,
+            'odoo_stage_name' => $odooStageName,
         ], fn (mixed $value): bool => $value !== null && $value !== '');
 
         if ($client) {
@@ -124,6 +130,7 @@ class ImportOdooCrmClients
                 'company_name' => $companyName,
                 'odoo_partner_id' => $odooPartnerId,
                 'odoo_lead_id' => $odooLeadId,
+                'odoo_stage_name' => $odooStageName,
             ]);
 
             return 'created';
@@ -137,5 +144,23 @@ class ImportOdooCrmClients
 
             return null;
         }
+    }
+
+    private function pushMissingLeads(): int
+    {
+        $pushed = 0;
+
+        Client::query()
+            ->whereNull('odoo_lead_id')
+            ->orderBy('id')
+            ->each(function (Client $client) use (&$pushed): void {
+                $client = $this->pushClientToOdoo->handle($client);
+                $client = $this->pushClientLeadToOdoo->handle($client, false, false);
+                if (filled($client->odoo_lead_id)) {
+                    $pushed++;
+                }
+            });
+
+        return $pushed;
     }
 }

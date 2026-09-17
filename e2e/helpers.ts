@@ -1,7 +1,7 @@
 import { expect, type APIRequestContext, type APIResponse, type Page } from "@playwright/test";
 
 export const LANDING = "http://localhost:3000/home-of-creativity-profile/";
-export const DASHBOARD = "http://127.0.0.1:5173";
+export const DASHBOARD = "http://127.0.0.1:5173/dashboard";
 export const API = process.env.E2E_API_URL ?? "http://127.0.0.1:8002/api";
 export const N8N_SECRET = process.env.N8N_WEBHOOK_SECRET ?? "change-me";
 export const BOT_SECRET = process.env.TELEGRAM_BOT_SECRET ?? "change-me-bot";

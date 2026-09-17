@@ -24,7 +24,7 @@ npm install
 npm run dev
 ```
 
-Login: http://127.0.0.1:5173/staff
+Login: http://127.0.0.1:5173/dashboard
 
 Bots:
 
@@ -59,7 +59,7 @@ sudo bash  # then after the first sync:
 
 Install Docker with `deploy/bootstrap.sh` after the files exist, or install Docker first.
 
-Create `/var/www/landing/backend/.env` from `.env.example`. Set `APP_KEY`, `APP_URL=http://YOUR_IP`, `DB_PASSWORD`, and `CORS_ALLOWED_ORIGINS=http://YOUR_IP/staff,http://YOUR_IP`.
+Create `/var/www/landing/backend/.env` from `.env.example`. Set `APP_KEY`, `APP_URL=http://YOUR_IP`, `DB_PASSWORD`, and `CORS_ALLOWED_ORIGINS=http://YOUR_IP/dashboard,http://YOUR_IP`.
 
 ### GitHub secrets (Settings → Secrets and variables → Actions)
 

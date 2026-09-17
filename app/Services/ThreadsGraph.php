@@ -32,7 +32,7 @@ class ThreadsGraph
             return $configured;
         }
 
-        return 'https://hoc.agency/staff/social/accounts';
+        return 'https://hoc.agency/dashboard/social/accounts';
     }
 
     public static function url(string $path): string

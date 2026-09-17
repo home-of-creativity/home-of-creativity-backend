@@ -132,17 +132,6 @@ export function Employees({ t }: { locale: Locale; t: (c: { ar: string; en: stri
     }
   }
 
-  async function reject(id: number) {
-    setError("");
-    try {
-      await api.rejectEmployee(id);
-      if (approvingId === id || editingId === id) resetForm();
-      load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t(copy.saveFailed));
-    }
-  }
-
   async function remove(id: number) {
     setError("");
     try {
@@ -153,8 +142,6 @@ export function Employees({ t }: { locale: Locale; t: (c: { ar: string; en: stri
       setError(err instanceof Error ? err.message : t(copy.saveFailed));
     }
   }
-
-  const pending = items.filter((item) => item.status === "pending");
 
   return (
     <>
@@ -178,30 +165,6 @@ export function Employees({ t }: { locale: Locale; t: (c: { ar: string; en: stri
       </header>
 
       <p className="notice notice-info">{t(copy.joinHint)}</p>
-
-      {pending.length > 0 ? (
-        <section className="card pending-card">
-          <h2 className="form-title">{t(copy.pendingJoins)}</h2>
-          <ul className="pending-list">
-            {pending.map((item) => (
-              <li key={item.id}>
-                <div>
-                  <strong className="client-name">{item.name}</strong>
-                  <span className="muted"> {telegramLabel(item)}</span>
-                </div>
-                <div className="row-actions">
-                  <button className="btn btn-teal" type="button" onClick={() => startApprove(item)}>
-                    {t(copy.approveEmployee)}
-                  </button>
-                  <button className="btn" type="button" onClick={() => void reject(item.id)}>
-                    {t(copy.rejectEmployee)}
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
 
       {!showForm && error ? <p className="error">{error}</p> : null}
 

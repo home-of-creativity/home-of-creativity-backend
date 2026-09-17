@@ -47,16 +47,38 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
 
   useEffect(() => {
     if (!id) return;
-    setLoading(true);
-    Promise.all([api.request(id), api.opsSettings().catch(() => ({ data: { sham_cash_qr: false } }))])
-      .then(([res, ops]) => {
-        setItem(res.data);
-        setStatus(res.data.status);
-        setHasQr(Boolean(ops.data.sham_cash_qr));
-        setReceivedAmount(res.data.expected_due != null ? String(res.data.expected_due) : "");
-      })
-      .catch(() => setItem(null))
-      .finally(() => setLoading(false));
+    const requestId = id;
+    let cancelled = false;
+
+    function load(silent = false) {
+      if (!silent) setLoading(true);
+      Promise.all([
+        api.request(requestId),
+        silent ? Promise.resolve(null) : api.opsSettings().catch(() => ({ data: { sham_cash_qr: false } })),
+      ])
+        .then(([res, ops]) => {
+          if (cancelled) return;
+          setItem(res.data);
+          if (!silent) {
+            setStatus(res.data.status);
+            if (ops) setHasQr(Boolean(ops.data.sham_cash_qr));
+            setReceivedAmount(res.data.expected_due != null ? String(res.data.expected_due) : "");
+          }
+        })
+        .catch(() => {
+          if (!cancelled && !silent) setItem(null);
+        })
+        .finally(() => {
+          if (!cancelled && !silent) setLoading(false);
+        });
+    }
+
+    load();
+    const timer = window.setInterval(() => load(true), 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
   }, [id]);
 
   async function saveStatus(next: string) {
@@ -274,6 +296,7 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
                 item.odoo_quotation_id ?? "—"
               )}
               {item.odoo_quotation_live?.state ? ` · ${item.odoo_quotation_live.state}` : ""}
+              {item.odoo_quotation_live?.amount_total != null ? ` · ${item.odoo_quotation_live.amount_total}` : ""}
             </dd>
           </div>
           <div>
@@ -287,6 +310,8 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
                 item.odoo_invoice_id ?? "—"
               )}
               {item.odoo_invoice_live?.state ? ` · ${item.odoo_invoice_live.state}` : ""}
+              {item.odoo_invoice_live?.payment_state ? ` / ${item.odoo_invoice_live.payment_state}` : ""}
+              {item.odoo_invoice_live?.amount_total != null ? ` · ${item.odoo_invoice_live.amount_total}` : ""}
             </dd>
           </div>
           <div>

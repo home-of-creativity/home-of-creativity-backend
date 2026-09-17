@@ -14,7 +14,7 @@ class PushClientLeadToOdoo
         private GeminiService $gemini,
     ) {}
 
-    public function handle(Client $client, bool $writeExisting = false): Client
+    public function handle(Client $client, bool $writeExisting = false, bool $classifyIndustry = true): Client
     {
         if (! $this->odoo->configured()) {
             return $client;
@@ -28,13 +28,19 @@ class PushClientLeadToOdoo
             return $client->fresh() ?? $client;
         }
 
-        if (! $client->profileComplete()) {
+        if (! filled($client->name)) {
+            return $client;
+        }
+
+        if (! filled($client->phone) && ! filled($client->email) && ! filled($client->company_name)) {
             return $client;
         }
 
         try {
-            $industry = $client->company_activity
-                ?: $this->gemini->classifyCompanyIndustry((string) $client->company_name);
+            $industry = $client->company_activity;
+            if ($classifyIndustry && ! filled($industry) && filled($client->company_name)) {
+                $industry = $this->gemini->classifyCompanyIndustry((string) $client->company_name);
+            }
             if ($industry && $client->company_activity !== $industry) {
                 $client->forceFill(['company_activity' => $industry])->save();
             }

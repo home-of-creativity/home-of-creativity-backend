@@ -135,7 +135,7 @@ return [
         'app_id' => trim((string) env('THREADS_APP_ID', '')),
         'app_secret' => trim((string) env('THREADS_APP_SECRET', '')),
         'redirect_uri' => trim((string) env('THREADS_REDIRECT_URI', 'https://hoc.agency/auth/threads/callback')),
-        'dashboard_accounts_url' => trim((string) env('THREADS_DASHBOARD_URL', 'https://hoc.agency/staff/social/accounts')),
+        'dashboard_accounts_url' => trim((string) env('THREADS_DASHBOARD_URL', 'https://hoc.agency/dashboard/social/accounts')),
         'oauth_authorize' => env('THREADS_OAUTH_URL', 'https://threads.net/oauth/authorize'),
         'oauth_token_base' => env('THREADS_OAUTH_TOKEN_URL', 'https://graph.threads.net'),
         'scopes' => env('THREADS_OAUTH_SCOPES', 'threads_basic,threads_content_publish,threads_read_replies,threads_manage_replies'),

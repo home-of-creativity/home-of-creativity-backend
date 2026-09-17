@@ -29,8 +29,8 @@ class ClientController extends Controller
     ) {
         if ($odoo->configured()) {
             try {
-                Cache::remember('odoo:crm:index-pull', 20, function () use ($importOdooCrmClients): bool {
-                    $importOdooCrmClients->handle(100);
+                Cache::remember('odoo:crm:index-pull', 10, function () use ($importOdooCrmClients): bool {
+                    $importOdooCrmClients->handle(200);
 
                     return true;
                 });
