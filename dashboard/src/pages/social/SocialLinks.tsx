@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { api, canSocial, type PageMeta, type SocialLinktreeProfile, type SocialPost, type User } from "../../api";
@@ -11,7 +11,6 @@ import { LinktreePhone, type LinktreeTheme } from "./LinktreePhone";
 import { SocialChrome } from "./SocialChrome";
 import { useSocialWorkspace } from "./SocialWorkspace";
 import {
-  groupSocialPages,
   publishErrorMessage,
   socialPlacementLabel,
   socialStatusLabel,
@@ -92,7 +91,7 @@ function LinkActions({
 
 export function SocialLinks({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
   const { user } = useAuth();
-  const { activeAccounts } = useSocialWorkspace();
+  const { selectedAccount } = useSocialWorkspace();
   const [items, setItems] = useState<SocialPost[]>([]);
   const [meta, setMeta] = useState<PageMeta | null>(null);
   const [status, setStatus] = useState("");
@@ -100,27 +99,23 @@ export function SocialLinks({ locale, t }: { locale: Locale; t: (c: { ar: string
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState<number | null>(null);
-  const [pageKey, setPageKey] = useState("");
   const [profile, setProfile] = useState<SocialLinktreeProfile | null>(null);
   const [listTab, setListTab] = useState<"links" | "stories">("links");
   const logoSrc = `${import.meta.env.BASE_URL}hummingbird.svg`;
 
-  const pages = useMemo(() => groupSocialPages(activeAccounts), [activeAccounts]);
-  const group = pages.find((item) => item.key === pageKey) ?? pages[0] ?? null;
-
-  const visible = useMemo(() => {
-    if (!group) return items;
-    const ids = new Set(group.accounts.map((account) => account.id));
-    return items.filter((item) => !item.accounts?.length || item.accounts.some((account) => ids.has(account.id)));
-  }, [items, group]);
-
-  const stories = visible.filter((item) => item.placement === "story");
-  const links = visible.filter((item) => item.placement !== "story");
+  const stories = items.filter((item) => item.placement === "story");
+  const links = items.filter((item) => item.placement !== "story");
 
   function load(silent = false) {
+    if (!selectedAccount) {
+      setItems([]);
+      setMeta(null);
+      if (!silent) setLoading(false);
+      return;
+    }
     if (!silent) setLoading(true);
     Promise.all([
-      api.socialPosts({ status: status || undefined, page, per_page: 30 }),
+      api.socialPosts({ status: status || undefined, page, per_page: 30, account_id: selectedAccount.id }),
       profile ? Promise.resolve(null) : api.socialProfile().catch(() => null),
     ])
       .then(([posts, profileRes]) => {
@@ -145,11 +140,7 @@ export function SocialLinks({ locale, t }: { locale: Locale; t: (c: { ar: string
     load();
     const timer = window.setInterval(() => load(true), 15000);
     return () => window.clearInterval(timer);
-  }, [status, page]);
-
-  useEffect(() => {
-    if (!pageKey && pages[0]) setPageKey(pages[0].key);
-  }, [pageKey, pages]);
+  }, [status, page, selectedAccount?.id]);
 
   async function approve(id: number) {
     setBusyId(id);
@@ -190,8 +181,8 @@ export function SocialLinks({ locale, t }: { locale: Locale; t: (c: { ar: string
     }
   }
 
-  const handle = group?.accounts.find((account) => account.handle)?.handle;
-  const displayName = profile?.display_name || group?.name || "Home of Creativity";
+  const handle = selectedAccount?.handle;
+  const displayName = profile?.display_name || selectedAccount?.name || "Home of Creativity";
   const bio = profile?.bio || t(copy.socialLinktreeBio);
   const theme = (profile?.theme ?? "cream") as LinktreeTheme;
 
@@ -208,18 +199,6 @@ export function SocialLinks({ locale, t }: { locale: Locale; t: (c: { ar: string
             </button>
           </div>
           <div className="lt-admin-tools">
-            {pages.length > 1 ? (
-              <label className="filter-label" htmlFor="linktree-page">
-                {t(copy.socialAccounts)}
-                <select id="linktree-page" className="field" value={group?.key ?? ""} onChange={(event) => setPageKey(event.target.value)}>
-                  {pages.map((item) => (
-                    <option key={item.key} value={item.key}>
-                      {item.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : null}
             <label className="filter-label" htmlFor="social-status-filter">
               {t(copy.status)}
               <select
@@ -282,7 +261,7 @@ export function SocialLinks({ locale, t }: { locale: Locale; t: (c: { ar: string
             name={displayName}
             handle={handle}
             bio={bio}
-            accounts={group?.accounts ?? []}
+            accounts={selectedAccount ? [selectedAccount] : []}
             stories={stories}
             links={links}
             logoSrc={logoSrc}

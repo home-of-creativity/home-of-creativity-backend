@@ -14,6 +14,7 @@ type Props = {
   title: Copy;
   lede?: Copy;
   actions?: ReactNode;
+  immersive?: boolean;
   children: ReactNode;
 };
 
@@ -26,12 +27,12 @@ const tabs: { to: string; end?: boolean; label: Copy; ability: SocialAbility }[]
   { to: "/social/accounts", label: copy.socialAccounts, ability: "accounts" },
 ];
 
-export function SocialChrome({ t, user, title, lede, actions, children }: Props) {
+export function SocialChrome({ t, user, title, lede, actions, immersive, children }: Props) {
   const { selectedAccount, activeAccounts, openPicker, loading } = useSocialWorkspace();
   const visible = tabs.filter((tab) => canSocial(user, tab.ability) || (tab.ability === "create" && canSocial(user, "approve")));
 
   return (
-    <div className="studio-shell">
+    <div className={immersive ? "studio-shell is-immersive" : "studio-shell"}>
       <div className="studio-top">
         <nav className="studio-nav" aria-label={t(copy.navSocial)}>
           {visible.map((tab) => (
@@ -60,13 +61,13 @@ export function SocialChrome({ t, user, title, lede, actions, children }: Props)
             <span className="muted">{loading ? t(copy.loading) : t(copy.socialPickAccount)}</span>
           )}
           {activeAccounts.length > 0 ? (
-            <button type="button" className="btn" onClick={openPicker}>
+            <button type="button" className="btn btn-primary studio-change-account" onClick={openPicker}>
               {selectedAccount ? t(copy.socialChangeAccount) : t(copy.socialPickAccount)}
             </button>
           ) : null}
         </div>
       </div>
-      <PageHeader title={t(title)} lede={lede ? t(lede) : undefined} actions={actions} />
+      {immersive ? <h1 className="sr-only">{t(title)}</h1> : <PageHeader title={t(title)} lede={lede ? t(lede) : undefined} actions={actions} />}
       {children}
     </div>
   );

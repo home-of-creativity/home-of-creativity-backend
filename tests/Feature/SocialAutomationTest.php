@@ -753,6 +753,38 @@ class SocialAutomationTest extends TestCase
         Http::assertSent(fn ($request) => str_contains($request->url(), '/photos'));
     }
 
+    public function test_admin_can_create_media_draft_without_caption(): void
+    {
+        Storage::fake('public');
+
+        $admin = $this->admin();
+        Sanctum::actingAs($admin);
+        $account = SocialAccount::factory()->connected()->recycle($admin)->create();
+
+        $this->post('/api/admin/social/posts', [
+            'body' => '',
+            'account_ids' => [$account->id],
+            'intent' => 'draft',
+            'media' => [UploadedFile::fake()->image('hero.jpg')],
+        ], ['Accept' => 'application/json'])
+            ->assertCreated()
+            ->assertJsonPath('data.body', '')
+            ->assertJsonPath('data.status', SocialPostStatus::Draft->value);
+    }
+
+    public function test_publish_requires_caption_or_media(): void
+    {
+        $admin = $this->admin();
+        Sanctum::actingAs($admin);
+        $account = SocialAccount::factory()->connected()->recycle($admin)->create();
+
+        $this->postJson('/api/admin/social/posts', [
+            'body' => '',
+            'account_ids' => [$account->id],
+            'intent' => 'publish',
+        ])->assertUnprocessable();
+    }
+
     public function test_admin_can_publish_image_to_instagram(): void
     {
         Storage::fake('public');

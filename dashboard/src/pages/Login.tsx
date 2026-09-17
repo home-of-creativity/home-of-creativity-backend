@@ -62,9 +62,11 @@ export function Login({
       setError(
         err instanceof Error && err.message === "forbidden"
           ? t(copy.forbidden)
-          : err instanceof Error && err.message
-            ? err.message
-            : t(copy.failed),
+          : err instanceof Error && err.message === "api_unreachable"
+            ? t(copy.apiUnreachable)
+            : err instanceof Error && err.message
+              ? err.message
+              : t(copy.failed),
       );
     }
   }

@@ -5,6 +5,7 @@ import { useAuth } from "../../auth";
 import { copy, type Locale } from "../../i18n";
 import { SocialChrome } from "./SocialChrome";
 import { socialStatusLabel } from "./helpers";
+import { useSocialWorkspace } from "./SocialWorkspace";
 
 function startOfMonth(date: Date) {
   return new Date(date.getFullYear(), date.getMonth(), 1);
@@ -17,6 +18,7 @@ function isoDate(date: Date) {
 
 export function SocialCalendar({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
   const { user } = useAuth();
+  const { selectedAccount } = useSocialWorkspace();
   const [cursor, setCursor] = useState(() => startOfMonth(new Date()));
   const [items, setItems] = useState<SocialPost[]>([]);
   const [error, setError] = useState("");
@@ -25,14 +27,19 @@ export function SocialCalendar({ locale, t }: { locale: Locale; t: (c: { ar: str
   const to = isoDate(new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0));
 
   useEffect(() => {
+    if (!selectedAccount) {
+      setItems([]);
+      setError("");
+      return;
+    }
     api
-      .socialPosts({ from, to, page: 1, per_page: 100 })
+      .socialPosts({ from, to, page: 1, per_page: 100, account_id: selectedAccount.id })
       .then((res) => {
         setItems(res.data);
         setError("");
       })
       .catch((err) => setError(err instanceof Error ? err.message : t(copy.loading)));
-  }, [from, to]);
+  }, [from, to, selectedAccount?.id, t]);
 
   const days = useMemo(() => {
     const firstWeekday = cursor.getDay();
@@ -73,7 +80,7 @@ export function SocialCalendar({ locale, t }: { locale: Locale; t: (c: { ar: str
             {cell.date ? <span className="social-calendar-num">{cell.date.getDate()}</span> : null}
             {cell.posts.map((post) => (
               <Link key={post.id} className={`social-calendar-chip status-${post.status}`} to={`/social/compose/${post.id}`}>
-                {socialStatusLabel(post.status, t)} · {post.body.slice(0, 28)}
+                {socialStatusLabel(post.status, t)} · {(post.body.trim() || t(copy.socialUntitledPost)).slice(0, 28)}
               </Link>
             ))}
           </div>

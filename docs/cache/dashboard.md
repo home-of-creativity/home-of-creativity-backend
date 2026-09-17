@@ -4,7 +4,7 @@ Path: `backend/dashboard/`
 React **19**, TypeScript, Vite **7**, react-router-dom **7**. No Next.js.
 
 Dev: `npm run dev` → http://127.0.0.1:5173/dashboard/  
-API: `VITE_API_URL` default `http://127.0.0.1:8000/api`  
+API: same-origin `/api` via Vite proxy → `http://127.0.0.1:8000` (`VITE_API_PROXY` overrides the target). Production builds use `VITE_API_URL` (default `https://api.hoc.agency/api`).  
 Build: `tsc --noEmit && vite build` (`vite.config` `base` `/dashboard/`, React Router `basename` `/dashboard`). Production Caddy serves `dashboard/dist` at `/dashboard/` (no Vite preview proxy).
 
 ## Auth
@@ -26,13 +26,13 @@ Demo: `admin@example.com` / `password`.
 | `/pricing` | Pricing CMS — every category `requires_full_payment` + `allows_renewal` badges; package partial-pay inherit/true/false |
 | `/projects` `/categories` | Portfolio |
 | `/reels` | Landing reels CMS — upload/replace/publish/sort; empty until staff add clips |
-| `/social` | Account picker first, then a large phone: Drag & Drop at the top and the selected page’s posts as you scroll. Posts are always `feed` — image / album / video is inferred from files. Accounts load once in `SocialWorkspace` for every social sub-route. |
+| `/social` | Account picker first, then a **full-page phone** for that account only: native-looking FB/IG/Threads/LinkedIn feed of **all** that page’s posts, drag-and-drop compose, optional caption, edit/delete on each post. Change-account in the chrome and on the rail. Posts are always `feed` — image / album / video is inferred from files. Accounts load once in `SocialWorkspace`. Calendar, inbox, and bio-links are filtered to the same selected account. |
 | `/social/compose/:id` | Edit an existing post on the same phone studio (new compose redirects to `/social`). |
 | `/social/links` | Linktree admin: Links/Stories list + cream/purple/dark phone preview (hummingbird avatar, stacked pills) |
 | `/social/design` | Link-in-bio name, bio, theme (`GET/PUT /api/admin/ops-settings/social-profile`) |
 | `/social/calendar` `/social/inbox` `/social/accounts` | Calendar, detailed inbox (post + reply), accounts (Facebook + linked Instagram + Threads, plus standalone LinkedIn company Pages). Accounts has **Connect Threads** (`GET /api/admin/social/threads/connect` → Meta → `https://hoc.agency/auth/threads/callback`) and **Connect LinkedIn** (`GET /api/admin/social/linkedin/connect` → LinkedIn → `https://hoc.agency/auth/linkedin/callback`, connects every organization the user administers). Inbox syncs and replies to LinkedIn comments natively (posts published from the dashboard only); LinkedIn has no message-kind inbox items since Pages have no DM API. |
 
-Social nav gated by `social_abilities` (`accounts`, `create`, `approve`, `engage`). Entering `/social` loads `GET /admin/social/accounts` once (`SocialWorkspace`); inner tabs reuse that list. A change-account control sits in the studio chrome. Add a network by flipping `live` in `dashboard/src/pages/social/catalog.ts` and wiring the Graph/REST adapter.
+Social nav gated by `social_abilities` (`accounts`, `create`, `approve`, `engage`). Entering `/social` loads `GET /admin/social/accounts` once (`SocialWorkspace`); inner tabs reuse that list. Home is an immersive phone studio for **one** selected account (native feed, optional caption, edit/delete). Change-account sits in the chrome and the composer rail. Calendar/inbox/links filter by that account. Add a network by flipping `live` in `dashboard/src/pages/social/catalog.ts` and wiring the Graph/REST adapter.
 
 i18n: `src/i18n.ts` (ar/en). `index.html` boots `lang`/`dir` from `hoc-dash-locale` (default Arabic RTL) before React; `readLocale`/`applyLocale` are localStorage-safe. Telegram staff bot link: `VITE_TELEGRAM_STAFF_BOT`.
 

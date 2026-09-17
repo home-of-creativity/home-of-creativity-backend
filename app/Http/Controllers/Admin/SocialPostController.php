@@ -99,7 +99,7 @@ class SocialPostController extends Controller
     public function store(StoreSocialPostRequest $request): JsonResponse
     {
         $post = SocialPost::query()->create([
-            'body' => $request->validated('body'),
+            'body' => $request->validated('body') ?? '',
             'placement' => $request->validated('placement') ?? SocialPlacement::Feed->value,
             'status' => SocialPostStatus::Draft,
             'scheduled_at' => $this->scheduledAt($request->input('scheduled_at')),

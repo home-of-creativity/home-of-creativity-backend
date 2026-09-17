@@ -69,6 +69,10 @@ export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: stri
       openPicker();
       return;
     }
+    if (intent !== "draft" && !body.trim() && !hasMedia) {
+      setError(t(copy.socialNeedCaptionOrMedia));
+      return;
+    }
     if (intent !== "draft" && selectedAccount.platform === "instagram" && !hasMedia) {
       setError(t(copy.socialInstagramNeedsMedia));
       return;
@@ -98,28 +102,31 @@ export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: stri
   }
 
   return (
-    <SocialChrome locale={locale} t={t} user={user} title={copy.socialCompose} lede={copy.socialComposeLede}>
+    <SocialChrome locale={locale} t={t} user={user} title={copy.socialCompose} lede={copy.socialComposeLede} immersive>
       {loading ? <p className="muted">{t(copy.loading)}</p> : null}
       {error ? <p className="error">{error}</p> : null}
-      <form className="studio-stage" onSubmit={(event) => void submit(event, primaryIntent())}>
-        <SocialPhonePreview
-          locale={locale}
-          t={t}
-          studio
-          accounts={selectedAccount ? [selectedAccount] : []}
-          placement="feed"
-          body={body}
-          existingMedia={existingMedia}
-          files={previewFiles}
-          excludePostId={postId}
-          onFiles={editable ? setFiles : undefined}
-          dropDisabled={!editable}
-        />
-        <div className="studio-composer card stack">
-          {post ? <span className={`status status-${post.status}`}>{socialStatusLabel(post.status, t)}</span> : null}
+      <form className="studio-board" onSubmit={(event) => void submit(event, primaryIntent())}>
+        <div className="studio-phone-col">
+          <SocialPhonePreview
+            locale={locale}
+            t={t}
+            studio
+            accounts={selectedAccount ? [selectedAccount] : []}
+            placement="feed"
+            body={body}
+            existingMedia={existingMedia}
+            files={previewFiles}
+            excludePostId={postId}
+            onFiles={editable ? setFiles : undefined}
+            dropDisabled={!editable}
+          />
+        </div>
+        <aside className="studio-rail">
+          <div className="studio-composer card stack">
+            {post ? <span className={`status status-${post.status}`}>{socialStatusLabel(post.status, t)}</span> : null}
           {post?.last_error ? <p className="error">{publishErrorMessage(post.last_error, t)}</p> : null}
           <label className="field-label">
-            {t(copy.socialBody)}
+            {t(copy.socialCaptionOptional)}
             <textarea
               className="field"
               rows={5}
@@ -127,7 +134,6 @@ export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: stri
               disabled={!editable}
               placeholder={t(copy.socialCaptionHint)}
               onChange={(event) => setBody(event.target.value)}
-              required
             />
           </label>
           {existingMedia.length > 0 ? (
@@ -217,6 +223,7 @@ export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: stri
             </section>
           ) : null}
         </div>
+        </aside>
       </form>
     </SocialChrome>
   );

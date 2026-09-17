@@ -19,6 +19,10 @@ class UpdateSocialPostRequest extends FormRequest
         if ($this->input('scheduled_at') === '') {
             $this->merge(['scheduled_at' => null]);
         }
+
+        if ($this->exists('body') && $this->input('body') === null) {
+            $this->merge(['body' => '']);
+        }
     }
 
     /**
@@ -27,7 +31,7 @@ class UpdateSocialPostRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'body' => ['sometimes', 'string', 'max:5000'],
+            'body' => ['sometimes', 'nullable', 'string', 'max:5000'],
             'placement' => ['sometimes', 'string', Rule::in(SocialPlacement::values())],
             'account_ids' => ['sometimes', 'array', 'min:1'],
             'account_ids.*' => ['integer', 'exists:social_accounts,id'],

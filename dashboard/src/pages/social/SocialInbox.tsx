@@ -6,6 +6,7 @@ import { Pagination } from "../../components/Pagination";
 import { copy, type Copy, type Locale } from "../../i18n";
 import { SocialChrome } from "./SocialChrome";
 import { formatWhen, inboxErrorMessage, platformLabel } from "./helpers";
+import { useSocialWorkspace } from "./SocialWorkspace";
 
 function inboxError(err: unknown, t: (item: Copy) => string) {
   const message = err instanceof Error ? err.message : "";
@@ -20,6 +21,7 @@ function sourceExcerpt(item: SocialInboxItem) {
 
 export function SocialInbox({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
   const { user } = useAuth();
+  const { selectedAccount } = useSocialWorkspace();
   const [items, setItems] = useState<SocialInboxItem[]>([]);
   const [meta, setMeta] = useState<PageMeta | null>(null);
   const [page, setPage] = useState(1);
@@ -33,9 +35,15 @@ export function SocialInbox({ locale, t }: { locale: Locale; t: (c: { ar: string
   const [syncing, setSyncing] = useState(false);
 
   function load() {
+    if (!selectedAccount) {
+      setItems([]);
+      setMeta(null);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     api
-      .socialInbox({ kind: kind || undefined, page })
+      .socialInbox({ kind: kind || undefined, page, account_id: selectedAccount.id })
       .then((res) => {
         setItems(res.data);
         setMeta(res.meta);
@@ -54,7 +62,7 @@ export function SocialInbox({ locale, t }: { locale: Locale; t: (c: { ar: string
 
   useEffect(() => {
     load();
-  }, [page, kind]);
+  }, [page, kind, selectedAccount?.id]);
 
   async function sync() {
     setSyncing(true);

@@ -1,4 +1,11 @@
-const API_URL = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000/api";
+function resolveApiUrl() {
+  if (import.meta.env.DEV) {
+    return "/api";
+  }
+  return (import.meta.env.VITE_API_URL ?? "https://api.hoc.agency/api").replace(/\/$/, "");
+}
+
+const API_URL = resolveApiUrl();
 const TOKEN_KEY = "hoc-staff-token";
 
 export function getToken() {
@@ -462,7 +469,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getToken();
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
-  const response = await fetch(`${API_URL}${path}`, { ...init, headers });
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`, { ...init, headers });
+  } catch (err) {
+    if (err instanceof TypeError) {
+      throw new Error("api_unreachable");
+    }
+    throw err;
+  }
   if (response.status === 401) {
     setToken(null);
   }
