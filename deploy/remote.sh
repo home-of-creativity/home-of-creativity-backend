@@ -19,6 +19,14 @@ chmod -R ug+rwx storage bootstrap/cache || true
 
 docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml up -d --build
 
+# Caddyfile is a read-only bind-mount, so `up -d` never restarts hoc-edge just
+# because its contents changed. Force a reload every deploy so routing edits
+# (e.g. /dashboard, /staff redirects) actually take effect.
+echo "Reloading edge (Caddy) config..."
+docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml exec -T hoc-edge \
+  caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile \
+  || docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml restart hoc-edge
+
 echo "Waiting for API php-fpm..."
 for _ in $(seq 1 60); do
   if docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml exec -T hoc-api php artisan --version >/dev/null 2>&1; then
