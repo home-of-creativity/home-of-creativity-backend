@@ -224,9 +224,16 @@ class OdooClient
     public function createCrmLead(array $values): int
     {
         $stageId = $values['stage_id'] ?? null;
+        $teamId = $values['team_id'] ?? null;
         if ($stageId === null) {
             try {
-                $stageId = $this->ensureCrmStage('تلغرام');
+                $stage = $this->findCrmStage('تلغرام');
+                if ($stage !== null) {
+                    $stageId = $stage['id'];
+                    $teamId ??= $stage['team_id'];
+                } else {
+                    $stageId = $this->ensureCrmStage('تلغرام');
+                }
             } catch (Throwable) {
                 $stageId = null;
             }
@@ -236,8 +243,6 @@ class OdooClient
         if (is_array($tagIds) && $tagIds !== [] && ! is_array($tagIds[0] ?? null)) {
             $tagIds = [[6, 0, array_map('intval', $tagIds)]];
         }
-
-        $teamId = $values['team_id'] ?? $this->ensureCrmTeamId('تلغرام');
 
         $payload = array_filter([
             'name' => $values['name'],
@@ -280,10 +285,6 @@ class OdooClient
             'name' => trim($name),
             'sequence' => 1,
         ];
-        $teamId = $this->ensureCrmTeamId($name);
-        if ($teamId !== null) {
-            $values['team_id'] = $teamId;
-        }
 
         $stageId = $this->call('crm.stage', 'create', [[$values]]);
 
@@ -674,29 +675,56 @@ class OdooClient
         return (int) $ids[0];
     }
 
-    public function findCrmStageId(string $stageName): ?int
+    /**
+     * @return array{id: int, team_id: int|null}|null
+     */
+    public function findCrmStage(string $stageName): ?array
     {
         $normalized = trim($stageName);
         if ($normalized === '') {
             return null;
         }
 
-        $rows = $this->searchRead('crm.stage', [], ['id', 'name'], 200, 0, 'sequence asc');
+        $rows = $this->searchRead('crm.stage', [], ['id', 'name', 'team_id'], 200, 0, 'sequence asc');
+        $match = null;
 
         foreach ($rows as $row) {
             if (trim((string) ($row['name'] ?? '')) === $normalized) {
-                return (int) $row['id'];
+                $match = $row;
+                break;
             }
         }
 
-        foreach ($rows as $row) {
-            $candidate = trim((string) ($row['name'] ?? ''));
-            if ($candidate !== '' && mb_stripos($candidate, $normalized) !== false) {
-                return (int) $row['id'];
+        if ($match === null) {
+            foreach ($rows as $row) {
+                $candidate = trim((string) ($row['name'] ?? ''));
+                if ($candidate !== '' && mb_stripos($candidate, $normalized) !== false) {
+                    $match = $row;
+                    break;
+                }
             }
         }
 
-        return null;
+        if ($match === null) {
+            return null;
+        }
+
+        $teamId = 0;
+        if (is_array($match['team_id'] ?? null) && isset($match['team_id'][0])) {
+            $teamId = (int) $match['team_id'][0];
+        } elseif (is_numeric($match['team_id'] ?? null)) {
+            $teamId = (int) $match['team_id'];
+        }
+
+        return [
+            'id' => (int) $match['id'],
+            'team_id' => $teamId > 0 ? $teamId : null,
+        ];
+    }
+
+    public function findCrmStageId(string $stageName): ?int
+    {
+        return $this->findCrmStage($stageName)['id'] ?? null;
     }
 
     /**
@@ -778,8 +806,9 @@ class OdooClient
         ?float $amount = null,
         ?string $notes = null,
         ?array $lines = null,
+        ?string $existingPartnerId = null,
     ): array {
-        $partnerId = $this->createOrReusePartner($partnerName, $email, $phone, $requestNumber);
+        $partnerId = $this->createOrReusePartner($partnerName, $email, $phone, $requestNumber, $existingPartnerId);
         $lineName = filled($notes) ? "{$title}\n{$notes}" : $title;
         $orderValues = [
             'partner_id' => (int) $partnerId,
@@ -881,23 +910,29 @@ class OdooClient
         return null;
     }
 
-    public function createOrReusePartner(string $partnerName, ?string $email, ?string $phone, ?string $requestNumber = null): string
+    public function createOrReusePartner(string $partnerName, ?string $email, ?string $phone, ?string $requestNumber = null, ?string $existingPartnerId = null): string
     {
+        if (filled($existingPartnerId)) {
+            return (string) $existingPartnerId;
+        }
+
         if (filled($email)) {
             $existing = $this->call('res.partner', 'search', [
                 'domain' => [['email', '=', $email]],
                 'limit' => 1,
             ]);
             if (is_array($existing) && isset($existing[0])) {
-                $partnerId = (string) $existing[0];
-                $this->writeRecord('res.partner', $partnerId, array_filter([
-                    'name' => $partnerName,
-                    'email' => $email,
-                    'phone' => $phone,
-                    'customer_rank' => 1,
-                ], fn (mixed $value): bool => $value !== null && $value !== ''));
+                return (string) $existing[0];
+            }
+        }
 
-                return $partnerId;
+        if (filled($phone)) {
+            $existing = $this->call('res.partner', 'search', [
+                'domain' => [['phone', '=', $phone]],
+                'limit' => 1,
+            ]);
+            if (is_array($existing) && isset($existing[0])) {
+                return (string) $existing[0];
             }
         }
 

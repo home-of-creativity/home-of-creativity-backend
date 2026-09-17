@@ -1175,6 +1175,9 @@ async def capture_reject_reason(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def pending_callback_followup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if context.user_data.get("profile_field"):
+        text = update.message.text.strip() if update.message and update.message.text else ""
+        if text in {BTN_NEW, BTN_MY, BTN_SUPPORT}:
+            return
         await capture_profile_field(update, context)
         return
     if context.user_data.get("reject_number"):

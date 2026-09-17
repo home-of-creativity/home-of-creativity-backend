@@ -43,7 +43,11 @@ class PushClientLeadToOdoo
         try {
             $industry = $client->company_activity;
             if ($classifyIndustry && ! filled($industry) && filled($client->company_name)) {
-                $industry = $this->gemini->classifyCompanyIndustry((string) $client->company_name);
+                try {
+                    $industry = $this->gemini->classifyCompanyIndustry((string) $client->company_name);
+                } catch (\Throwable) {
+                    $industry = $client->company_activity;
+                }
             }
             if ($industry && $client->company_activity !== $industry) {
                 $client->forceFill(['company_activity' => $industry])->save();

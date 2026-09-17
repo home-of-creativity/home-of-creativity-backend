@@ -407,7 +407,17 @@ class ClientOpsAutomationTest extends TestCase
         $this->post('/api/admin/ops-settings/sham-cash-qr', ['file' => $file], [
             'Accept' => 'application/json',
         ])->assertOk();
-        $this->getJson('/api/admin/ops-settings')->assertOk()->assertJsonPath('data.sham_cash_qr', true);
+        $this->getJson('/api/admin/ops-settings')->assertOk()
+            ->assertJsonPath('data.sham_cash_qr', true);
+        $this->assertNotEmpty($this->getJson('/api/admin/ops-settings')->json('data.sham_cash_qr_updated_at'));
+        $this->get('/api/admin/ops-settings/sham-cash-qr')->assertOk();
+        $this->putJson('/api/admin/ops-settings/social-profile', [
+            'display_name' => 'Home of Creativity',
+            'bio' => 'Brand architects',
+            'theme' => 'cream',
+        ])->assertOk()
+            ->assertJsonPath('data.theme', 'cream')
+            ->assertJsonPath('data.display_name', 'Home of Creativity');
     }
 
     public function test_approving_quotation_returns_shared_sham_cash_qr_for_the_bot(): void

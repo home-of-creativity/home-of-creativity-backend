@@ -69,6 +69,11 @@ class BotFlowchartTest extends TestCase
             ->assertJsonPath('data.profile_complete', true)
             ->assertJsonPath('data.company_name', 'شركة نون');
 
+        $this->clientBot()->postJson('/api/bot/telegram/profile', [
+            'telegram_user_id' => 'tg-stairs',
+            'phone' => '🆕 طلب جديد',
+        ])->assertUnprocessable();
+
         $this->clientBot()->getJson('/api/bot/telegram/me?telegram_user_id=tg-stairs')
             ->assertOk()
             ->assertJsonPath('data.profile_complete', true)

@@ -4,6 +4,7 @@ namespace App\Actions;
 
 use App\Models\Client;
 use App\Services\OdooClient;
+use App\Support\ClientProfileValue;
 use Illuminate\Support\Facades\Log;
 
 class HydrateClientFromOdoo
@@ -27,11 +28,21 @@ class HydrateClientFromOdoo
                     'odoo_stage_name' => null,
                 ])->save();
             } else {
+                $name = ClientProfileValue::usableName($live['contact_name'] ?? null)
+                    ?? ClientProfileValue::usableName($client->name)
+                    ?? $client->name;
+                $company = filled($live['partner_name'] ?? null) ? (string) $live['partner_name'] : $client->company_name;
+                if (ClientProfileValue::looksLikePhone($company)) {
+                    $company = ClientProfileValue::usableName($client->company_name) ?? $client->company_name;
+                }
+                $phone = ClientProfileValue::usablePhone($live['phone'] ?? null)
+                    ?? ClientProfileValue::usablePhone($client->phone);
+
                 $client->forceFill(array_filter([
-                    'name' => $live['contact_name'] ?? null,
-                    'company_name' => $live['partner_name'] ?? null,
+                    'name' => $name,
+                    'company_name' => $company,
                     'email' => $live['email'] ?? null,
-                    'phone' => $live['phone'] ?? null,
+                    'phone' => $phone,
                     'odoo_stage_name' => $live['stage'] ?? null,
                     'odoo_partner_id' => $live['partner_id'] ?? $client->odoo_partner_id,
                 ], fn (mixed $value): bool => $value !== null && $value !== ''))->save();
@@ -46,11 +57,17 @@ class HydrateClientFromOdoo
                     $client->forceFill(['odoo_partner_id' => null])->save();
                 }
             } elseif ($live === null) {
-                $client->forceFill(array_filter([
-                    'name' => $partner['name'] ?? null,
-                    'email' => $partner['email'] ?? null,
-                    'phone' => $partner['phone'] ?? null,
-                ], fn (mixed $value): bool => $value !== null && $value !== ''))->save();
+                $updates = [];
+                if (! ClientProfileValue::usableName($client->name)) {
+                    $updates['name'] = ClientProfileValue::usableName($partner['name'] ?? null);
+                }
+                if (! filled($client->email) && filled($partner['email'] ?? null)) {
+                    $updates['email'] = $partner['email'];
+                }
+                if (! ClientProfileValue::usablePhone($client->phone)) {
+                    $updates['phone'] = ClientProfileValue::usablePhone($partner['phone'] ?? null);
+                }
+                $client->forceFill(array_filter($updates, fn (mixed $value): bool => $value !== null && $value !== ''))->save();
             }
         }
 

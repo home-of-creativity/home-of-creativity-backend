@@ -489,6 +489,116 @@ class AdminDashboardTest extends TestCase
         });
     }
 
+    public function test_quotation_keeps_existing_odoo_partner(): void
+    {
+        Http::preventStrayRequests();
+        $this->fakeOdooDocuments();
+        Http::fake($this->odooDocumentsHttpFake());
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        $client = Client::factory()->create([
+            'name' => 'Ahmad',
+            'email' => null,
+            'phone' => '0957470371',
+            'company_name' => 'Prodesign',
+            'odoo_partner_id' => '58',
+        ]);
+        $serviceRequest = ServiceRequest::factory()->for($client)->create([
+            'status' => RequestStatus::Submitted,
+        ]);
+
+        $this->postJson("/api/admin/requests/{$serviceRequest->id}/quotation", [
+            'amount' => 100,
+            'notes' => 'عرض',
+        ])->assertOk();
+
+        $this->assertSame('58', $client->fresh()?->odoo_partner_id);
+        Http::assertNotSent(function (Request $request): bool {
+            $args = $request->data()['params']['args'] ?? [];
+
+            return ($args[3] ?? null) === 'res.partner' && ($args[4] ?? null) === 'create';
+        });
+    }
+
+    public function test_clients_index_does_not_replace_person_name_from_partner(): void
+    {
+        Cache::flush();
+        Http::preventStrayRequests();
+        $this->fakeOdooDocuments();
+        Http::fake([
+            'https://odoo.test/jsonrpc' => function (Request $request) {
+                $params = $request->data()['params'] ?? [];
+                if (($params['service'] ?? '') === 'common') {
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => 2], 200);
+                }
+
+                $args = $params['args'] ?? [];
+                $model = (string) ($args[3] ?? '');
+                $action = (string) ($args[4] ?? '');
+
+                if ($model === 'res.partner' && $action === 'search_read') {
+                    return Http::response(['jsonrpc' => '2.0', 'result' => [[
+                        'id' => 58,
+                        'name' => '0957470371',
+                        'email' => false,
+                        'phone' => '🆕 طلب جديد',
+                    ]]], 200);
+                }
+
+                if ($model === 'crm.lead' && $action === 'search_read') {
+                    $domain = $args[5][0] ?? [];
+                    foreach ($domain as $clause) {
+                        if (($clause[0] ?? '') === 'id') {
+                            return Http::response(['jsonrpc' => '2.0', 'result' => [[
+                                'id' => 801,
+                                'stage_id' => [11, 'تلغرام'],
+                                'contact_name' => 'Ahmad Ali',
+                                'partner_name' => 'Prodesign',
+                                'email_from' => false,
+                                'phone' => '0957470371',
+                                'partner_id' => [58, '0957470371'],
+                            ]]], 200);
+                        }
+                    }
+
+                    return Http::response(['jsonrpc' => '2.0', 'result' => []], 200);
+                }
+
+                if ($model === 'crm.lead' && $action === 'create') {
+                    return Http::response(['jsonrpc' => '2.0', 'result' => 801], 200);
+                }
+
+                if ($model === 'crm.stage' && $action === 'search_read') {
+                    return Http::response(['jsonrpc' => '2.0', 'result' => [
+                        ['id' => 11, 'name' => 'تلغرام'],
+                    ]], 200);
+                }
+
+                return Http::response(['jsonrpc' => '2.0', 'result' => true], 200);
+            },
+        ]);
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        Client::factory()->create([
+            'name' => 'Ahmad Ali',
+            'phone' => '0957470371',
+            'company_name' => 'Prodesign',
+            'odoo_partner_id' => '58',
+            'odoo_lead_id' => null,
+        ]);
+
+        $this->getJson('/api/admin/clients')
+            ->assertOk()
+            ->assertJsonPath('data.0.name', 'Ahmad Ali')
+            ->assertJsonPath('data.0.phone', '0957470371');
+    }
+
     public function test_clients_index_imports_odoo_leads_from_any_pipeline_stage(): void
     {
         Cache::flush();
@@ -1057,7 +1167,8 @@ class AdminDashboardTest extends TestCase
                 ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => 2], 200)
                 ->push(['jsonrpc' => '2.0', 'id' => 2, 'result' => []], 200)
                 ->push(['jsonrpc' => '2.0', 'id' => 3, 'result' => []], 200)
-                ->push(['jsonrpc' => '2.0', 'id' => 4, 'result' => 80], 200),
+                ->push(['jsonrpc' => '2.0', 'id' => 4, 'result' => []], 200)
+                ->push(['jsonrpc' => '2.0', 'id' => 5, 'result' => 80], 200),
         ]);
 
         $admin = User::factory()->create();

@@ -1,9 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { LoadingLottie } from "../components/LoadingLottie";
 import { PageHeader } from "../components/PageHeader";
 import { api, type ServiceRequest } from "../api";
 import { copy, sources, statuses, type Locale } from "../i18n";
+import { ShamCashQrThumb } from "./PaymentsQr";
 
 type QuotationLine = {
   id: string;
@@ -34,7 +35,6 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
   const [notice, setNotice] = useState("");
   const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
   const [receiptReason, setReceiptReason] = useState("");
-  const [hasQr, setHasQr] = useState(false);
   const [receivedAmount, setReceivedAmount] = useState("");
   const [requiresFullPayment, setRequiresFullPayment] = useState(false);
 
@@ -54,16 +54,13 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
 
     function load(silent = false) {
       if (!silent) setLoading(true);
-      Promise.all([
-        api.request(requestId),
-        silent ? Promise.resolve(null) : api.opsSettings().catch(() => ({ data: { sham_cash_qr: false } })),
-      ])
-        .then(([res, ops]) => {
+      api
+        .request(requestId)
+        .then((res) => {
           if (cancelled) return;
           setItem(res.data);
           if (!silent) {
             setStatus(res.data.status);
-            if (ops) setHasQr(Boolean(ops.data.sham_cash_qr));
             setReceivedAmount(res.data.expected_due != null ? String(res.data.expected_due) : "");
             setRequiresFullPayment(Boolean(res.data.requires_full_payment));
           }
@@ -195,18 +192,6 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
       setItem(res.data);
       setStatus(res.data.status);
       setNotice(res.message ?? "");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t(copy.saveFailed));
-    }
-  }
-
-  async function uploadQr(file: File) {
-    setError("");
-    setNotice("");
-    try {
-      await api.uploadShamCashQr(file);
-      setHasQr(true);
-      setNotice(t(copy.qrSaved));
     } catch (err) {
       setError(err instanceof Error ? err.message : t(copy.saveFailed));
     }
@@ -576,21 +561,13 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
           </button>
         </div>
       </section>
-      <section className="card action-card">
-        <h2 className="form-title">{t(copy.shamCashQr)} {hasQr ? "✓" : ""}</h2>
+      <section className="card action-card qr-request-card">
+        <h2 className="form-title">{t(copy.shamCashQr)}</h2>
         <p className="muted">{t(copy.shamCashQrHelp)}</p>
-        <label className="field-label">
-          {t(copy.uploadQr)}
-          <input
-            className="field"
-            type="file"
-            accept="image/png,image/jpeg,image/webp"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) void uploadQr(file);
-            }}
-          />
-        </label>
+        <ShamCashQrThumb alt={t(copy.shamCashQr)} />
+        <Link className="btn btn-primary" to="/payments">
+          {t(copy.qrManage)}
+        </Link>
       </section>
       {notice ? <p className="notice notice-info">{notice}</p> : null}
       {error ? <p className="error">{error}</p> : null}

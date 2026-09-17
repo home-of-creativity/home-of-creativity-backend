@@ -21,6 +21,17 @@ export type User = {
   social_abilities?: SocialAbility[];
 };
 
+export type OpsSettings = {
+  sham_cash_qr: boolean;
+  sham_cash_qr_updated_at?: string | null;
+};
+
+export type SocialLinktreeProfile = {
+  display_name: string;
+  bio: string;
+  theme: "cream" | "purple" | "dark";
+};
+
 export function canSocial(user: User | null | undefined, ability: SocialAbility) {
   return Boolean(user?.social_abilities?.includes(ability));
 }
@@ -529,12 +540,30 @@ export const api = {
     return request<Envelope<ServiceRequest>>(`/admin/requests/${id}/renew`, { method: "POST" });
   },
   opsSettings() {
-    return request<Envelope<{ sham_cash_qr: boolean }>>("/admin/ops-settings");
+    return request<Envelope<OpsSettings>>("/admin/ops-settings");
+  },
+  shamCashQrBlob() {
+    const headers = new Headers({ Accept: "image/*" });
+    const token = getToken();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    return fetch(`${API_URL}/admin/ops-settings/sham-cash-qr`, { headers }).then(async (response) => {
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.blob();
+    });
   },
   uploadShamCashQr(file: File) {
     const form = new FormData();
     form.append("file", file);
-    return submitForm<Envelope<{ sham_cash_qr: boolean }>>("/admin/ops-settings/sham-cash-qr", "POST", form);
+    return submitForm<Envelope<OpsSettings>>("/admin/ops-settings/sham-cash-qr", "POST", form);
+  },
+  socialProfile() {
+    return request<Envelope<SocialLinktreeProfile>>("/admin/ops-settings/social-profile");
+  },
+  updateSocialProfile(payload: SocialLinktreeProfile) {
+    return request<Envelope<SocialLinktreeProfile>>("/admin/ops-settings/social-profile", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
   },
   async receiptBlob(requestId: number, fileId: number) {
     const headers = new Headers({ Accept: "application/octet-stream" });

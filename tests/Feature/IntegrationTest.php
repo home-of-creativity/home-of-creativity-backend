@@ -65,9 +65,10 @@ class IntegrationTest extends TestCase
             'https://odoo.test/jsonrpc' => Http::sequence()
                 ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => 2], 200)
                 ->push(['jsonrpc' => '2.0', 'id' => 2, 'result' => []], 200)
-                ->push(['jsonrpc' => '2.0', 'id' => 3, 'result' => 44], 200)
-                ->push(['jsonrpc' => '2.0', 'id' => 4, 'result' => [['id' => 1, 'name' => 'SYP']]], 200)
-                ->push(['jsonrpc' => '2.0', 'id' => 5, 'result' => 88], 200),
+                ->push(['jsonrpc' => '2.0', 'id' => 3, 'result' => []], 200)
+                ->push(['jsonrpc' => '2.0', 'id' => 4, 'result' => 44], 200)
+                ->push(['jsonrpc' => '2.0', 'id' => 5, 'result' => [['id' => 1, 'name' => 'SYP']]], 200)
+                ->push(['jsonrpc' => '2.0', 'id' => 6, 'result' => 88], 200),
         ]);
 
         $number = $this->createTelegramRequest();
@@ -81,7 +82,7 @@ class IntegrationTest extends TestCase
             ->assertJsonPath('data.odoo_partner_id', '44')
             ->assertJsonPath('data.odoo_quotation_id', '88');
 
-        Http::assertSentCount(5);
+        Http::assertSentCount(6);
     }
 
     public function test_clickup_programming_tasks_use_programming_list(): void

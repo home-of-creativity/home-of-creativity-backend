@@ -4,6 +4,7 @@ namespace App\Actions;
 
 use App\Models\Client;
 use App\Services\OdooClient;
+use App\Support\ClientProfileValue;
 use Illuminate\Support\Facades\Log;
 
 class PushClientToOdoo
@@ -21,7 +22,9 @@ class PushClientToOdoo
         }
 
         try {
-            $partnerName = filled($client->company_name) ? (string) $client->company_name : $client->name;
+            $partnerName = ClientProfileValue::usableName($client->company_name)
+                ?? ClientProfileValue::usableName($client->name)
+                ?? (filled($client->company_name) ? (string) $client->company_name : $client->name);
             $values = array_filter([
                 'name' => $partnerName,
                 'email' => $client->email,

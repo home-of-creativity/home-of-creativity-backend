@@ -4,6 +4,7 @@ namespace App\Actions;
 
 use App\Models\Client;
 use App\Services\OdooClient;
+use App\Support\ClientProfileValue;
 use Illuminate\Support\Facades\Log;
 
 class ImportOdooCrmClients
@@ -117,6 +118,15 @@ class ImportOdooCrmClients
         ], fn (mixed $value): bool => $value !== null && $value !== '');
 
         if ($client) {
+            if (ClientProfileValue::usableName($client->name)) {
+                unset($payload['name']);
+            }
+            if (ClientProfileValue::usablePhone($client->phone)) {
+                unset($payload['phone']);
+            }
+            if (filled($client->company_name) && ! ClientProfileValue::looksLikePhone($client->company_name)) {
+                unset($payload['company_name']);
+            }
             $client->fill($payload)->save();
 
             return 'updated';

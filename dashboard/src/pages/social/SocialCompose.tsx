@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api, canSocial, type SocialAccount, type SocialPost, type SocialPostMedia } from "../../api";
 import { useAuth } from "../../auth";
 import { ConfirmAction } from "../../components/ConfirmAction";
@@ -35,6 +35,7 @@ function comboReason(platform: string, placementValue: SocialPlacementValue, t: 
 export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
   const { user } = useAuth();
   const { id } = useParams();
+  const [params] = useSearchParams();
   const navigate = useNavigate();
   const postId = id ? Number(id) : null;
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
@@ -45,6 +46,7 @@ export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: stri
   const [accountIds, setAccountIds] = useState<number[]>([]);
   const [pageKey, setPageKey] = useState("");
   const [scheduledAt, setScheduledAt] = useState("");
+  const [scheduleMode, setScheduleMode] = useState<"draft" | "now" | "custom">("draft");
   const [files, setFiles] = useState<File[]>([]);
   const [existingMedia, setExistingMedia] = useState<SocialPostMedia[]>([]);
   const [removeMediaIds, setRemoveMediaIds] = useState<number[]>([]);
@@ -68,6 +70,7 @@ export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: stri
         const nextIds = res.data.accounts?.map((item) => item.id) ?? [];
         setAccountIds(nextIds);
         setScheduledAt(toLocalInput(res.data.scheduled_at));
+        setScheduleMode(res.data.scheduled_at ? "custom" : res.data.status === "published" ? "now" : "draft");
         setExistingMedia(res.data.media ?? []);
       })
       .catch((err) => setError(err instanceof Error ? err.message : t(copy.loading)))
@@ -97,9 +100,13 @@ export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: stri
     if (!postId && pages.length > 0) {
       const first = pages[0];
       setPageKey(first.key);
-      setAccountIds(pagePublishAccountIds(first, accounts));
+      const wanted = params.get("platforms")?.split(",").filter(Boolean) ?? [];
+      const wantedIds = wanted.length
+        ? first.accounts.filter((account) => wanted.includes(account.platform)).map((account) => account.id)
+        : pagePublishAccountIds(first, accounts);
+      setAccountIds(wantedIds.length ? wantedIds : pagePublishAccountIds(first, accounts));
     }
-  }, [accounts, accountIds, pageKey, pages, postId]);
+  }, [accounts, accountIds, pageKey, pages, postId, params]);
 
   function selectPage(key: string) {
     const page = pages.find((item) => item.key === key);
@@ -118,6 +125,13 @@ export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: stri
   }
 
   const previewPlacement = hoverPlacement ?? placement;
+  const canPublish = canSocial(user, "approve");
+  function primaryIntent(): "draft" | "schedule" | "publish" {
+    if (isPublished) return "draft";
+    if (scheduleMode === "now") return "publish";
+    if (scheduleMode === "custom") return "schedule";
+    return "draft";
+  }
 
   function buildForm(intent: "draft" | "schedule" | "publish") {
     const form = new FormData();
@@ -170,55 +184,14 @@ export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: stri
     <SocialChrome locale={locale} t={t} user={user} title={copy.socialCompose} lede={copy.socialComposeLede}>
       {loading ? <p className="muted">{t(copy.loading)}</p> : null}
       {error ? <p className="error">{error}</p> : null}
-      <form className="social-compose" onSubmit={(event) => void submit(event, "draft")}>
+      <form className="social-compose" onSubmit={(event) => void submit(event, primaryIntent())}>
         <div className="card social-compose-main">
-          <label className="field-label">
-            <span>{t(copy.socialBody)}</span>
-            <textarea className="field" rows={8} value={body} disabled={!editable} onChange={(event) => setBody(event.target.value)} required />
-          </label>
-          <label className="field-label">
-            <span>{t(copy.socialMedia)}</span>
-            <FileDropzone
-              accept={{ "image/*": [], "video/*": [] }}
-              multiple
-              disabled={!editable}
-              hint={t(copy.dropzoneHintMultiple)}
-              activeHint={t(copy.dropzoneActive)}
-              onFiles={(nextFiles) => setFiles(nextFiles)}
-            />
-            {files.length > 0 ? (
-              <p className="muted">
-                {files.length} {locale === "ar" ? "ملف مختار" : "file(s) selected"}
-              </p>
-            ) : null}
-          </label>
-          {existingMedia.length > 0 ? (
-            <ul className="social-media-list">
-              {existingMedia.map((item) => (
-                <li key={item.id}>
-                  <span>{item.original_name}</span>
-                  {editable ? (
-                    <button
-                      type="button"
-                      className="btn btn-ghost"
-                      onClick={() => {
-                        setExistingMedia((current) => current.filter((media) => media.id !== item.id));
-                        setRemoveMediaIds((current) => [...current, item.id]);
-                      }}
-                    >
-                      {t(copy.delete)}
-                    </button>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          ) : null}
           <fieldset className="field-label">
             <legend>{t(copy.socialPickPage)}</legend>
             {pages.length === 0 ? <p className="muted">{t(copy.socialNoAccounts)}</p> : null}
-            <div className="social-account-picks" role="radiogroup" aria-label={t(copy.socialPickPage)}>
+            <div className="social-account-picks studio-page-pills" role="radiogroup" aria-label={t(copy.socialPickPage)}>
               {pages.map((page) => (
-                <label key={page.key} className="check-row">
+                <label key={page.key} className={pageKey === page.key ? "studio-page-pill is-on" : "studio-page-pill"}>
                   <input
                     type="radio"
                     name="social-page"
@@ -228,7 +201,7 @@ export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: stri
                   />
                   <span>
                     {page.name}
-                    <small className="muted"> · {pageChannelSummary(page, t)}</small>
+                    <small> · {pageChannelSummary(page, t)}</small>
                   </span>
                 </label>
               ))}
@@ -280,12 +253,94 @@ export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: stri
               </div>
             </fieldset>
           ) : null}
-          <label className="field-label">
-            <span>{t(copy.socialScheduleAt)}</span>
-            <DateTimeField value={scheduledAt} onChange={setScheduledAt} disabled={!editable} locale={locale} placeholder={t(copy.socialScheduleAt)} />
-          </label>
+          <div className="plann-media-well">
+            <FileDropzone
+              accept={{ "image/*": [], "video/*": [] }}
+              multiple
+              disabled={!editable}
+              hint={t(copy.dropzoneHintMultiple)}
+              activeHint={t(copy.dropzoneActive)}
+              onFiles={(nextFiles) => setFiles(nextFiles)}
+            />
+            {existingMedia.length > 0 ? (
+              <ul className="social-media-list">
+                {existingMedia.map((item) => (
+                  <li key={item.id}>
+                    <span>{item.original_name}</span>
+                    {editable ? (
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        onClick={() => {
+                          setExistingMedia((current) => current.filter((media) => media.id !== item.id));
+                          setRemoveMediaIds((current) => [...current, item.id]);
+                        }}
+                      >
+                        {t(copy.delete)}
+                      </button>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+          <div className="plann-caption">
+            <div className="plann-caption-platforms" aria-hidden>
+              {selectedAccounts.map((account) => (
+                <SocialBrandIcon key={account.id} platform={account.platform} />
+              ))}
+            </div>
+            <label className="field-label">
+              <span className="sr-only">{t(copy.socialBody)}</span>
+              <textarea
+                className="field plann-caption-field"
+                rows={6}
+                value={body}
+                disabled={!editable}
+                placeholder={t(copy.socialCaptionHint)}
+                onChange={(event) => setBody(event.target.value)}
+                required
+              />
+            </label>
+          </div>
+          <fieldset className="plann-schedule">
+            <legend>{t(copy.socialSchedule)}</legend>
+            <label className="plann-schedule-row">
+              <input
+                type="radio"
+                name="schedule-mode"
+                checked={scheduleMode === "draft"}
+                disabled={!editable}
+                onChange={() => setScheduleMode("draft")}
+              />
+              {t(copy.socialScheduleDraftMode)}
+            </label>
+            <label className="plann-schedule-row">
+              <input
+                type="radio"
+                name="schedule-mode"
+                checked={scheduleMode === "now"}
+                disabled={!editable || !canPublish}
+                onChange={() => setScheduleMode("now")}
+              />
+              {t(copy.socialScheduleNowMode)}
+            </label>
+            <label className="plann-schedule-row">
+              <input
+                type="radio"
+                name="schedule-mode"
+                checked={scheduleMode === "custom"}
+                disabled={!editable}
+                onChange={() => setScheduleMode("custom")}
+              />
+              {t(copy.socialScheduleCustomMode)}
+            </label>
+            {scheduleMode === "custom" ? (
+              <DateTimeField value={scheduledAt} onChange={setScheduledAt} disabled={!editable} locale={locale} placeholder={t(copy.socialScheduleAt)} />
+            ) : null}
+          </fieldset>
           {editable && canSocial(user, "create") ? (
-            <div className="toolbar">
+            <div className="toolbar plann-compose-actions">
               {isPublished ? (
                 <>
                   <button type="submit" className="btn btn-primary" disabled={saving}>
@@ -302,7 +357,7 @@ export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: stri
                         setSaving(true);
                         api
                           .deleteSocialPost(postId)
-                          .then(() => navigate("/social"))
+                          .then(() => navigate("/social/links"))
                           .catch((err) => setError(err instanceof Error ? err.message : t(copy.loading)))
                           .finally(() => setSaving(false));
                       }}
@@ -310,27 +365,18 @@ export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: stri
                   ) : null}
                 </>
               ) : (
-                <>
-                  <button type="submit" className="btn" disabled={saving}>
-                    {t(copy.socialSaveDraft)}
-                  </button>
-                  <button type="button" className="btn" disabled={saving} onClick={(event) => void submit(event, "schedule")}>
-                    {t(copy.socialSchedule)}
-                  </button>
-                  {canSocial(user, "approve") ? (
-                    <button type="button" className="btn btn-primary" disabled={saving} onClick={(event) => void submit(event, "publish")}>
-                      {t(copy.socialPublishNow)}
-                    </button>
-                  ) : null}
-                </>
+                <button type="submit" className="btn btn-primary studio-start" disabled={saving || (scheduleMode === "now" && !canPublish)}>
+                  {scheduleMode === "now" ? t(copy.socialPublishNow) : scheduleMode === "custom" ? t(copy.socialSchedule) : t(copy.socialFindInspo)}
+                </button>
               )}
             </div>
           ) : null}
         </div>
-        <aside className="card social-preview" aria-live="polite">
-          <p className="eyebrow">{t(copy.socialPreview)}</p>
-          {post ? <span className={`status status-${post.status}`}>{socialStatusLabel(post.status, t)}</span> : null}
-          <p className="muted">{socialPlacementLabel(previewPlacement, t)}</p>
+        <aside className="social-preview plann-preview" aria-live="polite">
+          <div className="plann-preview-meta">
+            {post ? <span className={`status status-${post.status}`}>{socialStatusLabel(post.status, t)}</span> : null}
+            <p className="muted">{socialPlacementLabel(previewPlacement, t)}</p>
+          </div>
           {post?.last_error ? <p className="error">{publishErrorMessage(post.last_error, t)}</p> : null}
           <SocialPhonePreview
             locale={locale}

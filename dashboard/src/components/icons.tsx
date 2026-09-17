@@ -4,6 +4,8 @@ type IconProps = SVGProps<SVGSVGElement>;
 
 const base = {
   viewBox: "0 0 24 24",
+  width: 20,
+  height: 20,
   fill: "none",
   stroke: "currentColor",
   strokeWidth: 1.7,
@@ -127,6 +129,17 @@ export function IconSocial(props: IconProps) {
       <circle cx="17.5" cy="6.5" r="2.2" />
       <circle cx="17.5" cy="17.5" r="2.2" />
       <path d="M8.4 11.1 15.4 7.6M8.4 12.9 15.4 16.4" />
+    </svg>
+  );
+}
+
+export function IconQr(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <rect x="3.5" y="3.5" width="7" height="7" rx="1.2" />
+      <rect x="13.5" y="3.5" width="7" height="7" rx="1.2" />
+      <rect x="3.5" y="13.5" width="7" height="7" rx="1.2" />
+      <path d="M14 14h2.2v2.2H14zM17.3 14H19v2.2h-1.7zM14 17.3h2.2V19H14zM17.3 17.3H19V19h-1.7z" />
     </svg>
   );
 }

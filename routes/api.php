@@ -90,7 +90,10 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
     Route::post('requests/{service_request}/re-request-receipt', [AdminServiceRequestController::class, 'reRequestReceipt']);
     Route::post('requests/{service_request}/renew', [AdminServiceRequestController::class, 'renew']);
     Route::get('ops-settings', [AdminServiceRequestController::class, 'opsSettings']);
+    Route::get('ops-settings/sham-cash-qr', [AdminServiceRequestController::class, 'shamCashQrPreview']);
     Route::post('ops-settings/sham-cash-qr', [AdminServiceRequestController::class, 'uploadShamCashQr']);
+    Route::get('ops-settings/social-profile', [AdminServiceRequestController::class, 'socialProfile']);
+    Route::put('ops-settings/social-profile', [AdminServiceRequestController::class, 'updateSocialProfile']);
     Route::get('requests/{service_request}/files/{file}/receipt', [AdminServiceRequestController::class, 'receipt']);
     Route::post('integration-events/{integrationEvent}/retry', [AdminServiceRequestController::class, 'retryIntegrationEvent']);
     Route::get('portfolio/categories', [AdminPortfolioCategoryController::class, 'index']);

@@ -11,6 +11,21 @@ export type SocialPageGroup = {
   accounts: SocialAccount[];
 };
 
+export function socialProfileUrl(account: Pick<SocialAccount, "platform" | "handle" | "page_id">): string | undefined {
+  const handle = account.handle?.replace(/^@/, "").trim();
+  if (account.platform === "instagram" && handle) return `https://www.instagram.com/${handle}/`;
+  if (account.platform === "facebook") {
+    if (account.page_id) return `https://www.facebook.com/${account.page_id}`;
+    if (handle) return `https://www.facebook.com/${handle}`;
+  }
+  if (account.platform === "threads" && handle) return `https://www.threads.net/@${handle}`;
+  if (account.platform === "linkedin" && account.page_id) return `https://www.linkedin.com/company/${account.page_id}`;
+  if ((account.platform === "x" || account.platform === "twitter") && handle) return `https://x.com/${handle}`;
+  if (account.platform === "tiktok" && handle) return `https://www.tiktok.com/@${handle}`;
+  if (account.platform === "youtube" && handle) return `https://www.youtube.com/@${handle}`;
+  return undefined;
+}
+
 export function pageGroupKey(account: SocialAccount) {
   return account.facebook_page_id
     || (account.platform === "facebook" ? account.page_id : null)
@@ -125,6 +140,7 @@ export function platformLabel(platform: string, t: (c: Copy) => string) {
   if (platform === "x") return t(copy.xTwitter);
   if (platform === "tiktok") return t(copy.tiktok);
   if (platform === "youtube") return t(copy.youtube);
+  if (platform === "pinterest") return t(copy.pinterest);
   return platform;
 }
 

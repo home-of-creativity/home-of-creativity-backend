@@ -91,7 +91,7 @@ class OdooCrmPurgeTest extends TestCase
         $this->assertNull($client->odoo_stage_name);
     }
 
-    public function test_complete_profile_sends_telegram_stage_and_team(): void
+    public function test_complete_profile_sends_telegram_stage_on_existing_pipeline(): void
     {
         Http::preventStrayRequests();
         $this->fakeOdooDocuments();
@@ -118,7 +118,7 @@ class OdooCrmPurgeTest extends TestCase
             $vals = $args[5][0][0] ?? [];
 
             return ($vals['stage_id'] ?? null) === 11
-                && ($vals['team_id'] ?? null) === 21
+                && ! array_key_exists('team_id', $vals)
                 && ($vals['type'] ?? null) === 'opportunity';
         });
     }

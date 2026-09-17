@@ -6,6 +6,7 @@ import { api, canSocial } from "./api";
 import { AuthProvider, useAuth } from "./auth";
 import { applyLocale, applyTheme, copy, readLocale, readTheme, type Copy, type Locale, type Theme } from "./i18n";
 import { Moon, Search, Sun } from "lucide-react";
+import { BrandLockup } from "./components/BrandLockup";
 import { CommandPalette, type CommandItem } from "./components/CommandPalette";
 import { ClientForm } from "./pages/ClientForm";
 import { Clients } from "./pages/Clients";
@@ -19,12 +20,14 @@ import { Pricing } from "./pages/Pricing";
 import { PricingCategoryForm } from "./pages/pricing/PricingCategoryForm";
 import { PricingPackageForm } from "./pages/pricing/PricingPackageForm";
 import { PricingSubcategoryForm } from "./pages/pricing/PricingSubcategoryForm";
+import { SocialHome } from "./pages/social/SocialHome";
+import { SocialLinks } from "./pages/social/SocialLinks";
+import { SocialDesign } from "./pages/social/SocialDesign";
 import { SocialAccounts } from "./pages/social/SocialAccounts";
 import { SocialAccountForm } from "./pages/social/SocialAccountForm";
 import { SocialCalendar } from "./pages/social/SocialCalendar";
 import { SocialCompose } from "./pages/social/SocialCompose";
 import { SocialInbox } from "./pages/social/SocialInbox";
-import { SocialPosts } from "./pages/social/SocialPosts";
 import { ClientLogoForm } from "./pages/portfolio/ClientLogoForm";
 import { PortfolioCategories } from "./pages/portfolio/PortfolioCategories";
 import { PortfolioCategoryForm } from "./pages/portfolio/PortfolioCategoryForm";
@@ -33,6 +36,7 @@ import { PortfolioProjects } from "./pages/portfolio/PortfolioProjects";
 import { LoadingLottie } from "./components/LoadingLottie";
 import { RequestDetail } from "./pages/RequestDetail";
 import { Requests } from "./pages/Requests";
+import { Payments } from "./pages/Payments";
 import {
   IconCategories,
   IconClients,
@@ -43,6 +47,7 @@ import {
   IconOverview,
   IconPricing,
   IconProjects,
+  IconQr,
   IconReels,
   IconRequests,
   IconSocial,
@@ -110,20 +115,22 @@ function Shell({
   }, []);
 
   const commandItems: CommandItem[] = [
-    { id: "overview", label: t(copy.overview), to: "/", icon: <IconOverview aria-hidden />, group: t(copy.commandGroupPages) },
-    { id: "requests", label: t(copy.requests), to: "/requests", icon: <IconRequests aria-hidden />, group: t(copy.commandGroupPages) },
-    { id: "employees", label: t(copy.employees), to: "/employees", icon: <IconEmployees aria-hidden />, group: t(copy.commandGroupPages) },
-    { id: "clients", label: t(copy.clients), to: "/clients", icon: <IconClients aria-hidden />, group: t(copy.commandGroupPages) },
-    { id: "social", label: t(copy.navSocial), to: "/social", icon: <IconSocial aria-hidden />, group: t(copy.commandGroupPages) },
-    { id: "projects", label: t(copy.portfolioTabProjects), to: "/projects", icon: <IconProjects aria-hidden />, group: t(copy.commandGroupPages) },
-    { id: "reels", label: t(copy.reelsTitle), to: "/reels", icon: <IconReels aria-hidden />, group: t(copy.commandGroupPages) },
-    { id: "categories", label: t(copy.portfolioTabCategories), to: "/categories", icon: <IconCategories aria-hidden />, group: t(copy.commandGroupPages) },
-    { id: "pricing", label: t(copy.pricingTitle), to: "/pricing", icon: <IconPricing aria-hidden />, group: t(copy.commandGroupPages) },
-    { id: "contact", label: t(copy.contactTitle), to: "/contact", icon: <IconContact aria-hidden />, group: t(copy.commandGroupPages) },
-    { id: "add-employee", label: t(copy.addEmployee), to: "/employees/new", icon: <IconEmployees aria-hidden />, group: t(copy.commandGroupActions) },
-    { id: "add-client", label: t(copy.addClient), to: "/clients/new", icon: <IconClients aria-hidden />, group: t(copy.commandGroupActions) },
-    { id: "add-reel", label: t(copy.addReel), to: "/reels/new", icon: <IconReels aria-hidden />, group: t(copy.commandGroupActions) },
-    { id: "compose-post", label: t(copy.socialCompose), to: "/social/compose", icon: <IconSocial aria-hidden />, group: t(copy.commandGroupActions) },
+    { id: "overview", label: t(copy.overview), to: "/", icon: <IconOverview aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
+    { id: "requests", label: t(copy.requests), to: "/requests", icon: <IconRequests aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
+    { id: "employees", label: t(copy.employees), to: "/employees", icon: <IconEmployees aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
+    { id: "clients", label: t(copy.clients), to: "/clients", icon: <IconClients aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
+    { id: "social", label: t(copy.navSocial), to: "/social", icon: <IconSocial aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
+    { id: "social-links", label: t(copy.socialBioLinks), to: "/social/links", icon: <IconSocial aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
+    { id: "projects", label: t(copy.portfolioTabProjects), to: "/projects", icon: <IconProjects aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
+    { id: "reels", label: t(copy.reelsTitle), to: "/reels", icon: <IconReels aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
+    { id: "categories", label: t(copy.portfolioTabCategories), to: "/categories", icon: <IconCategories aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
+    { id: "pricing", label: t(copy.pricingTitle), to: "/pricing", icon: <IconPricing aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
+    { id: "contact", label: t(copy.contactTitle), to: "/contact", icon: <IconContact aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
+    { id: "sham-cash", label: t(copy.navPayments), to: "/payments", icon: <IconQr aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
+    { id: "add-employee", label: t(copy.addEmployee), to: "/employees/new", icon: <IconEmployees aria-hidden width={18} height={18} />, group: t(copy.commandGroupActions) },
+    { id: "add-client", label: t(copy.addClient), to: "/clients/new", icon: <IconClients aria-hidden width={18} height={18} />, group: t(copy.commandGroupActions) },
+    { id: "add-reel", label: t(copy.addReel), to: "/reels/new", icon: <IconReels aria-hidden width={18} height={18} />, group: t(copy.commandGroupActions) },
+    { id: "compose-post", label: t(copy.socialCompose), to: "/social/compose", icon: <IconSocial aria-hidden width={18} height={18} />, group: t(copy.commandGroupActions) },
   ];
 
   if (!user?.is_admin) return <Navigate to="/" replace />;
@@ -135,7 +142,7 @@ function Shell({
       </a>
       <header className="mobile-bar">
         <p className="brand">
-          HOME <span>of</span> CREATIVITY
+          <BrandLockup compact inverted />
         </p>
         <button
           type="button"
@@ -161,9 +168,7 @@ function Shell({
       />
       <aside id="dash-nav" className={navOpen ? "sidebar is-open" : "sidebar"}>
         <div className="sidebar-brand">
-          <p className="brand">
-            HOME <span>of</span> CREATIVITY
-          </p>
+          <BrandLockup inverted />
           <p className="brand-mark">{t(copy.brandMark)}</p>
         </div>
         <nav className="nav-links" aria-label={t(copy.menu)}>
@@ -196,6 +201,10 @@ function Shell({
               <span>{t(copy.navSocial)}</span>
             </NavLink>
           ) : null}
+          <NavLink to="/payments">
+            <IconQr aria-hidden />
+            <span>{t(copy.navPayments)}</span>
+          </NavLink>
           <p className="nav-group-label">{t(copy.navSite)}</p>
           <NavLink to="/projects">
             <IconProjects aria-hidden />
@@ -354,7 +363,9 @@ export function App() {
           <Route path="/contact" element={<Contact locale={locale} t={t} />} />
           <Route path="/contact/new" element={<ContactChannelForm locale={locale} t={t} />} />
           <Route path="/contact/:id/edit" element={<ContactChannelForm locale={locale} t={t} />} />
-          <Route path="/social" element={<SocialPosts locale={locale} t={t} />} />
+          <Route path="/social" element={<SocialHome locale={locale} t={t} />} />
+          <Route path="/social/links" element={<SocialLinks locale={locale} t={t} />} />
+          <Route path="/social/design" element={<SocialDesign locale={locale} t={t} />} />
           <Route path="/social/compose" element={<SocialCompose locale={locale} t={t} />} />
           <Route path="/social/compose/:id" element={<SocialCompose locale={locale} t={t} />} />
           <Route path="/social/calendar" element={<SocialCalendar locale={locale} t={t} />} />
@@ -362,6 +373,7 @@ export function App() {
           <Route path="/social/accounts" element={<SocialAccounts locale={locale} t={t} />} />
           <Route path="/social/accounts/new" element={<SocialAccountForm locale={locale} t={t} />} />
           <Route path="/social/accounts/:id/edit" element={<SocialAccountForm locale={locale} t={t} />} />
+          <Route path="/payments" element={<Payments locale={locale} t={t} />} />
           <Route path="/client-logos" element={<Navigate to="/clients?tab=logos" replace />} />
           <Route path="/projects" element={<PortfolioProjects locale={locale} t={t} />} />
           <Route path="/projects/new" element={<PortfolioProjectForm locale={locale} t={t} />} />

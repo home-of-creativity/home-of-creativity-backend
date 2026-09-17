@@ -8,15 +8,16 @@ import { SocialBrandIcon } from "../components/SocialBrandIcon";
 import { Tabs } from "../components/Tabs";
 import { api, type ContactChannel } from "../api";
 import { copy, type Locale } from "../i18n";
+import { PaymentsQr } from "./PaymentsQr";
 
-type Tab = "numbers" | "social" | "locations";
-const tabs: Tab[] = ["numbers", "social", "locations"];
+type Tab = "numbers" | "social" | "locations" | "sham-cash";
+const tabs: Tab[] = ["numbers", "social", "locations", "sham-cash"];
 
 function readTab(value: string | null): Tab {
   return tabs.includes(value as Tab) ? (value as Tab) : "numbers";
 }
 
-export function Contact({ t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
+export function Contact({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = readTab(searchParams.get("tab"));
   const [items, setItems] = useState<ContactChannel[]>([]);
@@ -107,9 +108,11 @@ export function Contact({ t }: { locale: Locale; t: (c: { ar: string; en: string
         title={t(copy.contactTitle)}
         lede={t(copy.contactLede)}
         actions={
-          <Link className="btn btn-primary" to={`/contact/new?tab=${tab}`}>
-            {tab === "social" ? t(copy.addContactSocial) : tab === "locations" ? t(copy.addContactLocation) : t(copy.addContactNumber)}
-          </Link>
+          tab === "sham-cash" ? null : (
+            <Link className="btn btn-primary" to={`/contact/new?tab=${tab}`}>
+              {tab === "social" ? t(copy.addContactSocial) : tab === "locations" ? t(copy.addContactLocation) : t(copy.addContactNumber)}
+            </Link>
+          )
         }
       />
 
@@ -119,13 +122,23 @@ export function Contact({ t }: { locale: Locale; t: (c: { ar: string; en: string
         ariaLabel={t(copy.contactTitle)}
         items={tabs.map((entry) => ({
           value: entry,
-          label: entry === "social" ? t(copy.contactTabSocial) : entry === "locations" ? t(copy.contactTabLocations) : t(copy.contactTabNumbers),
+          label:
+            entry === "social"
+              ? t(copy.contactTabSocial)
+              : entry === "locations"
+                ? t(copy.contactTabLocations)
+                : entry === "sham-cash"
+                  ? t(copy.contactTabShamCash)
+                  : t(copy.contactTabNumbers),
         }))}
       />
 
       {notice ? <p className="notice">{notice}</p> : null}
       {error ? <p className="error">{error}</p> : null}
 
+      {tab === "sham-cash" ? <PaymentsQr locale={locale} t={t} /> : null}
+
+      {tab === "sham-cash" ? null : (
       <div className="table-wrap">
         <table>
           <thead>
@@ -228,6 +241,7 @@ export function Contact({ t }: { locale: Locale; t: (c: { ar: string; en: string
           </tbody>
         </table>
       </div>
+      )}
     </>
   );
 }

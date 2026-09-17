@@ -25,9 +25,11 @@ use App\Models\OpsSetting;
 use App\Models\RequestFile;
 use App\Models\ServiceRequest;
 use App\Services\RequestStatusTransitionService;
+use App\Support\ShamCashQr;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ServiceRequestController extends Controller
@@ -173,19 +175,26 @@ class ServiceRequestController extends Controller
 
     public function opsSettings(): JsonResponse
     {
-        $path = OpsSetting::getValue('sham_cash_qr_path');
-
         return response()->json([
-            'data' => [
-                'sham_cash_qr' => filled($path) && Storage::disk('local')->exists($path),
-            ],
+            'data' => $this->opsSettingsPayload(),
             'message' => 'ok',
+        ]);
+    }
+
+    public function shamCashQrPreview(): BinaryFileResponse
+    {
+        $absolute = ShamCashQr::absolutePath();
+        abort_unless(is_string($absolute), 404, 'Sham Cash QR is not configured.');
+
+        return response()->file($absolute, [
+            'Content-Type' => mime_content_type($absolute) ?: 'image/png',
+            'Cache-Control' => 'private, no-store',
         ]);
     }
 
     public function uploadShamCashQr(Request $request): JsonResponse
     {
-        $validated = $request->validate([
+        $request->validate([
             'file' => ['required', 'file', 'max:5120', 'mimes:jpg,jpeg,png,webp'],
         ]);
 
@@ -198,11 +207,65 @@ class ServiceRequestController extends Controller
         }
 
         OpsSetting::setValue('sham_cash_qr_path', $stored);
+        OpsSetting::setValue('sham_cash_qr_updated_at', now()->toIso8601String());
 
         return response()->json([
-            'data' => ['sham_cash_qr' => true],
+            'data' => $this->opsSettingsPayload(),
             'message' => 'QR saved.',
         ]);
+    }
+
+    public function socialProfile(): JsonResponse
+    {
+        return response()->json([
+            'data' => $this->socialProfilePayload(),
+            'message' => 'ok',
+        ]);
+    }
+
+    public function updateSocialProfile(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'display_name' => ['nullable', 'string', 'max:80'],
+            'bio' => ['nullable', 'string', 'max:280'],
+            'theme' => ['required', 'in:cream,purple,dark'],
+        ]);
+
+        OpsSetting::setValue('social_linktree_profile', json_encode($validated, JSON_UNESCAPED_UNICODE));
+
+        return response()->json([
+            'data' => $this->socialProfilePayload(),
+            'message' => 'ok',
+        ]);
+    }
+
+    /**
+     * @return array{sham_cash_qr: bool, sham_cash_qr_updated_at: string|null}
+     */
+    private function opsSettingsPayload(): array
+    {
+        return [
+            'sham_cash_qr' => ShamCashQr::relativePath() !== null,
+            'sham_cash_qr_updated_at' => OpsSetting::getValue('sham_cash_qr_updated_at'),
+        ];
+    }
+
+    /**
+     * @return array{display_name: string, bio: string, theme: string}
+     */
+    private function socialProfilePayload(): array
+    {
+        $raw = OpsSetting::getValue('social_linktree_profile');
+        $data = is_string($raw) ? json_decode($raw, true) : null;
+        $theme = is_array($data) && in_array($data['theme'] ?? null, ['cream', 'purple', 'dark'], true)
+            ? $data['theme']
+            : 'cream';
+
+        return [
+            'display_name' => is_array($data) ? (string) ($data['display_name'] ?? '') : '',
+            'bio' => is_array($data) ? (string) ($data['bio'] ?? '') : '',
+            'theme' => $theme,
+        ];
     }
 
     public function retryIntegrationEvent(IntegrationEvent $integrationEvent, EnqueueIntegrationEvent $enqueue): ServiceRequestResource

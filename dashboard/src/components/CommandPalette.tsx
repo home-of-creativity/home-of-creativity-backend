@@ -67,8 +67,8 @@ export function CommandPalette({
                     setOpen(false);
                   }}
                 >
-                  {item.icon}
-                  <span>{item.label}</span>
+                  {item.icon ? <span className="command-item-icon">{item.icon}</span> : null}
+                  <span className="command-item-label">{item.label}</span>
                 </Command.Item>
               ))}
           </Command.Group>

@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../auth";
 import { LoadingLottie } from "../components/LoadingLottie";
+import { BrandLockup } from "../components/BrandLockup";
 import { copy, type Copy, type Locale } from "../i18n";
 
 type LoginPhase = "idle" | "loading" | "success" | "error";
@@ -80,9 +81,7 @@ export function Login({
           aria-busy={busy}
         >
           <p className="eyebrow">{t(copy.staffChip)}</p>
-          <p className="brand-lockup">
-            HOME <span>of</span> CREATIVITY
-          </p>
+          <BrandLockup />
           <h1>{t(copy.login)}</h1>
           <p className="muted">{t(copy.loginLede)}</p>
 

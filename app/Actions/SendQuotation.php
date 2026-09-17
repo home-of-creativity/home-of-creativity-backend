@@ -167,6 +167,7 @@ class SendQuotation
                 $amount,
                 $notes,
                 $lines,
+                $request->client?->odoo_partner_id,
             );
             $request->forceFill([
                 'odoo_quotation_id' => $created['odoo_quotation_id'],

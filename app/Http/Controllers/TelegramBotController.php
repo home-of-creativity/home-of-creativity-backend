@@ -30,6 +30,7 @@ use App\Models\ServiceRequest;
 use App\Models\SupportMessage;
 use App\Services\ClickUpStatusMapper;
 use App\Services\RequestStatusTransitionService;
+use App\Support\ClientProfileValue;
 use App\Support\PricingCatalog;
 use App\Support\ResolveServiceRequest;
 use App\Support\ShamCashQr;
@@ -97,6 +98,14 @@ class TelegramBotController extends Controller
             'phone' => ['sometimes', 'string', 'max:40'],
             'company_name' => ['sometimes', 'string', 'max:160'],
         ]);
+
+        foreach (['name', 'phone', 'company_name'] as $field) {
+            if (isset($validated[$field]) && ClientProfileValue::isKeyboardLabel($validated[$field])) {
+                throw ValidationException::withMessages([
+                    $field => 'Send the real value, not a menu button.',
+                ]);
+            }
+        }
 
         $client = Client::query()
             ->where('telegram_user_id', $validated['telegram_user_id'])

@@ -4,6 +4,7 @@ namespace App\Actions;
 
 use App\Models\Client;
 use App\Services\OdooClient;
+use App\Support\ClientProfileValue;
 use Illuminate\Support\Facades\Log;
 
 class SyncOdooPartners
@@ -34,14 +35,17 @@ class SyncOdooPartners
                 $client = Client::query()->where('email', $partner['email'])->first();
             }
 
-            $payload = [
-                'name' => $partner['name'],
-                'email' => $partner['email'],
-                'phone' => $partner['phone'],
-                'odoo_partner_id' => $odooId,
-            ];
-
             if ($client) {
+                $payload = ['odoo_partner_id' => $odooId];
+                if (! filled($client->email) && filled($partner['email'])) {
+                    $payload['email'] = $partner['email'];
+                }
+                if (! ClientProfileValue::usablePhone($client->phone) && ClientProfileValue::usablePhone($partner['phone'] ?? null)) {
+                    $payload['phone'] = $partner['phone'];
+                }
+                if (! ClientProfileValue::usableName($client->name) && ClientProfileValue::usableName($partner['name'] ?? null)) {
+                    $payload['name'] = $partner['name'];
+                }
                 $client->fill($payload)->save();
                 $updated++;
 
@@ -49,7 +53,12 @@ class SyncOdooPartners
             }
 
             try {
-                Client::query()->create($payload);
+                Client::query()->create([
+                    'name' => $partner['name'],
+                    'email' => $partner['email'],
+                    'phone' => $partner['phone'],
+                    'odoo_partner_id' => $odooId,
+                ]);
                 $created++;
             } catch (\Throwable $exception) {
                 Log::warning('Odoo partner sync skipped a row.', [
