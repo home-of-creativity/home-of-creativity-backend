@@ -19,13 +19,12 @@ chmod -R ug+rwx storage bootstrap/cache || true
 
 docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml up -d --build
 
-# Caddyfile is a read-only bind-mount, so `up -d` never restarts hoc-edge just
-# because its contents changed. Force a reload every deploy so routing edits
-# (e.g. /dashboard, /staff redirects) actually take effect.
-echo "Reloading edge (Caddy) config..."
-docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml exec -T hoc-edge \
-  caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile \
-  || docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml restart hoc-edge
+# Caddyfile is a single-file bind-mount. rsync replaces files via temp+rename
+# (a new inode), which can detach that bind mount from ever seeing updates —
+# so `caddy reload` alone can keep reading a stale cached file forever. Force
+# a full recreate of hoc-edge every deploy so it re-mounts the current file.
+echo "Recreating edge (Caddy) so it picks up the current Caddyfile..."
+docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml up -d --force-recreate hoc-edge
 
 echo "Waiting for API php-fpm..."
 for _ in $(seq 1 60); do
