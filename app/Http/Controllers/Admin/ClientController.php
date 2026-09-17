@@ -3,7 +3,6 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Actions\DeleteClient;
-use App\Actions\HydrateClientFromOdoo;
 use App\Actions\ImportOdooCrmClients;
 use App\Actions\StoreClient;
 use App\Actions\UpdateClient;
@@ -25,11 +24,10 @@ class ClientController extends Controller
         PaginatedIndexRequest $request,
         OdooClient $odoo,
         ImportOdooCrmClients $importOdooCrmClients,
-        HydrateClientFromOdoo $hydrateClientFromOdoo,
     ) {
-        if ($odoo->configured()) {
+        if ($odoo->configured() && (app()->runningUnitTests() || PHP_SAPI !== 'cli-server')) {
             try {
-                Cache::remember('odoo:crm:index-pull', 10, function () use ($importOdooCrmClients): bool {
+                Cache::remember('odoo:crm:index-pull', 60, function () use ($importOdooCrmClients): bool {
                     $importOdooCrmClients->handle(200);
 
                     return true;
@@ -56,15 +54,6 @@ class ClientController extends Controller
             })
             ->latest('id')
             ->paginate($request->perPage());
-
-        if ($odoo->configured()) {
-            $paginator->setCollection(
-                $paginator->getCollection()
-                    ->map(fn (Client $client): Client => $hydrateClientFromOdoo->handle($client))
-                    ->filter(fn (Client $client): bool => $client->exists)
-                    ->values()
-            );
-        }
 
         return ClientResource::collection($paginator)->additional(['message' => 'ok']);
     }

@@ -3,7 +3,7 @@ import { Link, Outlet } from "react-router-dom";
 import { api, type SocialAccount } from "../../api";
 import { SocialBrandIcon } from "../../components/SocialBrandIcon";
 import { copy, type Locale } from "../../i18n";
-import { platformLabel } from "./helpers";
+import { groupSocialPages, orderedPageAccounts, pageChannelSummary, type SocialPageGroup } from "./helpers";
 
 const STORAGE = "hoc-social-account-id";
 
@@ -23,8 +23,11 @@ export type SocialAccountsMeta = {
 type SocialWorkspaceValue = {
   accounts: SocialAccount[];
   activeAccounts: SocialAccount[];
+  pages: SocialPageGroup[];
+  selectedPage: SocialPageGroup | null;
   selectedAccount: SocialAccount | null;
   selectAccount: (id: number) => void;
+  selectPage: (key: string) => void;
   pickerOpen: boolean;
   openPicker: () => void;
   closePicker: () => void;
@@ -94,25 +97,30 @@ export function SocialWorkspace({ locale, t }: { locale: Locale; t: (c: { ar: st
   }, [refreshAccounts]);
 
   const activeAccounts = useMemo(() => accounts.filter((account) => account.is_active), [accounts]);
+  const pages = useMemo(() => groupSocialPages(activeAccounts), [activeAccounts]);
   const selectedAccount = activeAccounts.find((account) => account.id === selectedId) ?? null;
+  const selectedPage = pages.find((page) => page.accounts.some((account) => account.id === selectedId)) ?? null;
 
   useEffect(() => {
     if (loading) return;
-    if (activeAccounts.length === 0) {
+    if (pages.length === 0) {
       setSelectedId(null);
       writeStoredId(null);
       setPickerOpen(false);
       return;
     }
-    if (selectedAccount) return;
-    if (activeAccounts.length === 1) {
-      setSelectedId(activeAccounts[0].id);
-      writeStoredId(activeAccounts[0].id);
+    if (selectedPage) return;
+    if (pages.length === 1) {
+      const primary = pages[0].facebook ?? pages[0].accounts[0];
+      if (primary) {
+        setSelectedId(primary.id);
+        writeStoredId(primary.id);
+      }
       setPickerOpen(false);
       return;
     }
     setPickerOpen(true);
-  }, [loading, activeAccounts, selectedAccount]);
+  }, [loading, pages, selectedPage]);
 
   const selectAccount = useCallback((id: number) => {
     setSelectedId(id);
@@ -120,22 +128,34 @@ export function SocialWorkspace({ locale, t }: { locale: Locale; t: (c: { ar: st
     setPickerOpen(false);
   }, []);
 
+  const selectPage = useCallback((key: string) => {
+    const page = pages.find((item) => item.key === key);
+    const primary = page?.facebook ?? page?.accounts[0];
+    if (!primary) return;
+    setSelectedId(primary.id);
+    writeStoredId(primary.id);
+    setPickerOpen(false);
+  }, [pages]);
+
   const value = useMemo<SocialWorkspaceValue>(
     () => ({
       accounts,
       activeAccounts,
+      pages,
+      selectedPage,
       selectedAccount,
       selectAccount,
+      selectPage,
       pickerOpen,
       openPicker: () => setPickerOpen(true),
       closePicker: () => {
-        if (selectedAccount) setPickerOpen(false);
+        if (selectedPage) setPickerOpen(false);
       },
       loading,
       refreshAccounts,
       meta,
     }),
-    [accounts, activeAccounts, selectedAccount, selectAccount, pickerOpen, loading, refreshAccounts, meta],
+    [accounts, activeAccounts, pages, selectedPage, selectedAccount, selectAccount, selectPage, pickerOpen, loading, refreshAccounts, meta],
   );
 
   return (
@@ -145,12 +165,12 @@ export function SocialWorkspace({ locale, t }: { locale: Locale; t: (c: { ar: st
         <AccountPicker
           t={t}
           locale={locale}
-          accounts={activeAccounts}
-          selectedId={selectedAccount?.id ?? null}
-          required={!selectedAccount}
-          onSelect={selectAccount}
+          pages={pages}
+          selectedKey={selectedPage?.key ?? null}
+          required={!selectedPage}
+          onSelect={selectPage}
           onClose={() => {
-            if (selectedAccount) setPickerOpen(false);
+            if (selectedPage) setPickerOpen(false);
           }}
         />
       ) : null}
@@ -161,18 +181,18 @@ export function SocialWorkspace({ locale, t }: { locale: Locale; t: (c: { ar: st
 function AccountPicker({
   t,
   locale,
-  accounts,
-  selectedId,
+  pages,
+  selectedKey,
   required,
   onSelect,
   onClose,
 }: {
   t: (c: { ar: string; en: string }) => string;
   locale: Locale;
-  accounts: SocialAccount[];
-  selectedId: number | null;
+  pages: SocialPageGroup[];
+  selectedKey: string | null;
   required: boolean;
-  onSelect: (id: number) => void;
+  onSelect: (key: string) => void;
   onClose: () => void;
 }) {
   useEffect(() => {
@@ -190,29 +210,30 @@ function AccountPicker({
       )}
       <div className="studio-modal-card studio-account-picker" dir={locale === "ar" ? "rtl" : "ltr"}>
         <h2 id="account-picker-title">{t(copy.socialPickAccountTitle)}</h2>
-        {accounts.length === 0 ? (
+        {pages.length === 0 ? (
           <p className="muted">
             {t(copy.socialNoAccountsYet)}{" "}
             <Link to="/social/accounts">{t(copy.socialAccounts)}</Link>
           </p>
         ) : (
           <ul className="studio-account-list">
-            {accounts.map((account) => (
-              <li key={account.id}>
+            {pages.map((page) => (
+              <li key={page.key}>
                 <button
                   type="button"
-                  className={account.id === selectedId ? "studio-account-option is-on" : "studio-account-option"}
-                  onClick={() => onSelect(account.id)}
+                  className={page.key === selectedKey ? "studio-account-option is-on" : "studio-account-option"}
+                  onClick={() => onSelect(page.key)}
                 >
-                  <span className={`studio-chip-icon is-${account.platform}`}>
-                    <SocialBrandIcon platform={account.platform} />
-                  </span>
                   <span>
-                    <strong>{account.name}</strong>
-                    <small>
-                      {platformLabel(account.platform, t)}
-                      {account.handle ? ` · @${account.handle.replace(/^@/, "")}` : ""}
-                    </small>
+                    <strong>{page.name}</strong>
+                    <small>{pageChannelSummary(page, t)}</small>
+                  </span>
+                  <span className="studio-page-networks" aria-hidden>
+                    {orderedPageAccounts(page).map((account) => (
+                      <span key={account.id} className={`studio-chip-icon is-${account.platform}`}>
+                        <SocialBrandIcon platform={account.platform} />
+                      </span>
+                    ))}
                   </span>
                 </button>
               </li>

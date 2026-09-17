@@ -15,6 +15,7 @@ use App\Services\SocialAccountSync;
 use App\Services\SocialActivityLogger;
 use App\Services\ThreadsGraph;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Cache;
 
 class SocialAccountController extends Controller
 {
@@ -29,7 +30,23 @@ class SocialAccountController extends Controller
             || request()->user()?->canSocial(SocialAbility::Create)
             || request()->user()?->canSocial(SocialAbility::Engage), 403);
 
-        $this->sync->syncFromFacebook(request()->user()?->id);
+        $connectedBy = request()->user()?->id;
+
+        try {
+            if (app()->runningUnitTests() || PHP_SAPI !== 'cli-server') {
+                $meta = app()->runningUnitTests()
+                    ? $this->syncFacebookAccounts($connectedBy)
+                    : Cache::remember('social:facebook-sync', 60, fn (): array => $this->syncFacebookAccounts($connectedBy));
+
+                $this->sync->facebookPagesFound = (int) ($meta['facebook_pages_found'] ?? 0);
+                $this->sync->lastError = $meta['facebook_error'] ?? $this->sync->lastError;
+                $this->sync->threadsError = $meta['threads_error'] ?? $this->sync->threadsError;
+                $this->sync->linkedinError = $meta['linkedin_error'] ?? $this->sync->linkedinError;
+            }
+        } catch (\Throwable $exception) {
+            report($exception);
+            $this->sync->lastError = $this->sync->lastError ?: 'facebook_sync_failed';
+        }
 
         return SocialAccountResource::collection(
             SocialAccount::query()
@@ -54,6 +71,21 @@ class SocialAccountController extends Controller
             'linkedin_redirect_uri' => LinkedInGraph::redirectUri(),
             'linkedin_error' => $this->sync->linkedinError,
         ]);
+    }
+
+    /**
+     * @return array{facebook_pages_found: int, facebook_error: ?string, threads_error: ?string, linkedin_error: ?string}
+     */
+    private function syncFacebookAccounts(?int $connectedBy): array
+    {
+        $this->sync->syncFromFacebook($connectedBy);
+
+        return [
+            'facebook_pages_found' => $this->sync->facebookPagesFound,
+            'facebook_error' => $this->sync->lastError,
+            'threads_error' => $this->sync->threadsError,
+            'linkedin_error' => $this->sync->linkedinError,
+        ];
     }
 
     public function store(StoreSocialAccountRequest $request): JsonResponse

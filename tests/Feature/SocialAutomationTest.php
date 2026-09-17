@@ -18,6 +18,7 @@ use App\Services\SocialAccountSync;
 use App\Services\SocialPublisher;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Cache;
@@ -654,6 +655,105 @@ class SocialAutomationTest extends TestCase
         Http::assertSent(fn (Request $request) => $request->method() === 'POST'
             && str_contains($request->url(), 'threads_publish')
             && ($request['creation_id'] ?? null) === 'th_container');
+    }
+
+    public function test_threads_graph_timeout_is_coded(): void
+    {
+        Http::fake(function (Request $request) {
+            $url = $request->url();
+            if ($request->method() === 'GET' && str_contains($url, 'th_container')) {
+                throw new ConnectionException('cURL error 28: Resolving timed out after 3002 milliseconds (see https://curl.se/libcurl/c/libcurl-errors.html) for https://graph.threads.net/v1.0/th_container');
+            }
+            if (str_contains($url, 'threads_publish')) {
+                return Http::response(['id' => 'th_99'], 200);
+            }
+            if ($request->method() === 'POST' && str_contains($url, '/threads')) {
+                return Http::response(['id' => 'th_container'], 200);
+            }
+
+            return Http::response(['id' => 'ok'], 200);
+        });
+
+        $admin = $this->admin();
+        Sanctum::actingAs($admin);
+
+        $account = SocialAccount::factory()->connected()->recycle($admin)->create([
+            'platform' => SocialPlatform::Threads,
+            'name' => 'Damastech.ae',
+            'handle' => 'damastech.ae',
+            'page_id' => '333',
+            'facebook_page_id' => '111',
+            'access_token' => 'threads-user-token',
+        ]);
+
+        $this->post('/api/admin/social/posts', [
+            'body' => 'Hello Threads.',
+            'account_ids' => [$account->id],
+            'intent' => 'publish',
+        ], ['Accept' => 'application/json'])
+            ->assertCreated()
+            ->assertJsonPath('data.status', SocialPostStatus::Failed->value)
+            ->assertJsonPath('data.last_error', 'Damastech.ae: graph_timeout');
+    }
+
+    public function test_threads_image_uses_resumable_upload_when_app_url_is_local(): void
+    {
+        Storage::fake('public');
+        Http::fake(function (Request $request) {
+            $url = $request->url();
+            if (str_contains($url, 'rupload.facebook.com/threads')) {
+                return Http::response(['success' => true], 200);
+            }
+            if (str_contains($url, 'threads_publish')) {
+                return Http::response(['id' => 'th_99'], 200);
+            }
+            if ($request->method() === 'POST' && str_contains($url, '/threads')) {
+                return Http::response(['id' => 'th_container'], 200);
+            }
+            if (str_contains($url, 'th_container')) {
+                return Http::response(['status' => 'FINISHED'], 200);
+            }
+            if (str_contains($url, '/photos')) {
+                return Http::response([
+                    'error' => [
+                        'message' => '(#200) New Pages Experience Is Not Supported: This endpoint is not supported in the new Pages experience.',
+                        'code' => 200,
+                    ],
+                ], 400);
+            }
+
+            return Http::response(['id' => 'ok'], 200);
+        });
+
+        $admin = $this->admin();
+        Sanctum::actingAs($admin);
+
+        $account = SocialAccount::factory()->connected()->recycle($admin)->create([
+            'platform' => SocialPlatform::Threads,
+            'name' => 'Damastech.ae',
+            'handle' => 'damastech.ae',
+            'page_id' => '333',
+            'facebook_page_id' => '111',
+            'access_token' => 'threads-user-token',
+        ]);
+
+        $this->post('/api/admin/social/posts', [
+            'body' => 'Hello Threads.',
+            'account_ids' => [$account->id],
+            'intent' => 'publish',
+            'media' => [UploadedFile::fake()->image('hero.jpg')],
+        ], ['Accept' => 'application/json'])
+            ->assertCreated()
+            ->assertJsonPath('data.status', SocialPostStatus::Published->value);
+
+        Http::assertSent(fn (Request $request) => $request->method() === 'POST'
+            && str_contains($request->url(), '/threads')
+            && ! str_contains($request->url(), 'threads_publish')
+            && ($request['upload_type'] ?? null) === 'resumable'
+            && ($request['media_type'] ?? null) === 'IMAGE'
+            && ! isset($request['image_url']));
+        Http::assertSent(fn (Request $request) => str_contains($request->url(), 'rupload.facebook.com/threads'));
+        Http::assertNotSent(fn (Request $request) => str_contains($request->url(), '/photos'));
     }
 
     public function test_account_edits_toggle_and_delete_survive_facebook_sync(): void

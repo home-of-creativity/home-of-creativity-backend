@@ -6,6 +6,8 @@ const apiProxy = {
   "/api": {
     target: apiProxyTarget,
     changeOrigin: true,
+    timeout: 180_000,
+    proxyTimeout: 180_000,
   },
 };
 

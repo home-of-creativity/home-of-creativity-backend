@@ -102,12 +102,13 @@ function Shell({
   useEffect(() => {
     function loadBadges() {
       api
-        .employees()
-        .then((res) => setBadges((prev) => ({ ...prev, pendingEmployees: res.data.filter((row) => row.status === "pending").length })))
-        .catch(() => {});
-      api
-        .requests()
-        .then((res) => setBadges((prev) => ({ ...prev, openRequests: res.meta.total })))
+        .overview()
+        .then((res) =>
+          setBadges({
+            pendingEmployees: res.data.pending_employees ?? 0,
+            openRequests: res.data.requests ?? 0,
+          }),
+        )
         .catch(() => {});
     }
     loadBadges();
@@ -335,6 +336,7 @@ export function App() {
     <Toaster
       position={locale === "ar" ? "top-left" : "top-right"}
       dir={locale === "ar" ? "rtl" : "ltr"}
+      offset="4.5rem"
       richColors
       closeButton
     />

@@ -38,7 +38,9 @@ class AdminDashboardTest extends TestCase
 
         $this->getJson('/api/admin/overview')
             ->assertOk()
-            ->assertJsonPath('data.requests', 0);
+            ->assertJsonPath('data.requests', 0)
+            ->assertJsonPath('data.pending_employees', 0)
+            ->assertJsonPath('data.recent', []);
     }
 
     public function test_admin_confirm_payment_queues_gemini(): void
@@ -375,8 +377,8 @@ class AdminDashboardTest extends TestCase
 
         $this->getJson('/api/admin/clients')
             ->assertOk()
-            ->assertJsonPath('data.0.name', 'Sara')
-            ->assertJsonPath('data.0.company_name', 'شركة الإبداع')
+            ->assertJsonPath('data.0.email', 'sara@hoc.test')
+            ->assertJsonPath('data.0.odoo_stage_name', 'تلغرام')
             ->assertJsonPath('data.0.odoo_live.stage', 'تلغرام');
     }
 

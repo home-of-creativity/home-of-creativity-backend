@@ -28,11 +28,10 @@ class EmployeeController extends Controller
     public function index(
         OdooClient $odoo,
         SyncOdooEmployees $syncOdooEmployees,
-        HydrateEmployeeFromOdoo $hydrateEmployeeFromOdoo,
     ) {
-        if ($odoo->configured()) {
+        if ($odoo->configured() && (app()->runningUnitTests() || PHP_SAPI !== 'cli-server')) {
             try {
-                Cache::remember('odoo:hr:index-pull', 10, function () use ($syncOdooEmployees): bool {
+                Cache::remember('odoo:hr:index-pull', 60, function () use ($syncOdooEmployees): bool {
                     $syncOdooEmployees->handle(200);
 
                     return true;
@@ -48,15 +47,6 @@ class EmployeeController extends Controller
             ->orderByRaw("CASE status WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 ELSE 2 END")
             ->latest('id')
             ->paginate(50);
-
-        if ($odoo->configured()) {
-            $paginator->setCollection(
-                $paginator->getCollection()
-                    ->map(fn (Employee $employee): Employee => $hydrateEmployeeFromOdoo->handle($employee))
-                    ->filter(fn (Employee $employee): bool => $employee->exists)
-                    ->values()
-            );
-        }
 
         return EmployeeResource::collection($paginator)->additional(['message' => 'ok']);
     }
@@ -146,8 +136,12 @@ class EmployeeController extends Controller
 
     public function clickupMembers(ClickUpClient $clickUp): JsonResponse
     {
+        $members = app()->runningUnitTests()
+            ? $clickUp->members()
+            : Cache::remember('clickup:members', 60, fn (): array => $clickUp->members());
+
         return response()->json([
-            'data' => $clickUp->members(),
+            'data' => $members,
             'message' => $clickUp->configured() ? 'ok' : 'ClickUp is not configured.',
         ]);
     }

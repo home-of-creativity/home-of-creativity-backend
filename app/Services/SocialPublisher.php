@@ -48,7 +48,7 @@ class SocialPublisher
 
         try {
             $response = Http::timeout(5)
-                ->connectTimeout(3)
+                ->connectTimeout($this->graphConnectTimeout())
                 ->acceptJson()
                 ->get($this->graphUrl($account, $externalId), $this->graphQuery($account, ['fields' => 'id']));
         } catch (ConnectionException|Throwable) {
@@ -95,7 +95,7 @@ class SocialPublisher
 
         try {
             $response = Http::timeout((int) config('services.social.timeout', 20))
-                ->connectTimeout(3)
+                ->connectTimeout($this->graphConnectTimeout())
                 ->acceptJson()
                 ->asForm()
                 ->post(
@@ -103,7 +103,7 @@ class SocialPublisher
                     FacebookGraph::withToken([$field => $post->body], (string) $account->access_token),
                 );
         } catch (ConnectionException|Throwable $exception) {
-            return $this->fail($exception->getMessage());
+            return $this->fail($this->connectionError($exception));
         }
 
         if (! $response->successful()) {
@@ -143,11 +143,11 @@ class SocialPublisher
         foreach ($candidates as $id) {
             try {
                 $response = Http::timeout((int) config('services.social.timeout', 20))
-                    ->connectTimeout(3)
+                    ->connectTimeout($this->graphConnectTimeout())
                     ->acceptJson()
                     ->delete($this->graphUrl($account, $id), $this->graphQuery($account, []));
             } catch (ConnectionException|Throwable $exception) {
-                return $this->fail($exception->getMessage());
+                return $this->fail($this->connectionError($exception));
             }
 
             if ($response->successful() || $this->graphObjectGone($response)) {
@@ -266,7 +266,7 @@ class SocialPublisher
 
             return $this->publishFacebook($account, $post, $pageId, $media, $placement);
         } catch (ConnectionException|Throwable $exception) {
-            return $this->fail($exception->getMessage());
+            return $this->fail($this->connectionError($exception));
         }
     }
 
@@ -414,7 +414,7 @@ class SocialPublisher
         }
 
         $response = Http::timeout((int) config('services.social.timeout', 20))
-            ->connectTimeout(3)
+            ->connectTimeout($this->graphConnectTimeout())
             ->withHeaders(LinkedInGraph::authHeaders($token))
             ->post(LinkedInGraph::restUrl('posts'), $payload);
 
@@ -447,7 +447,7 @@ class SocialPublisher
         }
 
         $init = Http::timeout((int) config('services.social.timeout', 20))
-            ->connectTimeout(3)
+            ->connectTimeout($this->graphConnectTimeout())
             ->withHeaders(LinkedInGraph::authHeaders($token))
             ->post(LinkedInGraph::restUrl('images?action=initializeUpload'), [
                 'initializeUploadRequest' => ['owner' => $author],
@@ -492,7 +492,7 @@ class SocialPublisher
         }
 
         $init = Http::timeout((int) config('services.social.timeout', 20))
-            ->connectTimeout(3)
+            ->connectTimeout($this->graphConnectTimeout())
             ->withHeaders(LinkedInGraph::authHeaders($token))
             ->post(LinkedInGraph::restUrl('videos?action=initializeUpload'), [
                 'initializeUploadRequest' => [
@@ -541,7 +541,7 @@ class SocialPublisher
         }
 
         $finish = Http::timeout((int) config('services.social.timeout', 20))
-            ->connectTimeout(3)
+            ->connectTimeout($this->graphConnectTimeout())
             ->withHeaders(LinkedInGraph::authHeaders($token))
             ->post(LinkedInGraph::restUrl('videos?action=finalizeUpload'), [
                 'finalizeUploadRequest' => array_filter([
@@ -574,7 +574,7 @@ class SocialPublisher
             }
 
             $status = Http::timeout(10)
-                ->connectTimeout(3)
+                ->connectTimeout($this->graphConnectTimeout())
                 ->withHeaders(LinkedInGraph::authHeaders($token))
                 ->get(LinkedInGraph::restUrl('videos/'.rawurlencode($videoUrn)));
 
@@ -594,7 +594,7 @@ class SocialPublisher
     {
         try {
             $response = Http::timeout(5)
-                ->connectTimeout(3)
+                ->connectTimeout($this->graphConnectTimeout())
                 ->withHeaders(LinkedInGraph::authHeaders($token))
                 ->get(LinkedInGraph::restUrl('posts/'.rawurlencode($externalId)));
         } catch (ConnectionException|Throwable) {
@@ -618,7 +618,7 @@ class SocialPublisher
     private function deleteLinkedInPost(string $externalId, string $token): array
     {
         $response = Http::timeout((int) config('services.social.timeout', 20))
-            ->connectTimeout(3)
+            ->connectTimeout($this->graphConnectTimeout())
             ->withHeaders(LinkedInGraph::authHeaders($token))
             ->delete(LinkedInGraph::restUrl('posts/'.rawurlencode($externalId)));
 
@@ -640,7 +640,7 @@ class SocialPublisher
         }
 
         $response = Http::timeout((int) config('services.social.timeout', 20))
-            ->connectTimeout(3)
+            ->connectTimeout($this->graphConnectTimeout())
             ->withHeaders(LinkedInGraph::authHeaders($token))
             ->post(LinkedInGraph::restUrl('socialActions/'.rawurlencode($shareUrn).'/comments'), [
                 'actor' => LinkedInGraph::organizationUrn((string) $account->page_id),
@@ -691,11 +691,15 @@ class SocialPublisher
      */
     private function graphForm(string $path, array $payload, string $token): array
     {
-        $response = Http::timeout((int) config('services.social.timeout', 20))
-            ->connectTimeout(3)
-            ->acceptJson()
-            ->asForm()
-            ->post(FacebookGraph::url($path), FacebookGraph::withToken($payload, $token));
+        try {
+            $response = Http::timeout((int) config('services.social.timeout', 20))
+                ->connectTimeout($this->graphConnectTimeout())
+                ->acceptJson()
+                ->asForm()
+                ->post(FacebookGraph::url($path), FacebookGraph::withToken($payload, $token));
+        } catch (ConnectionException $exception) {
+            return $this->fail($this->connectionError($exception));
+        }
 
         if (! $response->successful()) {
             return $this->fail($this->graphError($response->json(), $response->status()));
@@ -735,7 +739,7 @@ class SocialPublisher
         }
 
         $start = Http::timeout((int) config('services.social.timeout', 20))
-            ->connectTimeout(3)
+            ->connectTimeout($this->graphConnectTimeout())
             ->acceptJson()
             ->asForm()
             ->post(
@@ -1096,17 +1100,26 @@ class SocialPublisher
             return ['ok' => false, 'url' => null, 'error' => 'instagram_media_fetch'];
         }
 
-        $upload = Http::timeout((int) config('services.social.upload_timeout', 60))
-            ->connectTimeout(10)
-            ->acceptJson()
-            ->attach('source', $jpeg, 'photo.jpg')
-            ->post(
-                FacebookGraph::url($pageId.'/photos'),
-                FacebookGraph::withToken(['published' => 'false'], $pageToken),
-            );
+        try {
+            $upload = Http::timeout((int) config('services.social.upload_timeout', 60))
+                ->connectTimeout($this->graphConnectTimeout())
+                ->acceptJson()
+                ->attach('source', $jpeg, 'photo.jpg')
+                ->post(
+                    FacebookGraph::url($pageId.'/photos'),
+                    FacebookGraph::withToken(['published' => 'false'], $pageToken),
+                );
+        } catch (ConnectionException $exception) {
+            return ['ok' => false, 'url' => null, 'error' => $this->connectionError($exception)];
+        }
 
         if (! $upload->successful()) {
-            return ['ok' => false, 'url' => null, 'error' => $this->graphError($upload->json(), $upload->status())];
+            $error = $this->graphError($upload->json(), $upload->status());
+            if ($error === 'facebook_new_pages_experience' || FacebookGraph::isNewPagesExperienceMessage($error)) {
+                $error = 'instagram_media_fetch';
+            }
+
+            return ['ok' => false, 'url' => null, 'error' => $error];
         }
 
         $photoId = data_get($upload->json(), 'id');
@@ -1115,7 +1128,7 @@ class SocialPublisher
         }
 
         $meta = Http::timeout((int) config('services.social.timeout', 20))
-            ->connectTimeout(3)
+            ->connectTimeout($this->graphConnectTimeout())
             ->acceptJson()
             ->get(
                 FacebookGraph::url($photoId),
@@ -1257,7 +1270,7 @@ class SocialPublisher
     private function publishInstagramCreation(string $igUserId, string $creationId, string $token): array
     {
         $publish = Http::timeout((int) config('services.social.timeout', 20))
-            ->connectTimeout(3)
+            ->connectTimeout($this->graphConnectTimeout())
             ->acceptJson()
             ->asForm()
             ->post(
@@ -1343,19 +1356,25 @@ class SocialPublisher
     {
         $attempts = $video ? 40 : 16;
         $delayUs = $video ? 2_000_000 : 500_000;
+        $timeouts = 0;
 
         for ($attempt = 0; $attempt < $attempts; $attempt++) {
-            if ($attempt > 0) {
-                usleep($delayUs);
-            }
+            try {
+                $status = Http::timeout(10)
+                    ->connectTimeout($this->graphConnectTimeout())
+                    ->acceptJson()
+                    ->get(
+                        FacebookGraph::url($creationId),
+                        FacebookGraph::withToken(['fields' => 'status_code,status'], $token),
+                    );
+            } catch (ConnectionException $exception) {
+                $timeouts++;
+                if ($timeouts >= 3) {
+                    return $this->connectionError($exception);
+                }
 
-            $status = Http::timeout(10)
-                ->connectTimeout(3)
-                ->acceptJson()
-                ->get(
-                    FacebookGraph::url($creationId),
-                    FacebookGraph::withToken(['fields' => 'status_code,status'], $token),
-                );
+                continue;
+            }
 
             $code = data_get($status->json(), 'status_code');
             if ($code === 'FINISHED') {
@@ -1370,6 +1389,14 @@ class SocialPublisher
 
                 return 'instagram_media_fetch';
             }
+
+            if ($code === 'IN_PROGRESS' || ! $status->successful()) {
+                usleep($delayUs);
+
+                continue;
+            }
+
+            return null;
         }
 
         return 'instagram_media_processing';
@@ -1396,12 +1423,12 @@ class SocialPublisher
             ], $token);
         }
 
-        $item = $this->threadsMediaFields($account, $first, $post->body);
+        $item = $this->threadsMediaFields($first, $post->body);
         if (! $item['ok'] || $item['payload'] === null) {
             return $this->fail($item['error'] ?? 'threads_media_missing');
         }
 
-        return $this->publishThreadsContainer($userId, $item['payload'], $token);
+        return $this->publishThreadsContainer($userId, $item['payload'], $token, $item['binary'] ?? null, $first);
     }
 
     /**
@@ -1412,12 +1439,12 @@ class SocialPublisher
     {
         $children = [];
         foreach ($media as $item) {
-            $fields = $this->threadsMediaFields($account, $item, null, true);
+            $fields = $this->threadsMediaFields($item, null, true);
             if (! $fields['ok'] || $fields['payload'] === null) {
                 return $this->fail($fields['error'] ?? 'threads_media_missing');
             }
 
-            $container = $this->createThreadsContainer($userId, $fields['payload'], $token);
+            $container = $this->prepareThreadsContainer($userId, $fields['payload'], $token, $fields['binary'] ?? null, $item);
             if (! $container['ok'] || ! filled($container['id'])) {
                 return $this->fail($container['error'] ?? 'Threads did not return a media container.');
             }
@@ -1432,13 +1459,13 @@ class SocialPublisher
     }
 
     /**
-     * @return array{ok: bool, payload: ?array<string, string>, error: ?string}
+     * @return array{ok: bool, payload: ?array<string, string>, binary: ?string, error: ?string}
      */
-    private function threadsMediaFields(SocialAccount $account, SocialPostMedia $media, ?string $text, bool $carouselItem = false): array
+    private function threadsMediaFields(SocialPostMedia $media, ?string $text, bool $carouselItem = false): array
     {
         $disk = Storage::disk('public');
         if (! $disk->exists((string) $media->path)) {
-            return ['ok' => false, 'payload' => null, 'error' => 'Media file is missing.'];
+            return ['ok' => false, 'payload' => null, 'binary' => null, 'error' => 'Media file is missing.'];
         }
 
         $contents = $disk->get((string) $media->path);
@@ -1449,7 +1476,7 @@ class SocialPublisher
             }
         }
         if (! is_string($contents) || $contents === '') {
-            return ['ok' => false, 'payload' => null, 'error' => 'Media file is empty.'];
+            return ['ok' => false, 'payload' => null, 'binary' => null, 'error' => 'Media file is empty.'];
         }
 
         $payload = [];
@@ -1462,61 +1489,57 @@ class SocialPublisher
 
         if ($media->kind === 'video') {
             $videoUrl = $this->publicStorageUrl((string) $media->path);
-            if (! filled($videoUrl)) {
-                return ['ok' => false, 'payload' => null, 'error' => 'threads_media_fetch'];
-            }
             $payload['media_type'] = 'VIDEO';
-            $payload['video_url'] = $videoUrl;
+            if (filled($videoUrl)) {
+                $payload['video_url'] = $videoUrl;
 
-            return ['ok' => true, 'payload' => $payload, 'error' => null];
+                return ['ok' => true, 'payload' => $payload, 'binary' => null, 'error' => null];
+            }
+
+            return ['ok' => true, 'payload' => $payload, 'binary' => $contents, 'error' => null];
         }
 
         $jpeg = $this->instagramJpeg($media, $contents);
         if (! $jpeg['ok'] || ! is_string($jpeg['contents']) || $jpeg['contents'] === '') {
-            return ['ok' => false, 'payload' => null, 'error' => $jpeg['error'] ?? 'instagram_media_type'];
-        }
-
-        $imageUrl = $this->instagramPublicImageUrl($media, $jpeg['contents']);
-        if (! filled($imageUrl)) {
-            $hosted = $this->hostInstagramImageOnFacebook($account, $jpeg['contents'], (string) $account->access_token);
-            if (! $hosted['ok'] || ! filled($hosted['url'])) {
-                return ['ok' => false, 'payload' => null, 'error' => $hosted['error'] ?? 'threads_media_fetch'];
-            }
-            $imageUrl = $hosted['url'];
+            return ['ok' => false, 'payload' => null, 'binary' => null, 'error' => $jpeg['error'] ?? 'instagram_media_type'];
         }
 
         $payload['media_type'] = 'IMAGE';
-        $payload['image_url'] = $imageUrl;
+        $imageUrl = $this->instagramPublicImageUrl($media, $jpeg['contents']);
+        if (filled($imageUrl)) {
+            $payload['image_url'] = $imageUrl;
 
-        return ['ok' => true, 'payload' => $payload, 'error' => null];
+            return ['ok' => true, 'payload' => $payload, 'binary' => null, 'error' => null];
+        }
+
+        return ['ok' => true, 'payload' => $payload, 'binary' => $jpeg['contents'], 'error' => null];
     }
 
     /**
      * @param  array<string, string>  $payload
      * @return array{ok: bool, external_id: ?string, error: ?string}
      */
-    private function publishThreadsContainer(string $userId, array $payload, string $token): array
+    private function publishThreadsContainer(string $userId, array $payload, string $token, ?string $binary = null, ?SocialPostMedia $media = null): array
     {
-        $container = $this->createThreadsContainer($userId, $payload, $token);
+        $container = $this->prepareThreadsContainer($userId, $payload, $token, $binary, $media);
         if (! $container['ok'] || ! filled($container['id'])) {
             return $this->fail($container['error'] ?? 'Threads did not return a media container.');
         }
 
-        $waitError = $this->waitForThreadsContainer($container['id'], $token);
-        if (is_string($waitError)) {
-            return $this->fail($waitError);
+        try {
+            $publish = Http::timeout((int) config('services.social.timeout', 20))
+                ->connectTimeout($this->graphConnectTimeout())
+                ->acceptJson()
+                ->asForm()
+                ->post(
+                    ThreadsGraph::url($userId.'/threads_publish'),
+                    ThreadsGraph::withToken([
+                        'creation_id' => $container['id'],
+                    ], $token),
+                );
+        } catch (ConnectionException $exception) {
+            return $this->fail($this->connectionError($exception));
         }
-
-        $publish = Http::timeout((int) config('services.social.timeout', 20))
-            ->connectTimeout(3)
-            ->acceptJson()
-            ->asForm()
-            ->post(
-                ThreadsGraph::url($userId.'/threads_publish'),
-                ThreadsGraph::withToken([
-                    'creation_id' => $container['id'],
-                ], $token),
-            );
 
         if (! $publish->successful()) {
             return $this->fail($this->graphError($publish->json(), $publish->status()));
@@ -1533,16 +1556,63 @@ class SocialPublisher
      * @param  array<string, string>  $payload
      * @return array{ok: bool, id: ?string, error: ?string}
      */
+    private function prepareThreadsContainer(string $userId, array $payload, string $token, ?string $binary = null, ?SocialPostMedia $media = null): array
+    {
+        $resumable = is_string($binary) && $binary !== '' && $media !== null
+            && ! isset($payload['image_url'])
+            && ! isset($payload['video_url']);
+        if ($resumable) {
+            $payload['upload_type'] = 'resumable';
+        }
+
+        $container = $this->createThreadsContainer($userId, $payload, $token);
+        if (! $container['ok'] || ! filled($container['id'])) {
+            return $container;
+        }
+
+        if ($resumable) {
+            $mime = $media->kind === 'video'
+                ? ($media->mime ?: 'video/mp4')
+                : 'image/jpeg';
+            $upload = $this->uploadResumableBinary(
+                ThreadsGraph::ruploadUrl($container['id']),
+                $binary,
+                $media,
+                $token,
+                $container['id'],
+                $mime,
+            );
+            if (! $upload['ok']) {
+                return ['ok' => false, 'id' => null, 'error' => $upload['error'] ?? 'threads_media_fetch'];
+            }
+        }
+
+        $waitError = $this->waitForThreadsContainer($container['id'], $token);
+        if (is_string($waitError)) {
+            return ['ok' => false, 'id' => null, 'error' => $waitError];
+        }
+
+        return $container;
+    }
+
+    /**
+     * @param  array<string, string>  $payload
+     * @return array{ok: bool, id: ?string, error: ?string}
+     */
     private function createThreadsContainer(string $userId, array $payload, string $token): array
     {
-        $response = Http::timeout((int) config('services.social.upload_timeout', 180))
-            ->connectTimeout(10)
-            ->acceptJson()
-            ->asForm()
-            ->post(
-                ThreadsGraph::url($userId.'/threads'),
-                ThreadsGraph::withToken($payload, $token),
-            );
+        try {
+            $response = Http::timeout((int) config('services.social.upload_timeout', 180))
+                ->connectTimeout($this->graphConnectTimeout())
+                ->acceptJson()
+                ->asForm()
+                ->post(
+                    ThreadsGraph::url($userId.'/threads'),
+                    ThreadsGraph::withToken($payload, $token),
+                );
+        } catch (ConnectionException $exception) {
+            return ['ok' => false, 'id' => null, 'error' => $this->connectionError($exception)];
+        }
 
         if (! $response->successful()) {
             return ['ok' => false, 'id' => null, 'error' => $this->graphError($response->json(), $response->status())];
@@ -1560,19 +1630,25 @@ class SocialPublisher
     {
         $attempts = 16;
         $delayUs = 500_000;
+        $timeouts = 0;
 
         for ($attempt = 0; $attempt < $attempts; $attempt++) {
-            if ($attempt > 0) {
-                usleep($delayUs);
-            }
+            try {
+                $status = Http::timeout(10)
+                    ->connectTimeout($this->graphConnectTimeout())
+                    ->acceptJson()
+                    ->get(
+                        ThreadsGraph::url($creationId),
+                        ThreadsGraph::withToken(['fields' => 'status,error_message'], $token),
+                    );
+            } catch (ConnectionException $exception) {
+                $timeouts++;
+                if ($timeouts >= 3) {
+                    return $this->connectionError($exception);
+                }
 
-            $status = Http::timeout(10)
-                ->connectTimeout(3)
-                ->acceptJson()
-                ->get(
-                    ThreadsGraph::url($creationId),
-                    ThreadsGraph::withToken(['fields' => 'status,error_message'], $token),
-                );
+                continue;
+            }
 
             $code = data_get($status->json(), 'status');
             if (in_array($code, ['ERROR', 'EXPIRED'], true)) {
@@ -1584,13 +1660,13 @@ class SocialPublisher
                 return 'threads_media_fetch';
             }
 
-            if (in_array($code, ['IN_PROGRESS', 'PROCESSING'], true)) {
+            if (in_array($code, ['IN_PROGRESS', 'PROCESSING'], true) || ! $status->successful()) {
+                usleep($delayUs);
+
                 continue;
             }
 
-            if ($status->successful()) {
-                return null;
-            }
+            return null;
         }
 
         return 'threads_media_processing';
@@ -1654,7 +1730,7 @@ class SocialPublisher
 
         try {
             $response = Http::timeout((int) config('services.n8n.timeout', 12))
-                ->connectTimeout(3)
+                ->connectTimeout($this->graphConnectTimeout())
                 ->acceptJson()
                 ->withHeaders([
                     'X-N8N-Secret' => (string) config('services.n8n.webhook_secret'),
@@ -1686,6 +1762,14 @@ class SocialPublisher
     private function graphError(mixed $json, int $status): string
     {
         $message = FacebookGraph::errorMessage($json, $status);
+        $lower = strtolower($message);
+        if (str_contains($message, 'cURL error 28')
+            || str_contains($message, 'cURL error 6')
+            || str_contains($message, 'cURL error 7')
+            || str_contains($lower, 'timed out')
+            || str_contains($lower, 'could not resolve host')) {
+            return 'graph_timeout';
+        }
         if (str_contains($message, 'pages_manage_engagement')) {
             return 'missing_pages_manage_engagement';
         }
@@ -1695,7 +1779,6 @@ class SocialPublisher
         if (str_contains($message, 'Cannot call API for app')) {
             return 'facebook_app_user_mismatch';
         }
-        $lower = strtolower($message);
         if (str_contains($lower, 'image_url is required') || str_contains($lower, 'parameter image_url')) {
             return 'instagram_media_type';
         }
@@ -1754,7 +1837,7 @@ class SocialPublisher
     private function facebookPageStoryId(string $photoId, string $token): ?string
     {
         $meta = Http::timeout((int) config('services.social.timeout', 20))
-            ->connectTimeout(3)
+            ->connectTimeout($this->graphConnectTimeout())
             ->acceptJson()
             ->get(
                 FacebookGraph::url($photoId),
@@ -1764,6 +1847,26 @@ class SocialPublisher
         $storyId = data_get($meta->json(), 'page_story_id') ?: data_get($meta->json(), 'post_id');
 
         return is_string($storyId) && $storyId !== '' ? $storyId : null;
+    }
+
+    private function graphConnectTimeout(): int
+    {
+        return max(5, (int) config('services.social.connect_timeout', 10));
+    }
+
+    private function connectionError(?Throwable $exception = null): string
+    {
+        $message = $exception?->getMessage() ?? '';
+        if ($exception instanceof ConnectionException
+            || str_contains($message, 'cURL error 28')
+            || str_contains($message, 'cURL error 6')
+            || str_contains($message, 'cURL error 7')
+            || str_contains(strtolower($message), 'timed out')
+            || str_contains(strtolower($message), 'could not resolve host')) {
+            return 'graph_timeout';
+        }
+
+        return $message !== '' ? $message : 'graph_timeout';
     }
 
     /**

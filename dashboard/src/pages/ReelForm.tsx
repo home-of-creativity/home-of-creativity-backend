@@ -6,13 +6,14 @@ import { FileDropzone } from "../components/FileDropzone";
 import { FormPage } from "../components/FormPage";
 import { FormSection } from "../components/FormSection";
 import { LoadingLottie } from "../components/LoadingLottie";
+import { startUploadToast } from "../components/UploadToast";
 import { useZodForm } from "../lib/useZodForm";
 import { api } from "../api";
 import { copy, type Locale } from "../i18n";
 
 const maxVideoBytes = 512 * 1024 * 1024;
 
-export function ReelForm({ t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
+export function ReelForm({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
   const navigate = useNavigate();
   const params = useParams();
   const editingId = params.id ? Number(params.id) : null;
@@ -95,17 +96,18 @@ export function ReelForm({ t }: { locale: Locale; t: (c: { ar: string; en: strin
     document.querySelectorAll("video").forEach((el) => el.pause());
 
     setSaving(true);
+    const upload = video || poster ? startUploadToast(t, locale) : null;
     try {
-      if (editingId) await api.updateLandingReel(editingId, payload);
-      else await api.createLandingReel(payload);
-      toast.success(t(copy.saveSuccess));
+      if (editingId) await api.updateLandingReel(editingId, payload, upload?.onProgress);
+      else await api.createLandingReel(payload, upload?.onProgress);
+      upload ? upload.done() : toast.success(t(copy.saveSuccess));
       navigate("/reels");
     } catch (err) {
       const message = err instanceof Error ? err.message : "";
-      const network = err instanceof TypeError || /failed to fetch|networkerror|load failed/i.test(message);
+      const network = err instanceof TypeError || /failed to fetch|networkerror|load failed|api_unreachable/i.test(message);
       const finalMessage = network ? t(copy.reelSaveNetworkFailed) : message || t(copy.savePortfolioFailed);
       setError(finalMessage);
-      toast.error(finalMessage);
+      upload ? upload.fail(finalMessage) : toast.error(finalMessage);
       setSaving(false);
     }
   }

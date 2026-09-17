@@ -42,6 +42,17 @@ class ThreadsGraph
         return $base.'/'.ltrim($path, '/');
     }
 
+    public static function ruploadUrl(string $containerId): string
+    {
+        $base = rtrim((string) config('services.social.threads_graph_base', 'https://graph.threads.net/v1.0'), '/');
+        $version = 'v1.0';
+        if (preg_match('#/(v\d+\.\d+)$#', $base, $matches) === 1) {
+            $version = $matches[1];
+        }
+
+        return 'https://rupload.facebook.com/threads/'.$version.'/'.ltrim($containerId, '/');
+    }
+
     public static function oauthHost(): string
     {
         return rtrim((string) config('services.threads.oauth_token_base', 'https://graph.threads.net'), '/');

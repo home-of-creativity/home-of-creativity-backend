@@ -2,9 +2,8 @@ import type { ReactNode } from "react";
 import { NavLink } from "react-router-dom";
 import { canSocial, type SocialAbility, type User } from "../../api";
 import { PageHeader } from "../../components/PageHeader";
-import { SocialBrandIcon } from "../../components/SocialBrandIcon";
 import { copy, type Copy, type Locale } from "../../i18n";
-import { platformLabel } from "./helpers";
+import { pageChannelSummary, platformLabel } from "./helpers";
 import { useSocialWorkspace } from "./SocialWorkspace";
 
 type Props = {
@@ -28,8 +27,10 @@ const tabs: { to: string; end?: boolean; label: Copy; ability: SocialAbility }[]
 ];
 
 export function SocialChrome({ t, user, title, lede, actions, immersive, children }: Props) {
-  const { selectedAccount, activeAccounts, openPicker, loading } = useSocialWorkspace();
+  const { selectedAccount, selectedPage, pages, openPicker, loading } = useSocialWorkspace();
   const visible = tabs.filter((tab) => canSocial(user, tab.ability) || (tab.ability === "create" && canSocial(user, "approve")));
+  const pageLabel = selectedPage?.name ?? selectedAccount?.name ?? null;
+  const pageSummary = selectedPage ? pageChannelSummary(selectedPage, t) : selectedAccount ? platformLabel(selectedAccount.platform, t) : "";
 
   return (
     <div className={immersive ? "studio-shell is-immersive" : "studio-shell"}>
@@ -47,22 +48,19 @@ export function SocialChrome({ t, user, title, lede, actions, immersive, childre
           ))}
         </nav>
         <div className="studio-account-switch">
-          {selectedAccount ? (
+          {pageLabel ? (
             <span className="studio-account-current">
-              <span className={`studio-chip-icon is-${selectedAccount.platform}`}>
-                <SocialBrandIcon platform={selectedAccount.platform} />
-              </span>
               <span>
-                <strong>{selectedAccount.name}</strong>
-                <small>{platformLabel(selectedAccount.platform, t)}</small>
+                <strong>{pageLabel}</strong>
+                {pageSummary ? <small>{pageSummary}</small> : null}
               </span>
             </span>
           ) : (
             <span className="muted">{loading ? t(copy.loading) : t(copy.socialPickAccount)}</span>
           )}
-          {activeAccounts.length > 0 ? (
+          {pages.length > 0 ? (
             <button type="button" className="btn btn-primary studio-change-account" onClick={openPicker}>
-              {selectedAccount ? t(copy.socialChangeAccount) : t(copy.socialPickAccount)}
+              {selectedPage ? t(copy.socialChangeAccount) : t(copy.socialPickAccount)}
             </button>
           ) : null}
         </div>

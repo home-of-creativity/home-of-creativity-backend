@@ -121,7 +121,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
     }
 
     load();
-    const timer = window.setInterval(() => load(true), 15000);
+    const timer = window.setInterval(() => load(true), 30000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);

@@ -27,12 +27,25 @@ function statusTone(status: string) {
 }
 
 export function Overview({ t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
-  const [data, setData] = useState<{ clients: number; requests: number; by_status: Record<string, number> } | null>(null);
+  const [data, setData] = useState<{
+    clients: number;
+    requests: number;
+    by_status: Record<string, number>;
+    recent?: ServiceRequest[];
+  } | null>(null);
   const [recent, setRecent] = useState<ServiceRequest[]>([]);
 
   useEffect(() => {
-    api.overview().then((res) => setData(res.data)).catch(() => setData(null));
-    api.requests().then((res) => setRecent(res.data.slice(0, 6))).catch(() => setRecent([]));
+    api
+      .overview()
+      .then((res) => {
+        setData(res.data);
+        setRecent(res.data.recent ?? []);
+      })
+      .catch(() => {
+        setData(null);
+        setRecent([]);
+      });
   }, []);
 
   if (!data) return <LoadingLottie variant="page" label={t(copy.loading)} />;

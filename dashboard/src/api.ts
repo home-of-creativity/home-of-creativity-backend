@@ -488,11 +488,66 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-async function submitForm<T>(path: string, method: "POST" | "PUT", form: FormData) {
+export type UploadProgress = {
+  loaded: number;
+  total: number;
+  phase: "uploading" | "processing";
+};
+
+function parseXhrJson(raw: string): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+async function submitForm<T>(
+  path: string,
+  method: "POST" | "PUT",
+  form: FormData,
+  onProgress?: (progress: UploadProgress) => void,
+) {
   if (method === "PUT") {
     form.set("_method", "PUT");
   }
-  return request<T>(path, { method: "POST", body: form });
+  if (!onProgress) {
+    return request<T>(path, { method: "POST", body: form });
+  }
+
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${API_URL}${path}`);
+    xhr.responseType = "text";
+    xhr.setRequestHeader("Accept", "application/json");
+    const token = getToken();
+    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+
+    xhr.upload.onprogress = (event) => {
+      onProgress({
+        loaded: event.loaded,
+        total: event.lengthComputable ? event.total : 0,
+        phase: "uploading",
+      });
+    };
+    xhr.upload.onload = () => {
+      onProgress({ loaded: 0, total: 0, phase: "processing" });
+    };
+
+    xhr.onload = () => {
+      if (xhr.status === 401) setToken(null);
+      const body = parseXhrJson(xhr.responseText);
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(new Error(apiErrorMessage(body, xhr.status)));
+        return;
+      }
+      resolve(body as T);
+    };
+    xhr.onerror = () => reject(new Error("api_unreachable"));
+    xhr.onabort = () => reject(new Error("api_unreachable"));
+    xhr.send(form);
+  });
 }
 
 export const api = {
@@ -509,9 +564,13 @@ export const api = {
     return request<Envelope<null>>("/auth/logout", { method: "POST" });
   },
   overview() {
-    return request<Envelope<{ clients: number; requests: number; by_status: Record<string, number> }>>(
-      "/admin/overview",
-    );
+    return request<Envelope<{
+      clients: number;
+      requests: number;
+      pending_employees?: number;
+      by_status: Record<string, number>;
+      recent?: ServiceRequest[];
+    }>>("/admin/overview");
   },
   requests(status?: string, page = 1) {
     return request<Paginated<ServiceRequest>>(`/admin/requests${queryString({ status, page })}`);
@@ -741,11 +800,11 @@ export const api = {
   landingReels(page = 1) {
     return request<Paginated<LandingReel>>(`/admin/reels${queryString({ page })}`);
   },
-  createLandingReel(form: FormData) {
-    return submitForm<Envelope<LandingReel>>("/admin/reels", "POST", form);
+  createLandingReel(form: FormData, onProgress?: (progress: UploadProgress) => void) {
+    return submitForm<Envelope<LandingReel>>("/admin/reels", "POST", form, onProgress);
   },
-  updateLandingReel(id: number, form: FormData) {
-    return submitForm<Envelope<LandingReel>>(`/admin/reels/${id}`, "PUT", form);
+  updateLandingReel(id: number, form: FormData, onProgress?: (progress: UploadProgress) => void) {
+    return submitForm<Envelope<LandingReel>>(`/admin/reels/${id}`, "PUT", form, onProgress);
   },
   deleteLandingReel(id: number) {
     return request<Envelope<null>>(`/admin/reels/${id}`, { method: "DELETE" });
@@ -960,11 +1019,11 @@ export const api = {
   socialPost(id: number) {
     return request<Envelope<SocialPost>>(`/admin/social/posts/${id}`);
   },
-  createSocialPost(form: FormData) {
-    return submitForm<Envelope<SocialPost>>("/admin/social/posts", "POST", form);
+  createSocialPost(form: FormData, onProgress?: (progress: UploadProgress) => void) {
+    return submitForm<Envelope<SocialPost>>("/admin/social/posts", "POST", form, onProgress);
   },
-  updateSocialPost(id: number, form: FormData) {
-    return submitForm<Envelope<SocialPost>>(`/admin/social/posts/${id}`, "PUT", form);
+  updateSocialPost(id: number, form: FormData, onProgress?: (progress: UploadProgress) => void) {
+    return submitForm<Envelope<SocialPost>>(`/admin/social/posts/${id}`, "PUT", form, onProgress);
   },
   deleteSocialPost(id: number) {
     return request<Envelope<null>>(`/admin/social/posts/${id}`, { method: "DELETE" });

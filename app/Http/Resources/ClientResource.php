@@ -18,6 +18,12 @@ class ClientResource extends JsonResource
         $odoo = app(OdooClient::class);
         $odooReady = $odoo->configured();
         $live = $this->odoo_live ?? null;
+        if (! is_array($live) && filled($this->odoo_stage_name)) {
+            $live = [
+                'stage' => $this->odoo_stage_name,
+                'name' => $this->name,
+            ];
+        }
 
         return [
             'id' => $this->id,

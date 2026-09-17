@@ -105,7 +105,7 @@ class FacebookGraph
 
         try {
             $response = Http::timeout((int) config('services.social.timeout', 20))
-                ->connectTimeout(3)
+                ->connectTimeout(max(5, (int) config('services.social.connect_timeout', 10)))
                 ->acceptJson()
                 ->get(self::url($facebookPageId), self::withToken([
                     'fields' => 'instagram_business_account{id}',

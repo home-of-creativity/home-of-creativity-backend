@@ -17,21 +17,22 @@ export function Employees({ t }: { locale: Locale; t: (c: { ar: string; en: stri
   const [query, setQuery] = useState("");
   const staffBot = import.meta.env.VITE_TELEGRAM_STAFF_BOT as string | undefined;
 
-  function load() {
-    setLoading(true);
-    Promise.all([api.employees(), api.clickupMembers().catch(() => ({ data: [] as ClickUpMember[] }))])
-      .then(([employees, clickup]) => {
-        setItems(employees.data);
-        setMembers(clickup.data);
-      })
+  function load(silent = false) {
+    if (!silent) setLoading(true);
+    api
+      .employees()
+      .then((employees) => setItems(employees.data))
       .catch(() => setItems([]))
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!silent) setLoading(false);
+      });
   }
 
   useEffect(() => {
     load();
     api.odooStatus().then((res) => setOdooReady(res.data.configured)).catch(() => setOdooReady(false));
-    const timer = window.setInterval(() => load(), 15000);
+    api.clickupMembers().then((clickup) => setMembers(clickup.data)).catch(() => setMembers([]));
+    const timer = window.setInterval(() => load(true), 30000);
     return () => window.clearInterval(timer);
   }, []);
 

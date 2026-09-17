@@ -56,11 +56,23 @@ export function DateTimeField({
         </button>
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Content className="datetime-popover" sideOffset={8} align="start">
+        <Popover.Content className="datetime-popover" sideOffset={6} align="end" collisionPadding={12}>
           <DayPicker
             mode="single"
             selected={selectedDate}
             defaultMonth={selectedDate}
+            dir={locale === "ar" ? "rtl" : "ltr"}
+            formatters={{
+              formatCaption: (month) =>
+                new Intl.DateTimeFormat(locale === "ar" ? "ar" : "en-US", {
+                  month: "long",
+                  year: "numeric",
+                }).format(month),
+              formatWeekdayName: (weekday) =>
+                new Intl.DateTimeFormat(locale === "ar" ? "ar" : "en-US", {
+                  weekday: "narrow",
+                }).format(weekday),
+            }}
             onSelect={(next) => {
               if (!next) return;
               onChange(`${fromDate(next)}T${time}`);

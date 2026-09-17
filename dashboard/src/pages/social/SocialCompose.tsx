@@ -4,6 +4,7 @@ import { api, canSocial, type SocialPost, type SocialPostMedia } from "../../api
 import { useAuth } from "../../auth";
 import { ConfirmAction } from "../../components/ConfirmAction";
 import { DateTimeField } from "../../components/DateTimeField";
+import { startUploadToast } from "../../components/UploadToast";
 import { copy, socialActivities, type Locale } from "../../i18n";
 import { formatWhen, fromLocalInput, publishErrorMessage, socialStatusLabel, toLocalInput } from "./helpers";
 import { SocialChrome } from "./SocialChrome";
@@ -79,6 +80,7 @@ export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: stri
     }
     setSaving(true);
     setError("");
+    const upload = files.length > 0 ? startUploadToast(t, locale) : null;
     try {
       const form = new FormData();
       form.set("body", body);
@@ -88,14 +90,25 @@ export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: stri
       form.append("account_ids[]", String(selectedAccount.id));
       files.forEach((file) => form.append("media[]", file));
       removeMediaIds.forEach((value) => form.append("remove_media_ids[]", String(value)));
-      const res = postId ? await api.updateSocialPost(postId, form) : await api.createSocialPost(form);
+      const res = postId
+        ? await api.updateSocialPost(postId, form, upload?.onProgress)
+        : await api.createSocialPost(form, upload?.onProgress);
+      if (res.data.last_error) {
+        const message = publishErrorMessage(res.data.last_error, t);
+        setError(message);
+        upload?.fail(message);
+      } else {
+        upload?.done();
+      }
       navigate(`/social/compose/${res.data.id}`, { replace: true });
       setPost(res.data);
       setFiles([]);
       setRemoveMediaIds([]);
       setExistingMedia(res.data.media ?? []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t(copy.loading));
+      const message = err instanceof Error ? err.message : t(copy.loading);
+      setError(message);
+      upload?.fail(message);
     } finally {
       setSaving(false);
     }

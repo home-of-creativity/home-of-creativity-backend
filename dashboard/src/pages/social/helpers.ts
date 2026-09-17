@@ -63,6 +63,15 @@ export function groupSocialPages(accounts: SocialAccount[]): SocialPageGroup[] {
   return [...groups.values()];
 }
 
+export function orderedPageAccounts(page: SocialPageGroup): SocialAccount[] {
+  const rank = ["facebook", "instagram", "threads", "linkedin"];
+  return [...page.accounts].sort((left, right) => {
+    const leftRank = rank.indexOf(left.platform);
+    const rightRank = rank.indexOf(right.platform);
+    return (leftRank < 0 ? 99 : leftRank) - (rightRank < 0 ? 99 : rightRank);
+  });
+}
+
 function matchFacebookPage(
   account: SocialAccount,
   facebooks: SocialAccount[],
@@ -164,6 +173,15 @@ export function socialPlacementLabel(placement: string | undefined, t: (c: Copy)
   return socialPlacements[key] ? t(socialPlacements[key]) : key;
 }
 
+export function matchesSocialPlacement(post: { placement?: string; media?: { kind: string }[] }, placement: string) {
+  const value = post.placement || "feed";
+  if (placement === "story") return value === "story";
+  if (placement === "reel") {
+    return value === "reel" || (value === "feed" && (post.media ?? []).some((item) => item.kind === "video"));
+  }
+  return value !== "story";
+}
+
 export function socialStatusLabel(status: string, t: (c: Copy) => string) {
   return socialStatuses[status] ? t(socialStatuses[status]) : status;
 }
@@ -200,6 +218,9 @@ export function facebookErrorMessage(error: string, t: (c: Copy) => string) {
   if (error === "facebook_app_user_mismatch" || error.includes("Cannot call API for app")) {
     return t(copy.socialFacebookAppMismatch);
   }
+  if (error.includes("graph_timeout") || error.includes("cURL error 28") || error.toLowerCase().includes("resolving timed out")) {
+    return t(copy.socialGraphTimeout);
+  }
   if (error.includes("facebook_new_pages_text")) {
     return t(copy.socialFacebookNewPagesText);
   }
@@ -227,6 +248,26 @@ export function socialAccountStatusLabel(item: { connection_status: string; last
 }
 
 export function publishErrorMessage(error: string, t: (c: Copy) => string) {
+  if (error.includes(" | ")) {
+    return error
+      .split(" | ")
+      .map((part) => {
+        const colon = part.indexOf(": ");
+        if (colon > 0) {
+          return `${part.slice(0, colon)}: ${publishErrorCode(part.slice(colon + 2), t)}`;
+        }
+        return publishErrorCode(part, t);
+      })
+      .join(" · ");
+  }
+
+  return publishErrorCode(error, t);
+}
+
+function publishErrorCode(error: string, t: (c: Copy) => string) {
+  if (error.includes("graph_timeout") || error.includes("cURL error 28") || error.includes("cURL error 6") || error.toLowerCase().includes("resolving timed out") || error.toLowerCase().includes("connection timed out")) {
+    return t(copy.socialGraphTimeout);
+  }
   if (error.includes("instagram_media_type") || error.toLowerCase().includes("only photo or video") || error.toLowerCase().includes("image_url is required")) {
     return t(copy.socialInstagramMediaType);
   }
@@ -295,9 +336,6 @@ export function publishErrorMessage(error: string, t: (c: Copy) => string) {
   }
   if (error.includes("facebook_new_pages") || error.toLowerCase().includes("new pages experience")) {
     return t(copy.socialFacebookNewPages);
-  }
-  if (error.includes("facebook_unsupported_post") || error.toLowerCase().includes("unsupported post request")) {
-    return t(copy.socialFacebookUnsupportedPost);
   }
 
   return error;
