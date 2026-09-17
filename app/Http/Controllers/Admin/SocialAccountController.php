@@ -12,6 +12,7 @@ use App\Http\Resources\SocialAccountResource;
 use App\Models\SocialAccount;
 use App\Services\SocialAccountSync;
 use App\Services\SocialActivityLogger;
+use App\Services\ThreadsGraph;
 use Illuminate\Http\JsonResponse;
 
 class SocialAccountController extends Controller
@@ -44,6 +45,10 @@ class SocialAccountController extends Controller
             'facebook_configured' => $this->sync->configured(),
             'facebook_error' => $this->sync->lastError,
             'facebook_pages_found' => $this->sync->facebookPagesFound,
+            'threads_configured' => $this->sync->threadsConfigured(),
+            'threads_error' => $this->sync->threadsError,
+            'threads_oauth_configured' => ThreadsGraph::oauthConfigured(),
+            'threads_redirect_uri' => ThreadsGraph::redirectUri(),
         ]);
     }
 

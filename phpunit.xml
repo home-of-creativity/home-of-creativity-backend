@@ -20,6 +20,7 @@
     <php>
         <env name="APP_ENV" value="testing" force="true"/>
         <env name="APP_DEBUG" value="true" force="true"/>
+        <env name="APP_URL" value="http://127.0.0.1" force="true"/>
         <env name="APP_KEY" value="base64:2fl+KTV4dIgNcFS6/76PcTAmAm8J+OKRm8K01CnRm2w="/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
@@ -55,5 +56,10 @@
         <env name="FACEBOOK_ACCESS_TOKEN" value=""/>
         <env name="FACEBOOK_APP_ID" value=""/>
         <env name="FACEBOOK_APP_SECRET" value=""/>
+        <env name="THREADS_ACCESS_TOKEN" value=""/>
+        <env name="THREADS_APP_ID" value=""/>
+        <env name="THREADS_APP_SECRET" value=""/>
+        <env name="THREADS_REDIRECT_URI" value="https://hoc.agency/auth/threads/callback"/>
+        <env name="THREADS_DASHBOARD_URL" value="https://hoc.agency/staff/social/accounts"/>
     </php>
 </phpunit>

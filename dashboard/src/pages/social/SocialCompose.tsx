@@ -5,7 +5,7 @@ import { useAuth } from "../../auth";
 import { copy, socialActivities, type Locale } from "../../i18n";
 import { SocialChrome } from "./SocialChrome";
 import { SocialPhonePreview } from "./SocialPhonePreview";
-import { formatWhen, fromLocalInput, groupSocialPages, pageGroupKey, platformLabel, publishErrorMessage, socialPlacementLabel, socialStatusLabel, toLocalInput } from "./helpers";
+import { formatWhen, fromLocalInput, groupSocialPages, pageChannelSummary, pageGroupKey, publishErrorMessage, socialPlacementLabel, socialStatusLabel, toLocalInput } from "./helpers";
 
 export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
   const { user } = useAuth();
@@ -206,11 +206,7 @@ export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: stri
                   />
                   <span>
                     {page.name}
-                    {page.instagram ? (
-                      <small className="muted"> · {t(copy.facebook)} + {t(copy.instagram)}</small>
-                    ) : (
-                      <small className="muted"> · {platformLabel(page.facebook?.platform ?? page.accounts[0]?.platform ?? "", t)}</small>
-                    )}
+                    <small className="muted"> · {pageChannelSummary(page, t)}</small>
                   </span>
                 </label>
               ))}
@@ -241,6 +237,17 @@ export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: stri
                       onChange={() => toggleAccount(selectedPage.instagram!.id)}
                     />
                     <span>{t(copy.instagram)}</span>
+                  </label>
+                ) : null}
+                {selectedPage.threads ? (
+                  <label className="check-row">
+                    <input
+                      type="checkbox"
+                      checked={accountIds.includes(selectedPage.threads.id)}
+                      disabled={!editable}
+                      onChange={() => toggleAccount(selectedPage.threads!.id)}
+                    />
+                    <span>{t(copy.threads)}</span>
                   </label>
                 ) : null}
               </div>

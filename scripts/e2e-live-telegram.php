@@ -73,6 +73,7 @@ Http::withHeaders(['X-Webhook-Secret' => $botSecret])
 Http::withToken($admin)
     ->post("{$api}/admin/requests/{$requestId}/confirm-payment", [
         'payment_method' => 'cash',
+        'amount' => 500,
     ])->throw();
 
 Http::withHeaders(['X-N8N-Secret' => $n8nSecret])

@@ -60,6 +60,18 @@ REJECT_REASONS = {
     "rjprice": "السعر غالي",
     "rjdelay": "تأخير بالرد",
 }
+
+
+def reject_reason_keyboard(number: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("السعر غالي", callback_data=f"rjprice:{number}"),
+                InlineKeyboardButton("تأخير بالرد", callback_data=f"rjdelay:{number}"),
+            ],
+            [InlineKeyboardButton("غير ذلك", callback_data=f"rjother:{number}")],
+        ]
+    )
 ALLOWED_ATTACHMENT_MIMES = {
     "image/jpeg",
     "image/png",
@@ -941,7 +953,24 @@ async def quotation_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             await post_reject(query, number, REJECT_REASONS[action])
             return
 
-        if action in {"reject", "rjother"}:
+        if action == "reject":
+            try:
+                await query.edit_message_text(
+                    "ما سبب الرفض؟",
+                    reply_markup=reject_reason_keyboard(number),
+                )
+            except Exception:
+                try:
+                    await query.edit_message_reply_markup(reply_markup=None)
+                except Exception:
+                    pass
+                await query.message.reply_text(
+                    "ما سبب الرفض؟",
+                    reply_markup=reject_reason_keyboard(number),
+                )
+            return
+
+        if action == "rjother":
             context.user_data["reject_number"] = number
             await query.edit_message_reply_markup(reply_markup=None)
             await query.message.reply_text("اكتب سبب رفضك:")

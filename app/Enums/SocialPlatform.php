@@ -6,6 +6,7 @@ enum SocialPlatform: string
 {
     case Facebook = 'facebook';
     case Instagram = 'instagram';
+    case Threads = 'threads';
     case Linkedin = 'linkedin';
     case X = 'x';
     case Tiktok = 'tiktok';

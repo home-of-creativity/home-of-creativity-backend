@@ -6,6 +6,7 @@ use App\Actions\CompleteRequest;
 use App\Actions\ConfirmRequestPayment;
 use App\Actions\DispatchStatusWorkflow;
 use App\Actions\EnqueueIntegrationEvent;
+use App\Actions\HydrateServiceRequestFromOdoo;
 use App\Actions\RenewSubscription;
 use App\Actions\ReRequestReceipt;
 use App\Actions\SendQuotation;
@@ -43,8 +44,10 @@ class ServiceRequestController extends Controller
             ->additional(['message' => 'ok']);
     }
 
-    public function show(ServiceRequest $serviceRequest): ServiceRequestResource
+    public function show(ServiceRequest $serviceRequest, HydrateServiceRequestFromOdoo $hydrateServiceRequestFromOdoo): ServiceRequestResource
     {
+        $serviceRequest = $hydrateServiceRequestFromOdoo->handle($serviceRequest);
+
         $serviceRequest->load([
             'client',
             'briefs',
@@ -117,6 +120,7 @@ class ServiceRequestController extends Controller
         $confirmRequestPayment->handle(
             $serviceRequest,
             PaymentMethod::from($request->validated('payment_method')),
+            (float) $request->validated('amount'),
         );
 
         return ServiceRequestResource::make($serviceRequest->fresh([

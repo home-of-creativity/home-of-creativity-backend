@@ -29,6 +29,7 @@ use App\Http\Controllers\ServiceRequestController;
 use App\Http\Controllers\SocialFeedController;
 use App\Http\Controllers\StaffBotController;
 use App\Http\Controllers\TelegramBotController;
+use App\Http\Controllers\ThreadsOAuthController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('auth')->group(function () {
@@ -66,6 +67,8 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
     Route::delete('contact/{contact_channel}', [AdminContactChannelController::class, 'destroy']);
     Route::get('clients', [AdminClientController::class, 'index']);
     Route::post('clients', [AdminClientController::class, 'store']);
+    Route::put('clients/{client}', [AdminClientController::class, 'update']);
+    Route::delete('clients/{client}', [AdminClientController::class, 'destroy']);
     Route::get('odoo/status', [AdminOdooController::class, 'status']);
     Route::post('odoo/sync-partners', [AdminOdooController::class, 'syncPartners']);
     Route::post('odoo/import-crm-clients', [AdminOdooController::class, 'importCrmClients']);
@@ -128,6 +131,8 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
     Route::put('pricing/packages/{pricing_package}', [AdminPricingPackageController::class, 'update']);
     Route::post('pricing/packages/{pricing_package}/move', [AdminPricingPackageController::class, 'move']);
     Route::delete('pricing/packages/{pricing_package}', [AdminPricingPackageController::class, 'destroy']);
+    Route::get('social/threads/connect', [ThreadsOAuthController::class, 'redirect'])
+        ->middleware('throttle:10,1');
     Route::get('social/accounts', [AdminSocialAccountController::class, 'index']);
     Route::post('social/accounts', [AdminSocialAccountController::class, 'store']);
     Route::put('social/accounts/{social_account}', [AdminSocialAccountController::class, 'update']);

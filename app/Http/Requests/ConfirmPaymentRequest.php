@@ -20,6 +20,7 @@ class ConfirmPaymentRequest extends FormRequest
     {
         return [
             'payment_method' => ['required', Rule::enum(PaymentMethod::class)],
+            'amount' => ['required', 'numeric', 'min:0.01'],
         ];
     }
 }

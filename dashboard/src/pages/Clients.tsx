@@ -51,6 +51,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
@@ -63,69 +64,64 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
   }, []);
 
   useEffect(() => {
-    if (tab !== "clients") return;
-    setLoading(true);
-    api
-      .clients(page)
-      .then((res) => {
-        setItems(res.data);
-        setMeta(res.meta);
-      })
-      .catch(() => {
-        setItems([]);
-        setMeta(null);
-      })
-      .finally(() => setLoading(false));
-  }, [page, tab]);
+    if (tab === "logos") return;
 
-  useEffect(() => {
-    if (tab !== "quotations" || !odooReady) return;
-    setLoading(true);
-    api
-      .odooQuotations()
-      .then((res) => setQuotations(res.data))
-      .catch((err) => {
-        setQuotations([]);
-        setError(err instanceof Error ? err.message : t(copy.saveFailed));
-      })
-      .finally(() => setLoading(false));
-  }, [tab, odooReady, t]);
+    let cancelled = false;
 
-  useEffect(() => {
-    if (tab !== "invoices" || !odooReady) return;
-    setLoading(true);
-    api
-      .odooInvoices()
-      .then((res) => setInvoices(res.data))
-      .catch((err) => {
-        setInvoices([]);
-        setError(err instanceof Error ? err.message : t(copy.saveFailed));
-      })
-      .finally(() => setLoading(false));
-  }, [tab, odooReady, t]);
+    function load(silent = false) {
+      if (!silent) setLoading(true);
 
-  async function importCrmClients() {
-    setError("");
-    setNotice("");
-    setImportingCrm(true);
-    try {
-      const res = await api.importOdooCrmClients();
-      const message = t(copy.odooImportCrmDone)
-        .replace("{created}", String(res.data.created))
-        .replace("{updated}", String(res.data.updated))
-        .replace("{crm}", String(res.data.crm_leads))
-        .replace("{partners}", String(res.data.partners));
-      setNotice(message);
-      setPage(1);
-      const list = await api.clients(1);
-      setItems(list.data);
-      setMeta(list.meta);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t(copy.saveFailed));
-    } finally {
-      setImportingCrm(false);
+      const request =
+        tab === "quotations"
+          ? api.odooQuotations().then((res) => {
+              if (cancelled) return;
+              setQuotations(res.data);
+              setOdooReady(true);
+              setError("");
+            })
+          : tab === "invoices"
+            ? api.odooInvoices().then((res) => {
+                if (cancelled) return;
+                setInvoices(res.data);
+                setOdooReady(true);
+                setError("");
+              })
+            : api.clients(page).then((res) => {
+                if (cancelled) return;
+                setItems(res.data);
+                setMeta(res.meta);
+                setError("");
+              });
+
+      request
+        .catch((err) => {
+          if (cancelled) return;
+          if (tab === "quotations") setQuotations([]);
+          if (tab === "invoices") setInvoices([]);
+          if (tab === "clients") {
+            setItems([]);
+            setMeta(null);
+          }
+          const message = err instanceof Error ? err.message : t(copy.saveFailed);
+          if (message.toLowerCase().includes("not configured")) {
+            setOdooReady(false);
+            setError("");
+            return;
+          }
+          if (!silent) setError(message);
+        })
+        .finally(() => {
+          if (!cancelled && !silent) setLoading(false);
+        });
     }
-  }
+
+    load();
+    const timer = window.setInterval(() => load(true), 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [tab, page, t]);
 
   async function importCrmExcel(file: File) {
     setError("");
@@ -152,23 +148,70 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
     }
   }
 
-  async function createClient(event: FormEvent) {
+  function resetForm() {
+    setEditingId(null);
+    setName("");
+    setEmail("");
+    setPhone("");
+    setCompanyName("");
+    setShowForm(false);
+    setError("");
+  }
+
+  function startAdd() {
+    setEditingId(null);
+    setName("");
+    setEmail("");
+    setPhone("");
+    setCompanyName("");
+    setShowForm(true);
+    setError("");
+  }
+
+  function startEdit(item: Client) {
+    setEditingId(item.id);
+    setName(item.name);
+    setEmail(item.email ?? "");
+    setPhone(item.phone ?? "");
+    setCompanyName(item.company_name ?? "");
+    setShowForm(true);
+    setError("");
+  }
+
+  async function saveClient(event: FormEvent) {
     event.preventDefault();
     setError("");
     setNotice("");
     try {
-      await api.createClient({
+      const payload = {
         name,
         email: email || undefined,
         phone: phone || undefined,
         company_name: companyName || undefined,
-      });
-      setName("");
-      setEmail("");
-      setPhone("");
-      setCompanyName("");
-      setShowForm(false);
+      };
+      if (editingId) {
+        await api.updateClient(editingId, payload);
+      } else {
+        await api.createClient(payload);
+      }
+      resetForm();
       setNotice(t(copy.saveClient));
+      const list = await api.clients(page);
+      setItems(list.data);
+      setMeta(list.meta);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t(copy.saveFailed));
+    }
+  }
+
+  async function removeClient(id: number) {
+    if (!window.confirm(t(copy.confirmDelete))) return;
+    setError("");
+    setNotice("");
+    try {
+      await api.deleteClient(id);
+      if (editingId === id) resetForm();
+      setNotice(t(copy.deleted));
       const list = await api.clients(page);
       setItems(list.data);
       setMeta(list.meta);
@@ -193,14 +236,6 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
               <>
                 <button
                   type="button"
-                  className="btn btn-teal"
-                  disabled={importingCrm}
-                  onClick={() => void importCrmClients()}
-                >
-                  {importingCrm ? t(copy.odooImportCrmLoading) : t(copy.odooImportCrmClients)}
-                </button>
-                <button
-                  type="button"
                   className="btn btn-secondary"
                   disabled={importingCrm}
                   onClick={() => excelInputRef.current?.click()}
@@ -221,7 +256,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
             ) : (
               <span className="muted">{t(copy.odooNotConfigured)}</span>
             )}
-            <button type="button" className="btn btn-primary" onClick={() => { setShowForm(true); setError(""); }}>
+            <button type="button" className="btn btn-primary" onClick={startAdd}>
               {t(copy.addClient)}
             </button>
             <a className="btn btn-telegram" href={`https://t.me/${TELEGRAM_BOT}`} target="_blank" rel="noreferrer">
@@ -252,9 +287,9 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
 
       {tab === "clients" && showForm ? (
         <FormDialog
-          title={t(copy.addClient)}
-          onClose={() => { setShowForm(false); setError(""); }}
-          onSubmit={createClient}
+          title={editingId ? t(copy.editClient) : t(copy.addClient)}
+          onClose={resetForm}
+          onSubmit={saveClient}
           submitLabel={t(copy.saveClient)}
           cancelLabel={t(copy.cancel)}
           closeLabel={t(copy.close)}
@@ -300,14 +335,15 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                   <th>{t(copy.telegram)}</th>
                   <th>{t(copy.odooPartner)}</th>
                   <th>{t(copy.requestsCount)}</th>
+                  <th>{t(copy.actions)}</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <LoadingTableRow colSpan={8} label={t(copy.loading)} />
+                  <LoadingTableRow colSpan={9} label={t(copy.loading)} />
                 ) : items.length === 0 ? (
                   <tr>
-                    <td colSpan={8}>{t(copy.empty)}</td>
+                    <td colSpan={9}>{t(copy.empty)}</td>
                   </tr>
                 ) : (
                   items.map((item) => (
@@ -336,6 +372,16 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                         )}
                       </td>
                       <td>{item.requests_count ?? 0}</td>
+                      <td>
+                        <div className="row-actions">
+                          <button className="btn" type="button" onClick={() => startEdit(item)}>
+                            {t(copy.editEmployee)}
+                          </button>
+                          <button className="btn" type="button" onClick={() => void removeClient(item.id)}>
+                            {t(copy.deleteEmployee)}
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   ))
                 )}

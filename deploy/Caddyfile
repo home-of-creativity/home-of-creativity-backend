@@ -17,6 +17,17 @@
 		file_server
 	}
 
+	handle /auth* {
+		root * /var/www/hoc/public
+		encode gzip
+		php_fastcgi hoc-api:9000 {
+			dial_timeout 10s
+			read_timeout 10m
+			write_timeout 10m
+		}
+		file_server
+	}
+
 	handle /up {
 		root * /var/www/hoc/public
 		php_fastcgi hoc-api:9000

@@ -307,13 +307,46 @@ class ClientOpsAutomationTest extends TestCase
         ]);
 
         config(['services.gemini.e2e_stub' => true]);
-        app(ConfirmRequestPayment::class)->handle($request, PaymentMethod::Receipt);
+        app(ConfirmRequestPayment::class)->handle($request, PaymentMethod::Receipt, 400);
         $request->refresh();
         $this->assertNull($request->odoo_won_at);
         $this->assertGreaterThan(0, (float) $request->amount_remaining);
 
-        app(ConfirmRequestPayment::class)->handle($request->fresh() ?? $request, PaymentMethod::Receipt);
+        app(ConfirmRequestPayment::class)->handle($request->fresh() ?? $request, PaymentMethod::Receipt, 600);
         $this->assertNotNull($request->fresh()?->odoo_won_at);
+    }
+
+    public function test_invoice_uses_actual_received_amount_not_requested_deposit(): void
+    {
+        Http::fake();
+        $client = Client::factory()->create([
+            'telegram_user_id' => 'tg-invoice',
+            'company_name' => 'شركة',
+            'phone' => '099',
+        ]);
+        $request = ServiceRequest::factory()->create([
+            'client_id' => $client->id,
+            'status' => RequestStatus::AwaitingPayment,
+            'quotation_amount' => 1000,
+            'amount_total' => 1000,
+            'amount_paid' => 0,
+            'amount_remaining' => 1000,
+            'requires_full_payment' => false,
+            'payment_plan' => 'partial',
+        ]);
+
+        config(['services.gemini.e2e_stub' => true]);
+        $updated = app(ConfirmRequestPayment::class)->handle($request, PaymentMethod::Receipt, 400);
+        $invoice = $updated->invoices()->latest('id')->first();
+
+        $this->assertNotNull($invoice);
+        $this->assertSame('received', $invoice->kind);
+        $this->assertEqualsWithDelta(400, (float) $invoice->amount, 0.01);
+        $this->assertEqualsWithDelta(400, (float) $updated->amount_paid, 0.01);
+        $this->assertEqualsWithDelta(600, (float) $updated->amount_remaining, 0.01);
+        $this->assertEqualsWithDelta(40.0, $updated->paidPercent(), 0.1);
+        $this->assertEqualsWithDelta(60.0, $updated->remainingPercent(), 0.1);
+        $this->assertSame(1, $updated->invoices()->count());
     }
 
     public function test_admin_can_toggle_category_renewal_and_upload_qr(): void

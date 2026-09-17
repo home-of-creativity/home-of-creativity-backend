@@ -27,7 +27,7 @@ class ConfirmRequestPayment
         private IssueInvoice $issueInvoice,
     ) {}
 
-    public function handle(ServiceRequest $request, PaymentMethod $method): ServiceRequest
+    public function handle(ServiceRequest $request, PaymentMethod $method, float $receivedAmount): ServiceRequest
     {
         $isFirst = $request->paid_at === null;
         $remainingOnly = ! $isFirst && $request->hasRemainingBalance();
@@ -44,25 +44,30 @@ class ConfirmRequestPayment
             ]);
         }
 
+        if ($receivedAmount <= 0) {
+            throw ValidationException::withMessages([
+                'amount' => 'Enter the amount actually received.',
+            ]);
+        }
+
         if ($isFirst && ($request->gemini_status === GeminiStatus::Pending || $request->gemini_status === GeminiStatus::Processing)) {
             throw ValidationException::withMessages([
                 'gemini' => 'Gemini classification is already in progress.',
             ]);
         }
 
-        $updated = DB::transaction(function () use ($request, $method, $isFirst): ServiceRequest {
+        $appliedAmount = 0.0;
+        $updated = DB::transaction(function () use ($request, $method, $isFirst, $receivedAmount, &$appliedAmount): ServiceRequest {
             $total = (float) ($request->amount_total ?? $request->quotation_amount ?? 0);
             if ($total <= 0) {
                 $total = (float) ($request->quotation_amount ?? 0);
             }
 
             $paid = (float) ($request->amount_paid ?? 0);
-            $due = $request->requires_full_payment || $paid > 0.009
-                ? max($total - $paid, 0)
-                : round($total * 0.5, 2);
-
-            $newPaid = round($paid + $due, 2);
-            $newRemaining = max(round($total - $newPaid, 2), 0);
+            $room = $total > 0 ? max(round($total - $paid, 2), 0) : $receivedAmount;
+            $appliedAmount = $total > 0 ? min($receivedAmount, $room) : $receivedAmount;
+            $newPaid = round($paid + $appliedAmount, 2);
+            $newRemaining = $total > 0 ? max(round($total - $newPaid, 2), 0) : 0;
 
             $request->forceFill([
                 'amount_total' => $total,
@@ -111,17 +116,15 @@ class ConfirmRequestPayment
 
         $this->notifyClientSuccess($updated);
 
+        try {
+            $this->issueInvoice->handle($updated, $appliedAmount, 'received', false);
+        } catch (\Throwable) {
+            // Continue locally if Odoo invoice fails.
+        }
+
         if ($isFirst) {
             $this->ensureRequestDriveFolder->handle($updated);
             $this->schedulePaymentReminders->handle($updated->fresh() ?? $updated);
-
-            if ($updated->hasRemainingBalance()) {
-                try {
-                    $this->issueInvoice->handle($updated, (float) $updated->amount_remaining, 'remaining', false);
-                } catch (\Throwable) {
-                    // Continue locally if Odoo invoice fails.
-                }
-            }
 
             if ($updated->gemini_status !== GeminiStatus::Success) {
                 $updated->forceFill([

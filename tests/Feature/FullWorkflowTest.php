@@ -135,6 +135,7 @@ class FullWorkflowTest extends TestCase
 
         $this->postJson("/api/admin/requests/{$requestId}/confirm-payment", [
             'payment_method' => 'cash',
+            'amount' => 500,
         ])->assertOk();
 
         $serviceRequest->refresh();

@@ -88,7 +88,10 @@ class SocialLandingFeed
             }
         }
 
-        if ($posts === [] && $this->lastGraphStatus !== null && $this->isExpiredTokenError($this->lastGraphMessage)) {
+        if ($posts === [] && $this->lastGraphStatus !== null && (
+            $this->isExpiredTokenError($this->lastGraphMessage)
+            || FacebookGraph::isNewPagesExperienceMessage($this->lastGraphMessage)
+        )) {
             $this->skipCache = true;
         }
 
@@ -126,29 +129,65 @@ class SocialLandingFeed
      */
     private function fetchFacebookPosts(SocialAccount $account, int $limit): array
     {
+        $postFields = 'id,message,full_picture,permalink_url,created_time,status_type,attachments{media_type,type,url,media,subattachments,unshimmed_url,target}';
+        foreach (['published_posts', 'posts'] as $edge) {
+            $items = $this->paginateFacebookEdge($account, $edge, $postFields, $limit, fn (array $row) => $this->mapFacebookPost($row));
+            if ($items !== null) {
+                return $items;
+            }
+        }
+
+        $photos = $this->paginateFacebookEdge(
+            $account,
+            'photos',
+            'id,name,link,created_time,images',
+            $limit,
+            fn (array $row) => $this->mapFacebookPhoto($row),
+        ) ?? [];
+        $videos = $this->paginateFacebookEdge(
+            $account,
+            'videos',
+            'id,description,permalink_url,created_time,source,picture',
+            $limit,
+            fn (array $row) => $this->mapFacebookVideo($row),
+        ) ?? [];
+
+        $merged = array_merge($photos, $videos);
+        usort($merged, fn (array $a, array $b) => strcmp((string) ($b['timestamp'] ?? ''), (string) ($a['timestamp'] ?? '')));
+
+        return array_slice($merged, 0, $limit);
+    }
+
+    /**
+     * @param  callable(array<string, mixed>): ?array{id: string, caption: string|null, media_type: string, media_url: string|null, preview_url: string|null, permalink: string|null, timestamp: string|null}  $mapper
+     * @return list<array{id: string, caption: string|null, media_type: string, media_url: string|null, preview_url: string|null, permalink: string|null, timestamp: string|null}>|null
+     */
+    private function paginateFacebookEdge(SocialAccount $account, string $edge, string $fields, int $limit, callable $mapper): ?array
+    {
         $items = [];
         $after = null;
+        $fetched = false;
 
         do {
             $query = [
-                'fields' => 'id,message,full_picture,permalink_url,created_time,status_type,attachments{media_type,type,url,media,subattachments,unshimmed_url,target}',
-                'limit' => min(25, $limit - count($items)),
+                'fields' => $fields,
+                'limit' => min(25, max(1, $limit - count($items))),
             ];
             if (is_string($after) && $after !== '') {
                 $query['after'] = $after;
             }
 
-            $payload = $this->graphGet($account->page_id.'/published_posts', $query, (string) $account->access_token)
-                ?? $this->graphGet($account->page_id.'/posts', $query, (string) $account->access_token);
+            $payload = $this->graphGet($account->page_id.'/'.$edge, $query, (string) $account->access_token);
             if ($payload === null) {
-                break;
+                return $fetched ? $items : null;
             }
+            $fetched = true;
 
             foreach (data_get($payload, 'data') ?? [] as $row) {
                 if (! is_array($row)) {
                     continue;
                 }
-                $mapped = $this->mapFacebookPost($row);
+                $mapped = $mapper($row);
                 if ($mapped !== null) {
                     $items[] = $mapped;
                 }
@@ -240,6 +279,64 @@ class SocialLandingFeed
     }
 
     /**
+     * @param  array<string, mixed>  $row
+     * @return array{id: string, caption: string|null, media_type: string, media_url: string|null, preview_url: string|null, permalink: string|null, timestamp: string|null}|null
+     */
+    private function mapFacebookPhoto(array $row): ?array
+    {
+        $id = $row['id'] ?? null;
+        if (! is_string($id) || $id === '') {
+            return null;
+        }
+
+        $images = $row['images'] ?? [];
+        $images = is_array($images) ? $images : [];
+        usort($images, fn ($a, $b) => (int) data_get($b, 'width') <=> (int) data_get($a, 'width'));
+        $source = $this->nullableString(data_get($images, '0.source'));
+        if ($source === null) {
+            return null;
+        }
+
+        return [
+            'id' => $id,
+            'caption' => $this->nullableString($row['name'] ?? null),
+            'media_type' => 'IMAGE',
+            'media_url' => $source,
+            'preview_url' => $source,
+            'permalink' => $this->nullableString($row['link'] ?? null),
+            'timestamp' => $this->nullableString($row['created_time'] ?? null),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     * @return array{id: string, caption: string|null, media_type: string, media_url: string|null, preview_url: string|null, permalink: string|null, timestamp: string|null}|null
+     */
+    private function mapFacebookVideo(array $row): ?array
+    {
+        $id = $row['id'] ?? null;
+        if (! is_string($id) || $id === '') {
+            return null;
+        }
+
+        $videoUrl = $this->nullableString($row['source'] ?? null);
+        $imageUrl = $this->nullableString($row['picture'] ?? null);
+        if ($videoUrl === null && $imageUrl === null) {
+            return null;
+        }
+
+        return [
+            'id' => $id,
+            'caption' => $this->nullableString($row['description'] ?? null),
+            'media_type' => 'VIDEO',
+            'media_url' => $videoUrl ?? $imageUrl,
+            'preview_url' => $imageUrl ?? $videoUrl,
+            'permalink' => $this->nullableString($row['permalink_url'] ?? null),
+            'timestamp' => $this->nullableString($row['created_time'] ?? null),
+        ];
+    }
+
+    /**
      * @return array{profile: array<string, mixed>|null, posts: list<array{id: string, caption: string|null, media_type: string, media_url: string|null, preview_url: string|null, permalink: string|null, timestamp: string|null}>}
      */
     private function buildInstagram(int $limit): array
@@ -249,17 +346,22 @@ class SocialLandingFeed
             return ['profile' => null, 'posts' => []];
         }
 
-        $profile = $this->fetchProfile($account);
-        $posts = $this->fetchInstagramPosts($account, $limit);
+        $igUserId = $this->instagramGraphUserId($account);
+        $profile = $this->fetchProfile($account, $igUserId);
+        $posts = $this->fetchInstagramPosts($account, $igUserId, $limit);
         if ($posts === [] && $this->shouldRefreshTokens()) {
             $account = $this->refreshAccountTokens() ?? $account->fresh();
             if ($account && $account->hasToken()) {
-                $profile = $this->fetchProfile($account);
-                $posts = $this->fetchInstagramPosts($account, $limit);
+                $igUserId = $this->instagramGraphUserId($account);
+                $profile = $this->fetchProfile($account, $igUserId);
+                $posts = $this->fetchInstagramPosts($account, $igUserId, $limit);
             }
         }
 
-        if ($posts === [] && $this->lastGraphStatus !== null && $this->isExpiredTokenError($this->lastGraphMessage)) {
+        if ($posts === [] && $this->lastGraphStatus !== null && (
+            $this->isExpiredTokenError($this->lastGraphMessage)
+            || FacebookGraph::isNewPagesExperienceMessage($this->lastGraphMessage)
+        )) {
             $this->skipCache = true;
         }
 
@@ -272,9 +374,9 @@ class SocialLandingFeed
     /**
      * @return array<string, mixed>
      */
-    private function fetchProfile(SocialAccount $account): array
+    private function fetchProfile(SocialAccount $account, ?string $igUserId = null): array
     {
-        $payload = $this->graphGet((string) $account->page_id, [
+        $payload = $this->graphGet((string) ($igUserId ?: $account->page_id), [
             'fields' => 'username,name,biography,profile_picture_url,followers_count,follows_count,media_count',
         ], (string) $account->access_token) ?? [];
 
@@ -295,7 +397,7 @@ class SocialLandingFeed
     /**
      * @return list<array{id: string, caption: string|null, media_type: string, media_url: string|null, preview_url: string|null, permalink: string|null, timestamp: string|null}>
      */
-    private function fetchInstagramPosts(SocialAccount $account, int $limit): array
+    private function fetchInstagramPosts(SocialAccount $account, string $igUserId, int $limit): array
     {
         $items = [];
         $after = null;
@@ -309,8 +411,14 @@ class SocialLandingFeed
                 $query['after'] = $after;
             }
 
-            $payload = $this->graphGet($account->page_id.'/media', $query, (string) $account->access_token);
+            $payload = $this->graphGet($igUserId.'/media', $query, (string) $account->access_token);
             if ($payload === null) {
+                if ($items === [] && FacebookGraph::isNewPagesExperienceMessage($this->lastGraphMessage)) {
+                    $repaired = $this->repairInstagramUserId($account, $igUserId);
+                    if ($repaired !== $igUserId) {
+                        return $this->fetchInstagramPosts($account, $repaired, $limit);
+                    }
+                }
                 break;
             }
 
@@ -350,6 +458,30 @@ class SocialLandingFeed
             ->orderByRaw("CASE WHEN lower(handle) like '%homeofcreativity%' OR lower(name) like '%homeofcreativity%' THEN 0 ELSE 1 END")
             ->orderBy('name')
             ->first();
+    }
+
+    private function instagramGraphUserId(SocialAccount $account): string
+    {
+        $current = (string) $account->page_id;
+        $facebookPageId = (string) ($account->facebook_page_id ?: '');
+        if ($current !== '' && ($facebookPageId === '' || $current !== $facebookPageId)) {
+            return $current;
+        }
+
+        return $this->repairInstagramUserId($account, $current);
+    }
+
+    private function repairInstagramUserId(SocialAccount $account, string $currentId): string
+    {
+        $lookupId = (string) ($account->facebook_page_id ?: $currentId);
+        $resolved = FacebookGraph::instagramBusinessAccountId($lookupId, (string) $account->access_token);
+        if (! is_string($resolved) || $resolved === '' || $resolved === $currentId) {
+            return $currentId;
+        }
+
+        $account->forceFill(['page_id' => $resolved])->save();
+
+        return $resolved;
     }
 
     /**

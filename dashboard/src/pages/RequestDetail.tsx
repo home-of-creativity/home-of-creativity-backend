@@ -34,6 +34,7 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
   const [receiptUrl, setReceiptUrl] = useState<string | null>(null);
   const [receiptReason, setReceiptReason] = useState("");
   const [hasQr, setHasQr] = useState(false);
+  const [receivedAmount, setReceivedAmount] = useState("");
 
   useEffect(() => {
     if (!receiptUrl) return;
@@ -52,6 +53,7 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
         setItem(res.data);
         setStatus(res.data.status);
         setHasQr(Boolean(ops.data.sham_cash_qr));
+        setReceivedAmount(res.data.expected_due != null ? String(res.data.expected_due) : "");
       })
       .catch(() => setItem(null))
       .finally(() => setLoading(false));
@@ -128,13 +130,19 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
 
   async function confirmPayment(method: "receipt" | "cash") {
     if (!item) return;
+    const amount = Number(receivedAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setError(t(copy.receivedAmount));
+      return;
+    }
     setError("");
     setNotice("");
     try {
-      const res = await api.confirmPayment(item.id, method);
+      const res = await api.confirmPayment(item.id, method, amount);
       setItem(res.data);
       setStatus(res.data.status);
       setNotice(res.message ?? "");
+      setReceivedAmount(res.data.expected_due != null ? String(res.data.expected_due) : "");
     } catch (err) {
       setError(err instanceof Error ? err.message : t(copy.saveFailed));
     }
@@ -265,6 +273,7 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
               ) : (
                 item.odoo_quotation_id ?? "—"
               )}
+              {item.odoo_quotation_live?.state ? ` · ${item.odoo_quotation_live.state}` : ""}
             </dd>
           </div>
           <div>
@@ -277,15 +286,22 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
               ) : (
                 item.odoo_invoice_id ?? "—"
               )}
+              {item.odoo_invoice_live?.state ? ` · ${item.odoo_invoice_live.state}` : ""}
             </dd>
           </div>
           <div>
             <dt>{t(copy.paidAmount)}</dt>
-            <dd>{item.amount_paid ?? "—"}</dd>
+            <dd>
+              {item.amount_paid ?? "—"}
+              {item.paid_percent != null ? ` (${item.paid_percent}%)` : ""}
+            </dd>
           </div>
           <div>
             <dt>{t(copy.remainingBalance)}</dt>
-            <dd>{item.amount_remaining ?? "—"}</dd>
+            <dd>
+              {item.amount_remaining ?? "—"}
+              {item.remaining_percent != null ? ` (${item.remaining_percent}%)` : ""}
+            </dd>
           </div>
           <div>
             <dt>{t(copy.driveFolder)}</dt>
@@ -443,6 +459,23 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
           <button className="btn btn-primary" type="submit">
             {t(copy.save)}
           </button>
+          {canConfirmPayment || canConfirmRemaining ? (
+            <label className="field-label" htmlFor="received-amount">
+              {t(copy.receivedAmount)}
+              <input
+                id="received-amount"
+                className="field"
+                type="number"
+                min="0.01"
+                step="0.01"
+                inputMode="decimal"
+                value={receivedAmount}
+                onChange={(e) => setReceivedAmount(e.target.value)}
+                placeholder={item.expected_due != null ? String(item.expected_due) : t(copy.expectedDue)}
+                aria-label={t(copy.receivedAmount)}
+              />
+            </label>
+          ) : null}
           {canConfirmPayment ? (
             <>
               <button className="btn btn-teal" type="button" onClick={() => void confirmPayment("receipt")}>

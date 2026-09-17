@@ -8,6 +8,7 @@ use App\Models\SocialAccount;
 use App\Models\SocialPost;
 use App\Models\SocialPostMedia;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -25,7 +26,7 @@ class SocialPublisher
             return $this->fail('Account is disabled.');
         }
 
-        if ($account->hasToken() && in_array($account->platform, [SocialPlatform::Facebook, SocialPlatform::Instagram], true)) {
+        if ($account->hasToken() && in_array($account->platform, [SocialPlatform::Facebook, SocialPlatform::Instagram, SocialPlatform::Threads], true)) {
             return $this->publishViaGraph($account, $post);
         }
 
@@ -45,7 +46,7 @@ class SocialPublisher
             $response = Http::timeout(5)
                 ->connectTimeout(3)
                 ->acceptJson()
-                ->get(FacebookGraph::url($externalId), FacebookGraph::withToken(['fields' => 'id'], (string) $account->access_token));
+                ->get($this->graphUrl($account, $externalId), $this->graphQuery($account, ['fields' => 'id']));
         } catch (ConnectionException|Throwable) {
             return null;
         }
@@ -76,6 +77,10 @@ class SocialPublisher
     {
         if (! $account->hasToken()) {
             return $this->fail('Account is not connected.');
+        }
+
+        if ($account->platform === SocialPlatform::Threads) {
+            return $this->fail('threads_edit_unsupported');
         }
 
         $field = $account->platform === SocialPlatform::Instagram ? 'caption' : 'message';
@@ -128,7 +133,7 @@ class SocialPublisher
                 $response = Http::timeout((int) config('services.social.timeout', 20))
                     ->connectTimeout(3)
                     ->acceptJson()
-                    ->delete(FacebookGraph::url($id), FacebookGraph::withToken([], $token));
+                    ->delete($this->graphUrl($account, $id), $this->graphQuery($account, []));
             } catch (ConnectionException|Throwable $exception) {
                 return $this->fail($exception->getMessage());
             }
@@ -157,7 +162,7 @@ class SocialPublisher
             return $this->fail('Account is not connected.');
         }
 
-        if (! in_array($account->platform, [SocialPlatform::Facebook, SocialPlatform::Instagram], true)) {
+        if (! in_array($account->platform, [SocialPlatform::Facebook, SocialPlatform::Instagram, SocialPlatform::Threads], true)) {
             return $this->publishViaN8n($account, null, [
                 'event' => 'social.inbox.reply',
                 'external_id' => $externalId,
@@ -168,6 +173,18 @@ class SocialPublisher
         }
 
         $token = (string) $account->access_token;
+
+        if ($account->platform === SocialPlatform::Threads) {
+            if ($kind !== 'comment') {
+                return $this->fail('threads_messages_unsupported');
+            }
+
+            return $this->publishThreadsContainer((string) $account->page_id, [
+                'media_type' => 'TEXT',
+                'text' => $body,
+                'reply_to_id' => $externalId,
+            ], $token);
+        }
 
         if ($kind === 'comment') {
             return $this->graphForm($externalId.'/comments', [
@@ -200,8 +217,23 @@ class SocialPublisher
         $placement = $post->placement instanceof SocialPlacement ? $post->placement : SocialPlacement::Feed;
 
         try {
+            if ($account->platform === SocialPlatform::Threads) {
+                return $this->publishThreads($account, $post, $media);
+            }
+
             if ($account->platform === SocialPlatform::Instagram) {
-                return $this->publishInstagram($account, $post, $pageId, $media, $placement);
+                $igUserId = $this->instagramGraphUserId($account);
+                $result = $this->publishInstagram($account, $post, $igUserId, $media, $placement);
+                if ($result['ok'] || ! FacebookGraph::isNewPagesExperienceMessage($result['error'])) {
+                    return $result;
+                }
+
+                $resolved = $this->repairInstagramUserId($account, $igUserId);
+                if ($resolved === $igUserId) {
+                    return $result;
+                }
+
+                return $this->publishInstagram($account, $post, $resolved, $media, $placement);
             }
 
             return $this->publishFacebook($account, $post, $pageId, $media, $placement);
@@ -226,15 +258,17 @@ class SocialPublisher
                 return $this->fail('story_needs_media');
             }
 
+            if ($first->kind === 'video') {
+                return $this->publishFacebookResumableVideo($pageId, $token, $first, 'video_stories');
+            }
+
             $upload = $this->uploadFacebookFile($pageId, $token, $first, unpublished: true);
             if (! $upload['ok'] || ! filled($upload['id'])) {
                 return $this->fail($upload['error'] ?? 'Media file is missing.');
             }
 
-            $field = $first->kind === 'video' ? 'video_id' : 'photo_id';
-
-            return $this->graphForm($pageId.'/stories', [
-                $field => $upload['id'],
+            return $this->graphForm($pageId.'/photo_stories', [
+                'photo_id' => $upload['id'],
             ], $token);
         }
 
@@ -244,7 +278,12 @@ class SocialPublisher
                 return $this->fail('reel_needs_video');
             }
 
-            return $this->uploadFacebookFile($pageId, $token, $video, unpublished: false, caption: $post->body);
+            $finish = ['video_state' => 'PUBLISHED'];
+            if (filled($post->body)) {
+                $finish['description'] = $post->body;
+            }
+
+            return $this->publishFacebookResumableVideo($pageId, $token, $video, 'video_reels', $finish);
         }
 
         if ($images->count() >= 2 && $videos->isEmpty()) {
@@ -257,16 +296,26 @@ class SocialPublisher
                 $attached[] = ['media_fbid' => $upload['id']];
             }
 
-            return $this->graphForm($pageId.'/feed', [
+            $album = $this->graphForm($pageId.'/feed', [
                 'message' => $post->body,
                 'attached_media' => json_encode($attached),
             ], $token);
+            if ($album['ok'] || ! FacebookGraph::isNewPagesExperienceMessage($album['error'])) {
+                return $album;
+            }
+
+            return $this->uploadFacebookFile($pageId, $token, $images->first(), unpublished: false, caption: $post->body);
         }
 
         if (! $first) {
-            return $this->graphForm($pageId.'/feed', [
+            $text = $this->graphForm($pageId.'/feed', [
                 'message' => $post->body,
             ], $token);
+            if ($text['ok'] || ! FacebookGraph::isNewPagesExperienceMessage($text['error'])) {
+                return $text;
+            }
+
+            return $this->fail('facebook_new_pages_text');
         }
 
         return $this->uploadFacebookFile($pageId, $token, $first, unpublished: false, caption: $post->body);
@@ -291,11 +340,68 @@ class SocialPublisher
         /** @var array<string, mixed> $json */
         $json = $response->json() ?? [];
 
+        $externalId = $json['post_id'] ?? $json['id'] ?? $json['video_id'] ?? null;
+
         return [
             'ok' => true,
-            'external_id' => isset($json['post_id']) ? (string) $json['post_id'] : (isset($json['id']) ? (string) $json['id'] : null),
+            'external_id' => filled($externalId) ? (string) $externalId : null,
             'error' => null,
         ];
+    }
+
+    /**
+     * @param  array<string, string>  $finishExtra
+     * @return array{ok: bool, external_id: ?string, error: ?string}
+     */
+    private function publishFacebookResumableVideo(
+        string $pageId,
+        string $token,
+        SocialPostMedia $media,
+        string $edge,
+        array $finishExtra = [],
+    ): array {
+        $disk = Storage::disk('public');
+        if (! $disk->exists((string) $media->path)) {
+            return $this->fail('Media file is missing.');
+        }
+
+        $contents = $disk->get((string) $media->path);
+        if (! is_string($contents) || $contents === '') {
+            return $this->fail('Media file is empty.');
+        }
+
+        $start = Http::timeout((int) config('services.social.timeout', 20))
+            ->connectTimeout(3)
+            ->acceptJson()
+            ->asForm()
+            ->post(
+                FacebookGraph::url($pageId.'/'.$edge),
+                FacebookGraph::withToken(['upload_phase' => 'start'], $token),
+            );
+
+        if (! $start->successful()) {
+            return $this->fail($this->graphError($start->json(), $start->status()));
+        }
+
+        $videoId = data_get($start->json(), 'video_id');
+        $uploadUrl = data_get($start->json(), 'upload_url');
+        if (! is_string($videoId) || $videoId === '') {
+            return $this->fail('Facebook did not return a video upload session.');
+        }
+        if (! is_string($uploadUrl) || $uploadUrl === '') {
+            $uploadUrl = FacebookGraph::videoRuploadUrl($videoId);
+        }
+
+        $upload = $this->uploadResumableBinary($uploadUrl, $contents, $media, $token, $videoId);
+        if (! $upload['ok']) {
+            return $this->fail($upload['error'] ?? 'Media file is missing.');
+        }
+
+        return $this->graphForm($pageId.'/'.$edge, [
+            'upload_phase' => 'finish',
+            'video_id' => $videoId,
+            ...$finishExtra,
+        ], $token);
     }
 
     /**
@@ -433,7 +539,7 @@ class SocialPublisher
         if (! filled($imageUrl)) {
             $hosted = $this->hostInstagramImageOnFacebook($account, $jpeg['contents'], $token);
             if (! $hosted['ok'] || ! filled($hosted['url'])) {
-                return ['ok' => false, 'id' => null, 'error' => $hosted['error'] ?? 'instagram_media_fetch'];
+                return $this->createInstagramResumableContainer($igUserId, $media, $jpeg['contents'], $extra, $token);
             }
             $imageUrl = $hosted['url'];
         }
@@ -495,12 +601,16 @@ class SocialPublisher
             return ['ok' => false, 'id' => null, 'error' => 'Instagram did not return a media container.'];
         }
 
-        $upload = $this->uploadInstagramResumable($creationId, $contents, $media, $token);
+        $upload = $this->uploadInstagramResumable($creationId, $contents, $media, $token, $this->instagramUploadMime($media, $extra));
         if (! $upload['ok']) {
             return $upload;
         }
 
-        $waitError = $this->waitForInstagramContainer($creationId, $token, true);
+        $waitError = $this->waitForInstagramContainer(
+            $creationId,
+            $token,
+            $media->kind === 'video' || in_array($extra['media_type'] ?? '', ['REELS', 'VIDEO'], true),
+        );
         if (is_string($waitError)) {
             return ['ok' => false, 'id' => null, 'error' => $waitError];
         }
@@ -663,26 +773,118 @@ class SocialPublisher
     }
 
     /**
-     * @return array{ok: bool, id: ?string, error: ?string}
+     * @param  array<string, string>  $extra
      */
-    private function uploadInstagramResumable(string $containerId, string $contents, SocialPostMedia $media, string $token): array
+    private function instagramUploadMime(SocialPostMedia $media, array $extra): string
     {
-        $response = Http::timeout((int) config('services.social.upload_timeout', 60))
-            ->connectTimeout(10)
-            ->acceptJson()
-            ->withHeaders([
-                'Authorization' => 'OAuth '.$token,
-                'offset' => '0',
-                'file_size' => (string) strlen($contents),
-            ])
-            ->withBody($contents, $media->mime ?: 'application/octet-stream')
-            ->post(FacebookGraph::ruploadUrl($containerId));
-
-        if ($response->successful() || data_get($response->json(), 'success') === true) {
-            return ['ok' => true, 'id' => $containerId, 'error' => null];
+        $type = strtoupper((string) ($extra['media_type'] ?? ''));
+        if (in_array($type, ['IMAGE', 'STORIES'], true) && $media->kind !== 'video') {
+            return 'image/jpeg';
         }
 
-        return ['ok' => false, 'id' => null, 'error' => $this->graphError($response->json(), $response->status())];
+        return $media->mime ?: 'application/octet-stream';
+    }
+
+    /**
+     * @return array{ok: bool, id: ?string, error: ?string}
+     */
+    private function uploadInstagramResumable(string $containerId, string $contents, SocialPostMedia $media, string $token, ?string $mime = null): array
+    {
+        return $this->uploadResumableBinary(
+            FacebookGraph::ruploadUrl($containerId),
+            $contents,
+            $media,
+            $token,
+            $containerId,
+            $mime,
+        );
+    }
+
+    /**
+     * @return array{ok: bool, id: ?string, error: ?string}
+     */
+    private function uploadResumableBinary(
+        string $url,
+        string $contents,
+        SocialPostMedia $media,
+        string $token,
+        ?string $id = null,
+        ?string $mime = null,
+    ): array {
+        $total = strlen($contents);
+        $chunkSize = 4 * 1024 * 1024;
+        $offset = 0;
+        $timeout = max(120, (int) config('services.social.upload_timeout', 60));
+
+        while ($offset < $total) {
+            $chunk = substr($contents, $offset, $chunkSize);
+            $response = Http::timeout($timeout)
+                ->connectTimeout(10)
+                ->withHeaders([
+                    'Authorization' => 'OAuth '.$token,
+                    'offset' => (string) $offset,
+                    'file_size' => (string) $total,
+                ])
+                ->withBody($chunk, 'application/octet-stream')
+                ->post($url);
+
+            $json = $response->json();
+            if (! is_array($json) && is_string($response->body()) && $response->body() !== '') {
+                $decoded = json_decode($response->body(), true);
+                $json = is_array($decoded) ? $decoded : null;
+            }
+
+            $accepted = $response->successful()
+                || data_get($json, 'success') === true
+                || is_numeric(data_get($json, 'offset'));
+
+            if (! $accepted) {
+                Log::warning('Social resumable upload failed.', [
+                    'status' => $response->status(),
+                    'offset' => $offset,
+                    'bytes' => $total,
+                    'name' => $media->original_name,
+                    'error' => FacebookGraph::errorMessage($json, $response->status()),
+                ]);
+
+                return ['ok' => false, 'id' => null, 'error' => $this->graphError($json, $response->status())];
+            }
+
+            $next = data_get($json, 'offset');
+            if (is_numeric($next) && (int) $next > $offset) {
+                $offset = (int) $next;
+
+                continue;
+            }
+
+            $offset += strlen($chunk);
+        }
+
+        return ['ok' => true, 'id' => $id, 'error' => null];
+    }
+
+    public function instagramGraphUserId(SocialAccount $account): string
+    {
+        $current = (string) $account->page_id;
+        $facebookPageId = (string) ($account->facebook_page_id ?: '');
+        if ($current !== '' && ($facebookPageId === '' || $current !== $facebookPageId)) {
+            return $current;
+        }
+
+        return $this->repairInstagramUserId($account, $current);
+    }
+
+    private function repairInstagramUserId(SocialAccount $account, string $currentId): string
+    {
+        $lookupId = (string) ($account->facebook_page_id ?: $currentId);
+        $resolved = FacebookGraph::instagramBusinessAccountId($lookupId, (string) $account->access_token);
+        if (! is_string($resolved) || $resolved === '' || $resolved === $currentId) {
+            return $currentId;
+        }
+
+        $account->forceFill(['page_id' => $resolved])->save();
+
+        return $resolved;
     }
 
     /**
@@ -810,6 +1012,257 @@ class SocialPublisher
     }
 
     /**
+     * @param  Collection<int, SocialPostMedia>  $media
+     * @return array{ok: bool, external_id: ?string, error: ?string}
+     */
+    private function publishThreads(SocialAccount $account, SocialPost $post, Collection $media): array
+    {
+        $userId = (string) $account->page_id;
+        $token = (string) $account->access_token;
+
+        if ($media->count() >= 2) {
+            return $this->publishThreadsCarousel($account, $post, $userId, $media, $token);
+        }
+
+        $first = $media->first();
+        if (! $first) {
+            return $this->publishThreadsContainer($userId, [
+                'media_type' => 'TEXT',
+                'text' => $post->body,
+            ], $token);
+        }
+
+        $item = $this->threadsMediaFields($account, $first, $post->body);
+        if (! $item['ok'] || $item['payload'] === null) {
+            return $this->fail($item['error'] ?? 'threads_media_missing');
+        }
+
+        return $this->publishThreadsContainer($userId, $item['payload'], $token);
+    }
+
+    /**
+     * @param  Collection<int, SocialPostMedia>  $media
+     * @return array{ok: bool, external_id: ?string, error: ?string}
+     */
+    private function publishThreadsCarousel(SocialAccount $account, SocialPost $post, string $userId, Collection $media, string $token): array
+    {
+        $children = [];
+        foreach ($media as $item) {
+            $fields = $this->threadsMediaFields($account, $item, null, true);
+            if (! $fields['ok'] || $fields['payload'] === null) {
+                return $this->fail($fields['error'] ?? 'threads_media_missing');
+            }
+
+            $container = $this->createThreadsContainer($userId, $fields['payload'], $token);
+            if (! $container['ok'] || ! filled($container['id'])) {
+                return $this->fail($container['error'] ?? 'Threads did not return a media container.');
+            }
+            $children[] = $container['id'];
+        }
+
+        return $this->publishThreadsContainer($userId, [
+            'media_type' => 'CAROUSEL',
+            'children' => implode(',', $children),
+            'text' => $post->body,
+        ], $token);
+    }
+
+    /**
+     * @return array{ok: bool, payload: ?array<string, string>, error: ?string}
+     */
+    private function threadsMediaFields(SocialAccount $account, SocialPostMedia $media, ?string $text, bool $carouselItem = false): array
+    {
+        $disk = Storage::disk('public');
+        if (! $disk->exists((string) $media->path)) {
+            return ['ok' => false, 'payload' => null, 'error' => 'Media file is missing.'];
+        }
+
+        $contents = $disk->get((string) $media->path);
+        if ((! is_string($contents) || $contents === '') && $disk->exists((string) $media->path)) {
+            $absolute = $disk->path((string) $media->path);
+            if (is_file($absolute)) {
+                $contents = (string) file_get_contents($absolute);
+            }
+        }
+        if (! is_string($contents) || $contents === '') {
+            return ['ok' => false, 'payload' => null, 'error' => 'Media file is empty.'];
+        }
+
+        $payload = [];
+        if ($carouselItem) {
+            $payload['is_carousel_item'] = 'true';
+        }
+        if (is_string($text) && $text !== '') {
+            $payload['text'] = $text;
+        }
+
+        if ($media->kind === 'video') {
+            $videoUrl = $this->publicStorageUrl((string) $media->path);
+            if (! filled($videoUrl)) {
+                return ['ok' => false, 'payload' => null, 'error' => 'threads_media_fetch'];
+            }
+            $payload['media_type'] = 'VIDEO';
+            $payload['video_url'] = $videoUrl;
+
+            return ['ok' => true, 'payload' => $payload, 'error' => null];
+        }
+
+        $jpeg = $this->instagramJpeg($media, $contents);
+        if (! $jpeg['ok'] || ! is_string($jpeg['contents']) || $jpeg['contents'] === '') {
+            return ['ok' => false, 'payload' => null, 'error' => $jpeg['error'] ?? 'instagram_media_type'];
+        }
+
+        $imageUrl = $this->instagramPublicImageUrl($media, $jpeg['contents']);
+        if (! filled($imageUrl)) {
+            $hosted = $this->hostInstagramImageOnFacebook($account, $jpeg['contents'], (string) $account->access_token);
+            if (! $hosted['ok'] || ! filled($hosted['url'])) {
+                return ['ok' => false, 'payload' => null, 'error' => $hosted['error'] ?? 'threads_media_fetch'];
+            }
+            $imageUrl = $hosted['url'];
+        }
+
+        $payload['media_type'] = 'IMAGE';
+        $payload['image_url'] = $imageUrl;
+
+        return ['ok' => true, 'payload' => $payload, 'error' => null];
+    }
+
+    /**
+     * @param  array<string, string>  $payload
+     * @return array{ok: bool, external_id: ?string, error: ?string}
+     */
+    private function publishThreadsContainer(string $userId, array $payload, string $token): array
+    {
+        $container = $this->createThreadsContainer($userId, $payload, $token);
+        if (! $container['ok'] || ! filled($container['id'])) {
+            return $this->fail($container['error'] ?? 'Threads did not return a media container.');
+        }
+
+        $waitError = $this->waitForThreadsContainer($container['id'], $token);
+        if (is_string($waitError)) {
+            return $this->fail($waitError);
+        }
+
+        $publish = Http::timeout((int) config('services.social.timeout', 20))
+            ->connectTimeout(3)
+            ->acceptJson()
+            ->asForm()
+            ->post(
+                ThreadsGraph::url($userId.'/threads_publish'),
+                ThreadsGraph::withToken([
+                    'creation_id' => $container['id'],
+                ], $token),
+            );
+
+        if (! $publish->successful()) {
+            return $this->fail($this->graphError($publish->json(), $publish->status()));
+        }
+
+        return [
+            'ok' => true,
+            'external_id' => (string) data_get($publish->json(), 'id'),
+            'error' => null,
+        ];
+    }
+
+    /**
+     * @param  array<string, string>  $payload
+     * @return array{ok: bool, id: ?string, error: ?string}
+     */
+    private function createThreadsContainer(string $userId, array $payload, string $token): array
+    {
+        $response = Http::timeout((int) config('services.social.upload_timeout', 180))
+            ->connectTimeout(10)
+            ->acceptJson()
+            ->asForm()
+            ->post(
+                ThreadsGraph::url($userId.'/threads'),
+                ThreadsGraph::withToken($payload, $token),
+            );
+
+        if (! $response->successful()) {
+            return ['ok' => false, 'id' => null, 'error' => $this->graphError($response->json(), $response->status())];
+        }
+
+        $creationId = data_get($response->json(), 'id');
+        if (! is_string($creationId) || $creationId === '') {
+            return ['ok' => false, 'id' => null, 'error' => 'Threads did not return a media container.'];
+        }
+
+        return ['ok' => true, 'id' => $creationId, 'error' => null];
+    }
+
+    private function waitForThreadsContainer(string $creationId, string $token): ?string
+    {
+        $attempts = 16;
+        $delayUs = 500_000;
+
+        for ($attempt = 0; $attempt < $attempts; $attempt++) {
+            if ($attempt > 0) {
+                usleep($delayUs);
+            }
+
+            $status = Http::timeout(10)
+                ->connectTimeout(3)
+                ->acceptJson()
+                ->get(
+                    ThreadsGraph::url($creationId),
+                    ThreadsGraph::withToken(['fields' => 'status,error_message'], $token),
+                );
+
+            $code = data_get($status->json(), 'status');
+            if (in_array($code, ['ERROR', 'EXPIRED'], true)) {
+                $message = data_get($status->json(), 'error_message');
+                if (is_string($message) && $message !== '') {
+                    return $this->graphError(['error' => ['message' => $message]], 400);
+                }
+
+                return 'threads_media_fetch';
+            }
+
+            if (in_array($code, ['IN_PROGRESS', 'PROCESSING'], true)) {
+                continue;
+            }
+
+            if ($status->successful()) {
+                return null;
+            }
+        }
+
+        return 'threads_media_processing';
+    }
+
+    private function publicStorageUrl(string $path): ?string
+    {
+        $relative = Storage::disk('public')->url($path);
+        $url = str_starts_with($relative, 'http')
+            ? $relative
+            : rtrim((string) config('app.url'), '/').$relative;
+
+        return $this->instagramCanFetch($url) ? $url : null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $query
+     * @return array<string, mixed>
+     */
+    private function graphQuery(SocialAccount $account, array $query): array
+    {
+        $token = (string) $account->access_token;
+
+        return $account->platform === SocialPlatform::Threads
+            ? ThreadsGraph::withToken($query, $token)
+            : FacebookGraph::withToken($query, $token);
+    }
+
+    private function graphUrl(SocialAccount $account, string $path): string
+    {
+        return $account->platform === SocialPlatform::Threads
+            ? ThreadsGraph::url($path)
+            : FacebookGraph::url($path);
+    }
+
+    /**
      * @param  array<string, mixed>|null  $override
      * @return array{ok: bool, external_id: ?string, error: ?string}
      */
@@ -890,12 +1343,32 @@ class SocialPublisher
             || str_contains($lower, 'media download has failed')) {
             return 'instagram_media_fetch';
         }
+        if (str_contains($lower, 'invalid video')
+            || str_contains($lower, 'unsupported format')
+            || str_contains($lower, 'not a supported format')
+            || str_contains($lower, 'codec')) {
+            return 'instagram_media_type';
+        }
+        if (FacebookGraph::isNewPagesExperienceMessage($message)) {
+            return 'facebook_new_pages_experience';
+        }
+        if (str_contains($lower, 'unsupported post request')) {
+            return 'facebook_unsupported_post';
+        }
+        if (str_contains($lower, 'threads')) {
+            if (str_contains($lower, 'processing')) {
+                return 'threads_media_processing';
+            }
+            if (str_contains($lower, 'download') || str_contains($lower, 'upload') || str_contains($lower, 'media')) {
+                return 'threads_media_fetch';
+            }
+        }
 
         return $message;
     }
 
     /**
-     * @param  \Illuminate\Http\Client\Response  $response
+     * @param  Response  $response
      */
     private function graphObjectGone($response): bool
     {

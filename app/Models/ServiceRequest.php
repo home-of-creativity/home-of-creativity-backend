@@ -131,6 +131,40 @@ class ServiceRequest extends Model
         return $total > 0 && (float) ($this->amount_paid ?? 0) + 0.009 >= $total;
     }
 
+    public function paidPercent(): float
+    {
+        $total = (float) ($this->amount_total ?? $this->quotation_amount ?? 0);
+        if ($total <= 0) {
+            return 0.0;
+        }
+
+        $paid = min((float) ($this->amount_paid ?? 0), $total);
+
+        return round($paid / $total * 100, 1);
+    }
+
+    public function remainingPercent(): float
+    {
+        return round(max(100 - $this->paidPercent(), 0), 1);
+    }
+
+    public function expectedDue(): float
+    {
+        $total = (float) ($this->amount_total ?? $this->quotation_amount ?? 0);
+        $paid = (float) ($this->amount_paid ?? 0);
+        $remaining = $total > 0 ? max(round($total - $paid, 2), 0) : 0;
+
+        if ($paid > 0.009 || $this->paid_at) {
+            return $remaining;
+        }
+
+        if ($this->requires_full_payment || $this->payment_plan === 'full') {
+            return round($total, 2);
+        }
+
+        return round($total * 0.5, 2);
+    }
+
     public function acceptsReceiptUpload(): bool
     {
         if ($this->receipt_reupload_required) {

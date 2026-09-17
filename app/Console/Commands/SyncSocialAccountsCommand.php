@@ -10,14 +10,18 @@ class SyncSocialAccountsCommand extends Command
 {
     protected $signature = 'social:sync-accounts';
 
-    protected $description = 'Refresh Facebook and Instagram page tokens from FACEBOOK_ACCESS_TOKEN.';
+    protected $description = 'Refresh Facebook, Instagram, and Threads page tokens from Graph credentials or a connected Threads OAuth account.';
 
     public function handle(SocialAccountSync $sync): int
     {
-        if (! $sync->configured()) {
-            $this->warn('Facebook credentials are not configured.');
+        if (! $sync->configured() && ! $sync->threadsConfigured()) {
+            $this->warn('Facebook or Threads credentials are not configured.');
 
             return self::FAILURE;
+        }
+
+        if (! $sync->configured()) {
+            $this->warn('Facebook credentials are not configured.');
         }
 
         $count = $sync->syncFromFacebook();
@@ -29,6 +33,9 @@ class SyncSocialAccountsCommand extends Command
         }
 
         $this->info("Synced {$count} social account(s). Facebook pages found: {$sync->facebookPagesFound}.");
+        if ($sync->threadsError) {
+            $this->warn($sync->threadsError);
+        }
 
         return self::SUCCESS;
     }

@@ -98,11 +98,7 @@ class SendQuotation
                         'اختر:',
                         [
                             [['text' => '✅ موافقة', 'callback_data' => "approve:{$ref}"]],
-                            [
-                                ['text' => 'السعر غالي', 'callback_data' => "rjprice:{$ref}"],
-                                ['text' => 'تأخير بالرد', 'callback_data' => "rjdelay:{$ref}"],
-                            ],
-                            [['text' => 'غير ذلك', 'callback_data' => "rjother:{$ref}"]],
+                            [['text' => '❌ رفض', 'callback_data' => "reject:{$ref}"]],
                         ],
                     );
                 }

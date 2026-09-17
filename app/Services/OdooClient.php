@@ -56,17 +56,28 @@ class OdooClient
     }
 
     /**
-     * @return list<array<string, mixed>>
+     * @return list<string>
      */
-    public function listQuotations(int $limit = 100, int $offset = 0): array
+    private function quotationFields(): array
     {
-        $rows = $this->searchRead('sale.order', [
-            ['state', 'in', ['draft', 'sent']],
-        ], [
-            'id', 'name', 'partner_id', 'amount_total', 'state', 'client_order_ref', 'origin', 'date_order',
-        ], $limit, $offset, 'date_order desc');
+        return ['id', 'name', 'partner_id', 'amount_total', 'state', 'client_order_ref', 'origin', 'date_order'];
+    }
 
-        return array_map(fn (array $row): array => [
+    /**
+     * @return list<string>
+     */
+    private function invoiceFields(): array
+    {
+        return ['id', 'name', 'partner_id', 'amount_total', 'state', 'payment_state', 'invoice_origin', 'ref', 'invoice_date'];
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     * @return array<string, mixed>
+     */
+    private function mapQuotation(array $row): array
+    {
+        return [
             'id' => (int) $row['id'],
             'name' => (string) ($row['name'] ?? ''),
             'partner_name' => $this->relationName($row['partner_id'] ?? null),
@@ -76,21 +87,16 @@ class OdooClient
             'origin' => filled($row['origin'] ?? null) ? (string) $row['origin'] : null,
             'date_order' => filled($row['date_order'] ?? null) ? (string) $row['date_order'] : null,
             'odoo_url' => $this->recordUrl('sale.order', (int) $row['id']),
-        ], $rows);
+        ];
     }
 
     /**
-     * @return list<array<string, mixed>>
+     * @param  array<string, mixed>  $row
+     * @return array<string, mixed>
      */
-    public function listInvoices(int $limit = 100, int $offset = 0): array
+    private function mapInvoice(array $row): array
     {
-        $rows = $this->searchRead('account.move', [
-            ['move_type', '=', 'out_invoice'],
-        ], [
-            'id', 'name', 'partner_id', 'amount_total', 'state', 'payment_state', 'invoice_origin', 'ref', 'invoice_date',
-        ], $limit, $offset, 'invoice_date desc');
-
-        return array_map(fn (array $row): array => [
+        return [
             'id' => (int) $row['id'],
             'name' => (string) ($row['name'] ?? ''),
             'partner_name' => $this->relationName($row['partner_id'] ?? null),
@@ -101,7 +107,94 @@ class OdooClient
             'ref' => filled($row['ref'] ?? null) ? (string) $row['ref'] : null,
             'invoice_date' => filled($row['invoice_date'] ?? null) ? (string) $row['invoice_date'] : null,
             'odoo_url' => $this->recordUrl('account.move', (int) $row['id']),
-        ], $rows);
+        ];
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function listQuotations(int $limit = 100, int $offset = 0): array
+    {
+        $rows = $this->searchRead('sale.order', [], $this->quotationFields(), $limit, $offset, 'date_order desc');
+
+        return array_map(fn (array $row): array => $this->mapQuotation($row), $rows);
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    public function quotationSnapshot(int $id): ?array
+    {
+        if ($id <= 0) {
+            return null;
+        }
+
+        $rows = $this->searchRead('sale.order', [['id', '=', $id]], $this->quotationFields(), 1);
+
+        return isset($rows[0]) ? $this->mapQuotation($rows[0]) : null;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    public function findQuotationForRequest(string $requestNumber): ?array
+    {
+        if ($requestNumber === '') {
+            return null;
+        }
+
+        $rows = $this->searchRead('sale.order', [
+            '|',
+            ['client_order_ref', '=', $requestNumber],
+            ['origin', '=', $requestNumber],
+        ], $this->quotationFields(), 1, 0, 'id desc');
+
+        return isset($rows[0]) ? $this->mapQuotation($rows[0]) : null;
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function listInvoices(int $limit = 100, int $offset = 0): array
+    {
+        $rows = $this->searchRead('account.move', [
+            ['move_type', '=', 'out_invoice'],
+        ], $this->invoiceFields(), $limit, $offset, 'invoice_date desc');
+
+        return array_map(fn (array $row): array => $this->mapInvoice($row), $rows);
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    public function invoiceSnapshot(int $id): ?array
+    {
+        if ($id <= 0) {
+            return null;
+        }
+
+        $rows = $this->searchRead('account.move', [['id', '=', $id]], $this->invoiceFields(), 1);
+
+        return isset($rows[0]) ? $this->mapInvoice($rows[0]) : null;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    public function findInvoiceForRequest(string $requestNumber): ?array
+    {
+        if ($requestNumber === '') {
+            return null;
+        }
+
+        $rows = $this->searchRead('account.move', [
+            ['move_type', '=', 'out_invoice'],
+            '|',
+            ['invoice_origin', '=', $requestNumber],
+            ['ref', '=', $requestNumber],
+        ], $this->invoiceFields(), 1, 0, 'id desc');
+
+        return isset($rows[0]) ? $this->mapInvoice($rows[0]) : null;
     }
 
     /**
@@ -110,11 +203,13 @@ class OdooClient
      *     contact_name?: string|null,
      *     partner_name?: string|null,
      *     stage_id?: int|null,
+     *     team_id?: int|null,
      *     phone?: string|null,
      *     mobile?: string|null,
      *     email_from?: string|null,
      *     description?: string|null,
-     *     tag_ids?: list<int>|null
+     *     tag_ids?: list<int>|null,
+     *     partner_id?: int|null
      * }  $values
      */
     public function createCrmLead(array $values): int
@@ -133,16 +228,20 @@ class OdooClient
             $tagIds = [[6, 0, array_map('intval', $tagIds)]];
         }
 
+        $teamId = $values['team_id'] ?? $this->ensureCrmTeamId('تلغرام');
+
         $payload = array_filter([
             'name' => $values['name'],
             'contact_name' => $values['contact_name'] ?? null,
             'partner_name' => $values['partner_name'] ?? null,
             'stage_id' => $stageId,
+            'team_id' => $teamId,
             'phone' => $values['phone'] ?? $values['mobile'] ?? null,
             'mobile' => $values['mobile'] ?? $values['phone'] ?? null,
             'email_from' => $values['email_from'] ?? null,
             'description' => $values['description'] ?? null,
             'tag_ids' => $tagIds,
+            'partner_id' => $values['partner_id'] ?? null,
             'type' => 'opportunity',
         ], fn (mixed $value): bool => $value !== null && $value !== '');
 
@@ -168,11 +267,165 @@ class OdooClient
             return $existing;
         }
 
-        $stageId = $this->call('crm.stage', 'create', [[
+        $values = [
             'name' => trim($name),
-        ]]);
+            'sequence' => 1,
+        ];
+        $teamId = $this->ensureCrmTeamId($name);
+        if ($teamId !== null) {
+            $values['team_id'] = $teamId;
+        }
+
+        $stageId = $this->call('crm.stage', 'create', [[$values]]);
 
         return (int) $stageId;
+    }
+
+    public function ensureCrmTeamId(string $name): ?int
+    {
+        try {
+            $existing = $this->findCrmTeamId($name);
+            if ($existing !== null) {
+                return $existing;
+            }
+
+            $teamId = $this->call('crm.team', 'create', [[
+                'name' => trim($name),
+            ]]);
+
+            return (int) $teamId;
+        } catch (Throwable $exception) {
+            Log::warning('Odoo CRM team ensure failed.', [
+                'team' => $name,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return $this->findCrmTeamId($name);
+        }
+    }
+
+    public function findCrmTeamId(string $name): ?int
+    {
+        $normalized = trim($name);
+        if ($normalized === '') {
+            return null;
+        }
+
+        try {
+            $rows = $this->searchRead('crm.team', [], ['id', 'name'], 200, 0, 'id asc');
+        } catch (Throwable) {
+            return null;
+        }
+
+        foreach ($rows as $row) {
+            if (trim((string) ($row['name'] ?? '')) === $normalized) {
+                return (int) $row['id'];
+            }
+        }
+
+        foreach ($rows as $row) {
+            $candidate = trim((string) ($row['name'] ?? ''));
+            if ($candidate !== '' && mb_stripos($candidate, $normalized) !== false) {
+                return (int) $row['id'];
+            }
+        }
+
+        foreach (['Telegram', 'telegram'] as $english) {
+            if (mb_strtolower($normalized) === 'تلغرام') {
+                foreach ($rows as $row) {
+                    $candidate = trim((string) ($row['name'] ?? ''));
+                    if ($candidate !== '' && mb_stripos($candidate, $english) !== false) {
+                        return (int) $row['id'];
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return array{leads: int, partners: int}
+     */
+    public function purgeCrmCustomers(): array
+    {
+        return [
+            'leads' => $this->unlinkMatchingRecords('crm.lead', []),
+            'partners' => $this->unlinkMatchingRecords('res.partner', [
+                ['customer_rank', '>', 0],
+                ['id', '>', 1],
+            ]),
+        ];
+    }
+
+    /**
+     * @param  list<list<mixed>>  $domain
+     */
+    public function unlinkMatchingRecords(string $model, array $domain, int $batch = 80): int
+    {
+        $deleted = 0;
+
+        foreach ([true, false] as $active) {
+            $offset = 0;
+            $guard = 0;
+
+            do {
+                $rows = $this->searchRead($model, array_merge($domain, [
+                    ['active', '=', $active],
+                ]), ['id'], $batch, $offset, 'id asc');
+                if ($rows === []) {
+                    break;
+                }
+
+                $ids = [];
+                foreach ($rows as $row) {
+                    $id = (int) ($row['id'] ?? 0);
+                    if ($id > 0) {
+                        $ids[] = $id;
+                    }
+                }
+
+                if ($ids === []) {
+                    break;
+                }
+
+                try {
+                    $this->unlinkRecords($model, $ids);
+                    $deleted += count($ids);
+                } catch (Throwable $exception) {
+                    Log::warning('Odoo unlink failed; archiving records instead.', [
+                        'model' => $model,
+                        'ids' => $ids,
+                        'error' => $exception->getMessage(),
+                    ]);
+                    foreach ($ids as $id) {
+                        try {
+                            $this->writeRecord($model, $id, ['active' => false]);
+                            $deleted++;
+                        } catch (Throwable) {
+                            $offset += 1;
+                        }
+                    }
+                }
+
+                $guard++;
+            } while (count($rows) === $batch && $guard < 200);
+        }
+
+        return $deleted;
+    }
+
+    /**
+     * @param  list<int>  $ids
+     */
+    public function unlinkRecords(string $model, array $ids): void
+    {
+        $ids = array_values(array_filter(array_map('intval', $ids), fn (int $id): bool => $id > 0));
+        if ($ids === []) {
+            return;
+        }
+
+        $this->call($model, 'unlink', ['ids' => $ids]);
     }
 
     public function messagePost(string $model, int $recordId, string $body, bool $html = false): void
@@ -289,7 +542,18 @@ class OdooClient
     }
 
     /**
-     * @return array{stage: string|null, color: int|null, probability: float|null, expected_revenue: float|null, odoo_url: string}|null
+     * @return array{
+     *     stage: string|null,
+     *     color: int|null,
+     *     probability: float|null,
+     *     expected_revenue: float|null,
+     *     contact_name: string|null,
+     *     partner_name: string|null,
+     *     email: string|null,
+     *     phone: string|null,
+     *     partner_id: string|null,
+     *     odoo_url: string
+     * }|null
      */
     public function leadSnapshot(int|string $leadId): ?array
     {
@@ -300,6 +564,50 @@ class OdooClient
         try {
             $rows = $this->searchRead('crm.lead', [['id', '=', (int) $leadId]], [
                 'id', 'stage_id', 'color', 'probability', 'expected_revenue',
+                'contact_name', 'partner_name', 'email_from', 'phone', 'partner_id',
+            ], 1, 0, 'id desc');
+        } catch (Throwable) {
+            return null;
+        }
+
+        if ($rows === []) {
+            return null;
+        }
+
+        $row = $rows[0];
+        $partnerId = 0;
+        if (is_array($row['partner_id'] ?? null) && isset($row['partner_id'][0])) {
+            $partnerId = (int) $row['partner_id'][0];
+        } elseif (is_numeric($row['partner_id'] ?? null)) {
+            $partnerId = (int) $row['partner_id'];
+        }
+
+        return [
+            'stage' => $this->relationName($row['stage_id'] ?? null),
+            'color' => isset($row['color']) ? (int) $row['color'] : null,
+            'probability' => isset($row['probability']) ? (float) $row['probability'] : null,
+            'expected_revenue' => isset($row['expected_revenue']) ? (float) $row['expected_revenue'] : null,
+            'contact_name' => filled($row['contact_name'] ?? null) ? (string) $row['contact_name'] : null,
+            'partner_name' => filled($row['partner_name'] ?? null) ? (string) $row['partner_name'] : null,
+            'email' => filled($row['email_from'] ?? null) ? (string) $row['email_from'] : null,
+            'phone' => filled($row['phone'] ?? null) ? (string) $row['phone'] : null,
+            'partner_id' => $partnerId > 0 ? (string) $partnerId : null,
+            'odoo_url' => $this->recordUrl('crm.lead', (int) $leadId),
+        ];
+    }
+
+    /**
+     * @return array{name: string|null, email: string|null, phone: string|null, odoo_url: string}|null
+     */
+    public function partnerSnapshot(int|string $partnerId): ?array
+    {
+        if (! $this->configured()) {
+            return null;
+        }
+
+        try {
+            $rows = $this->searchRead('res.partner', [['id', '=', (int) $partnerId]], [
+                'id', 'name', 'email', 'phone',
             ], 1, 0, 'id desc');
         } catch (Throwable) {
             return null;
@@ -312,12 +620,30 @@ class OdooClient
         $row = $rows[0];
 
         return [
-            'stage' => $this->relationName($row['stage_id'] ?? null),
-            'color' => isset($row['color']) ? (int) $row['color'] : null,
-            'probability' => isset($row['probability']) ? (float) $row['probability'] : null,
-            'expected_revenue' => isset($row['expected_revenue']) ? (float) $row['expected_revenue'] : null,
-            'odoo_url' => $this->recordUrl('crm.lead', (int) $leadId),
+            'name' => filled($row['name'] ?? null) ? (string) $row['name'] : null,
+            'email' => filled($row['email'] ?? null) ? (string) $row['email'] : null,
+            'phone' => filled($row['phone'] ?? null) ? (string) $row['phone'] : null,
+            'odoo_url' => $this->recordUrl('res.partner', (int) $partnerId),
         ];
+    }
+
+    public function archiveOrUnlink(string $model, int|string $recordId): void
+    {
+        $id = (int) $recordId;
+        if ($id <= 0) {
+            return;
+        }
+
+        try {
+            $this->unlinkRecords($model, [$id]);
+        } catch (Throwable $exception) {
+            Log::warning('Odoo unlink failed; archiving record instead.', [
+                'model' => $model,
+                'id' => $id,
+                'error' => $exception->getMessage(),
+            ]);
+            $this->writeRecord($model, $id, ['active' => false]);
+        }
     }
 
     public function findCrmLead(string $name, ?string $partnerName = null): ?int
@@ -365,14 +691,14 @@ class OdooClient
     }
 
     /**
-     * @return list<array{lead_id: int, name: string, email: string|null, phone: string|null, odoo_partner_id: string|null, odoo_url: string}>
+     * @return list<array{lead_id: int, name: string, email: string|null, phone: string|null, company_name: string|null, odoo_partner_id: string|null, odoo_url: string}>
      */
     public function listCrmClients(int $limit = 200, int $offset = 0): array
     {
         $rows = $this->searchRead('crm.lead', [
             ['active', '=', true],
         ], [
-            'id', 'name', 'contact_name', 'partner_id', 'email_from', 'phone',
+            'id', 'name', 'contact_name', 'partner_name', 'partner_id', 'email_from', 'phone',
         ], $limit, $offset, 'write_date desc');
 
         $clients = [];
@@ -411,11 +737,14 @@ class OdooClient
             }
             $seen[$key] = true;
 
+            $company = filled($row['partner_name'] ?? null) ? (string) $row['partner_name'] : null;
+
             $clients[] = [
                 'lead_id' => $leadId,
                 'name' => $name,
                 'email' => $email,
                 'phone' => $phone,
+                'company_name' => $company,
                 'odoo_partner_id' => $partnerId > 0 ? (string) $partnerId : null,
                 'odoo_url' => $partnerId > 0
                     ? $this->recordUrl('res.partner', $partnerId)
@@ -550,7 +879,15 @@ class OdooClient
                 'limit' => 1,
             ]);
             if (is_array($existing) && isset($existing[0])) {
-                return (string) $existing[0];
+                $partnerId = (string) $existing[0];
+                $this->writeRecord('res.partner', $partnerId, array_filter([
+                    'name' => $partnerName,
+                    'email' => $email,
+                    'phone' => $phone,
+                    'customer_rank' => 1,
+                ], fn (mixed $value): bool => $value !== null && $value !== ''));
+
+                return $partnerId;
             }
         }
 
@@ -782,6 +1119,12 @@ class OdooClient
             ];
         }
 
+        if ($method === 'unlink') {
+            return [
+                'ids' => $payload['ids'] ?? [],
+            ];
+        }
+
         if ($method === 'message_post') {
             return $payload;
         }
@@ -881,6 +1224,12 @@ class OdooClient
             return $this->execute($uid, $model, $method, [
                 $payload['ids'] ?? [],
                 $payload['vals'] ?? [],
+            ]);
+        }
+
+        if ($method === 'unlink') {
+            return $this->execute($uid, $model, $method, [
+                $payload['ids'] ?? [],
             ]);
         }
 

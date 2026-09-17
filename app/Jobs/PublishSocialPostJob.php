@@ -19,7 +19,9 @@ class PublishSocialPostJob implements ShouldBeUnique, ShouldQueue
 
     public int $tries = 3;
 
-    public int $uniqueFor = 300;
+    public int $timeout = 360;
+
+    public int $uniqueFor = 360;
 
     public function __construct(public int $socialPostId) {}
 

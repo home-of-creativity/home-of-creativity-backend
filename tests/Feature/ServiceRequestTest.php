@@ -178,6 +178,8 @@ class ServiceRequestTest extends TestCase
             ])->assertOk()
             ->assertJsonPath('data.status', 'awaiting_payment');
 
+        $this->assertSame(0, $request->fresh()?->invoices()->count());
+
         $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
             ->postJson("/api/bot/telegram/requests/{$request->number}/approve", [
                 'telegram_user_id' => 'tg-1',
@@ -202,6 +204,7 @@ class ServiceRequestTest extends TestCase
 
         $this->postJson("/api/admin/requests/{$request->id}/confirm-payment", [
             'payment_method' => 'cash',
+            'amount' => 100,
         ])->assertOk()
             ->assertJsonPath('data.gemini_status', 'pending');
     }

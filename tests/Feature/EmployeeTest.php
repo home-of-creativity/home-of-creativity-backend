@@ -280,6 +280,19 @@ class EmployeeTest extends TestCase
         ]);
 
         Http::assertSent(fn (Request $request): bool => str_contains($request->url(), 'botclient-token/sendDocument'));
+        Http::assertSent(function (Request $request): bool {
+            if (! str_contains($request->url(), 'botclient-token/sendMessage')) {
+                return false;
+            }
+
+            $texts = collect(data_get($request->data(), 'reply_markup.inline_keyboard', []))
+                ->flatten(1)
+                ->pluck('text');
+
+            return $texts->contains('✅ موافقة')
+                && $texts->contains('❌ رفض')
+                && ! $texts->contains('السعر غالي');
+        });
     }
 
     public function test_non_sales_staff_cannot_send_quotation(): void

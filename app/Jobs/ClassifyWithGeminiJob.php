@@ -34,6 +34,7 @@ class ClassifyWithGeminiJob implements ShouldQueue
         IssueInvoice $issueInvoice,
         ProvisionClickUpTasks $provisionClickUpTasks,
     ): void {
+        unset($issueInvoice);
         $request = ServiceRequest::query()->with('briefs')->find($this->requestId);
         if (! $request || $request->gemini_status === GeminiStatus::Success) {
             return;
@@ -61,7 +62,7 @@ class ClassifyWithGeminiJob implements ShouldQueue
             throw $exception;
         }
 
-        DB::transaction(function () use ($request, $result, $gemini, $transitions, $enqueueIntegrationEvent, $issueInvoice, $provisionClickUpTasks): void {
+        DB::transaction(function () use ($request, $result, $gemini, $transitions, $enqueueIntegrationEvent, $provisionClickUpTasks): void {
             $request->refresh();
             $gemini->persistBriefs($request, $result['briefs']);
 
@@ -106,10 +107,6 @@ class ClassifyWithGeminiJob implements ShouldQueue
                     ->sortByDesc('id')
                     ->first()
                     ?->event_uuid ?? $eventUuid);
-            }
-
-            if (! $fresh->invoices()->exists()) {
-                $issueInvoice->handle($fresh, null, 'full', false);
             }
 
             $provisionClickUpTasks->handle(

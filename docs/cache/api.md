@@ -11,6 +11,7 @@ Health: `GET /up`. Web: `GET /` → default welcome (not the marketing site).
 - `POST /auth/register` → **403** (accounts only via Telegram bot).
 - Admin: `users.is_admin` + `EnsureAdmin`. Policy: `ServiceRequestPolicy`.
 - **No Filament.** `dont-discover` leftovers only.
+- Threads OAuth: staff `GET /api/admin/social/threads/connect` (Sanctum + admin + accounts ability) → Meta authorize URL. Public web `GET /auth/threads/callback` (Caddy `/auth*` on hoc.agency and api.hoc.agency). Canonical redirect URI `https://hoc.agency/auth/threads/callback`. After success, redirect `https://hoc.agency/staff/social/accounts?threads=connected`.
 
 Seeded: `admin@example.com` / `password` (admin), `test@example.com` / `password` (client).
 
@@ -26,9 +27,11 @@ Seeded: `admin@example.com` / `password` (admin), `test@example.com` / `password
 
 `GET/POST /requests`, `GET /requests/{id}` — own requests only.
 
+Admin confirm-payment (`POST /admin/requests/{id}/confirm-payment`) requires `payment_method` and **`amount`** (the sum actually received after receipt review). Paid/remaining percents are derived from that amount; the invoice is issued then (`kind=received`), not on quotation approval. Gemini classifies after confirm and does not send a second invoice.
+
 ## Admin (`auth:sanctum` + `admin`)
 
-Overview, contact channels, clients, employees (approve/reject), service requests (quotation, confirm-payment, retry-gemini, receipts, re-request-receipt, renew, Sham Cash QR), portfolio CMS, pricing CMS (`requires_full_payment` / `allows_renewal` on every category), social (accounts/posts with feed-reel-story placement, carousel, inbox with source post + message replies/staff), Odoo (status, import CRM, quotations/invoices; GET hydrates live lead/employee — no dashboard sync buttons), ClickUp members, retry integration events.
+Overview, contact channels, clients (CRUD syncs Odoo CRM partner+lead immediately; GET pulls live Odoo rows every 15s in the dashboard), employees (approve/reject), service requests (quotation/invoice hydrate from live Odoo on GET, confirm-payment, retry-gemini, receipts, re-request-receipt, renew, Sham Cash QR), portfolio CMS, pricing CMS (`requires_full_payment` / `allows_renewal` on every category), social (accounts/posts with feed-reel-story placement; Facebook Page stories/reels use `/photo_stories`, `/video_stories`, `/video_reels` + rupload; carousel; inbox with source post + message replies/staff; New Pages Experience uses photos/videos and Instagram `/media` instead of `/published_posts` `/feed` `/conversations`; Threads OAuth at `GET /auth/threads/callback` (Caddy `/auth*` → Laravel) and `GET /api/admin/social/threads/connect`; default redirect `https://hoc.agency/auth/threads/callback`; long-lived token stored on `SocialAccount`; also accepts `THREADS_ACCESS_TOKEN`; publishes via `graph.threads.net`), Odoo (status, Excel CRM import, live quotations/invoices on GET — **no dashboard sync buttons**), ClickUp members, retry integration events.
 
 ## Webhooks (`VerifySharedSecret`)
 
@@ -42,9 +45,9 @@ Bot HTTP APIs: `/bot/telegram/*` (client secret), `/bot/staff/*` (staff secret),
 
 Other models: User↔Client, Employee (telegram id, no User FK; join codes `EMP-%04d` from max suffix), Portfolio*, Pricing*, ShowcaseClient, ContactChannel, Social*.
 
-Integrations live in `app/Actions/`, `app/Services/` (Odoo, ClickUp, Gemini Arabic briefs, Telegram, Facebook Graph, Google Drive/Calendar, ElevenLabs STT). Jobs: Gemini classify, integration dispatch, social publish, Drive poll, payment reminders.
+Integrations live in `app/Actions/`, `app/Services/` (Odoo, ClickUp, Gemini Arabic briefs, Telegram, Facebook Graph, Threads Graph, Google Drive/Calendar, ElevenLabs STT). Jobs: Gemini classify, integration dispatch, social publish, Drive poll, payment reminders.
 
-Artisan: `social:publish-due` (every minute, Asia/Damascus), `social:sync-inbox` / `social:sync-posts` (15 min), `integration:process-outbox`, `odoo:reconcile` (every minute, rotating client batches), `ops:process-reminders` (every minute), `ops:poll-drive` (5 min, retries unsent Drive files), `ops:clickup-due-alerts` (hourly, once per task/due-day; staff chat fallback), `seo:submit-sitemap` (daily 06:15 Damascus; IndexNow + Search Console API), `e2e:purge`.
+Artisan: `social:publish-due` (every minute, Asia/Damascus), `social:sync-inbox` / `social:sync-posts` (15 min), `social:sync-accounts` (Facebook/Instagram/Threads), `integration:process-outbox`, `odoo:reconcile` (every minute, rotating client batches), `odoo:purge-crm` (delete CRM leads/customer partners and reset local Odoo ids), `ops:process-reminders` (every minute), `ops:poll-drive` (5 min, retries unsent Drive files), `ops:clickup-due-alerts` (hourly, once per task/due-day; staff chat fallback), `seo:submit-sitemap` (daily 06:15 Damascus; IndexNow + Search Console API), `e2e:purge`.
 
 ## Cache / queue
 
@@ -58,4 +61,4 @@ PHPUnit `tests/Feature` + `tests/Unit`. Playwright `e2e/` (starts API + dashboar
 
 ## Do not assume
 
-Marketing site is **not** in this repo. No public registration, no client web portal. VPS Docker lives in `deploy/`. n8n JSON in `n8n/` is not auto-deployed. Live Odoo/ClickUp/Meta need credentials.
+Marketing site is **not** in this repo. No public registration, no client web portal. VPS Docker lives in `deploy/`. n8n JSON in `n8n/` is not auto-deployed. Live Odoo/ClickUp/Meta/Threads need credentials (`THREADS_APP_ID` / `THREADS_APP_SECRET` for OAuth, or `THREADS_ACCESS_TOKEN` as a Threads user token — not the Facebook Page token). Caddy sends `/auth*` to Laravel so Meta can call `https://hoc.agency/auth/threads/callback`.

@@ -263,6 +263,7 @@ class BotFlowchartTest extends TestCase
         Sanctum::actingAs($this->adminUser());
         $this->postJson("/api/admin/requests/{$requestId}/confirm-payment", [
             'payment_method' => 'cash',
+            'amount' => 500,
         ])->assertOk();
 
         $serviceRequest = ServiceRequest::query()->findOrFail($requestId);

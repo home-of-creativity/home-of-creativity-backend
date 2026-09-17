@@ -161,10 +161,10 @@ export async function uploadReceipt(request: APIRequestContext, number: string, 
   return response.json();
 }
 
-export async function confirmPayment(request: APIRequestContext, requestId: number) {
+export async function confirmPayment(request: APIRequestContext, requestId: number, amount = 1) {
   const response = await request.post(`${API}/admin/requests/${requestId}/confirm-payment`, {
     headers: await authHeaders(request),
-    data: { payment_method: "cash" },
+    data: { payment_method: "cash", amount },
   });
   expect(response.ok(), await response.text()).toBeTruthy();
   return response.json();

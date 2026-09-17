@@ -40,6 +40,8 @@ class ServiceRequestResource extends JsonResource
             'odoo_invoice_url' => $odooReady && filled($this->odoo_invoice_id)
                 ? $odoo->recordUrl('account.move', (string) $this->odoo_invoice_id)
                 : null,
+            'odoo_quotation_live' => is_array($this->odoo_quotation_live ?? null) ? $this->odoo_quotation_live : null,
+            'odoo_invoice_live' => is_array($this->odoo_invoice_live ?? null) ? $this->odoo_invoice_live : null,
             'ai_analysis' => $this->ai_analysis,
             'paid_at' => $this->paid_at?->toIso8601String(),
             'payment_method' => $this->payment_method?->value,
@@ -57,6 +59,9 @@ class ServiceRequestResource extends JsonResource
             'amount_total' => $this->amount_total,
             'amount_paid' => $this->amount_paid,
             'amount_remaining' => $this->amount_remaining,
+            'paid_percent' => $this->paidPercent(),
+            'remaining_percent' => $this->remainingPercent(),
+            'expected_due' => $this->expectedDue(),
             'subscription_starts_at' => $this->subscription_starts_at?->toIso8601String(),
             'subscription_ends_at' => $this->subscription_ends_at?->toIso8601String(),
             'google_drive_folder_id' => $this->google_drive_folder_id,

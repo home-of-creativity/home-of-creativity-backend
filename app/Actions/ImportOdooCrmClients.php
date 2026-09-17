@@ -56,7 +56,9 @@ class ImportOdooCrmClients
                 name: $lead['name'],
                 email: $lead['email'],
                 phone: $lead['phone'],
+                companyName: $lead['company_name'] ?? null,
                 odooPartnerId: $lead['odoo_partner_id'],
+                odooLeadId: (string) $lead['lead_id'],
             );
 
             if ($result === 'created') {
@@ -73,11 +75,21 @@ class ImportOdooCrmClients
         ];
     }
 
-    private function upsertClient(string $name, ?string $email, ?string $phone, ?string $odooPartnerId): ?string
-    {
+    private function upsertClient(
+        string $name,
+        ?string $email,
+        ?string $phone,
+        ?string $companyName,
+        ?string $odooPartnerId,
+        ?string $odooLeadId,
+    ): ?string {
         $client = null;
 
-        if (filled($odooPartnerId)) {
+        if (filled($odooLeadId)) {
+            $client = Client::query()->where('odoo_lead_id', $odooLeadId)->first();
+        }
+
+        if (! $client && filled($odooPartnerId)) {
             $client = Client::query()->where('odoo_partner_id', $odooPartnerId)->first();
         }
 
@@ -93,7 +105,9 @@ class ImportOdooCrmClients
             'name' => $name,
             'email' => $email,
             'phone' => $phone,
+            'company_name' => $companyName,
             'odoo_partner_id' => $odooPartnerId,
+            'odoo_lead_id' => $odooLeadId,
         ], fn (mixed $value): bool => $value !== null && $value !== '');
 
         if ($client) {
@@ -107,7 +121,9 @@ class ImportOdooCrmClients
                 'name' => $name,
                 'email' => $email,
                 'phone' => $phone,
+                'company_name' => $companyName,
                 'odoo_partner_id' => $odooPartnerId,
+                'odoo_lead_id' => $odooLeadId,
             ]);
 
             return 'created';

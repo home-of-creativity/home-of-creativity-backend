@@ -14,17 +14,21 @@ class PushClientLeadToOdoo
         private GeminiService $gemini,
     ) {}
 
-    public function handle(Client $client): Client
+    public function handle(Client $client, bool $writeExisting = false): Client
     {
-        if (! $client->profileComplete()) {
-            return $client;
-        }
-
         if (! $this->odoo->configured()) {
             return $client;
         }
 
         if (filled($client->odoo_lead_id)) {
+            if ($writeExisting) {
+                $this->writeLead($client);
+            }
+
+            return $client->fresh() ?? $client;
+        }
+
+        if (! $client->profileComplete()) {
             return $client;
         }
 
@@ -44,13 +48,14 @@ class PushClientLeadToOdoo
             }
 
             $leadId = $this->odoo->createCrmLead([
-                'name' => $client->company_name.' — '.$client->name,
+                'name' => $this->leadName($client),
                 'contact_name' => $client->name,
                 'partner_name' => $client->company_name,
                 'phone' => $client->phone,
                 'mobile' => $client->phone,
                 'email_from' => $client->email,
-                'description' => 'Lead from Telegram client bot'
+                'partner_id' => filled($client->odoo_partner_id) ? (int) $client->odoo_partner_id : null,
+                'description' => 'Lead from Home of Creativity'
                     .($industry ? "\nالنشاط: {$industry}" : ''),
                 'tag_ids' => $tagIds !== [] ? $tagIds : null,
             ]);
@@ -70,5 +75,32 @@ class PushClientLeadToOdoo
         }
 
         return $client->fresh() ?? $client;
+    }
+
+    private function writeLead(Client $client): void
+    {
+        try {
+            $this->odoo->writeRecord('crm.lead', (string) $client->odoo_lead_id, array_filter([
+                'name' => $this->leadName($client),
+                'contact_name' => $client->name,
+                'partner_name' => $client->company_name,
+                'phone' => $client->phone,
+                'mobile' => $client->phone,
+                'email_from' => $client->email,
+                'partner_id' => filled($client->odoo_partner_id) ? (int) $client->odoo_partner_id : null,
+            ], fn (mixed $value): bool => $value !== null && $value !== ''));
+        } catch (\Throwable $exception) {
+            Log::warning('Odoo CRM lead update failed for client.', [
+                'client_id' => $client->id,
+                'error' => $exception->getMessage(),
+            ]);
+        }
+    }
+
+    private function leadName(Client $client): string
+    {
+        $company = trim((string) $client->company_name);
+
+        return $company !== '' ? $company.' — '.$client->name : $client->name;
     }
 }

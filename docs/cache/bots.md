@@ -24,10 +24,10 @@ Reply Keyboard flows stay; Inline buttons expand them (catalog, quotation reject
 
 ## Client bot
 
-`/start` sends an Arabic welcome (what the bot does, why phone and company are required) then collects missing profile fields. Link account; if name/phone/company missing, collect them then push `crm.lead` on stage تلغرام in a background `odoo:push-client` process (HTTP returns immediately). `GET /me` is local profile only. `/start` uses the link payload and replies even if a later API call times out.  
+`/start` sends an Arabic welcome (what the bot does, why phone and company are required) then collects missing profile fields. Link account; if name/phone/company missing, collect them then push `crm.lead` on stage **تلغرام** (and CRM team تلغرام) in a background `odoo:push-client` process (HTTP returns immediately). `GET /me` is local profile only. `/start` uses the link payload and replies even if a later API call times out.  
 New request: CMS catalog (categories → subcategories or packages → billing periods that exist, **no prices on buttons**, last option always **طلب يدوي**). Package+period creates a `quotation_sent` request with Odoo PDF when Odoo is up.  
 طلباتي shows Arabic status, package, paid/remaining, renew buttons when `allows_renewal`.  
-Quotation: approve (Sham Cash QR + invoices) or inline reject (غالي / تأخير / سبب مكتوب). Receipt upload prefers the re-requested number, then `receipt_reupload_required`, then awaiting payment.
+Quotation: approve or reject first; after reject the client picks غالي / تأخير / سبب مكتوب. Receipt upload prefers the re-requested number, then `receipt_reupload_required`, then awaiting payment. Approving a quotation sends payment instructions (50% or full) only — the invoice PDF is sent later, after staff confirm the received amount from the dashboard.
 
 ## Staff bot
 

@@ -14,10 +14,12 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
 use Laravel\Sanctum\Sanctum;
+use Tests\Concerns\FakesOdooDocuments;
 use Tests\TestCase;
 
 class AdminDashboardTest extends TestCase
 {
+    use FakesOdooDocuments;
     use RefreshDatabase;
 
     public function test_client_cannot_open_admin_overview(): void
@@ -53,11 +55,28 @@ class AdminDashboardTest extends TestCase
 
         $this->postJson("/api/admin/requests/{$serviceRequest->id}/confirm-payment", [
             'payment_method' => 'cash',
+            'amount' => 100,
         ])->assertOk()
             ->assertJsonPath('data.gemini_status', 'pending');
 
         $this->assertSame(RequestStatus::AwaitingPayment, $serviceRequest->fresh()->status);
         Bus::assertDispatched(ClassifyWithGeminiJob::class);
+    }
+
+    public function test_admin_confirm_payment_requires_received_amount(): void
+    {
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        $serviceRequest = ServiceRequest::factory()->create([
+            'status' => RequestStatus::AwaitingPayment,
+        ]);
+
+        $this->postJson("/api/admin/requests/{$serviceRequest->id}/confirm-payment", [
+            'payment_method' => 'cash',
+        ])->assertUnprocessable()
+            ->assertJsonValidationErrors(['amount']);
     }
 
     public function test_admin_cannot_confirm_payment_before_quotation_approval(): void
@@ -72,6 +91,7 @@ class AdminDashboardTest extends TestCase
 
         $this->postJson("/api/admin/requests/{$serviceRequest->id}/confirm-payment", [
             'payment_method' => 'cash',
+            'amount' => 100,
         ])->assertUnprocessable();
 
         $this->patchJson("/api/admin/requests/{$serviceRequest->id}", [
@@ -157,6 +177,248 @@ class AdminDashboardTest extends TestCase
             'email' => 'studio@hoc.test',
             'odoo_partner_id' => '44',
         ]);
+    }
+
+    public function test_admin_update_client_writes_odoo_partner_and_lead(): void
+    {
+        Http::preventStrayRequests();
+        $this->fakeOdooDocuments();
+        Http::fake($this->odooDocumentsHttpFake());
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        $client = Client::factory()->create([
+            'name' => 'Old Name',
+            'company_name' => 'Old Co',
+            'email' => 'old@hoc.test',
+            'phone' => '+963100',
+            'odoo_partner_id' => '44',
+            'odoo_lead_id' => '77',
+        ]);
+
+        $this->putJson("/api/admin/clients/{$client->id}", [
+            'name' => 'New Name',
+            'company_name' => 'New Co',
+            'email' => 'new@hoc.test',
+            'phone' => '+963200',
+        ])->assertOk()
+            ->assertJsonPath('data.name', 'New Name')
+            ->assertJsonPath('data.company_name', 'New Co')
+            ->assertJsonPath('data.odoo_partner_id', '44')
+            ->assertJsonPath('data.odoo_lead_id', '77');
+
+        Http::assertSent(function (Request $request): bool {
+            $args = $request->data()['params']['args'] ?? [];
+
+            return ($args[3] ?? null) === 'res.partner' && ($args[4] ?? null) === 'write';
+        });
+        Http::assertSent(function (Request $request): bool {
+            $args = $request->data()['params']['args'] ?? [];
+
+            return ($args[3] ?? null) === 'crm.lead' && ($args[4] ?? null) === 'write';
+        });
+    }
+
+    public function test_admin_delete_client_unlinks_odoo_crm_records(): void
+    {
+        Http::preventStrayRequests();
+        $this->fakeOdooDocuments();
+        Http::fake($this->odooDocumentsHttpFake());
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        $client = Client::factory()->create([
+            'odoo_partner_id' => '44',
+            'odoo_lead_id' => '77',
+            'telegram_user_id' => null,
+        ]);
+
+        $this->deleteJson("/api/admin/clients/{$client->id}")
+            ->assertOk();
+
+        $this->assertDatabaseMissing('clients', ['id' => $client->id]);
+        Http::assertSent(function (Request $request): bool {
+            $args = $request->data()['params']['args'] ?? [];
+
+            return ($args[3] ?? null) === 'crm.lead' && ($args[4] ?? null) === 'unlink';
+        });
+        Http::assertSent(function (Request $request): bool {
+            $args = $request->data()['params']['args'] ?? [];
+
+            return ($args[3] ?? null) === 'res.partner' && ($args[4] ?? null) === 'unlink';
+        });
+    }
+
+    public function test_admin_clients_index_pulls_live_odoo_crm_fields(): void
+    {
+        Http::preventStrayRequests();
+        $this->fakeOdooDocuments();
+        Http::fake($this->odooDocumentsHttpFake());
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        Client::factory()->create([
+            'name' => 'Stale',
+            'company_name' => 'Stale Co',
+            'odoo_lead_id' => '77',
+            'odoo_partner_id' => '44',
+        ]);
+
+        $this->getJson('/api/admin/clients')
+            ->assertOk()
+            ->assertJsonPath('data.0.name', 'Sara')
+            ->assertJsonPath('data.0.company_name', 'شركة الإبداع')
+            ->assertJsonPath('data.0.odoo_live.stage', 'تلغرام');
+    }
+
+    public function test_admin_clients_index_imports_odoo_crm_without_a_sync_button(): void
+    {
+        Http::preventStrayRequests();
+        $this->fakeOdooDocuments();
+        Http::fake($this->odooDocumentsHttpFake());
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        $this->getJson('/api/admin/clients')
+            ->assertOk()
+            ->assertJsonFragment(['email' => 'sara@hoc.test']);
+
+        $this->assertDatabaseHas('clients', [
+            'email' => 'sara@hoc.test',
+            'odoo_lead_id' => '77',
+            'odoo_partner_id' => '44',
+        ]);
+    }
+
+    public function test_admin_lists_confirmed_odoo_quotations_from_live_odoo(): void
+    {
+        Http::preventStrayRequests();
+        config([
+            'services.odoo.enabled' => true,
+            'services.odoo.url' => 'https://odoo.test',
+            'services.odoo.db' => 'hoc',
+            'services.odoo.username' => 'admin',
+            'services.odoo.api_key' => 'secret-key',
+            'services.odoo.use_json2' => false,
+        ]);
+        Http::fake([
+            'https://odoo.test/jsonrpc' => function (Request $request) {
+                $params = $request->data()['params'] ?? [];
+                if (($params['service'] ?? '') === 'common') {
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => 2], 200);
+                }
+
+                $args = $params['args'] ?? [];
+                if (($args[3] ?? null) === 'sale.order' && ($args[4] ?? null) === 'search_read') {
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => [[
+                        'id' => 301,
+                        'name' => 'S00031',
+                        'partner_id' => [44, 'Damastech'],
+                        'amount_total' => 250,
+                        'state' => 'sale',
+                        'client_order_ref' => 'REQ-2026-000001',
+                        'origin' => false,
+                        'date_order' => '2026-09-17 10:00:00',
+                    ]]], 200);
+                }
+
+                return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => []], 200);
+            },
+        ]);
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        $this->getJson('/api/admin/odoo/quotations')
+            ->assertOk()
+            ->assertJsonPath('data.0.state', 'sale')
+            ->assertJsonPath('data.0.amount_total', 250);
+    }
+
+    public function test_admin_request_show_hydrates_live_odoo_quotation_and_invoice(): void
+    {
+        Http::preventStrayRequests();
+        config([
+            'services.odoo.enabled' => true,
+            'services.odoo.url' => 'https://odoo.test',
+            'services.odoo.db' => 'hoc',
+            'services.odoo.username' => 'admin',
+            'services.odoo.api_key' => 'secret-key',
+            'services.odoo.use_json2' => false,
+        ]);
+        $seen = [];
+        Http::fake([
+            'https://odoo.test/jsonrpc' => function (Request $request) use (&$seen) {
+                $params = $request->data()['params'] ?? [];
+                if (($params['service'] ?? '') === 'common') {
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => 2], 200);
+                }
+
+                $args = $params['args'] ?? [];
+                $model = $args[3] ?? null;
+                $action = $args[4] ?? null;
+                $seen[] = $model.'.'.$action;
+
+                if ($model === 'sale.order' && $action === 'search_read') {
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => [[
+                        'id' => 301,
+                        'name' => 'S00031',
+                        'partner_id' => [44, 'Damastech'],
+                        'amount_total' => 250,
+                        'state' => 'sent',
+                        'client_order_ref' => 'REQ-TEST',
+                        'origin' => false,
+                        'date_order' => '2026-09-17 10:00:00',
+                    ]]], 200);
+                }
+
+                if ($model === 'account.move' && $action === 'search_read') {
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => [[
+                        'id' => 501,
+                        'name' => 'INV/2026/0001',
+                        'partner_id' => [44, 'Damastech'],
+                        'amount_total' => 250,
+                        'state' => 'posted',
+                        'payment_state' => 'not_paid',
+                        'invoice_origin' => 'REQ-TEST',
+                        'ref' => 'REQ-TEST',
+                        'invoice_date' => '2026-09-17',
+                    ]]], 200);
+                }
+
+                return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => []], 200);
+            },
+        ]);
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        $serviceRequest = ServiceRequest::factory()->create([
+            'number' => 'REQ-TEST',
+            'odoo_quotation_id' => '301',
+            'quotation_amount' => 10,
+        ]);
+
+        $response = $this->getJson("/api/admin/requests/{$serviceRequest->id}");
+        $this->assertContains('account.move.search_read', $seen, json_encode($seen));
+        $response
+            ->assertOk()
+            ->assertJsonPath('data.odoo_quotation_id', '301')
+            ->assertJsonPath('data.odoo_invoice_id', '501')
+            ->assertJsonPath('data.odoo_quotation_live.state', 'sent')
+            ->assertJsonPath('data.odoo_invoice_live.state', 'posted');
+
+        $this->assertEquals(250.0, (float) $serviceRequest->fresh()->quotation_amount);
     }
 
     public function test_admin_can_sync_odoo_partners_into_clients(): void
@@ -427,6 +689,7 @@ class AdminDashboardTest extends TestCase
             'name' => 'CRM Lead Client',
             'email' => 'crm-lead@hoc.test',
             'odoo_partner_id' => '88',
+            'odoo_lead_id' => '701',
         ]);
     }
 

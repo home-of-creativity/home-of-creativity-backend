@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
 use Laravel\Sanctum\Sanctum;
@@ -27,35 +28,77 @@ class OdooCrmExcelImportTest extends TestCase
             'services.odoo.use_json2' => false,
         ]);
 
+        $leadId = 900;
+        $leads = [];
+
         Http::fake([
-            'https://odoo.test/jsonrpc' => Http::sequence()
-                ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => 2], 200)
-                ->push(['jsonrpc' => '2.0', 'id' => 2, 'result' => [[
-                    'id' => 11,
-                    'name' => 'العملاء المحتملون',
-                ]]], 200)
-                ->push(['jsonrpc' => '2.0', 'id' => 3, 'result' => []], 200)
-                ->push(['jsonrpc' => '2.0', 'id' => 4, 'result' => 901], 200)
-                ->push(['jsonrpc' => '2.0', 'id' => 5, 'result' => []], 200)
-                ->push(['jsonrpc' => '2.0', 'id' => 6, 'result' => 902], 200)
-                ->push(['jsonrpc' => '2.0', 'id' => 7, 'result' => 2], 200)
-                ->push(['jsonrpc' => '2.0', 'id' => 8, 'result' => [[
-                    'id' => 901,
-                    'name' => 'نيل أكرو',
-                    'contact_name' => 'أحمد كمال',
-                    'partner_id' => false,
-                    'email_from' => false,
-                    'phone' => false,
-                ], [
-                    'id' => 902,
-                    'name' => 'شركة وايب',
-                    'contact_name' => 'سيف',
-                    'partner_id' => false,
-                    'email_from' => false,
-                    'phone' => false,
-                ]]], 200)
-                ->push(['jsonrpc' => '2.0', 'id' => 9, 'result' => 2], 200)
-                ->push(['jsonrpc' => '2.0', 'id' => 10, 'result' => []], 200),
+            'https://odoo.test/jsonrpc' => function (Request $request) use (&$leadId, &$leads) {
+                $params = $request->data()['params'] ?? [];
+                $service = $params['service'] ?? '';
+                $method = $params['method'] ?? '';
+
+                if ($service === 'common' && $method === 'authenticate') {
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => 2], 200);
+                }
+
+                $args = $params['args'] ?? [];
+                $model = (string) ($args[3] ?? '');
+                $action = (string) ($args[4] ?? '');
+
+                if ($model === 'crm.stage' && $action === 'search_read') {
+                    return Http::response(['jsonrpc' => '2.0', 'result' => [
+                        ['id' => 11, 'name' => 'العملاء المحتملون'],
+                    ]], 200);
+                }
+
+                if ($model === 'crm.team' && $action === 'search_read') {
+                    return Http::response(['jsonrpc' => '2.0', 'result' => [
+                        ['id' => 21, 'name' => 'تلغرام'],
+                    ]], 200);
+                }
+
+                if ($model === 'crm.lead' && $action === 'search') {
+                    return Http::response(['jsonrpc' => '2.0', 'result' => []], 200);
+                }
+
+                if ($model === 'crm.lead' && $action === 'create') {
+                    $leadId++;
+                    $values = $args[5][0][0] ?? [];
+                    $leads[] = [
+                        'id' => $leadId,
+                        'name' => $values['name'] ?? 'Lead',
+                        'contact_name' => $values['contact_name'] ?? null,
+                        'partner_name' => $values['partner_name'] ?? null,
+                        'partner_id' => false,
+                        'email_from' => false,
+                        'phone' => false,
+                    ];
+
+                    return Http::response(['jsonrpc' => '2.0', 'result' => $leadId], 200);
+                }
+
+                if ($model === 'crm.lead' && $action === 'search_read') {
+                    return Http::response(['jsonrpc' => '2.0', 'result' => $leads], 200);
+                }
+
+                if ($model === 'res.partner' && $action === 'search_read') {
+                    return Http::response(['jsonrpc' => '2.0', 'result' => []], 200);
+                }
+
+                if ($model === 'res.partner' && $action === 'search') {
+                    return Http::response(['jsonrpc' => '2.0', 'result' => []], 200);
+                }
+
+                if ($model === 'res.partner' && $action === 'create') {
+                    return Http::response(['jsonrpc' => '2.0', 'result' => 44], 200);
+                }
+
+                if ($model === 'res.partner' && $action === 'write') {
+                    return Http::response(['jsonrpc' => '2.0', 'result' => true], 200);
+                }
+
+                return Http::response(['jsonrpc' => '2.0', 'result' => null], 200);
+            },
         ]);
 
         $path = tempnam(sys_get_temp_dir(), 'crm-import-').'.xlsx';

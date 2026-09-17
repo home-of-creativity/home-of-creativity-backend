@@ -204,6 +204,8 @@ export type ServiceRequest = {
   odoo_invoice_id?: string | null;
   odoo_quotation_url?: string | null;
   odoo_invoice_url?: string | null;
+  odoo_quotation_live?: OdooQuotation | null;
+  odoo_invoice_live?: OdooInvoice | null;
   gemini_status?: string | null;
   gemini_error?: string | null;
   quotation_amount?: string | null;
@@ -215,6 +217,9 @@ export type ServiceRequest = {
   amount_total?: string | number | null;
   amount_paid?: string | number | null;
   amount_remaining?: string | number | null;
+  paid_percent?: number | null;
+  remaining_percent?: number | null;
+  expected_due?: string | number | null;
   subscription_starts_at?: string | null;
   subscription_ends_at?: string | null;
   google_drive_folder_id?: string | null;
@@ -505,10 +510,10 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
-  confirmPayment(id: number, payment_method: "receipt" | "cash") {
+  confirmPayment(id: number, payment_method: "receipt" | "cash", amount: number) {
     return request<Envelope<ServiceRequest>>(`/admin/requests/${id}/confirm-payment`, {
       method: "POST",
-      body: JSON.stringify({ payment_method }),
+      body: JSON.stringify({ payment_method, amount }),
     });
   },
   retryGemini(id: number) {
@@ -548,19 +553,20 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
-  odooStatus() {
-    return request<Envelope<{ configured: boolean; url: string | null }>>("/admin/odoo/status");
-  },
-  syncOdooPartners() {
-    return request<Envelope<{ synced: number; created: number; updated: number; pushed?: number }>>("/admin/odoo/sync-partners", {
-      method: "POST",
+  updateClient(
+    id: number,
+    payload: { name: string; email?: string | null; phone?: string | null; telegram_user_id?: string | null; company_name?: string | null },
+  ) {
+    return request<Envelope<Client>>(`/admin/clients/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
     });
   },
-  importOdooCrmClients() {
-    return request<Envelope<{ imported: number; created: number; updated: number; pushed: number; crm_leads: number; partners: number }>>(
-      "/admin/odoo/import-crm-clients",
-      { method: "POST" },
-    );
+  deleteClient(id: number) {
+    return request<Envelope<null>>(`/admin/clients/${id}`, { method: "DELETE" });
+  },
+  odooStatus() {
+    return request<Envelope<{ configured: boolean; url: string | null }>>("/admin/odoo/status");
   },
   importOdooCrmClientsExcel(file: File) {
     const form = new FormData();
@@ -579,11 +585,6 @@ export const api = {
         partners: number;
       }>
     >("/admin/odoo/import-crm-clients/excel", "POST", form);
-  },
-  syncOdooEmployees() {
-    return request<Envelope<{ synced: number; created: number; updated: number; pushed: number }>>("/admin/odoo/sync-employees", {
-      method: "POST",
-    });
   },
   odooQuotations() {
     return request<{ data: OdooQuotation[] }>("/admin/odoo/quotations");
@@ -866,7 +867,14 @@ export const api = {
       facebook_configured?: boolean;
       facebook_error?: string | null;
       facebook_pages_found?: number;
+      threads_configured?: boolean;
+      threads_error?: string | null;
+      threads_oauth_configured?: boolean;
+      threads_redirect_uri?: string | null;
     }>("/admin/social/accounts");
+  },
+  threadsConnect() {
+    return request<{ data: { authorize_url: string; redirect_uri: string } }>("/admin/social/threads/connect");
   },
   createSocialAccount(payload: Partial<SocialAccount> & { platform: string; name: string; access_token?: string }) {
     return request<Envelope<SocialAccount>>("/admin/social/accounts", {

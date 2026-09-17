@@ -36,29 +36,68 @@ class SocialInboxSync
             return 0;
         }
 
-        if (! in_array($account->platform, [SocialPlatform::Facebook, SocialPlatform::Instagram], true)) {
+        if (! in_array($account->platform, [SocialPlatform::Facebook, SocialPlatform::Instagram, SocialPlatform::Threads], true)) {
             return 0;
         }
 
         $imported = 0;
+        if ($account->platform === SocialPlatform::Threads) {
+            $imported += $this->importThreadsReplies($account);
+            $imported += $this->importCommentsFromPublishedTargets($account);
+            $this->pruneDeletedComments($account);
+
+            return $imported;
+        }
+
         if ($account->platform === SocialPlatform::Instagram) {
-            $imported += $this->importCommentsFromPath($account, $account->page_id.'/media', [
+            $igUserId = $this->publisher->instagramGraphUserId($account);
+            $imported += $this->importCommentsFromPath($account, $igUserId.'/media', [
                 'fields' => 'id,caption,permalink,media_type,media_url,thumbnail_url,comments.limit(50){id,text,username,timestamp,from}',
                 'limit' => '25',
             ]);
         } else {
-            $imported += $this->importCommentsFromPath($account, $account->page_id.'/published_posts', [
-                'fields' => 'id,message,permalink_url,full_picture,attachments{media{image{src}}},comments.limit(50){id,message,from,created_time}',
-                'limit' => '25',
-            ]);
-            $imported += $this->importCommentsFromPath($account, $account->page_id.'/feed', [
-                'fields' => 'id,message,permalink_url,full_picture,attachments{media{image{src}}},comments.limit(50){id,message,from,created_time}',
-                'limit' => '25',
-            ]);
+            foreach ($this->facebookCommentEdges() as $edge => $fields) {
+                $imported += $this->importCommentsFromPath($account, $account->page_id.'/'.$edge, [
+                    'fields' => $fields,
+                    'limit' => '25',
+                ]);
+            }
         }
         $imported += $this->importCommentsFromPublishedTargets($account);
         $imported += $this->importMessages($account);
         $this->pruneDeletedComments($account);
+
+        return $imported;
+    }
+
+    private function importThreadsReplies(SocialAccount $account): int
+    {
+        $payload = $this->graphGet($account, $account->page_id.'/threads', [
+            'fields' => 'id,text,permalink,timestamp,media_type,thumbnail_url,replies.limit(50){id,text,username,timestamp}',
+            'limit' => '25',
+        ]);
+
+        if ($payload === null) {
+            return 0;
+        }
+
+        $imported = 0;
+        foreach (data_get($payload, 'data', []) as $post) {
+            if (! is_array($post)) {
+                continue;
+            }
+            $postId = data_get($post, 'id');
+            if (! is_string($postId) || $postId === '') {
+                continue;
+            }
+
+            $imported += $this->syncCommentsForPost(
+                $account,
+                $postId,
+                data_get($post, 'replies.data', []),
+                $this->sourceFromPost($account, $post),
+            );
+        }
 
         return $imported;
     }
@@ -108,7 +147,9 @@ class SocialInboxSync
             ->each(function (SocialPostAccount $target) use ($account, &$imported): void {
                 $fields = $account->platform === SocialPlatform::Instagram
                     ? 'id,caption,permalink,media_type,media_url,thumbnail_url,comments.limit(50){id,text,username,timestamp,from}'
-                    : 'id,message,permalink_url,full_picture,comments.limit(50){id,message,from,created_time}';
+                    : ($account->platform === SocialPlatform::Threads
+                        ? 'id,text,permalink,timestamp,media_type,thumbnail_url,replies.limit(50){id,text,username,timestamp}'
+                        : 'id,message,permalink_url,full_picture,comments.limit(50){id,message,from,created_time}');
                 $payload = $this->graphGet($account, (string) $target->external_id, [
                     'fields' => $fields,
                 ]);
@@ -120,7 +161,9 @@ class SocialInboxSync
                 $imported += $this->syncCommentsForPost(
                     $account,
                     (string) $target->external_id,
-                    data_get($payload, 'comments.data', []),
+                    $account->platform === SocialPlatform::Threads
+                        ? data_get($payload, 'replies.data', [])
+                        : data_get($payload, 'comments.data', []),
                     $this->sourceFromPost($account, is_array($payload) ? $payload : []),
                 );
             });
@@ -134,11 +177,15 @@ class SocialInboxSync
             'fields' => 'id,updated_time,messages.limit(20){id,message,from,created_time}',
             'limit' => '25',
         ];
+        $conversationPageId = (string) $account->page_id;
         if ($account->platform === SocialPlatform::Instagram) {
             $query['platform'] = 'instagram';
+            if (filled($account->facebook_page_id)) {
+                $conversationPageId = (string) $account->facebook_page_id;
+            }
         }
 
-        $payload = $this->graphGet($account, $account->page_id.'/conversations', $query);
+        $payload = $this->graphGet($account, $conversationPageId.'/conversations', $query);
 
         if ($payload === null) {
             return 0;
@@ -150,7 +197,11 @@ class SocialInboxSync
             $conversationId = is_string($conversationId) ? $conversationId : null;
             foreach (data_get($conversation, 'messages.data', []) as $message) {
                 $fromId = (string) data_get($message, 'from.id');
-                if ($fromId !== '' && $fromId === (string) $account->page_id) {
+                $ownIds = array_values(array_filter([
+                    (string) $account->page_id,
+                    (string) ($account->facebook_page_id ?: ''),
+                ]));
+                if ($fromId !== '' && in_array($fromId, $ownIds, true)) {
                     continue;
                 }
 
@@ -293,12 +344,14 @@ class SocialInboxSync
     {
         $postId = data_get($post, 'id');
         $postId = is_string($postId) ? $postId : null;
-        $body = data_get($post, 'message') ?? data_get($post, 'caption');
-        $permalink = data_get($post, 'permalink_url') ?? data_get($post, 'permalink');
+        $body = data_get($post, 'message') ?? data_get($post, 'caption') ?? data_get($post, 'text') ?? data_get($post, 'name') ?? data_get($post, 'description');
+        $permalink = data_get($post, 'permalink_url') ?? data_get($post, 'permalink') ?? data_get($post, 'link');
         $preview = data_get($post, 'full_picture')
             ?? data_get($post, 'thumbnail_url')
             ?? data_get($post, 'media_url')
-            ?? data_get($post, 'attachments.data.0.media.image.src');
+            ?? data_get($post, 'attachments.data.0.media.image.src')
+            ?? data_get($post, 'images.0.source')
+            ?? data_get($post, 'picture');
         $mediaType = data_get($post, 'media_type');
 
         return [
@@ -331,7 +384,14 @@ class SocialInboxSync
             $response = Http::timeout((int) config('services.social.timeout', 20))
                 ->connectTimeout(3)
                 ->acceptJson()
-                ->get(FacebookGraph::url($path), FacebookGraph::withToken($query, (string) $account->access_token));
+                ->get(
+                    $account->platform === SocialPlatform::Threads
+                        ? ThreadsGraph::url($path)
+                        : FacebookGraph::url($path),
+                    $account->platform === SocialPlatform::Threads
+                        ? ThreadsGraph::withToken($query, (string) $account->access_token)
+                        : FacebookGraph::withToken($query, (string) $account->access_token),
+                );
         } catch (ConnectionException|Throwable $exception) {
             $this->lastError = $exception->getMessage();
             Log::warning('Social inbox sync failed.', [
@@ -343,8 +403,11 @@ class SocialInboxSync
         }
 
         if (! $response->successful()) {
-            $message = data_get($response->json(), 'error.message');
-            if (is_string($message) && $message !== '' && ! str_contains($message, 'does not exist')) {
+            $json = $response->json();
+            $message = data_get($json, 'error.message');
+            if (is_string($message) && $message !== ''
+                && ! str_contains($message, 'does not exist')
+                && ! FacebookGraph::isNewPagesExperienceError($json, $message)) {
                 $this->lastError = $message;
             }
             Log::warning('Social inbox sync rejected.', [
@@ -359,5 +422,20 @@ class SocialInboxSync
         $json = $response->json() ?? [];
 
         return $json;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function facebookCommentEdges(): array
+    {
+        $postFields = 'id,message,permalink_url,full_picture,attachments{media{image{src}}},comments.limit(50){id,message,from,created_time}';
+
+        return [
+            'published_posts' => $postFields,
+            'feed' => $postFields,
+            'photos' => 'id,name,link,created_time,images,comments.limit(50){id,message,from,created_time}',
+            'videos' => 'id,description,permalink_url,created_time,picture,source,comments.limit(50){id,message,from,created_time}',
+        ];
     }
 }

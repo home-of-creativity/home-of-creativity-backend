@@ -6,6 +6,7 @@ export type SocialPageGroup = {
   name: string;
   facebook?: SocialAccount;
   instagram?: SocialAccount;
+  threads?: SocialAccount;
   accounts: SocialAccount[];
 };
 
@@ -36,7 +37,7 @@ export function groupSocialPages(accounts: SocialAccount[]): SocialPageGroup[] {
       if (account.facebook_page_id && (facebook.facebook_page_id === account.facebook_page_id || facebook.page_id === account.facebook_page_id)) {
         return true;
       }
-      return account.platform === "instagram" && facebook.name === account.name;
+      return (account.platform === "instagram" || account.platform === "threads") && facebook.name === account.name;
     });
     const key = matchedFacebook
       ? matchedFacebook.facebook_page_id || matchedFacebook.page_id || `fb-${matchedFacebook.id}`
@@ -45,6 +46,9 @@ export function groupSocialPages(accounts: SocialAccount[]): SocialPageGroup[] {
     current.accounts.push(account);
     if (account.platform === "instagram") {
       current.instagram = account;
+    }
+    if (account.platform === "threads") {
+      current.threads = account;
     }
     if (!current.facebook) {
       current.name = account.name;
@@ -55,16 +59,31 @@ export function groupSocialPages(accounts: SocialAccount[]): SocialPageGroup[] {
   return [...groups.values()];
 }
 
-export const socialPlatforms = ["facebook", "instagram", "linkedin", "x", "tiktok", "youtube"] as const;
+export const socialPlatforms = ["facebook", "instagram", "threads", "linkedin", "x", "tiktok", "youtube"] as const;
 
 export function platformLabel(platform: string, t: (c: Copy) => string) {
   if (platform === "instagram") return t(copy.instagram);
   if (platform === "facebook") return t(copy.facebook);
+  if (platform === "threads") return t(copy.threads);
   if (platform === "linkedin") return t(copy.linkedin);
   if (platform === "x") return t(copy.xTwitter);
   if (platform === "tiktok") return t(copy.tiktok);
   if (platform === "youtube") return t(copy.youtube);
   return platform;
+}
+
+export function pageChannelSummary(page: SocialPageGroup, t: (c: Copy) => string) {
+  const labels = [
+    page.facebook ? t(copy.facebook) : null,
+    page.instagram ? t(copy.instagram) : null,
+    page.threads ? t(copy.threads) : null,
+  ].filter((label): label is string => Boolean(label));
+
+  if (labels.length > 0) {
+    return labels.join(" + ");
+  }
+
+  return platformLabel(page.accounts[0]?.platform ?? "", t);
 }
 
 export function socialPlacementLabel(placement: string | undefined, t: (c: Copy) => string) {
@@ -103,8 +122,16 @@ export function facebookErrorMessage(error: string, t: (c: Copy) => string) {
   if (error === "no_pages") return t(copy.socialFacebookNoPages);
   if (error === "missing_page_token") return t(copy.socialFacebookMissingPageToken);
   if (error === "page_not_in_token") return t(copy.socialFacebookPageNotInToken);
+  if (error === "threads_token_missing") return t(copy.socialThreadsTokenMissing);
+  if (error === "threads_profile_missing") return t(copy.socialThreadsError);
   if (error === "facebook_app_user_mismatch" || error.includes("Cannot call API for app")) {
     return t(copy.socialFacebookAppMismatch);
+  }
+  if (error.includes("facebook_new_pages_text")) {
+    return t(copy.socialFacebookNewPagesText);
+  }
+  if (error.includes("facebook_new_pages") || error.toLowerCase().includes("new pages experience")) {
+    return t(copy.socialFacebookNewPages);
   }
 
   return error.length > 0 ? error : t(copy.socialFacebookError);
@@ -128,6 +155,24 @@ export function publishErrorMessage(error: string, t: (c: Copy) => string) {
   if (error.includes("instagram_media_processing")) {
     return t(copy.socialInstagramMediaProcessing);
   }
+  if (error.includes("threads_media_fetch")) {
+    return t(copy.socialThreadsMediaFetch);
+  }
+  if (error.includes("threads_media_processing")) {
+    return t(copy.socialThreadsMediaProcessing);
+  }
+  if (error.includes("threads_edit_unsupported")) {
+    return t(copy.socialThreadsEditUnsupported);
+  }
+  if (error.includes("threads_token_missing")) {
+    return t(copy.socialThreadsTokenMissing);
+  }
+  if (error.includes("facebook_unsupported_post") || error.toLowerCase().includes("unsupported post request")) {
+    return t(copy.socialFacebookUnsupportedPost);
+  }
+  if (error.includes("Facebook Graph HTTP 400") || error.includes("Facebook Graph HTTP")) {
+    return t(copy.socialGraphRejectedUpload);
+  }
   if (error.includes("story_needs_media")) {
     return t(copy.socialStoryNeedsMedia);
   }
@@ -143,6 +188,15 @@ export function publishErrorMessage(error: string, t: (c: Copy) => string) {
   if (error === "facebook_app_user_mismatch" || error.includes("Cannot call API for app")) {
     return t(copy.socialFacebookAppMismatch);
   }
+  if (error.includes("facebook_new_pages_text")) {
+    return t(copy.socialFacebookNewPagesText);
+  }
+  if (error.includes("facebook_new_pages") || error.toLowerCase().includes("new pages experience")) {
+    return t(copy.socialFacebookNewPages);
+  }
+  if (error.includes("facebook_unsupported_post") || error.toLowerCase().includes("unsupported post request")) {
+    return t(copy.socialFacebookUnsupportedPost);
+  }
 
   return error;
 }
@@ -156,6 +210,9 @@ export function inboxErrorMessage(error: string, t: (c: Copy) => string) {
   }
   if (error === "facebook_app_user_mismatch" || error.includes("Cannot call API for app")) {
     return t(copy.socialFacebookAppMismatch);
+  }
+  if (error.includes("facebook_new_pages") || error.toLowerCase().includes("new pages experience")) {
+    return t(copy.socialFacebookNewPages);
   }
 
   return error.length > 0 ? error : t(copy.loading);

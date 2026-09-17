@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\SocialAccountStatus;
 use App\Enums\SocialPlatform;
 use App\Models\SocialAccount;
+use DateTimeInterface;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -14,6 +15,8 @@ class SocialAccountSync
 {
     public ?string $lastError = null;
 
+    public ?string $threadsError = null;
+
     public int $facebookPagesFound = 0;
 
     public function configured(): bool
@@ -21,6 +24,11 @@ class SocialAccountSync
         return filled(config('services.facebook.access_token'))
             && filled(config('services.facebook.app_id'))
             && filled(config('services.facebook.app_secret'));
+    }
+
+    public function threadsConfigured(): bool
+    {
+        return ThreadsGraph::configured();
     }
 
     public function syncFromFacebook(?int $connectedBy = null): int
@@ -32,7 +40,7 @@ class SocialAccountSync
         if (! $this->configured()) {
             $this->lastError = 'Facebook credentials are not configured.';
 
-            return 0;
+            return $this->syncStandaloneThreads($connectedBy);
         }
 
         $pages = $this->fetchPages();
@@ -45,6 +53,8 @@ class SocialAccountSync
         }
 
         $keepIds = [];
+        $attachedThreadsIds = [];
+        $instagramPages = [];
 
         foreach ($pages as $page) {
             $this->rememberSyncedAccount($keepIds, $this->upsertAccount(
@@ -62,6 +72,7 @@ class SocialAccountSync
             }
 
             $instagram = $page['instagram'];
+            $instagramPages[] = $page;
             $this->rememberSyncedAccount($keepIds, $this->upsertAccount(
                 SocialPlatform::Instagram,
                 $instagram['id'],
@@ -73,9 +84,95 @@ class SocialAccountSync
             ));
         }
 
+        $threadsProfiles = $this->fetchThreadsProfiles();
+        $threadsProfile = $threadsProfiles[0] ?? null;
+
+        foreach ($instagramPages as $page) {
+            $threads = $this->resolveThreadsForPage($page, $threadsProfile, $instagramPages);
+            if ($threads === null) {
+                continue;
+            }
+
+            $this->rememberSyncedAccount($keepIds, $this->upsertAccount(
+                SocialPlatform::Threads,
+                $threads['id'],
+                $threads['name'],
+                $threads['username'],
+                $threads['token'],
+                $connectedBy,
+                $page['id'],
+                $threads['token'] === null || $threads['token'] === '' ? 'threads_token_missing' : null,
+            ));
+            $attachedThreadsIds[] = $threads['id'];
+        }
+
+        foreach ($threadsProfiles as $profile) {
+            if (in_array($profile['id'], $attachedThreadsIds, true)) {
+                continue;
+            }
+
+            $this->rememberSyncedAccount($keepIds, $this->upsertAccount(
+                SocialPlatform::Threads,
+                $profile['id'],
+                $profile['name'] ?: $profile['username'],
+                $profile['username'],
+                $profile['token'],
+                $connectedBy,
+                $this->matchingFacebookPageId($profile['username']),
+            ));
+        }
+
+        $this->rememberExistingThreadsAccounts($keepIds);
         $this->markMissingPages($keepIds);
 
         return count($keepIds);
+    }
+
+    public function connectThreadsToken(string $accessToken, ?int $connectedBy = null, ?DateTimeInterface $expiresAt = null): ?SocialAccount
+    {
+        $this->threadsError = null;
+        $profile = $this->fetchThreadsProfileWithToken($accessToken);
+        if ($profile === null) {
+            return null;
+        }
+
+        $account = $this->upsertAccount(
+            SocialPlatform::Threads,
+            $profile['id'],
+            $profile['name'] ?: $profile['username'],
+            $profile['username'],
+            $profile['token'],
+            $connectedBy,
+            $this->matchingFacebookPageId($profile['username']),
+            null,
+            $expiresAt,
+            true,
+        );
+
+        return $this->isManuallyDisconnected($account) ? null : $account;
+    }
+
+    private function syncStandaloneThreads(?int $connectedBy): int
+    {
+        $count = 0;
+
+        foreach ($this->fetchThreadsProfiles() as $profile) {
+            $account = $this->upsertAccount(
+                SocialPlatform::Threads,
+                $profile['id'],
+                $profile['name'] ?: $profile['username'],
+                $profile['username'],
+                $profile['token'],
+                $connectedBy,
+                $this->matchingFacebookPageId($profile['username']),
+            );
+
+            if (! $this->isManuallyDisconnected($account)) {
+                $count++;
+            }
+        }
+
+        return $count;
     }
 
     public function purgeTestAccounts(): int
@@ -214,31 +311,293 @@ class SocialAccountSync
         return $json;
     }
 
+    /**
+     * @return list<array{id: string, username: string, name: string, token: string}>
+     */
+    private function fetchThreadsProfiles(): array
+    {
+        $profiles = [];
+        $lastError = null;
+
+        foreach ($this->threadsAccessTokens() as $token) {
+            $this->threadsError = null;
+            $profile = $this->fetchThreadsProfileWithToken($token);
+            if ($profile === null) {
+                $lastError = $this->threadsError;
+
+                continue;
+            }
+
+            $profiles[$profile['id']] = $profile;
+        }
+
+        $this->threadsError = $profiles === [] ? $lastError : null;
+
+        return array_values($profiles);
+    }
+
+    /**
+     * @return array{id: string, username: string, name: string, token: string}|null
+     */
+    private function fetchThreadsProfileWithToken(string $token): ?array
+    {
+        $token = trim($token);
+        if ($token === '') {
+            return null;
+        }
+
+        $payload = $this->threadsGet('me', [
+            'fields' => 'id,username,name',
+        ], $token);
+
+        $id = data_get($payload, 'id');
+        $username = data_get($payload, 'username');
+        if (! is_string($id) || $id === '' || ! is_string($username) || $username === '') {
+            if ($this->threadsError === null) {
+                $this->threadsError = 'threads_profile_missing';
+            }
+
+            return null;
+        }
+
+        $name = data_get($payload, 'name');
+
+        return [
+            'id' => $id,
+            'username' => $username,
+            'name' => is_string($name) && $name !== '' ? $name : $username,
+            'token' => $token,
+        ];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function threadsAccessTokens(): array
+    {
+        $tokens = [];
+        $envToken = trim((string) config('services.threads.access_token'));
+        if ($envToken !== '') {
+            $tokens[] = $envToken;
+        }
+
+        foreach ($this->storedThreadsAccounts() as $account) {
+            $token = trim((string) $account->access_token);
+            if ($token !== '' && ! in_array($token, $tokens, true)) {
+                $tokens[] = $token;
+            }
+        }
+
+        return $tokens;
+    }
+
+    /**
+     * @return list<SocialAccount>
+     */
+    private function storedThreadsAccounts(): array
+    {
+        return SocialAccount::query()
+            ->where('platform', SocialPlatform::Threads)
+            ->where('connection_status', SocialAccountStatus::Connected)
+            ->get()
+            ->all();
+    }
+
+    private function matchingFacebookPageId(string $username): ?string
+    {
+        $instagram = SocialAccount::query()
+            ->where('platform', SocialPlatform::Instagram)
+            ->where('handle', $username)
+            ->first();
+
+        return filled($instagram?->facebook_page_id) ? (string) $instagram->facebook_page_id : null;
+    }
+
+    /**
+     * @param  list<int>  $keepIds
+     */
+    private function rememberExistingThreadsAccounts(array &$keepIds): void
+    {
+        foreach ($this->storedThreadsAccounts() as $account) {
+            $this->rememberSyncedAccount($keepIds, $account);
+        }
+    }
+
+    /**
+     * @param  array{id: string, name: string, access_token: string, instagram?: array{id: string, name: string, username: string}}  $page
+     * @param  array{id: string, username: string, name: string, token: string}|null  $threadsProfile
+     * @param  list<array{id: string, name: string, access_token: string, instagram?: array{id: string, name: string, username: string}}>  $instagramPages
+     * @return array{id: string, username: string, name: string, token: ?string}|null
+     */
+    private function resolveThreadsForPage(array $page, ?array $threadsProfile, array $instagramPages): ?array
+    {
+        $instagram = $page['instagram'] ?? null;
+        if (! is_array($instagram)) {
+            return null;
+        }
+
+        $connected = $this->fetchConnectedThreadsUser((string) $instagram['id']);
+        $instagramUsername = (string) ($instagram['username'] ?? '');
+
+        if ($threadsProfile !== null) {
+            $sameId = $connected !== null && $connected['id'] === $threadsProfile['id'];
+            $sameHandle = $instagramUsername !== ''
+                && strcasecmp($threadsProfile['username'], $instagramUsername) === 0;
+            $onlyInstagram = count($instagramPages) === 1 && $connected === null;
+
+            if (! $sameId && ! $sameHandle && ! $onlyInstagram) {
+                return $connected;
+            }
+
+            return [
+                'id' => $threadsProfile['id'],
+                'username' => $threadsProfile['username'],
+                'name' => $threadsProfile['name'] ?: (string) ($instagram['name'] ?? $threadsProfile['username']),
+                'token' => $threadsProfile['token'],
+            ];
+        }
+
+        return $connected;
+    }
+
+    /**
+     * @return array{id: string, username: string, name: string, token: ?string}|null
+     */
+    private function fetchConnectedThreadsUser(string $igUserId): ?array
+    {
+        foreach (['connected_threads_user', 'instagram_backed_threads_user'] as $edge) {
+            $payload = $this->graphGetOptional($igUserId.'/'.$edge, [
+                'fields' => 'threads_user_id,username,name',
+            ]);
+            $row = $this->firstThreadsUserRow($payload);
+            if ($row === null) {
+                continue;
+            }
+
+            return $row;
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $payload
+     * @return array{id: string, username: string, name: string, token: ?string}|null
+     */
+    private function firstThreadsUserRow(?array $payload): ?array
+    {
+        if ($payload === null) {
+            return null;
+        }
+
+        $row = data_get($payload, 'data.0');
+        if (! is_array($row)) {
+            $row = $payload;
+        }
+
+        $id = data_get($row, 'threads_user_id');
+        if (! is_string($id) || $id === '') {
+            return null;
+        }
+
+        $username = data_get($row, 'username');
+        $name = data_get($row, 'name');
+
+        return [
+            'id' => $id,
+            'username' => is_string($username) && $username !== '' ? $username : $id,
+            'name' => is_string($name) && $name !== '' ? $name : (is_string($username) && $username !== '' ? $username : $id),
+            'token' => null,
+        ];
+    }
+
+    /**
+     * @param  array<string, string>  $query
+     * @return array<string, mixed>|null
+     */
+    private function graphGetOptional(string $path, array $query): ?array
+    {
+        $previous = $this->lastError;
+        $payload = $this->graphGet($path, $query);
+        $this->lastError = $previous;
+
+        return $payload;
+    }
+
+    /**
+     * @param  array<string, string>  $query
+     * @return array<string, mixed>|null
+     */
+    private function threadsGet(string $path, array $query, string $token): ?array
+    {
+        try {
+            $response = Http::timeout((int) config('services.social.timeout', 20))
+                ->connectTimeout(3)
+                ->acceptJson()
+                ->get(ThreadsGraph::url($path), ThreadsGraph::withToken($query, $token));
+        } catch (ConnectionException|Throwable $exception) {
+            $this->threadsError = $exception->getMessage();
+            Log::warning('Threads account sync failed.', [
+                'path' => $path,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return null;
+        }
+
+        if (! $response->successful()) {
+            $this->threadsError = ThreadsGraph::errorMessage($response->json(), $response->status());
+            Log::warning('Threads account sync rejected.', [
+                'path' => $path,
+                'status' => $response->status(),
+            ]);
+
+            return null;
+        }
+
+        /** @var array<string, mixed> $json */
+        $json = $response->json() ?? [];
+
+        return $json;
+    }
+
     private function upsertAccount(
         SocialPlatform $platform,
         string $pageId,
         string $name,
         string $handle,
-        string $accessToken,
+        ?string $accessToken,
         ?int $connectedBy,
         ?string $facebookPageId = null,
+        ?string $missingTokenError = null,
+        ?DateTimeInterface $expiresAt = null,
+        bool $forceReconnect = false,
     ): SocialAccount {
         $account = SocialAccount::query()->firstOrNew([
             'platform' => $platform,
             'page_id' => $pageId,
         ]);
 
-        if ($this->isManuallyDisconnected($account)) {
+        if (! $forceReconnect && $this->isManuallyDisconnected($account)) {
             return $account;
         }
 
         $isNew = ! $account->exists;
+        $hasToken = is_string($accessToken) && $accessToken !== '';
+        $keepExistingToken = ! $hasToken && $account->hasToken();
+        $connected = $hasToken || $keepExistingToken;
+
         $account->fill([
-            'connection_status' => SocialAccountStatus::Connected,
-            'last_error' => null,
+            'connection_status' => $connected
+                ? SocialAccountStatus::Connected
+                : SocialAccountStatus::Error,
+            'last_error' => $connected ? null : ($missingTokenError ?: 'missing_token'),
             'connected_by' => $connectedBy ?? $account->connected_by,
-            'facebook_page_id' => $facebookPageId,
         ]);
+
+        if (is_string($facebookPageId) && $facebookPageId !== '') {
+            $account->facebook_page_id = $facebookPageId;
+        }
 
         if ($isNew) {
             $account->fill([
@@ -248,7 +607,16 @@ class SocialAccountSync
             ]);
         }
 
-        $account->access_token = $accessToken;
+        if ($forceReconnect) {
+            $account->is_active = true;
+        }
+
+        if ($hasToken) {
+            $account->access_token = $accessToken;
+        }
+        if ($expiresAt !== null) {
+            $account->token_expires_at = $expiresAt;
+        }
         $account->save();
 
         return $account;
@@ -263,7 +631,9 @@ class SocialAccountSync
             return;
         }
 
-        $keepIds[] = $account->id;
+        if (! in_array($account->id, $keepIds, true)) {
+            $keepIds[] = $account->id;
+        }
     }
 
     private function isManuallyDisconnected(SocialAccount $account): bool

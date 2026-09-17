@@ -27,7 +27,9 @@ class IssueInvoice
         bool $sendPaidNotice = true,
     ): Invoice {
         return DB::transaction(function () use ($request, $amount, $kind, $sendPaidNotice): Invoice {
-            $existing = $request->invoices()->where('kind', $kind)->latest('id')->first();
+            $existing = $kind === 'received'
+                ? null
+                : $request->invoices()->where('kind', $kind)->latest('id')->first();
             if ($existing) {
                 return $existing;
             }
@@ -37,8 +39,13 @@ class IssueInvoice
                 $resolvedAmount = (float) ($request->quotation_amount ?? $request->amount_total ?? 0);
             }
 
-            $suffix = $kind === 'full' ? '' : '-'.$kind;
-            $invoiceNumber = 'INV-'.$request->number.$suffix;
+            if ($kind === 'received') {
+                $seq = $request->invoices()->count() + 1;
+                $invoiceNumber = 'INV-'.$request->number.'-rcv'.$seq;
+            } else {
+                $suffix = $kind === 'full' ? '' : '-'.$kind;
+                $invoiceNumber = 'INV-'.$request->number.$suffix;
+            }
             if ($request->invoices()->where('invoice_number', $invoiceNumber)->exists()) {
                 $invoiceNumber = 'INV-'.$request->number.'-'.now()->format('His');
             }
@@ -182,16 +189,25 @@ class IssueInvoice
     {
         $methodLabel = $paymentMethod === PaymentMethod::Receipt->value ? 'وصل بنكي' : 'نقداً';
         $kindLabel = match ($kind) {
-            'deposit' => 'دفعة أولى 50%',
+            'deposit' => 'دفعة أولى',
             'remaining' => 'المتبقي',
             'renewal' => 'تجديد',
+            'received' => 'دفعة مستلمة',
             default => 'كامل المبلغ',
         };
+
+        $total = (float) ($request->amount_total ?? $request->quotation_amount ?? 0);
+        $paid = (float) ($request->amount_paid ?? 0);
+        $remaining = (float) ($request->amount_remaining ?? max($total - $paid, 0));
+        $paidPercent = $request->paidPercent();
+        $remainingPercent = $request->remainingPercent();
 
         $lines = [
             "فاتورة #{$request->number} ({$kindLabel})",
             "العنوان: {$request->title}",
-            'المبلغ: '.number_format($amount, 2).' SYP',
+            'هذه الدفعة: '.number_format($amount, 2).' SYP',
+            'المدفوع: '.number_format($paid, 2)." SYP ({$paidPercent}%)",
+            'المتبقي: '.number_format($remaining, 2)." SYP ({$remainingPercent}%)",
             "طريقة الدفع: {$methodLabel}",
         ];
 

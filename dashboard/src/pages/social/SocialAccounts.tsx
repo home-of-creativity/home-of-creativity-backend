@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 import { FormDialog } from "../../components/FormDialog";
 import { LoadingTableRow } from "../../components/LoadingTableRow";
 import { SocialBrandIcon } from "../../components/SocialBrandIcon";
@@ -26,12 +27,19 @@ const abilities: { key: SocialAbility; label: typeof copy.socialPermAccounts }[]
 
 export function SocialAccounts({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [items, setItems] = useState<SocialAccount[]>([]);
   const [staff, setStaff] = useState<SocialStaff[]>([]);
   const [loading, setLoading] = useState(true);
+  const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState("");
   const [facebookError, setFacebookError] = useState("");
+  const [threadsError, setThreadsError] = useState("");
+  const [oauthNotice, setOauthNotice] = useState("");
+  const [oauthError, setOauthError] = useState("");
   const [facebookPagesFound, setFacebookPagesFound] = useState<number | null>(null);
+  const [threadsOauthConfigured, setThreadsOauthConfigured] = useState(false);
+  const [threadsRedirectUri, setThreadsRedirectUri] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState(emptyForm);
@@ -48,7 +56,10 @@ export function SocialAccounts({ locale, t }: { locale: Locale; t: (c: { ar: str
         setStaff(team.data);
         setError("");
         setFacebookError(accounts.facebook_error ?? "");
+        setThreadsError(accounts.threads_error ?? "");
         setFacebookPagesFound(typeof accounts.facebook_pages_found === "number" ? accounts.facebook_pages_found : null);
+        setThreadsOauthConfigured(Boolean(accounts.threads_oauth_configured));
+        setThreadsRedirectUri(accounts.threads_redirect_uri ?? "");
       })
       .catch((err) => setError(err instanceof Error ? err.message : t(copy.loading)))
       .finally(() => setLoading(false));
@@ -57,6 +68,39 @@ export function SocialAccounts({ locale, t }: { locale: Locale; t: (c: { ar: str
   useEffect(() => {
     load();
   }, []);
+
+  useEffect(() => {
+    const connected = searchParams.get("threads");
+    const oauthErrorCode = searchParams.get("threads_error");
+    if (connected !== "connected" && !oauthErrorCode) {
+      return;
+    }
+
+    if (connected === "connected") {
+      setOauthNotice(t(copy.socialThreadsConnected));
+      setOauthError("");
+    } else if (oauthErrorCode) {
+      setOauthNotice("");
+      setOauthError(threadsOauthMessage(oauthErrorCode, t));
+    }
+
+    const next = new URLSearchParams(searchParams);
+    next.delete("threads");
+    next.delete("threads_error");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams, t]);
+
+  async function connectThreads() {
+    setConnecting(true);
+    setError("");
+    try {
+      const result = await api.threadsConnect();
+      window.location.assign(result.data.authorize_url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t(copy.socialThreadsOauthMissing));
+      setConnecting(false);
+    }
+  }
 
   function startEdit(item: SocialAccount) {
     setEditingId(item.id);
@@ -140,8 +184,28 @@ export function SocialAccounts({ locale, t }: { locale: Locale; t: (c: { ar: str
 
   return (
     <SocialChrome locale={locale} t={t} user={user} title={copy.socialAccounts} lede={copy.socialAccountsLede}>
+      {canSocial(user, "accounts") ? (
+        <div className="toolbar">
+          {threadsOauthConfigured ? (
+            <button type="button" className="btn btn-primary" disabled={connecting} onClick={() => void connectThreads()}>
+              {t(copy.socialConnectThreads)}
+            </button>
+          ) : (
+            <p className="notice notice-info">{t(copy.socialThreadsOauthMissing)}</p>
+          )}
+        </div>
+      ) : null}
+      {threadsRedirectUri ? (
+        <p className="notice notice-info">
+          {t(copy.socialThreadsRedirectHint)}{" "}
+          <code dir="ltr">{threadsRedirectUri}</code>
+        </p>
+      ) : null}
+      {oauthNotice ? <p className="notice notice-info">{oauthNotice}</p> : null}
+      {oauthError ? <p className="error">{oauthError}</p> : null}
       {error && !showForm ? <p className="error">{error}</p> : null}
       {facebookError ? <p className="error">{facebookErrorMessage(facebookError, t)}</p> : null}
+      {threadsError ? <p className="error">{facebookErrorMessage(threadsError, t)}</p> : null}
       {facebookPagesFound !== null && facebookPagesFound > 0 ? (
         <p className="notice notice-info">{t(copy.socialFacebookPagesFound).replace("{count}", String(facebookPagesFound))}</p>
       ) : null}
@@ -180,6 +244,14 @@ export function SocialAccounts({ locale, t }: { locale: Locale; t: (c: { ar: str
                       </span>
                     ) : (
                       <small className="muted">{t(copy.socialNoInstagram)}</small>
+                    )}
+                    {page.threads ? (
+                      <span className="social-account-name">
+                        <SocialBrandIcon platform="threads" />
+                        {t(copy.socialLinkedThreads)}
+                      </span>
+                    ) : (
+                      <small className="muted">{t(copy.socialNoThreads)}</small>
                     )}
                   </div>
                 </td>
@@ -315,4 +387,13 @@ export function SocialAccounts({ locale, t }: { locale: Locale; t: (c: { ar: str
       ) : null}
     </SocialChrome>
   );
+}
+
+function threadsOauthMessage(code: string, t: (c: { ar: string; en: string }) => string) {
+  if (code === "denied") return t(copy.socialThreadsOauthDenied);
+  if (code === "invalid_state") return t(copy.socialThreadsOauthInvalid);
+  if (code === "token_exchange") return t(copy.socialThreadsOauthToken);
+  if (code === "profile") return t(copy.socialThreadsOauthProfile);
+
+  return t(copy.socialThreadsOauthInvalid);
 }

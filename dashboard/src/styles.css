@@ -1581,6 +1581,10 @@ html[dir="rtl"] .back-link span {
   color: var(--brand-muted);
 }
 
+.toolbar .field-label {
+  min-inline-size: 11rem;
+}
+
 .checkbox-row {
   display: flex;
   align-items: center;

@@ -114,9 +114,10 @@ return [
 
     'social' => [
         'graph_base' => env('META_GRAPH_URL', 'https://graph.facebook.com/v21.0'),
+        'threads_graph_base' => env('THREADS_GRAPH_URL', 'https://graph.threads.net/v1.0'),
         'timeout' => (int) env('SOCIAL_GRAPH_TIMEOUT', 20),
         'connect_timeout' => (int) env('SOCIAL_GRAPH_CONNECT_TIMEOUT', 10),
-        'upload_timeout' => (int) env('SOCIAL_GRAPH_UPLOAD_TIMEOUT', 60),
+        'upload_timeout' => (int) env('SOCIAL_GRAPH_UPLOAD_TIMEOUT', 180),
         'timezone' => env('SOCIAL_TIMEZONE', 'Asia/Damascus'),
         'landing_instagram_handle' => env('SOCIAL_LANDING_INSTAGRAM_HANDLE', 'homeofcreativity.sy'),
         'landing_facebook_page_id' => env('SOCIAL_LANDING_FACEBOOK_PAGE_ID', ''),
@@ -127,6 +128,17 @@ return [
         'access_token' => trim((string) env('FACEBOOK_ACCESS_TOKEN', '')),
         'app_id' => trim((string) env('FACEBOOK_APP_ID', '')),
         'app_secret' => trim((string) env('FACEBOOK_APP_SECRET', '')),
+    ],
+
+    'threads' => [
+        'access_token' => trim((string) env('THREADS_ACCESS_TOKEN', '')),
+        'app_id' => trim((string) env('THREADS_APP_ID', '')),
+        'app_secret' => trim((string) env('THREADS_APP_SECRET', '')),
+        'redirect_uri' => trim((string) env('THREADS_REDIRECT_URI', 'https://hoc.agency/auth/threads/callback')),
+        'dashboard_accounts_url' => trim((string) env('THREADS_DASHBOARD_URL', 'https://hoc.agency/staff/social/accounts')),
+        'oauth_authorize' => env('THREADS_OAUTH_URL', 'https://threads.net/oauth/authorize'),
+        'oauth_token_base' => env('THREADS_OAUTH_TOKEN_URL', 'https://graph.threads.net'),
+        'scopes' => env('THREADS_OAUTH_SCOPES', 'threads_basic,threads_content_publish,threads_read_replies,threads_manage_replies'),
     ],
 
 ];
