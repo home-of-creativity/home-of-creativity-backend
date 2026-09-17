@@ -5,7 +5,7 @@ React **19**, TypeScript, Vite **7**, react-router-dom **7**. No Next.js.
 
 Dev: `npm run dev` → http://127.0.0.1:5173/dashboard/  
 API: `VITE_API_URL` default `http://127.0.0.1:8000/api`  
-Build: `tsc --noEmit && vite build` (`vite.config` `base` `/dashboard/`, React Router `basename` `/dashboard`)
+Build: `tsc --noEmit && vite build` (`vite.config` `base` `/dashboard/`, React Router `basename` `/dashboard`). Production Caddy serves `dashboard/dist` at `/dashboard/` (no Vite preview proxy).
 
 ## Auth
 

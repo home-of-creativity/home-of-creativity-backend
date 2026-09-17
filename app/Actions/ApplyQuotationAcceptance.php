@@ -63,10 +63,21 @@ class ApplyQuotationAcceptance
             }
         }
 
-        $caption = "تعليمات الدفع للطلب #{$displayNumber}";
-        if ($total > 0) {
-            $caption .= "\n".'الإجمالي: '.Money::format($total);
+        if ($total <= 0) {
+            Log::warning('Quotation accepted without a payable amount; skipped payment instructions.', [
+                'request' => $request->number,
+            ]);
+            $this->notifyClient(
+                $request,
+                "تمت الموافقة على عرض السعر للطلب #{$displayNumber}. سيصلك المبلغ المطلوب وخطوات التحويل من الفريق.",
+                withQr: false,
+            );
+
+            return $request->fresh(['client']) ?? $request;
         }
+
+        $caption = "تعليمات الدفع للطلب #{$displayNumber}";
+        $caption .= "\n".'الإجمالي: '.Money::format($total);
         if (filled($planNote)) {
             $caption .= "\n{$planNote}";
         }
@@ -77,9 +88,9 @@ class ApplyQuotationAcceptance
         return $request->fresh(['client']) ?? $request;
     }
 
-    private function notifyClient(ServiceRequest $request, string $caption): void
+    private function notifyClient(ServiceRequest $request, string $caption, bool $withQr = true): void
     {
-        $qrPath = ShamCashQr::relativePath();
+        $qrPath = $withQr ? ShamCashQr::relativePath() : null;
         $delivered = false;
         $chatId = $request->client?->telegram_user_id;
 

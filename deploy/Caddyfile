@@ -66,14 +66,20 @@
 
 	redir /dashboard /dashboard/ 308
 
-	handle /dashboard* {
-		reverse_proxy hoc-dashboard:5173 {
-			lb_try_duration 20s
-			lb_try_interval 500ms
-			transport http {
-				dial_timeout 5s
-			}
-		}
+	handle_path /dashboard* {
+		root * /var/www/hoc/dashboard/dist
+		encode gzip
+		try_files {path} {path}/ /index.html
+		file_server
+	}
+
+	@siteAsset {
+		path *.css *.js *.mjs *.map *.woff *.woff2 *.ttf *.png *.jpg *.jpeg *.webp *.avif *.svg *.ico *.txt *.xml *.webmanifest
+		not path /dashboard /dashboard/*
+	}
+	handle @siteAsset {
+		root * /var/www/design
+		file_server
 	}
 
 	handle {

@@ -55,35 +55,15 @@ services:
 
   hoc-dashboard:
     image: node:22-alpine
-    restart: unless-stopped
     working_dir: /app
     volumes:
       - ../dashboard:/app
       - hoc_dashboard_node_modules:/app/node_modules
-    ports:
-      - "5173:5173"
     environment:
       VITE_API_URL: ${APP_URL:-https://hoc.agency}/api
-    # Keep preview-only after first boot so deploys can rebuild dist without
-    # taking :5173 down for the whole npm install + vite build.
-    command: >
-      sh -c "if [ ! -f dist/index.html ]; then npm install && npm run build; fi
-      && npx vite preview --host 0.0.0.0 --port 5173 --strictPort"
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "node",
-          "-e",
-          "require('http').get('http://127.0.0.1:5173/dashboard/',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))",
-        ]
-      interval: 5s
-      timeout: 5s
-      retries: 36
-      start_period: 180s
-    depends_on:
-      hoc-api:
-        condition: service_started
+    profiles:
+      - tools
+    command: sh -c "npm install && npm run build"
 
   hoc-scheduler:
     build:
@@ -122,8 +102,6 @@ services:
     depends_on:
       hoc-api:
         condition: service_started
-      hoc-dashboard:
-        condition: service_healthy
 
   hoc-client-bot:
     image: python:3.12-slim

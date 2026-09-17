@@ -20,25 +20,13 @@ chmod -R ug+rwx storage bootstrap/cache || true
 COMPOSE=(docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml)
 
 "${COMPOSE[@]}" up -d --build
+"${COMPOSE[@]}" stop hoc-dashboard >/dev/null 2>&1 || true
+"${COMPOSE[@]}" rm -f hoc-dashboard >/dev/null 2>&1 || true
 
-echo "Building dashboard from synced source (preview stays up until restart)..."
-"${COMPOSE[@]}" exec -T hoc-dashboard npm install
-"${COMPOSE[@]}" exec -T hoc-dashboard npm run build
-echo "Restarting dashboard preview..."
-"${COMPOSE[@]}" restart hoc-dashboard
-
-echo "Waiting for dashboard preview..."
-dashboard_ready=0
-for _ in $(seq 1 60); do
-  if "${COMPOSE[@]}" exec -T hoc-dashboard node -e "require('http').get('http://127.0.0.1:5173/dashboard/',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"; then
-    dashboard_ready=1
-    break
-  fi
-  sleep 2
-done
-if [[ "$dashboard_ready" != 1 ]]; then
-  echo "Dashboard preview did not become ready."
-  "${COMPOSE[@]}" logs --tail 80 hoc-dashboard
+echo "Building dashboard dist for Caddy..."
+"${COMPOSE[@]}" --profile tools run --rm --no-deps hoc-dashboard
+if [[ ! -f "$ROOT/dashboard/dist/index.html" ]] || ! grep -q '/dashboard/assets/' "$ROOT/dashboard/dist/index.html"; then
+  echo "Dashboard build is missing /dashboard/ asset prefix."
   exit 1
 fi
 
@@ -48,7 +36,7 @@ docker run --rm -v "$ROOT/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpi
 
 # Caddyfile is a single-file bind-mount. rsync replaces files via temp+rename
 # (a new inode), which can detach that bind mount from ever seeing updates.
-# Recreate hoc-edge only after the dashboard is serving so /dashboard is not 502.
+# Recreate hoc-edge after dist exists so /dashboard is static files, not a 502 proxy.
 echo "Recreating edge (Caddy) so it picks up the current Caddyfile..."
 "${COMPOSE[@]}" up -d --force-recreate --wait --wait-timeout 60 hoc-edge
 

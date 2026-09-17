@@ -137,7 +137,17 @@ async def send_sham_cash_qr(query, number: str, response) -> None:
         body = {}
 
     payload = body.get("sham_cash_qr") if isinstance(body.get("sham_cash_qr"), dict) else {}
-    caption = str(payload.get("caption") or "").strip() or default_sham_cash_caption(number)
+    qr_available = bool(payload.get("qr_available"))
+    caption = str(payload.get("caption") or "").strip()
+    if not caption:
+        caption = (
+            default_sham_cash_caption(number)
+            if qr_available
+            else (
+                f"تمت الموافقة على عرض السعر للطلب #{escape(number)}.\n"
+                "سيصلك المبلغ المطلوب وخطوات التحويل من الفريق."
+            )
+        )
     delivered = bool(payload.get("delivered"))
     encoded = payload.get("content_base64")
     raw = None
@@ -150,7 +160,7 @@ async def send_sham_cash_qr(query, number: str, response) -> None:
         except Exception:
             raw = None
 
-    if raw is None and payload.get("qr_available") and not delivered:
+    if raw is None and qr_available and not delivered:
         try:
             async with httpx.AsyncClient(timeout=12) as client:
                 image = await client.get(
@@ -173,11 +183,16 @@ async def send_sham_cash_qr(query, number: str, response) -> None:
         )
         return
 
-    if delivered and payload.get("qr_available"):
+    if delivered and qr_available:
         caption = (
             f"تمت الموافقة على عرض السعر للطلب #{escape(number)}.\n"
             "رمز شام كاش للتحويل أعلاه. بعد التحويل أرسل إثبات الدفع كصورة أو PDF."
         )
+        await query.message.reply_text(caption, reply_markup=main_keyboard())
+        return
+
+    if delivered:
+        return
 
     await query.message.reply_text(caption, reply_markup=main_keyboard())
 

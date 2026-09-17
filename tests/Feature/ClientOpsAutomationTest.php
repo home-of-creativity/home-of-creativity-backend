@@ -494,6 +494,60 @@ class ClientOpsAutomationTest extends TestCase
         });
     }
 
+    public function test_approving_quotation_without_amount_does_not_send_payment_instructions(): void
+    {
+        Storage::fake('local');
+        config(['services.telegram.bot_token' => 'client-token']);
+        Http::fake([
+            'https://api.telegram.org/*' => Http::response(['ok' => true], 200),
+        ]);
+
+        $path = UploadedFile::fake()->image('sham-cash.png')->store('payment', 'local');
+        OpsSetting::setValue('sham_cash_qr_path', $path);
+
+        $client = Client::factory()->create(['telegram_user_id' => 'tg-no-amount']);
+        $request = ServiceRequest::factory()->for($client)->create([
+            'status' => RequestStatus::QuotationSent,
+            'quotation_amount' => null,
+            'amount_total' => null,
+        ]);
+        Quotation::query()->create([
+            'request_id' => $request->id,
+            'version' => 1,
+            'amount' => 0,
+            'sent_at' => now(),
+        ]);
+
+        $response = $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
+            ->postJson("/api/bot/telegram/requests/{$request->number}/approve", [
+                'telegram_user_id' => 'tg-no-amount',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'awaiting_payment')
+            ->assertJsonPath('sham_cash_qr.qr_available', false)
+            ->assertJsonPath('sham_cash_qr.delivered', true)
+            ->assertJsonPath('sham_cash_qr.content_base64', null);
+
+        $caption = (string) $response->json('sham_cash_qr.caption');
+        $this->assertStringContainsString('سيصلك المبلغ المطلوب', $caption);
+        $this->assertStringNotContainsString('تعليمات الدفع', $caption);
+        $this->assertStringNotContainsString('شام كاش', $caption);
+        $this->assertStringNotContainsString('الإجمالي:', $caption);
+
+        Http::assertSent(function (Request $httpRequest): bool {
+            if (! str_contains($httpRequest->url(), 'botclient-token/sendMessage')) {
+                return false;
+            }
+
+            $text = (string) ($httpRequest['text'] ?? $httpRequest->body());
+
+            return str_contains($text, 'سيصلك المبلغ المطلوب')
+                && ! str_contains($text, 'تعليمات الدفع')
+                && ! str_contains($text, 'شام كاش');
+        });
+        Http::assertNotSent(fn (Request $httpRequest) => str_contains($httpRequest->url(), 'sendPhoto'));
+    }
+
     public function test_clickup_due_alert_is_idempotent_and_covers_just_passed_due(): void
     {
         Cache::flush();
