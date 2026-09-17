@@ -68,9 +68,11 @@
 
 	handle /dashboard* {
 		reverse_proxy hoc-dashboard:5173 {
-			dial_timeout 5s
 			lb_try_duration 20s
 			lb_try_interval 500ms
+			transport http {
+				dial_timeout 5s
+			}
 		}
 	}
 

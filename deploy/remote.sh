@@ -42,6 +42,10 @@ if [[ "$dashboard_ready" != 1 ]]; then
   exit 1
 fi
 
+echo "Validating Caddyfile before recreating edge..."
+docker run --rm -v "$ROOT/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine \
+  caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
 # Caddyfile is a single-file bind-mount. rsync replaces files via temp+rename
 # (a new inode), which can detach that bind mount from ever seeing updates.
 # Recreate hoc-edge only after the dashboard is serving so /dashboard is not 502.
