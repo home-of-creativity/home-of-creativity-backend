@@ -1,157 +1,157 @@
-import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { api, canSocial, type SocialAccount, type SocialPost } from "../../api";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
+import { api, canSocial, type SocialPost } from "../../api";
 import { useAuth } from "../../auth";
-import { SocialBrandIcon } from "../../components/SocialBrandIcon";
+import { DateTimeField } from "../../components/DateTimeField";
 import { copy, type Locale } from "../../i18n";
-import { LIVE_SOCIAL_PLATFORMS, SOCIAL_PLATFORMS, STUDIO_HOME_CARDS, type SocialPlatformId } from "./catalog";
-import { PlatformPicker } from "./PlatformPicker";
+import { fromLocalInput } from "./helpers";
 import { SocialChrome } from "./SocialChrome";
-import { platformLabel, socialStatusLabel } from "./helpers";
+import { SocialPhonePreview } from "./SocialPhonePreview";
+import { useSocialWorkspace } from "./SocialWorkspace";
 
 export function SocialHome({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
   const { user } = useAuth();
-  const navigate = useNavigate();
-  const [params, setParams] = useSearchParams();
-  const [accounts, setAccounts] = useState<SocialAccount[]>([]);
+  const { selectedAccount, activeAccounts, loading: accountsLoading, openPicker } = useSocialWorkspace();
   const [posts, setPosts] = useState<SocialPost[]>([]);
-  const [picker, setPicker] = useState(false);
-  const [selected, setSelected] = useState<SocialPlatformId[]>([...LIVE_SOCIAL_PLATFORMS]);
+  const [body, setBody] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
+  const [scheduledAt, setScheduledAt] = useState("");
+  const [scheduleMode, setScheduleMode] = useState<"draft" | "now" | "custom">("draft");
+  const [feedFilter, setFeedFilter] = useState<"all" | "draft" | "scheduled">("all");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    api.socialAccounts().then((res) => setAccounts(res.data.filter((row) => row.is_active))).catch(() => setAccounts([]));
-    api.socialPosts({ per_page: 6 }).then((res) => setPosts(res.data)).catch(() => setPosts([]));
-  }, []);
+    if (!selectedAccount) {
+      setPosts([]);
+      return;
+    }
+    let cancelled = false;
+    api
+      .socialPosts({ account_id: selectedAccount.id, per_page: 40 })
+      .then((res) => {
+        if (!cancelled) setPosts(res.data);
+      })
+      .catch(() => {
+        if (!cancelled) setPosts([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedAccount?.id]);
 
-  useEffect(() => {
-    if (params.get("create") === "1") setPicker(true);
-  }, [params]);
+  const previewFiles = useMemo(
+    () => files.map((file) => ({ name: file.name, url: URL.createObjectURL(file), kind: file.type.startsWith("video/") ? "video" : "image" })),
+    [files],
+  );
+  useEffect(() => () => previewFiles.forEach((file) => URL.revokeObjectURL(file.url)), [previewFiles]);
 
-  const connected = useMemo(() => {
-    const seen = new Set<string>();
-    return accounts.filter((account) => {
-      if (seen.has(account.platform)) return false;
-      seen.add(account.platform);
-      return true;
-    });
-  }, [accounts]);
+  const canPublish = canSocial(user, "approve");
+  const canCreate = canSocial(user, "create");
 
-  const connectedIds = useMemo(() => new Set(connected.map((account) => account.platform)), [connected]);
-
-  function closePicker() {
-    setPicker(false);
-    if (params.get("create") === "1") {
-      const next = new URLSearchParams(params);
-      next.delete("create");
-      setParams(next, { replace: true });
+  async function submit(event: FormEvent, intent: "draft" | "schedule" | "publish") {
+    event.preventDefault();
+    if (!selectedAccount) {
+      openPicker();
+      return;
+    }
+    if (intent !== "draft" && selectedAccount.platform === "instagram" && files.length === 0) {
+      setError(t(copy.socialInstagramNeedsMedia));
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      const form = new FormData();
+      form.set("body", body);
+      form.set("placement", "feed");
+      form.set("intent", intent);
+      if (scheduledAt) form.set("scheduled_at", fromLocalInput(scheduledAt));
+      form.append("account_ids[]", String(selectedAccount.id));
+      files.forEach((file) => form.append("media[]", file));
+      await api.createSocialPost(form);
+      setBody("");
+      setFiles([]);
+      setScheduledAt("");
+      setScheduleMode("draft");
+      const res = await api.socialPosts({ account_id: selectedAccount.id, per_page: 40 });
+      setPosts(res.data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t(copy.loading));
+    } finally {
+      setSaving(false);
     }
   }
 
-  function startCreating() {
-    const live = selected.filter((id) => LIVE_SOCIAL_PLATFORMS.includes(id));
-    const query = live.length ? `?platforms=${live.join(",")}` : "";
-    closePicker();
-    navigate(`/social/compose${query}`);
+  function primaryIntent(): "draft" | "schedule" | "publish" {
+    if (scheduleMode === "now") return "publish";
+    if (scheduleMode === "custom") return "schedule";
+    return "draft";
   }
-
-  function openPicker(initial?: SocialPlatformId) {
-    if (initial && LIVE_SOCIAL_PLATFORMS.includes(initial)) {
-      setSelected((current) => (current.includes(initial) ? current : [...current, initial]));
-    }
-    setPicker(true);
-  }
-
-  const welcome = t(copy.socialWelcome).replace("{name}", user?.name?.split(" ")[0] || "HOC");
-  const cardCopy = {
-    idea: { title: copy.socialNeedIdea, body: copy.socialNeedIdeaBody, cta: copy.socialFindInspo },
-    calendar: { title: copy.socialTemplates, body: copy.socialTemplatesBody, cta: copy.socialCheckTemplates },
-    own: { title: copy.socialOwnIdea, body: copy.socialOwnIdeaBody, cta: copy.socialGetStarted },
-  } as const;
 
   return (
-    <SocialChrome locale={locale} t={t} user={user} title={{ ar: welcome, en: welcome }} lede={copy.socialHomeLede}>
-      <section className="studio-platforms" aria-label={t(copy.socialAccounts)}>
-        {SOCIAL_PLATFORMS.map((item) => {
-          const on = connectedIds.has(item.id);
-          return (
-            <button
-              key={item.id}
-              type="button"
-              className={on ? "studio-chip is-on" : item.live ? "studio-chip" : "studio-chip is-soon"}
-              disabled={!item.live}
-              title={item.live ? platformLabel(item.id, t) : t(copy.socialComingSoon)}
-              onClick={() => item.live && openPicker(item.id)}
-            >
-              <span className={`studio-chip-icon is-${item.id}`}>
-                <SocialBrandIcon platform={item.id} />
-              </span>
-              <span>{platformLabel(item.id, t)}</span>
-              {!item.live ? <small>{t(copy.socialComingSoon)}</small> : null}
-            </button>
-          );
-        })}
-        {canSocial(user, "accounts") ? (
-          <Link className="studio-chip is-add" to="/social/accounts">
-            + {t(copy.socialAddAccount)}
-          </Link>
-        ) : null}
-      </section>
-
-      <div className="studio-cards">
-        {STUDIO_HOME_CARDS.map((card) => {
-          const text = cardCopy[card.id];
-          return (
-            <article key={card.id} className={`studio-card is-${card.tone}`}>
-              <div className="studio-card-art" aria-hidden>
-                <span />
-                <span />
-                <span />
-              </div>
-              <h2>{t(text.title)}</h2>
-              <p>{t(text.body)}</p>
-              {card.id === "idea" ? (
-                <button type="button" className="btn btn-primary" onClick={() => openPicker()}>
-                  {t(text.cta)}
-                </button>
-              ) : (
-                <Link className="btn" to={card.to}>
-                  {t(text.cta)}
-                </Link>
-              )}
-            </article>
-          );
-        })}
-      </div>
-
-      <section className="panel recent-panel">
-        <div className="panel-head">
-          <h2>{t(copy.socialRecentPosts)}</h2>
-          <Link className="btn btn-ghost" to="/social/links">
-            {t(copy.socialBioLinks)}
-          </Link>
-        </div>
-        {posts.length === 0 ? <p className="muted empty-copy">{t(copy.socialNoPosts)}</p> : (
-          <ul className="studio-recent">
-            {posts.map((item) => (
-              <li key={item.id}>
-                <Link to={`/social/compose/${item.id}`}>
-                  <strong>{item.body.slice(0, 72) || t(copy.socialCompose)}</strong>
-                  <small>{socialStatusLabel(item.status, t)}</small>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      {picker ? (
-        <PlatformPicker
-          t={t}
-          selected={selected}
-          onToggle={(id) => setSelected((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]))}
-          onStart={startCreating}
-          onClose={closePicker}
-        />
+    <SocialChrome locale={locale} t={t} user={user} title={copy.socialHome} lede={copy.socialHomeLede}>
+      {accountsLoading ? <p className="muted">{t(copy.loading)}</p> : null}
+      {!accountsLoading && activeAccounts.length === 0 ? (
+        <p className="muted">
+          {t(copy.socialNoAccountsYet)}{" "}
+          <Link to="/social/accounts">{t(copy.socialAccounts)}</Link>
+        </p>
+      ) : null}
+      {error ? <p className="error">{error}</p> : null}
+      {selectedAccount ? (
+        <form className="studio-stage" onSubmit={(event) => void submit(event, primaryIntent())}>
+          <SocialPhonePreview
+            locale={locale}
+            t={t}
+            studio
+            accounts={[selectedAccount]}
+            placement="feed"
+            body={body}
+            existingMedia={[]}
+            files={previewFiles}
+            posts={posts}
+            onFiles={setFiles}
+            dropDisabled={!canCreate}
+            feedFilter={feedFilter}
+            onFeedFilter={setFeedFilter}
+          />
+          {canCreate ? (
+            <div className="studio-composer card stack">
+              <label className="field-label">
+                {t(copy.socialBody)}
+                <textarea
+                  className="field"
+                  rows={5}
+                  value={body}
+                  placeholder={t(copy.socialCaptionHint)}
+                  onChange={(event) => setBody(event.target.value)}
+                />
+              </label>
+              <fieldset className="plann-schedule">
+                <legend>{t(copy.socialSchedule)}</legend>
+                <label className="plann-schedule-row">
+                  <input type="radio" name="home-schedule" checked={scheduleMode === "draft"} onChange={() => setScheduleMode("draft")} />
+                  {t(copy.socialScheduleDraftMode)}
+                </label>
+                <label className="plann-schedule-row">
+                  <input type="radio" name="home-schedule" checked={scheduleMode === "now"} disabled={!canPublish} onChange={() => setScheduleMode("now")} />
+                  {t(copy.socialScheduleNowMode)}
+                </label>
+                <label className="plann-schedule-row">
+                  <input type="radio" name="home-schedule" checked={scheduleMode === "custom"} onChange={() => setScheduleMode("custom")} />
+                  {t(copy.socialScheduleCustomMode)}
+                </label>
+                {scheduleMode === "custom" ? (
+                  <DateTimeField value={scheduledAt} onChange={setScheduledAt} locale={locale} placeholder={t(copy.socialScheduleAt)} />
+                ) : null}
+              </fieldset>
+              <button type="submit" className="btn btn-primary" disabled={saving || (scheduleMode === "now" && !canPublish)}>
+                {scheduleMode === "now" ? t(copy.socialPublishNow) : scheduleMode === "custom" ? t(copy.socialSchedule) : t(copy.socialSaveDraft)}
+              </button>
+            </div>
+          ) : null}
+        </form>
       ) : null}
     </SocialChrome>
   );

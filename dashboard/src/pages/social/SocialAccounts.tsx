@@ -7,6 +7,7 @@ import { api, canSocial, type SocialAbility, type SocialAccount, type SocialStaf
 import { useAuth } from "../../auth";
 import { copy, type Locale } from "../../i18n";
 import { SocialChrome } from "./SocialChrome";
+import { useSocialWorkspace } from "./SocialWorkspace";
 import { facebookErrorMessage, groupSocialPages, linkedinOauthMessage, platformLabel, socialAccountStatusLabel, socialStatusLabel } from "./helpers";
 
 const abilities: { key: SocialAbility; label: typeof copy.socialPermAccounts }[] = [
@@ -18,50 +19,43 @@ const abilities: { key: SocialAbility; label: typeof copy.socialPermAccounts }[]
 
 export function SocialAccounts({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
   const { user } = useAuth();
+  const { accounts, meta, refreshAccounts, loading: accountsLoading } = useSocialWorkspace();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [items, setItems] = useState<SocialAccount[]>([]);
+  const items = accounts;
   const [staff, setStaff] = useState<SocialStaff[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [staffLoading, setStaffLoading] = useState(true);
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState("");
-  const [facebookError, setFacebookError] = useState("");
-  const [threadsError, setThreadsError] = useState("");
   const [oauthNotice, setOauthNotice] = useState("");
   const [oauthError, setOauthError] = useState("");
-  const [facebookPagesFound, setFacebookPagesFound] = useState<number | null>(null);
-  const [threadsOauthConfigured, setThreadsOauthConfigured] = useState(false);
-  const [threadsRedirectUri, setThreadsRedirectUri] = useState("");
-  const [linkedinOauthConfigured, setLinkedinOauthConfigured] = useState(false);
-  const [linkedinRedirectUri, setLinkedinRedirectUri] = useState("");
-  const [linkedinError, setLinkedinError] = useState("");
   const [connectingLinkedin, setConnectingLinkedin] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
+  const loading = accountsLoading || staffLoading;
+  const facebookError = meta.facebook_error ?? "";
+  const threadsError = meta.threads_error ?? "";
+  const facebookPagesFound = typeof meta.facebook_pages_found === "number" ? meta.facebook_pages_found : null;
+  const threadsOauthConfigured = Boolean(meta.threads_oauth_configured);
+  const threadsRedirectUri = meta.threads_redirect_uri ?? "";
+  const linkedinOauthConfigured = Boolean(meta.linkedin_oauth_configured);
+  const linkedinRedirectUri = meta.linkedin_redirect_uri ?? "";
+  const linkedinError = meta.linkedin_error ?? "";
 
-  function load() {
-    setLoading(true);
-    Promise.all([
-      api.socialAccounts(),
-      canSocial(user, "accounts") ? api.socialStaff().catch(() => ({ data: [] as SocialStaff[] })) : Promise.resolve({ data: [] as SocialStaff[] }),
-    ])
-      .then(([accounts, team]) => {
-        setItems(accounts.data);
-        setStaff(team.data);
-        setError("");
-        setFacebookError(accounts.facebook_error ?? "");
-        setThreadsError(accounts.threads_error ?? "");
-        setFacebookPagesFound(typeof accounts.facebook_pages_found === "number" ? accounts.facebook_pages_found : null);
-        setThreadsOauthConfigured(Boolean(accounts.threads_oauth_configured));
-        setThreadsRedirectUri(accounts.threads_redirect_uri ?? "");
-        setLinkedinOauthConfigured(Boolean(accounts.linkedin_oauth_configured));
-        setLinkedinRedirectUri(accounts.linkedin_redirect_uri ?? "");
-        setLinkedinError(accounts.linkedin_error ?? "");
-      })
-      .catch((err) => setError(err instanceof Error ? err.message : t(copy.loading)))
-      .finally(() => setLoading(false));
+  function loadStaff() {
+    if (!canSocial(user, "accounts")) {
+      setStaff([]);
+      setStaffLoading(false);
+      return;
+    }
+    setStaffLoading(true);
+    api
+      .socialStaff()
+      .then((team) => setStaff(team.data))
+      .catch(() => setStaff([]))
+      .finally(() => setStaffLoading(false));
   }
 
   useEffect(() => {
-    load();
+    loadStaff();
   }, []);
 
   useEffect(() => {
@@ -93,6 +87,7 @@ export function SocialAccounts({ locale, t }: { locale: Locale; t: (c: { ar: str
     next.delete("linkedin");
     next.delete("linkedin_error");
     setSearchParams(next, { replace: true });
+    void refreshAccounts();
   }, [searchParams, setSearchParams, t]);
 
   async function connectThreads() {
@@ -123,7 +118,7 @@ export function SocialAccounts({ locale, t }: { locale: Locale; t: (c: { ar: str
     setBusyId(id);
     try {
       await api.toggleSocialAccount(id);
-      load();
+      await refreshAccounts();
     } catch (err) {
       setError(err instanceof Error ? err.message : t(copy.loading));
     } finally {
@@ -135,7 +130,7 @@ export function SocialAccounts({ locale, t }: { locale: Locale; t: (c: { ar: str
     setBusyId(id);
     try {
       await api.deleteSocialAccount(id);
-      load();
+      await refreshAccounts();
       toast.success(t(copy.deleteSuccess));
     } catch (err) {
       const message = err instanceof Error ? err.message : t(copy.loading);
@@ -162,7 +157,7 @@ export function SocialAccounts({ locale, t }: { locale: Locale; t: (c: { ar: str
     const next = enabled ? Array.from(new Set([...current, ability])) : current.filter((item) => item !== ability);
     try {
       await api.updateSocialStaff(member.id, next);
-      load();
+      loadStaff();
     } catch (err) {
       setError(err instanceof Error ? err.message : t(copy.loading));
     }

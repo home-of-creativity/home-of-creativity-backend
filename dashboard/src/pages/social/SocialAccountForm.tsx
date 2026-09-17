@@ -9,12 +9,14 @@ import { useZodForm } from "../../lib/useZodForm";
 import { api } from "../../api";
 import { copy, type Locale } from "../../i18n";
 import { platformLabel, socialPlatforms } from "./helpers";
+import { useSocialWorkspace } from "./SocialWorkspace";
 
 export function SocialAccountForm({ t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
   const navigate = useNavigate();
   const params = useParams();
   const editingId = params.id ? Number(params.id) : null;
 
+  const { accounts, refreshAccounts } = useSocialWorkspace();
   const [loading, setLoading] = useState(Boolean(editingId));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -48,27 +50,23 @@ export function SocialAccountForm({ t }: { locale: Locale; t: (c: { ar: string; 
       setLoading(false);
       return;
     }
-    setLoading(true);
-    api
-      .socialAccounts()
-      .then((res) => res.data.find((item) => item.id === editingId))
-      .then((item) => {
-        if (!item) {
-          setError(t(copy.saveFailed));
-          return;
-        }
-        reset({
-          platform: item.platform,
-          name: item.name,
-          handle: item.handle ?? "",
-          pageId: item.page_id ?? "",
-          accessToken: "",
-          isActive: item.is_active,
-        });
-      })
-      .catch(() => setError(t(copy.saveFailed)))
-      .finally(() => setLoading(false));
-  }, [editingId, reset, t]);
+    const item = accounts.find((row) => row.id === editingId);
+    if (!item) {
+      if (accounts.length === 0) return;
+      setError(t(copy.saveFailed));
+      setLoading(false);
+      return;
+    }
+    reset({
+      platform: item.platform,
+      name: item.name,
+      handle: item.handle ?? "",
+      pageId: item.page_id ?? "",
+      accessToken: "",
+      isActive: item.is_active,
+    });
+    setLoading(false);
+  }, [editingId, accounts, reset, t]);
 
   async function onValid(values: {
     platform: string;
@@ -91,6 +89,7 @@ export function SocialAccountForm({ t }: { locale: Locale; t: (c: { ar: string; 
       };
       if (editingId) await api.updateSocialAccount(editingId, payload);
       else await api.createSocialAccount(payload);
+      await refreshAccounts();
       toast.success(t(copy.saveSuccess));
       navigate("/social/accounts");
     } catch (err) {

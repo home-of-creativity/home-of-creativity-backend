@@ -2,7 +2,10 @@ import type { ReactNode } from "react";
 import { NavLink } from "react-router-dom";
 import { canSocial, type SocialAbility, type User } from "../../api";
 import { PageHeader } from "../../components/PageHeader";
+import { SocialBrandIcon } from "../../components/SocialBrandIcon";
 import { copy, type Copy, type Locale } from "../../i18n";
+import { platformLabel } from "./helpers";
+import { useSocialWorkspace } from "./SocialWorkspace";
 
 type Props = {
   locale?: Locale;
@@ -16,7 +19,6 @@ type Props = {
 
 const tabs: { to: string; end?: boolean; label: Copy; ability: SocialAbility }[] = [
   { to: "/social", end: true, label: copy.socialHome, ability: "create" },
-  { to: "/social/compose", label: copy.socialCreate, ability: "create" },
   { to: "/social/links", label: copy.socialBioLinks, ability: "create" },
   { to: "/social/design", label: copy.socialDesign, ability: "create" },
   { to: "/social/calendar", label: copy.socialCalendar, ability: "create" },
@@ -25,6 +27,7 @@ const tabs: { to: string; end?: boolean; label: Copy; ability: SocialAbility }[]
 ];
 
 export function SocialChrome({ t, user, title, lede, actions, children }: Props) {
+  const { selectedAccount, activeAccounts, openPicker, loading } = useSocialWorkspace();
   const visible = tabs.filter((tab) => canSocial(user, tab.ability) || (tab.ability === "create" && canSocial(user, "approve")));
 
   return (
@@ -42,11 +45,26 @@ export function SocialChrome({ t, user, title, lede, actions, children }: Props)
             </NavLink>
           ))}
         </nav>
-        {canSocial(user, "create") ? (
-          <NavLink className="btn btn-primary studio-create" to="/social?create=1">
-            {t(copy.socialFindInspo)}
-          </NavLink>
-        ) : null}
+        <div className="studio-account-switch">
+          {selectedAccount ? (
+            <span className="studio-account-current">
+              <span className={`studio-chip-icon is-${selectedAccount.platform}`}>
+                <SocialBrandIcon platform={selectedAccount.platform} />
+              </span>
+              <span>
+                <strong>{selectedAccount.name}</strong>
+                <small>{platformLabel(selectedAccount.platform, t)}</small>
+              </span>
+            </span>
+          ) : (
+            <span className="muted">{loading ? t(copy.loading) : t(copy.socialPickAccount)}</span>
+          )}
+          {activeAccounts.length > 0 ? (
+            <button type="button" className="btn" onClick={openPicker}>
+              {selectedAccount ? t(copy.socialChangeAccount) : t(copy.socialPickAccount)}
+            </button>
+          ) : null}
+        </div>
       </div>
       <PageHeader title={t(title)} lede={lede ? t(lede) : undefined} actions={actions} />
       {children}

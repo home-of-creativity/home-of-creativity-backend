@@ -28,6 +28,7 @@ import { SocialAccountForm } from "./pages/social/SocialAccountForm";
 import { SocialCalendar } from "./pages/social/SocialCalendar";
 import { SocialCompose } from "./pages/social/SocialCompose";
 import { SocialInbox } from "./pages/social/SocialInbox";
+import { SocialWorkspace } from "./pages/social/SocialWorkspace";
 import { ClientLogoForm } from "./pages/portfolio/ClientLogoForm";
 import { PortfolioCategories } from "./pages/portfolio/PortfolioCategories";
 import { PortfolioCategoryForm } from "./pages/portfolio/PortfolioCategoryForm";
@@ -130,7 +131,7 @@ function Shell({
     { id: "add-employee", label: t(copy.addEmployee), to: "/employees/new", icon: <IconEmployees aria-hidden width={18} height={18} />, group: t(copy.commandGroupActions) },
     { id: "add-client", label: t(copy.addClient), to: "/clients/new", icon: <IconClients aria-hidden width={18} height={18} />, group: t(copy.commandGroupActions) },
     { id: "add-reel", label: t(copy.addReel), to: "/reels/new", icon: <IconReels aria-hidden width={18} height={18} />, group: t(copy.commandGroupActions) },
-    { id: "compose-post", label: t(copy.socialCompose), to: "/social/compose", icon: <IconSocial aria-hidden width={18} height={18} />, group: t(copy.commandGroupActions) },
+    { id: "compose-post", label: t(copy.socialCompose), to: "/social", icon: <IconSocial aria-hidden width={18} height={18} />, group: t(copy.commandGroupActions) },
   ];
 
   if (!user?.is_admin) return <Navigate to="/" replace />;
@@ -363,16 +364,18 @@ export function App() {
           <Route path="/contact" element={<Contact locale={locale} t={t} />} />
           <Route path="/contact/new" element={<ContactChannelForm locale={locale} t={t} />} />
           <Route path="/contact/:id/edit" element={<ContactChannelForm locale={locale} t={t} />} />
-          <Route path="/social" element={<SocialHome locale={locale} t={t} />} />
-          <Route path="/social/links" element={<SocialLinks locale={locale} t={t} />} />
-          <Route path="/social/design" element={<SocialDesign locale={locale} t={t} />} />
-          <Route path="/social/compose" element={<SocialCompose locale={locale} t={t} />} />
-          <Route path="/social/compose/:id" element={<SocialCompose locale={locale} t={t} />} />
-          <Route path="/social/calendar" element={<SocialCalendar locale={locale} t={t} />} />
-          <Route path="/social/inbox" element={<SocialInbox locale={locale} t={t} />} />
-          <Route path="/social/accounts" element={<SocialAccounts locale={locale} t={t} />} />
-          <Route path="/social/accounts/new" element={<SocialAccountForm locale={locale} t={t} />} />
-          <Route path="/social/accounts/:id/edit" element={<SocialAccountForm locale={locale} t={t} />} />
+          <Route path="/social" element={<SocialWorkspace locale={locale} t={t} />}>
+            <Route index element={<SocialHome locale={locale} t={t} />} />
+            <Route path="links" element={<SocialLinks locale={locale} t={t} />} />
+            <Route path="design" element={<SocialDesign locale={locale} t={t} />} />
+            <Route path="compose" element={<Navigate to="/social" replace />} />
+            <Route path="compose/:id" element={<SocialCompose locale={locale} t={t} />} />
+            <Route path="calendar" element={<SocialCalendar locale={locale} t={t} />} />
+            <Route path="inbox" element={<SocialInbox locale={locale} t={t} />} />
+            <Route path="accounts" element={<SocialAccounts locale={locale} t={t} />} />
+            <Route path="accounts/new" element={<SocialAccountForm locale={locale} t={t} />} />
+            <Route path="accounts/:id/edit" element={<SocialAccountForm locale={locale} t={t} />} />
+          </Route>
           <Route path="/payments" element={<Payments locale={locale} t={t} />} />
           <Route path="/client-logos" element={<Navigate to="/clients?tab=logos" replace />} />
           <Route path="/projects" element={<PortfolioProjects locale={locale} t={t} />} />

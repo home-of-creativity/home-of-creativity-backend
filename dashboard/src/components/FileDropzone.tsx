@@ -9,6 +9,7 @@ export function FileDropzone({
   disabled,
   hint,
   activeHint,
+  className,
 }: {
   accept?: Accept;
   onFiles: (files: File[]) => void;
@@ -16,6 +17,7 @@ export function FileDropzone({
   disabled?: boolean;
   hint: string;
   activeHint?: string;
+  className?: string;
 }) {
   const onDrop = useCallback(
     (accepted: File[]) => {
@@ -36,7 +38,7 @@ export function FileDropzone({
   return (
     <div
       {...rootProps}
-      className={["dropzone", isDragActive ? "is-active" : "", disabled ? "is-disabled" : ""].filter(Boolean).join(" ")}
+      className={["dropzone", isDragActive ? "is-active" : "", disabled ? "is-disabled" : "", className].filter(Boolean).join(" ")}
     >
       <input {...getInputProps()} />
       <UploadCloud size={20} aria-hidden="true" />

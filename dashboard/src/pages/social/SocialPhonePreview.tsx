@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { api, type SocialAccount, type SocialPost, type SocialPostMedia } from "../../api";
 import { SocialBrandIcon } from "../../components/SocialBrandIcon";
+import { FileDropzone } from "../../components/FileDropzone";
 import { copy, type Locale } from "../../i18n";
 import { formatWhen, platformLabel } from "./helpers";
 
@@ -37,6 +38,14 @@ export function SocialPhonePreview({
   existingMedia,
   files,
   excludePostId,
+  studio,
+  posts,
+  onFiles,
+  dropHint,
+  dropActiveHint,
+  dropDisabled,
+  feedFilter = "all",
+  onFeedFilter,
 }: {
   locale: Locale;
   t: (c: { ar: string; en: string }) => string;
@@ -46,6 +55,14 @@ export function SocialPhonePreview({
   existingMedia: SocialPostMedia[];
   files: PreviewFile[];
   excludePostId?: number | null;
+  studio?: boolean;
+  posts?: SocialPost[];
+  onFiles?: (files: File[]) => void;
+  dropHint?: string;
+  dropActiveHint?: string;
+  dropDisabled?: boolean;
+  feedFilter?: "all" | "draft" | "scheduled";
+  onFeedFilter?: (value: "all" | "draft" | "scheduled") => void;
 }) {
   const [accountId, setAccountId] = useState<number | null>(accounts[0]?.id ?? null);
   const [slide, setSlide] = useState(0);
@@ -66,6 +83,10 @@ export function SocialPhonePreview({
   }, [mediaKey]);
 
   useEffect(() => {
+    if (posts) {
+      setNeighbors(posts.filter((item) => item.id !== excludePostId));
+      return;
+    }
     if (!account) {
       setNeighbors([]);
       return;
@@ -74,8 +95,8 @@ export function SocialPhonePreview({
     api
       .socialPosts({
         account_id: account.id,
-        placement,
-        per_page: 8,
+        placement: studio ? undefined : placement,
+        per_page: studio ? 40 : 8,
       })
       .then((res) => {
         if (cancelled) return;
@@ -87,11 +108,17 @@ export function SocialPhonePreview({
     return () => {
       cancelled = true;
     };
-  }, [account?.id, placement, excludePostId]);
+  }, [account?.id, placement, excludePostId, posts, studio]);
+
+  const filteredNeighbors = neighbors.filter((item) => {
+    if (feedFilter === "draft") return item.status === "draft" || item.status === "failed";
+    if (feedFilter === "scheduled") return item.status === "scheduled" || item.status === "publishing";
+    return true;
+  });
 
   return (
-    <div className="social-phone-preview">
-      {accounts.length > 1 ? (
+    <div className={studio ? "social-phone-preview is-studio" : "social-phone-preview"}>
+      {!studio && accounts.length > 1 ? (
         <div className="social-phone-account-switch" role="tablist" aria-label={t(copy.socialPickPlatforms)}>
           {accounts.map((item) => (
             <button
@@ -109,34 +136,12 @@ export function SocialPhonePreview({
         </div>
       ) : null}
 
-      <div className={`social-phone-bezel is-${account?.platform ?? "empty"}`}>
+      <div className={studio ? `social-phone-bezel is-studio is-${account?.platform ?? "empty"}` : `social-phone-bezel is-${account?.platform ?? "empty"}`}>
         <div className="social-phone-notch" aria-hidden />
-        <div className={`social-phone-screen is-${placement}`} dir={locale === "ar" ? "rtl" : "ltr"}>
+        <div className={studio ? "social-phone-screen is-feed is-studio" : `social-phone-screen is-${placement}`} dir={locale === "ar" ? "rtl" : "ltr"}>
           {!account ? (
             <p className="social-phone-empty">{t(copy.socialPreviewPickAccount)}</p>
-          ) : placement === "story" ? (
-            <StoryTimeline
-              account={account}
-              handle={handle}
-              slide={current}
-              caption={body}
-              emptyLabel={t(copy.socialPreviewEmptyMedia)}
-              draftLabel={t(copy.socialPreviewThisPost)}
-              neighbors={neighbors}
-            />
-          ) : placement === "reel" ? (
-            <ReelTimeline
-              account={account}
-              handle={handle}
-              slide={current}
-              caption={body}
-              emptyLabel={t(copy.socialPreviewEmptyMedia)}
-              nowLabel={t(copy.socialNow)}
-              draftLabel={t(copy.socialPreviewThisPost)}
-              neighbors={neighbors}
-              locale={locale}
-            />
-          ) : (
+          ) : studio || placement === "feed" ? (
             <FeedTimeline
               account={account}
               handle={handle}
@@ -149,13 +154,66 @@ export function SocialPhonePreview({
               prevLabel={t(copy.socialPreviewPrev)}
               nextLabel={t(copy.socialPreviewNext)}
               onIndex={setSlide}
+              neighbors={filteredNeighbors}
+              locale={locale}
+              lead={
+                onFiles ? (
+                  <FileDropzone
+                    className="social-phone-drop"
+                    accept={{ "image/*": [], "video/*": [] }}
+                    multiple
+                    disabled={dropDisabled}
+                    hint={dropHint ?? t(copy.socialDropPost)}
+                    activeHint={dropActiveHint ?? t(copy.socialDropPostActive)}
+                    onFiles={onFiles}
+                  />
+                ) : null
+              }
+              filters={
+                onFeedFilter ? (
+                  <div className="social-phone-filters" role="tablist" aria-label={t(copy.socialPosts)}>
+                    {(["all", "draft", "scheduled"] as const).map((value) => (
+                      <button
+                        key={value}
+                        type="button"
+                        role="tab"
+                        aria-selected={feedFilter === value}
+                        className={feedFilter === value ? "is-on" : undefined}
+                        onClick={() => onFeedFilter(value)}
+                      >
+                        {value === "all" ? t(copy.socialFeedAll) : value === "draft" ? t(copy.socialFeedDrafts) : t(copy.socialFeedScheduled)}
+                      </button>
+                    ))}
+                  </div>
+                ) : null
+              }
+            />
+          ) : placement === "story" ? (
+            <StoryTimeline
+              account={account}
+              handle={handle}
+              slide={current}
+              caption={body}
+              emptyLabel={t(copy.socialPreviewEmptyMedia)}
+              draftLabel={t(copy.socialPreviewThisPost)}
+              neighbors={neighbors}
+            />
+          ) : (
+            <ReelTimeline
+              account={account}
+              handle={handle}
+              slide={current}
+              caption={body}
+              emptyLabel={t(copy.socialPreviewEmptyMedia)}
+              nowLabel={t(copy.socialNow)}
+              draftLabel={t(copy.socialPreviewThisPost)}
               neighbors={neighbors}
               locale={locale}
             />
           )}
         </div>
       </div>
-      {account && neighbors.length > 0 ? <p className="muted social-phone-feed-hint">{t(copy.socialPreviewOnPage)}</p> : null}
+      {!studio && account && neighbors.length > 0 ? <p className="muted social-phone-feed-hint">{t(copy.socialPreviewOnPage)}</p> : null}
     </div>
   );
 }
@@ -200,6 +258,8 @@ function FeedTimeline({
   onIndex,
   neighbors,
   locale,
+  lead,
+  filters,
 }: {
   account: SocialAccount;
   handle: string;
@@ -214,31 +274,40 @@ function FeedTimeline({
   onIndex: (value: number) => void;
   neighbors: SocialPost[];
   locale: Locale;
+  lead?: ReactNode;
+  filters?: ReactNode;
 }) {
   return (
     <div className="social-phone-feed-scroll">
       <header className="social-phone-feed-bar">
-        <AccountMark account={account} />
-        <div>
-          <p className="social-phone-name">{account.name}</p>
-          <p className="social-phone-handle"><bdi>{handle}</bdi></p>
+        <div className="social-phone-feed-identity">
+          <AccountMark account={account} />
+          <div>
+            <p className="social-phone-name">{account.name}</p>
+            <p className="social-phone-handle"><bdi>{handle}</bdi></p>
+          </div>
+          <SocialBrandIcon platform={account.platform} />
         </div>
+        {filters}
       </header>
-      <FeedPost
-        account={account}
-        handle={handle}
-        timeLabel={nowLabel}
-        body={body}
-        slides={slides}
-        index={index}
-        emptyLabel={emptyLabel}
-        prevLabel={prevLabel}
-        nextLabel={nextLabel}
-        onIndex={onIndex}
-        isDraft
-        draftLabel={draftLabel}
-        interactive
-      />
+      {lead}
+      {body || slides.length > 0 ? (
+        <FeedPost
+          account={account}
+          handle={handle}
+          timeLabel={nowLabel}
+          body={body}
+          slides={slides}
+          index={index}
+          emptyLabel={emptyLabel}
+          prevLabel={prevLabel}
+          nextLabel={nextLabel}
+          onIndex={onIndex}
+          isDraft
+          draftLabel={draftLabel}
+          interactive
+        />
+      ) : null}
       {neighbors.map((post) => (
         <FeedPost
           key={post.id}
