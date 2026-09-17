@@ -26,6 +26,14 @@ docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml up -d --build
 echo "Recreating edge (Caddy) so it picks up the current Caddyfile..."
 docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml up -d --force-recreate hoc-edge
 
+# hoc-dashboard's command runs `npm install && npm run build` once at
+# container startup, then serves that dist/ forever. `up -d` won't recreate
+# it just because the synced dashboard source changed, so every deploy would
+# keep serving a stale build. Force a recreate so it rebuilds from the code
+# that was just rsynced.
+echo "Rebuilding dashboard (this runs npm install + build, can take a bit)..."
+docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml up -d --force-recreate hoc-dashboard
+
 echo "Waiting for API php-fpm..."
 for _ in $(seq 1 60); do
   if docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml exec -T hoc-api php artisan --version >/dev/null 2>&1; then
