@@ -107,11 +107,16 @@ class PushClientLeadToOdoo
         return $client->fresh() ?? $client;
     }
 
+    /**
+     * Push contact details only. Pipeline stage, sales team, and salesperson
+     * belong to the Odoo/sales side once a lead exists — a dashboard or bot
+     * profile edit must never drag an opportunity that progressed past
+     * تلغرام (e.g. تم الفوز بها) back to the initial stage.
+     */
     private function writeLead(Client $client): void
     {
         try {
-            $pipeline = $this->odoo->resolveTelegramPipeline();
-            $this->odoo->writeRecord('crm.lead', (string) $client->odoo_lead_id, array_filter([
+            $values = array_filter([
                 'name' => $this->leadName($client),
                 'contact_name' => $client->name,
                 'partner_name' => $client->company_name,
@@ -119,15 +124,16 @@ class PushClientLeadToOdoo
                 'mobile' => $client->phone,
                 'email_from' => $client->email,
                 'partner_id' => filled($client->odoo_partner_id) ? (int) $client->odoo_partner_id : null,
-                'stage_id' => $pipeline['stage_id'],
-                'team_id' => $pipeline['team_id'],
-                'user_id' => $this->odoo->crmOwnerUserId($pipeline['team_id']),
-                'type' => 'opportunity',
-            ], fn (mixed $value): bool => $value !== null && $value !== ''));
+            ], fn (mixed $value): bool => $value !== null && $value !== '');
 
-            if (blank($client->odoo_stage_name)) {
-                $client->forceFill(['odoo_stage_name' => 'تلغرام'])->save();
+            $telegramTagId = $this->odoo->ensureCrmTagId('تلغرام');
+            if ($telegramTagId) {
+                // Add-only command: keeps the تلغرام classification always
+                // present without removing tags a staff member added in Odoo.
+                $values['tag_ids'] = [[4, $telegramTagId]];
             }
+
+            $this->odoo->writeRecord('crm.lead', (string) $client->odoo_lead_id, $values);
         } catch (\Throwable $exception) {
             Log::error('Odoo CRM lead update failed for client.', [
                 'client_id' => $client->id,

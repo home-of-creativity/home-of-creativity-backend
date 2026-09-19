@@ -548,27 +548,37 @@ async def capture_profile_field(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def replace_catalog_message(message, text: str, markup=None) -> None:
+    chat_id = message.chat_id
+    message_id = message.message_id
+    bot = message.get_bot()
+    deleted = False
     try:
-        await message.edit_text(text, reply_markup=markup)
-        return
-    except BadRequest as exc:
-        if "not modified" in str(exc).lower():
-            if markup is not None:
-                try:
-                    await message.edit_reply_markup(reply_markup=markup)
-                except Exception:
-                    pass
+        await bot.delete_message(chat_id=chat_id, message_id=message_id)
+        deleted = True
+    except Exception:
+        try:
+            await message.delete()
+            deleted = True
+        except Exception:
+            deleted = False
+    if not deleted:
+        try:
+            await message.edit_text(text, reply_markup=markup)
             return
-    except Exception:
-        pass
-    try:
-        await message.delete()
-    except Exception:
-        pass
+        except BadRequest as exc:
+            if "not modified" in str(exc).lower():
+                if markup is not None:
+                    try:
+                        await message.edit_reply_markup(reply_markup=markup)
+                    except Exception:
+                        pass
+                return
+        except Exception:
+            pass
     kwargs = {}
     if markup is not None:
         kwargs["reply_markup"] = markup
-    await message.chat.send_message(text, **kwargs)
+    await bot.send_message(chat_id=chat_id, text=text, **kwargs)
 
 
 async def send_catalog_view(message, text: str, markup=None, *, replace: bool = False) -> None:

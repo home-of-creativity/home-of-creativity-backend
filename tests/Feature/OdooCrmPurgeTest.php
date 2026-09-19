@@ -3,7 +3,11 @@
 namespace Tests\Feature;
 
 use App\Actions\PurgeOdooCrmCustomers;
+use App\Actions\PushClientLeadToOdoo;
+use App\Actions\SendQuotation;
+use App\Enums\RequestStatus;
 use App\Models\Client;
+use App\Models\ServiceRequest;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
@@ -122,7 +126,70 @@ class OdooCrmPurgeTest extends TestCase
             return ($vals['stage_id'] ?? null) === 11
                 && ($vals['team_id'] ?? null) === 21
                 && ($vals['user_id'] ?? null) === 2
-                && ($vals['type'] ?? null) === 'opportunity';
+                && ($vals['type'] ?? null) === 'opportunity'
+                && ($vals['tag_ids'][0] ?? null) === [6, 0, [3]];
+        });
+    }
+
+    public function test_send_quotation_links_sale_order_to_existing_opportunity(): void
+    {
+        Http::preventStrayRequests();
+        $this->fakeOdooDocuments();
+        Http::fake($this->odooDocumentsHttpFake());
+
+        $client = Client::factory()->create([
+            'name' => 'Sara',
+            'company_name' => 'شركة الإبداع',
+            'odoo_partner_id' => '44',
+            'odoo_lead_id' => '77',
+        ]);
+        $request = ServiceRequest::factory()->for($client)->create([
+            'status' => RequestStatus::Submitted,
+        ]);
+
+        app(SendQuotation::class)->handle($request, 500, 'عرض تجريبي');
+
+        Http::assertSent(function (Request $httpRequest): bool {
+            $args = $httpRequest->data()['params']['args'] ?? [];
+            if (($args[3] ?? null) !== 'sale.order' || ($args[4] ?? null) !== 'create') {
+                return false;
+            }
+
+            $vals = $args[5][0][0] ?? [];
+
+            return ($vals['opportunity_id'] ?? null) === 77
+                && ($vals['partner_id'] ?? null) === 44;
+        });
+    }
+
+    public function test_writing_client_profile_never_resets_opportunity_stage_or_team(): void
+    {
+        Http::preventStrayRequests();
+        $this->fakeOdooDocuments();
+        Http::fake($this->odooDocumentsHttpFake());
+
+        $client = Client::factory()->create([
+            'name' => 'Sara',
+            'company_name' => 'شركة الإبداع',
+            'phone' => '+963911111111',
+            'odoo_partner_id' => '44',
+            'odoo_lead_id' => '77',
+        ]);
+
+        app(PushClientLeadToOdoo::class)->handle($client, writeExisting: true, classifyIndustry: false);
+
+        Http::assertSent(function (Request $httpRequest): bool {
+            $args = $httpRequest->data()['params']['args'] ?? [];
+            if (($args[3] ?? null) !== 'crm.lead' || ($args[4] ?? null) !== 'write') {
+                return false;
+            }
+
+            $vals = $args[5][1] ?? [];
+
+            return ! array_key_exists('stage_id', $vals)
+                && ! array_key_exists('team_id', $vals)
+                && ! array_key_exists('user_id', $vals)
+                && ($vals['tag_ids'][0] ?? null) === [4, 3];
         });
     }
 

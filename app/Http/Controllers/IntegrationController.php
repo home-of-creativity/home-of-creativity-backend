@@ -38,6 +38,7 @@ class IntegrationController extends Controller
                 $serviceRequest->number,
                 (string) $request->validated('title'),
                 existingPartnerId: $serviceRequest->client?->odoo_partner_id,
+                opportunityId: $serviceRequest->client?->odoo_lead_id,
             );
         } catch (\Throwable $exception) {
             Log::warning('Odoo quotation failed.', [

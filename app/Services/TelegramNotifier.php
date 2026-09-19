@@ -36,7 +36,10 @@ class TelegramNotifier
         }
     }
 
-    public function sendDocument(string $chatId, string $absolutePath, ?string $caption = null, string $bot = 'client'): ?string
+    /**
+     * @param  array<string, mixed>|null  $replyMarkup
+     */
+    public function sendDocument(string $chatId, string $absolutePath, ?string $caption = null, string $bot = 'client', ?array $replyMarkup = null): ?string
     {
         $token = $this->token($bot);
         if ($token === '') {
@@ -47,13 +50,18 @@ class TelegramNotifier
             throw new RuntimeException('Document file not found.');
         }
 
+        $fields = array_filter([
+            'chat_id' => $chatId,
+            'caption' => $caption,
+        ], fn ($value) => $value !== null && $value !== '');
+        if ($replyMarkup !== null) {
+            $fields['reply_markup'] = json_encode($replyMarkup, JSON_UNESCAPED_UNICODE);
+        }
+
         $response = Http::timeout(30)
             ->connectTimeout(5)
             ->attach('document', fopen($absolutePath, 'r'), basename($absolutePath))
-            ->post("https://api.telegram.org/bot{$token}/sendDocument", array_filter([
-                'chat_id' => $chatId,
-                'caption' => $caption,
-            ]));
+            ->post("https://api.telegram.org/bot{$token}/sendDocument", $fields);
 
         if (! $response->successful() || $response->json('ok') !== true) {
             Log::warning('Telegram document send failed.', ['body' => $response->body()]);
@@ -108,7 +116,10 @@ class TelegramNotifier
         return $this->sendDocument($chatId, $absolutePath, $caption, $bot);
     }
 
-    public function sendStoredDocument(ServiceRequest $request, string $relativePath, ?string $caption = null): ?string
+    /**
+     * @param  array<string, mixed>|null  $replyMarkup
+     */
+    public function sendStoredDocument(ServiceRequest $request, string $relativePath, ?string $caption = null, ?array $replyMarkup = null): ?string
     {
         $chatId = $request->client?->telegram_user_id;
         if (! filled($chatId)) {
@@ -117,7 +128,7 @@ class TelegramNotifier
 
         $absolute = Storage::disk('local')->path($relativePath);
 
-        return $this->sendDocument((string) $chatId, $absolute, $caption, 'client');
+        return $this->sendDocument((string) $chatId, $absolute, $caption, 'client', $replyMarkup);
     }
 
     public function sendPaymentQr(string $chatId, string $caption, string $relativePath, string $bot = 'client'): ?string

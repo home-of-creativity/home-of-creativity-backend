@@ -13,7 +13,10 @@ Schedule::command('social:sync-inbox')->everyFifteenMinutes()->withoutOverlappin
 Schedule::command('social:sync-posts')->everyFifteenMinutes()->withoutOverlapping();
 Schedule::command('social:sync-accounts')->everyFifteenMinutes()->withoutOverlapping();
 Schedule::command('integration:process-outbox')->everyMinute()->withoutOverlapping();
-Schedule::command('odoo:reconcile')->everyMinute()->withoutOverlapping();
+// --limit=500 keeps the whole client table hydrating from Odoo every run
+// (not a rotating slice) so a stage/tag/contact edit made directly in Odoo
+// reaches the dashboard within about a minute even as the client list grows.
+Schedule::command('odoo:reconcile', ['--limit' => 500])->everyMinute()->withoutOverlapping();
 Schedule::command('ops:process-reminders')->everyMinute()->timezone('Asia/Damascus')->withoutOverlapping();
 Schedule::command('ops:poll-drive')->everyFiveMinutes()->timezone('Asia/Damascus')->withoutOverlapping();
 Schedule::command('ops:clickup-due-alerts')->hourly()->timezone('Asia/Damascus')->withoutOverlapping();

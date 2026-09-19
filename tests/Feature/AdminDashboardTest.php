@@ -321,8 +321,18 @@ class AdminDashboardTest extends TestCase
         });
         Http::assertSent(function (Request $request): bool {
             $args = $request->data()['params']['args'] ?? [];
+            if (($args[3] ?? null) !== 'crm.lead' || ($args[4] ?? null) !== 'write') {
+                return false;
+            }
 
-            return ($args[3] ?? null) === 'crm.lead' && ($args[4] ?? null) === 'write';
+            $vals = $args[5][1] ?? [];
+
+            // A dashboard profile edit must never drag an opportunity that
+            // progressed past تلغرام (e.g. تم الفوز بها) back to that stage,
+            // and must always keep the تلغرام tag present (add-only command).
+            return ! array_key_exists('stage_id', $vals)
+                && ! array_key_exists('team_id', $vals)
+                && ($vals['tag_ids'][0] ?? null) === [4, 3];
         });
     }
 

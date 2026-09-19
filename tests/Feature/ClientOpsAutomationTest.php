@@ -183,7 +183,19 @@ class ClientOpsAutomationTest extends TestCase
             }
 
             return substr_count($text, 'الفترة:') === 1
-                && ! str_contains($text, 'وصف الطلب:');
+                && ! str_contains($text, 'وصف الطلب:')
+                && ! str_contains($text, 'تم إنشاء الطلب');
+        });
+        Http::assertNotSent(function (Request $httpRequest): bool {
+            if (! str_contains($httpRequest->url(), 'api.telegram.org') || ! str_contains($httpRequest->url(), 'sendMessage')) {
+                return false;
+            }
+
+            $text = (string) ($httpRequest->data()['text'] ?? '');
+
+            return str_contains($text, 'تم إنشاء الطلب')
+                || str_contains($text, 'وإرسال عرض السعر')
+                || $text === 'اختر:';
         });
     }
 

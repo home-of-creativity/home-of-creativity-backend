@@ -13,6 +13,9 @@ class OdooClient
 
     private ?int $currencyId = null;
 
+    /** @var array<string, int|null> */
+    private array $tagIdCache = [];
+
     public function configured(): bool
     {
         if (! (bool) config('services.odoo.enabled')
@@ -230,10 +233,8 @@ class OdooClient
         $teamId = $pipeline['team_id'];
         $stageId = $pipeline['stage_id'];
 
-        $tagIds = $values['tag_ids'] ?? null;
-        if (is_array($tagIds) && $tagIds !== [] && ! is_array($tagIds[0] ?? null)) {
-            $tagIds = [[6, 0, array_map('intval', $tagIds)]];
-        }
+        $extraTagIds = is_array($values['tag_ids'] ?? null) ? $values['tag_ids'] : [];
+        $tagIds = $this->withTelegramTagIds($extraTagIds);
 
         $payload = array_filter([
             'name' => $values['name'],
@@ -381,6 +382,30 @@ class OdooClient
             'stage_id' => $stageId,
             'team_id' => $teamId,
         ];
+    }
+
+    /**
+     * Every Telegram-originated lead always carries the "تلغرام" tag so the
+     * source is identifiable in Odoo regardless of the company's industry
+     * tag. Returns an Odoo o2m command list, or null if the tag is
+     * unavailable (Odoo down) and there is nothing else to set.
+     *
+     * @param  list<int>  $extraTagIds
+     * @return list<mixed>|null
+     */
+    private function withTelegramTagIds(array $extraTagIds = []): ?array
+    {
+        $telegramTagId = $this->ensureCrmTagId('تلغرام');
+        $ids = array_values(array_unique(array_filter(
+            [...$extraTagIds, $telegramTagId],
+            fn (mixed $id): bool => is_numeric($id) && (int) $id > 0,
+        )));
+
+        if ($ids === []) {
+            return null;
+        }
+
+        return [[6, 0, array_map('intval', $ids)]];
     }
 
     public function ensureCrmStage(string $name): int
@@ -621,24 +646,26 @@ class OdooClient
         }
 
         try {
-            $stageId = $this->findCrmStageId('تم الفوز بها')
-                ?? $this->findCrmStageId('Won')
-                ?? $this->findCrmStageId('تم الفوز')
-                ?? $this->findCrmStageId('won');
+            $teamId = $this->findCrmTeamId('تلغرام');
+            $stage = $this->findCrmStage('تم الفوز بها', $teamId)
+                ?? $this->findCrmStage('Won', $teamId)
+                ?? $this->findCrmStage('تم الفوز', $teamId);
 
+            $stageId = $stage['id'] ?? null;
             if ($stageId === null) {
-                Log::warning('Odoo Won stage not found for markLeadWon.', ['lead_id' => $leadId]);
+                Log::error('Odoo Won stage not found for markLeadWon.', ['lead_id' => $leadId]);
 
                 return;
             }
 
-            $this->writeRecord('crm.lead', $leadId, [
+            $this->writeRecord('crm.lead', $leadId, array_filter([
                 'stage_id' => $stageId,
                 'probability' => 100,
                 'color' => 10,
-            ]);
+                'date_closed' => now()->toDateTimeString(),
+            ], fn (mixed $value): bool => $value !== null && $value !== ''));
         } catch (Throwable $exception) {
-            Log::warning('Odoo markLeadWon failed.', [
+            Log::error('Odoo markLeadWon failed.', [
                 'lead_id' => $leadId,
                 'error' => $exception->getMessage(),
             ]);
@@ -652,13 +679,17 @@ class OdooClient
             return null;
         }
 
+        if (array_key_exists($normalized, $this->tagIdCache)) {
+            return $this->tagIdCache[$normalized];
+        }
+
         try {
             $rows = $this->searchRead('crm.tag', [['name', '=', $normalized]], ['id', 'name'], 1, 0, 'id asc');
             if (isset($rows[0]['id'])) {
-                return (int) $rows[0]['id'];
+                return $this->tagIdCache[$normalized] = (int) $rows[0]['id'];
             }
 
-            return (int) $this->call('crm.tag', 'create', [['name' => $normalized]]);
+            return $this->tagIdCache[$normalized] = (int) $this->call('crm.tag', 'create', [['name' => $normalized]]);
         } catch (Throwable $exception) {
             Log::warning('Odoo CRM tag ensure failed.', [
                 'tag' => $normalized,
@@ -995,6 +1026,7 @@ class OdooClient
         ?string $notes = null,
         ?array $lines = null,
         ?string $existingPartnerId = null,
+        int|string|null $opportunityId = null,
     ): array {
         $partnerId = $this->createOrReusePartner($partnerName, $email, $phone, $requestNumber, $existingPartnerId);
         $lineName = filled($notes) ? "{$title}\n{$notes}" : $title;
@@ -1004,6 +1036,10 @@ class OdooClient
             'origin' => $requestNumber,
             'note' => $lineName,
         ];
+
+        if (filled($opportunityId) && (int) $opportunityId > 0) {
+            $orderValues['opportunity_id'] = (int) $opportunityId;
+        }
 
         if ($currencyId = $this->resolveCurrencyId()) {
             $orderValues['currency_id'] = $currencyId;
@@ -1028,7 +1064,18 @@ class OdooClient
             ])]];
         }
 
-        $orderId = $this->call('sale.order', 'create', [$orderValues]);
+        try {
+            $orderId = $this->call('sale.order', 'create', [$orderValues]);
+        } catch (Throwable $exception) {
+            if (! isset($orderValues['opportunity_id'])) {
+                throw $exception;
+            }
+
+            // Older/custom Odoo CRM setups may not expose opportunity_id on
+            // sale.order; retry without it rather than losing the quotation.
+            unset($orderValues['opportunity_id']);
+            $orderId = $this->call('sale.order', 'create', [$orderValues]);
+        }
 
         return [
             'odoo_partner_id' => (string) $partnerId,

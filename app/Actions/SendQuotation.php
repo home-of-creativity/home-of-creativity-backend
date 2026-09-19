@@ -81,32 +81,23 @@ class SendQuotation
 
             try {
                 $caption = $this->quotationCaption($request, $amount, $notes, $version);
+                $chatId = $request->client?->telegram_user_id;
+                $keyboard = $chatId ? $this->quotationKeyboard($request) : null;
                 if ($pdfPath !== '') {
                     $fileId = $this->telegram->sendStoredDocument(
                         $request,
                         $pdfPath,
                         $caption,
+                        $keyboard,
                     );
                     if ($fileId) {
                         $quotation->forceFill(['telegram_file_id' => $fileId])->save();
                     }
-                } else {
-                    $chatId = $request->client?->telegram_user_id;
-                    if ($chatId) {
-                        $this->telegram->send((string) $chatId, $caption);
-                    }
-                }
-
-                $chatId = $request->client?->telegram_user_id;
-                if ($chatId) {
-                    $ref = ResolveServiceRequest::displayNumber($request);
+                } elseif ($chatId) {
                     $this->telegram->sendInlineKeyboard(
                         (string) $chatId,
-                        'اختر:',
-                        [
-                            [['text' => '✅ موافقة', 'callback_data' => "approve:{$ref}"]],
-                            [['text' => '❌ رفض', 'callback_data' => "reject:{$ref}"]],
-                        ],
+                        $caption,
+                        $keyboard['inline_keyboard'] ?? [],
                     );
                 }
             } catch (Throwable $exception) {
@@ -168,6 +159,7 @@ class SendQuotation
                 $notes,
                 $lines,
                 $request->client?->odoo_partner_id,
+                $request->client?->odoo_lead_id,
             );
             $request->forceFill([
                 'odoo_quotation_id' => $created['odoo_quotation_id'],
@@ -210,6 +202,21 @@ class SendQuotation
 
             return '';
         }
+    }
+
+    /**
+     * @return array{inline_keyboard: list<list<array{text: string, callback_data: string}>>}
+     */
+    private function quotationKeyboard(ServiceRequest $request): array
+    {
+        $ref = ResolveServiceRequest::displayNumber($request);
+
+        return [
+            'inline_keyboard' => [
+                [['text' => '✅ موافقة', 'callback_data' => "approve:{$ref}"]],
+                [['text' => '❌ رفض', 'callback_data' => "reject:{$ref}"]],
+            ],
+        ];
     }
 
     private function quotationCaption(ServiceRequest $request, float $amount, ?string $notes, int $version): string

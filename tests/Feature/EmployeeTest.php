@@ -279,19 +279,27 @@ class EmployeeTest extends TestCase
             'amount' => 450.5,
         ]);
 
-        Http::assertSent(fn (Request $request): bool => str_contains($request->url(), 'botclient-token/sendDocument'));
         Http::assertSent(function (Request $request): bool {
+            if (! str_contains($request->url(), 'botclient-token/sendDocument')) {
+                return false;
+            }
+
+            return collect($request->data())->contains(function (mixed $value): bool {
+                $text = is_string($value) ? $value : json_encode($value, JSON_UNESCAPED_UNICODE);
+
+                return is_string($text) && str_contains($text, 'موافقة') && str_contains($text, 'رفض');
+            });
+        });
+        Http::assertNotSent(function (Request $request): bool {
             if (! str_contains($request->url(), 'botclient-token/sendMessage')) {
                 return false;
             }
 
-            $texts = collect(data_get($request->data(), 'reply_markup.inline_keyboard', []))
-                ->flatten(1)
-                ->pluck('text');
+            $text = (string) ($request->data()['text'] ?? $request->data()['caption'] ?? '');
 
-            return $texts->contains('✅ موافقة')
-                && $texts->contains('❌ رفض')
-                && ! $texts->contains('السعر غالي');
+            return str_contains($text, 'تم إنشاء الطلب')
+                || str_contains($text, 'وإرسال عرض السعر')
+                || $text === 'اختر:';
         });
     }
 
