@@ -24,7 +24,8 @@ class EnsureRequestDriveFolder
             return $request;
         }
 
-        $company = $request->client?->company_name ?: $request->client?->name ?: 'client';
+        $request->loadMissing('client');
+        $company = $request->client?->driveCompanyFolderName() ?? 'شركة';
         $task = trim($request->title.' '.now()->format('Y-m-d'));
         $parent = (string) config('services.google.drive_parent_folder_id');
 

@@ -2,17 +2,19 @@
 
 namespace App\Models;
 
+use App\Support\ClientProfileValue;
 use Database\Factories\ClientFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Client extends Model
 {
     /** @use HasFactory<ClientFactory> */
-    use HasFactory;
+    use HasFactory, SoftDeletes;
 
     protected $fillable = [
         'user_id',
@@ -38,11 +40,31 @@ class Client extends Model
         return $this->hasMany(ServiceRequest::class);
     }
 
+    public static function findForTelegram(?string $telegramUserId): ?self
+    {
+        if (! filled($telegramUserId)) {
+            return null;
+        }
+
+        $client = static::query()->withTrashed()->where('telegram_user_id', $telegramUserId)->first();
+        if ($client?->trashed()) {
+            $client->restore();
+        }
+
+        return $client;
+    }
+
     public function profileComplete(): bool
     {
         return filled($this->name)
             && filled($this->phone)
             && filled($this->company_name);
+    }
+
+    public function driveCompanyFolderName(): string
+    {
+        return ClientProfileValue::usableCompanyName($this->company_name, $this->telegram_user_id)
+            ?? 'شركة';
     }
 
     public function readyForOdoo(): bool

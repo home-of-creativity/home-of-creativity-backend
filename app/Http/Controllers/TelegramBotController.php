@@ -13,6 +13,7 @@ use App\Actions\PushClientToOdoo;
 use App\Actions\RejectQuotation;
 use App\Actions\RenewSubscription;
 use App\Actions\RequestRevision;
+use App\Actions\ResolveTelegramClient;
 use App\Actions\SubmitServiceRequest;
 use App\Actions\SyncClickUpFromStaff;
 use App\Enums\ClickUpSyncEvent;
@@ -37,17 +38,15 @@ use App\Support\ShamCashQr;
 use App\Support\StatusLabel;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
-use function Illuminate\Support\php_binary;
-
 class TelegramBotController extends Controller
 {
-    public function link(TelegramLinkRequest $request, PushClientToOdoo $pushClientToOdoo, PushClientLeadToOdoo $pushClientLeadToOdoo): JsonResponse
+    public function __construct(private ResolveTelegramClient $resolveTelegramClient) {}
+
+    public function link(TelegramLinkRequest $request): JsonResponse
     {
         $payload = [
             'name' => $request->validated('name'),
@@ -59,12 +58,10 @@ class TelegramBotController extends Controller
             $payload['company_name'] = $request->validated('company_name');
         }
 
-        $client = Client::query()->updateOrCreate(
-            ['telegram_user_id' => $request->validated('telegram_user_id')],
-            array_filter($payload, fn ($value) => $value !== null && $value !== ''),
+        $client = $this->resolveTelegramClient->link(
+            $request->validated('telegram_user_id'),
+            $payload,
         );
-
-        $this->pushClientToOdooInBackground($client, $pushClientToOdoo, $pushClientLeadToOdoo);
 
         return response()->json([
             'data' => array_merge(ClientResource::make($client)->resolve(), [
@@ -77,9 +74,7 @@ class TelegramBotController extends Controller
 
     public function me(Request $request): JsonResponse
     {
-        $client = Client::query()
-            ->where('telegram_user_id', $request->query('telegram_user_id'))
-            ->firstOrFail();
+        $client = $this->resolveTelegramClient->handle($request->query('telegram_user_id'));
 
         return response()->json([
             'data' => array_merge(ClientResource::make($client)->resolve(), [
@@ -107,9 +102,7 @@ class TelegramBotController extends Controller
             }
         }
 
-        $client = Client::query()
-            ->where('telegram_user_id', $validated['telegram_user_id'])
-            ->firstOrFail();
+        $client = $this->resolveTelegramClient->handle($validated['telegram_user_id']);
 
         $client->forceFill(array_filter([
             'name' => $validated['name'] ?? null,
@@ -118,7 +111,8 @@ class TelegramBotController extends Controller
         ], fn ($value) => $value !== null && $value !== ''))->save();
 
         $client = $client->fresh() ?? $client;
-        $this->pushClientToOdooInBackground($client, $pushClientToOdoo, $pushClientLeadToOdoo);
+        $this->pushCompletedClientToOdoo($client, $pushClientToOdoo, $pushClientLeadToOdoo);
+        $client = $client->fresh() ?? $client;
 
         return response()->json([
             'data' => array_merge(ClientResource::make($client)->resolve(), [
@@ -131,9 +125,7 @@ class TelegramBotController extends Controller
 
     public function submit(TelegramSubmitRequest $request, SubmitServiceRequest $submitServiceRequest): JsonResponse
     {
-        $client = Client::query()
-            ->where('telegram_user_id', $request->validated('telegram_user_id'))
-            ->firstOrFail();
+        $client = $this->resolveTelegramClient->handle($request->validated('telegram_user_id'));
 
         abort_unless($client->profileComplete(), 422, 'Complete your name, phone, and company first.');
 
@@ -152,9 +144,7 @@ class TelegramBotController extends Controller
 
     public function index(Request $request, ClickUpStatusMapper $mapper): JsonResponse
     {
-        $client = Client::query()
-            ->where('telegram_user_id', $request->query('telegram_user_id'))
-            ->firstOrFail();
+        $client = $this->resolveTelegramClient->handle($request->query('telegram_user_id'));
 
         $items = $client->requests()
             ->with('pricingPackage')
@@ -184,9 +174,7 @@ class TelegramBotController extends Controller
 
     public function update(Request $request, ServiceRequest $serviceRequest): ServiceRequestResource
     {
-        $client = Client::query()
-            ->where('telegram_user_id', $request->input('telegram_user_id'))
-            ->firstOrFail();
+        $client = $this->resolveTelegramClient->handle($request->input('telegram_user_id'));
 
         abort_unless($serviceRequest->client_id === $client->id, 403);
         abort_unless($serviceRequest->status->allowsClientEdit(), 422, 'Request can no longer be edited.');
@@ -399,9 +387,7 @@ class TelegramBotController extends Controller
             'request_number' => ['nullable', 'string'],
         ]);
 
-        $client = Client::query()
-            ->where('telegram_user_id', $validated['telegram_user_id'])
-            ->firstOrFail();
+        $client = $this->resolveTelegramClient->handle($validated['telegram_user_id']);
 
         $requestId = null;
         if (filled($validated['request_number'] ?? null)) {
@@ -430,7 +416,7 @@ class TelegramBotController extends Controller
             'offset' => ['nullable', 'integer', 'min:0'],
         ]);
 
-        Client::query()->where('telegram_user_id', $validated['telegram_user_id'])->firstOrFail();
+        $this->resolveTelegramClient->handle($validated['telegram_user_id']);
 
         $offset = (int) ($validated['offset'] ?? 0);
         $items = [];
@@ -471,9 +457,7 @@ class TelegramBotController extends Controller
             'billing_period' => ['nullable', 'string', 'max:40'],
         ]);
 
-        $client = Client::query()
-            ->where('telegram_user_id', $validated['telegram_user_id'])
-            ->firstOrFail();
+        $client = $this->resolveTelegramClient->handle($validated['telegram_user_id']);
 
         abort_unless($client->profileComplete(), 422, 'Complete your name, phone, and company first.');
 
@@ -504,7 +488,7 @@ class TelegramBotController extends Controller
             ->additional(['message' => 'Renewal declined.']);
     }
 
-    private function pushClientToOdooInBackground(
+    private function pushCompletedClientToOdoo(
         Client $client,
         PushClientToOdoo $pushClientToOdoo,
         PushClientLeadToOdoo $pushClientLeadToOdoo,
@@ -513,36 +497,18 @@ class TelegramBotController extends Controller
             return;
         }
 
-        if (app()->runningUnitTests()) {
-            $fresh = $client->fresh() ?? $client;
-            $fresh = $pushClientToOdoo->handle($fresh);
-            $pushClientLeadToOdoo->handle($fresh);
-
-            return;
-        }
-
-        try {
-            Process::path(base_path())
-                ->timeout(120)
-                ->start([
-                    php_binary(),
-                    'artisan',
-                    'odoo:push-client',
-                    (string) $client->id,
-                ]);
-        } catch (\Throwable $exception) {
-            Log::warning('Failed to start Odoo client push process.', [
-                'client_id' => $client->id,
-                'error' => $exception->getMessage(),
-            ]);
-        }
+        $fresh = $client->fresh() ?? $client;
+        $fresh = $pushClientToOdoo->handle($fresh);
+        $pushClientLeadToOdoo->handle(
+            $fresh,
+            writeExisting: filled($fresh->odoo_lead_id),
+            classifyIndustry: false,
+        );
     }
 
     private function assertClientOwns(Request $request, ServiceRequest $serviceRequest): void
     {
-        $client = Client::query()
-            ->where('telegram_user_id', $request->input('telegram_user_id'))
-            ->firstOrFail();
+        $client = $this->resolveTelegramClient->handle($request->input('telegram_user_id'));
 
         abort_unless($serviceRequest->client_id === $client->id, 403);
     }

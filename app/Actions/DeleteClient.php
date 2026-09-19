@@ -28,6 +28,12 @@ class DeleteClient
             }
         }
 
+        $client->forceFill([
+            'odoo_partner_id' => null,
+            'odoo_lead_id' => null,
+            'odoo_stage_name' => null,
+        ])->save();
+
         $client->delete();
     }
 }

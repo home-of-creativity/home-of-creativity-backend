@@ -91,7 +91,7 @@ class CreateCatalogRequest
         $this->sendQuotation->handle(
             $serviceRequest,
             $amount,
-            "باقة: {$title}\nالفترة: {$periodLabel}",
+            "الفترة: {$periodLabel}",
             'client:catalog',
         );
 

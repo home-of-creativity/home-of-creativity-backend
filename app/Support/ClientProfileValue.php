@@ -48,4 +48,26 @@ class ClientProfileValue
 
         return $value;
     }
+
+    public static function usableCompanyName(?string $value, ?string $telegramUserId = null): ?string
+    {
+        $usable = self::usableName($value);
+        if ($usable === null) {
+            return null;
+        }
+
+        $compact = preg_replace('/\s+/u', '', $usable) ?? '';
+        if ($compact === '' || preg_match('/^tg[-_]/i', $compact) === 1) {
+            return null;
+        }
+
+        if (filled($telegramUserId)) {
+            $telegram = preg_replace('/\s+/u', '', (string) $telegramUserId) ?? '';
+            if (mb_strlen($telegram) >= 4 && str_contains(mb_strtolower($compact), mb_strtolower($telegram))) {
+                return null;
+            }
+        }
+
+        return $usable;
+    }
 }

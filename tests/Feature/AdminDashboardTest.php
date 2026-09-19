@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Actions\ImportOdooCrmClients;
 use App\Enums\EmployeeProfession;
 use App\Enums\RequestStatus;
 use App\Jobs\ClassifyWithGeminiJob;
@@ -344,7 +345,7 @@ class AdminDashboardTest extends TestCase
         $this->deleteJson("/api/admin/clients/{$client->id}")
             ->assertOk();
 
-        $this->assertDatabaseMissing('clients', ['id' => $client->id]);
+        $this->assertSoftDeleted($client);
         Http::assertSent(function (Request $request): bool {
             $args = $request->data()['params']['args'] ?? [];
 
@@ -354,6 +355,34 @@ class AdminDashboardTest extends TestCase
             $args = $request->data()['params']['args'] ?? [];
 
             return ($args[3] ?? null) === 'res.partner' && ($args[4] ?? null) === 'unlink';
+        });
+    }
+
+    public function test_admin_clients_index_lists_sql_without_live_odoo_pull(): void
+    {
+        Cache::flush();
+        Http::preventStrayRequests();
+        $this->fakeOdooDocuments();
+        Http::fake($this->odooDocumentsHttpFake());
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        Client::factory()->create([
+            'name' => 'Local Only',
+            'phone' => '+963900000000',
+            'company_name' => 'Local Co',
+        ]);
+
+        $this->getJson('/api/admin/clients')
+            ->assertOk()
+            ->assertJsonFragment(['name' => 'Local Only']);
+
+        Http::assertNotSent(function (Request $request): bool {
+            $args = $request->data()['params']['args'] ?? [];
+
+            return ($args[3] ?? null) === 'crm.lead' && in_array($args[4] ?? null, ['search_read', 'create'], true);
         });
     }
 
@@ -375,6 +404,8 @@ class AdminDashboardTest extends TestCase
             'odoo_partner_id' => '44',
         ]);
 
+        app(ImportOdooCrmClients::class)->handle(200);
+
         $this->getJson('/api/admin/clients')
             ->assertOk()
             ->assertJsonPath('data.0.email', 'sara@hoc.test')
@@ -392,6 +423,8 @@ class AdminDashboardTest extends TestCase
         $admin = User::factory()->create();
         $admin->forceFill(['is_admin' => true])->save();
         Sanctum::actingAs($admin);
+
+        app(ImportOdooCrmClients::class)->handle(200);
 
         $this->getJson('/api/admin/clients')
             ->assertOk()
@@ -478,6 +511,8 @@ class AdminDashboardTest extends TestCase
             'odoo_partner_id' => '58',
             'odoo_lead_id' => null,
         ]);
+
+        app(ImportOdooCrmClients::class)->handle(200);
 
         $this->getJson('/api/admin/clients')
             ->assertOk()
@@ -641,6 +676,8 @@ class AdminDashboardTest extends TestCase
         $admin = User::factory()->create();
         $admin->forceFill(['is_admin' => true])->save();
         Sanctum::actingAs($admin);
+
+        app(ImportOdooCrmClients::class)->handle(200);
 
         $this->getJson('/api/admin/clients')
             ->assertOk()

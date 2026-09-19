@@ -7,7 +7,7 @@ from pathlib import Path
 import httpx
 from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, Update
-from telegram.error import NetworkError, TimedOut
+from telegram.error import BadRequest, NetworkError, TimedOut
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -353,37 +353,59 @@ async def link_client(telegram_id: int, name: str) -> dict:
         return response.json()
 
 
-async def fetch_me(telegram_id: int) -> dict:
+async def recover_client(telegram_id: int, name: str | None = None) -> dict:
+    payload = await link_client(telegram_id, name or "عميل تيليجرام")
+    return payload.get("data") or {}
+
+
+async def fetch_me(telegram_id: int, name: str | None = None) -> dict:
     async with httpx.AsyncClient(timeout=20) as client:
         response = await client.get(
             f"{API_URL}/bot/telegram/me",
             headers=api_headers(),
             params={"telegram_user_id": str(telegram_id)},
         )
+        if response.status_code == 404:
+            return await recover_client(telegram_id, name)
         response.raise_for_status()
         return response.json().get("data") or {}
 
 
-async def patch_profile(telegram_id: int, field: str, value: str) -> dict:
+async def patch_profile(telegram_id: int, field: str, value: str, name: str | None = None) -> dict:
+    payload = {"telegram_user_id": str(telegram_id), field: value}
     async with httpx.AsyncClient(timeout=20) as client:
         response = await client.post(
             f"{API_URL}/bot/telegram/profile",
             headers=api_headers(),
-            json={"telegram_user_id": str(telegram_id), field: value},
+            json=payload,
         )
+        if response.status_code == 404:
+            await recover_client(telegram_id, name)
+            response = await client.post(
+                f"{API_URL}/bot/telegram/profile",
+                headers=api_headers(),
+                json=payload,
+            )
         response.raise_for_status()
         return response.json().get("data") or {}
 
 
-async def fetch_catalog(telegram_id: int, **params) -> dict:
+async def fetch_catalog(telegram_id: int, name: str | None = None, **params) -> dict:
     query = {"telegram_user_id": str(telegram_id)}
-    query.update({key: value for key, value in params.items() if value is not None})
+    query.update({key: value for key, value in params.items() if value is not None and key != "name"})
     async with httpx.AsyncClient(timeout=12) as client:
         response = await client.get(
             f"{API_URL}/bot/telegram/catalog",
             headers=api_headers(),
             params=query,
         )
+        if response.status_code == 404:
+            await recover_client(telegram_id, name)
+            response = await client.get(
+                f"{API_URL}/bot/telegram/catalog",
+                headers=api_headers(),
+                params=query,
+            )
         response.raise_for_status()
         return response.json().get("data") or {}
 
@@ -484,7 +506,7 @@ async def ensure_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if user is None or message is None:
         return False
     try:
-        me = await fetch_me(user.id)
+        me = await fetch_me(user.id, user.full_name)
     except (httpx.TimeoutException, httpx.HTTPStatusError, httpx.RequestError):
         await notify_api_failure(message)
         return False
@@ -503,13 +525,13 @@ async def capture_profile_field(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text(PROFILE_PROMPTS.get(field, "أكمل بياناتك:"))
         return True
     try:
-        me = await patch_profile(user.id, field, value)
+        me = await patch_profile(user.id, field, value, user.full_name)
     except httpx.HTTPStatusError:
         await notify_api_failure(update.message)
         return True
     except (httpx.TimeoutException, httpx.RequestError):
         try:
-            me = await fetch_me(user.id)
+            me = await fetch_me(user.id, user.full_name)
         except (httpx.TimeoutException, httpx.HTTPStatusError, httpx.RequestError):
             await notify_api_failure(update.message)
             return True
@@ -525,13 +547,34 @@ async def capture_profile_field(update: Update, context: ContextTypes.DEFAULT_TY
     return True
 
 
+async def replace_catalog_message(message, text: str, markup=None) -> None:
+    try:
+        await message.edit_text(text, reply_markup=markup)
+        return
+    except BadRequest as exc:
+        if "not modified" in str(exc).lower():
+            if markup is not None:
+                try:
+                    await message.edit_reply_markup(reply_markup=markup)
+                except Exception:
+                    pass
+            return
+    except Exception:
+        pass
+    try:
+        await message.delete()
+    except Exception:
+        pass
+    kwargs = {}
+    if markup is not None:
+        kwargs["reply_markup"] = markup
+    await message.chat.send_message(text, **kwargs)
+
+
 async def send_catalog_view(message, text: str, markup=None, *, replace: bool = False) -> None:
     if replace:
-        try:
-            await message.edit_text(text, reply_markup=markup)
-            return
-        except Exception:
-            pass
+        await replace_catalog_message(message, text, markup)
+        return
     kwargs = {}
     if markup is not None:
         kwargs["reply_markup"] = markup
@@ -540,12 +583,20 @@ async def send_catalog_view(message, text: str, markup=None, *, replace: bool = 
 
 async def send_catalog_result(message, text: str, *, replace: bool = False) -> None:
     if replace:
-        try:
-            await message.edit_text(text)
-            return
-        except Exception:
-            pass
+        await replace_catalog_message(message, text)
+        return
     await message.reply_text(text, reply_markup=main_keyboard())
+
+
+async def clear_catalog_message(message) -> None:
+    try:
+        await message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    try:
+        await message.delete()
+    except Exception:
+        pass
 
 
 async def show_catalog(
@@ -636,14 +687,9 @@ async def create_catalog_request(
                 replace=replace,
             )
             return
-        result = response.json().get("data") or {}
 
-    number = escape(str(result.get("number") or ""))
-    await send_catalog_result(
-        message,
-        f"تم إنشاء الطلب {number} وإرسال عرض السعر.",
-        replace=replace,
-    )
+    if replace:
+        await clear_catalog_message(message)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -808,14 +854,25 @@ async def list_requests(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if user is None or update.message is None:
         return
 
-    async with httpx.AsyncClient(timeout=12) as client:
-        response = await client.get(
-            f"{API_URL}/bot/telegram/requests",
-            headers=api_headers(),
-            params={"telegram_user_id": str(user.id)},
-        )
-        response.raise_for_status()
-        items = response.json().get("data", [])
+    try:
+        async with httpx.AsyncClient(timeout=12) as client:
+            response = await client.get(
+                f"{API_URL}/bot/telegram/requests",
+                headers=api_headers(),
+                params={"telegram_user_id": str(user.id)},
+            )
+            if response.status_code == 404:
+                await recover_client(user.id, user.full_name)
+                response = await client.get(
+                    f"{API_URL}/bot/telegram/requests",
+                    headers=api_headers(),
+                    params={"telegram_user_id": str(user.id)},
+                )
+            response.raise_for_status()
+            items = response.json().get("data", [])
+    except (httpx.TimeoutException, httpx.HTTPStatusError, httpx.RequestError):
+        await notify_api_failure(update.message)
+        return
 
     if not items:
         await update.message.reply_text("لا توجد طلبات بعد.", reply_markup=main_keyboard())
@@ -1219,6 +1276,13 @@ async def upload_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             headers=api_headers(),
             params={"telegram_user_id": str(user.id)},
         )
+        if requests_resp.status_code == 404:
+            await recover_client(user.id, user.full_name)
+            requests_resp = await client.get(
+                f"{API_URL}/bot/telegram/requests",
+                headers=api_headers(),
+                params={"telegram_user_id": str(user.id)},
+            )
         requests_resp.raise_for_status()
         items = requests_resp.json().get("data", [])
         hinted = context.user_data.get("receipt_number")

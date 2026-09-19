@@ -51,7 +51,7 @@ class PurgeE2eDashboardData
                 ->delete();
 
             $deletedRequests = ServiceRequest::query()->whereIn('id', $requestIds)->delete();
-            $deletedClients = Client::query()->whereIn('id', $e2eClientIds)->delete();
+            $deletedClients = Client::query()->whereIn('id', $e2eClientIds)->forceDelete();
             $socialAccounts = $this->socialAccountSync->purgeTestAccounts();
 
             return [

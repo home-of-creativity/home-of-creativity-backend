@@ -3,7 +3,6 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Actions\DeleteClient;
-use App\Actions\ImportOdooCrmClients;
 use App\Actions\StoreClient;
 use App\Actions\UpdateClient;
 use App\Http\Controllers\Controller;
@@ -14,31 +13,11 @@ use App\Http\Resources\ClientResource;
 use App\Models\Client;
 use App\Services\OdooClient;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Log;
-use Throwable;
 
 class ClientController extends Controller
 {
-    public function index(
-        PaginatedIndexRequest $request,
-        OdooClient $odoo,
-        ImportOdooCrmClients $importOdooCrmClients,
-    ) {
-        if ($odoo->configured() && (app()->runningUnitTests() || PHP_SAPI !== 'cli-server')) {
-            try {
-                Cache::remember('odoo:crm:index-pull', 60, function () use ($importOdooCrmClients): bool {
-                    $importOdooCrmClients->handle(200);
-
-                    return true;
-                });
-            } catch (Throwable $exception) {
-                Log::warning('Odoo CRM pull on clients index failed.', [
-                    'error' => $exception->getMessage(),
-                ]);
-            }
-        }
-
+    public function index(PaginatedIndexRequest $request)
+    {
         $search = trim((string) $request->query('search', ''));
 
         $paginator = Client::query()

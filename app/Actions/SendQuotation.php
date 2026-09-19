@@ -221,11 +221,9 @@ class SendQuotation
         ];
 
         if (filled($notes)) {
-            $lines[] = "تفاصيل العرض: {$notes}";
-        }
-
-        if (filled($request->description)) {
-            $lines[] = "وصف الطلب: {$request->description}";
+            $lines[] = $notes;
+        } elseif (filled($request->description)) {
+            $lines[] = $request->description;
         }
 
         $lines[] = '';

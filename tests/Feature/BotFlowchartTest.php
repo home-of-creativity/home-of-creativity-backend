@@ -400,6 +400,57 @@ class BotFlowchartTest extends TestCase
             ->assertJsonPath('data.assigned', true);
     }
 
+    public function test_staff_delete_restores_telegram_client_and_keeps_requests(): void
+    {
+        $this->fakeBotIntegrations();
+        $this->completeProfile('tg-restore');
+        $client = Client::query()->where('telegram_user_id', 'tg-restore')->firstOrFail();
+        $serviceRequest = ServiceRequest::factory()->for($client)->create([
+            'title' => 'طلب محفوظ بعد الحذف',
+        ]);
+
+        Sanctum::actingAs($this->adminUser());
+        $this->deleteJson("/api/admin/clients/{$client->id}")->assertOk();
+        $this->assertSoftDeleted($client);
+        $this->assertDatabaseHas('requests', [
+            'id' => $serviceRequest->id,
+            'client_id' => $client->id,
+        ]);
+
+        $listed = $this->getJson('/api/admin/clients')->assertOk()->json('data');
+        $this->assertFalse(collect($listed)->contains(fn ($row) => (int) ($row['id'] ?? 0) === $client->id));
+
+        $this->clientBot()->getJson('/api/bot/telegram/me?telegram_user_id=tg-restore')
+            ->assertOk()
+            ->assertJsonPath('data.id', $client->id)
+            ->assertJsonPath('data.profile_complete', true)
+            ->assertJsonPath('data.phone', '+963900000001')
+            ->assertJsonPath('data.company_name', 'شركة tg-restore');
+
+        $this->assertNull($client->fresh()->deleted_at);
+        $this->assertSame(1, Client::query()->withTrashed()->where('telegram_user_id', 'tg-restore')->count());
+
+        $items = $this->clientBot()->getJson('/api/bot/telegram/requests?telegram_user_id=tg-restore')
+            ->assertOk()
+            ->json('data');
+        $this->assertTrue(collect($items)->contains(
+            fn ($row) => ($row['number'] ?? null) === $serviceRequest->number,
+        ));
+
+        $this->deleteJson("/api/admin/clients/{$client->id}")->assertOk();
+        $this->assertSoftDeleted($client);
+
+        $this->clientBot()->postJson('/api/bot/telegram/link', [
+            'telegram_user_id' => 'tg-restore',
+            'name' => 'Client tg-restore',
+            'locale' => 'ar',
+        ])->assertOk()
+            ->assertJsonPath('data.id', $client->id)
+            ->assertJsonPath('data.profile_complete', true);
+
+        $this->assertSame(1, Client::query()->withTrashed()->where('telegram_user_id', 'tg-restore')->count());
+    }
+
     public function test_sales_cannot_complete_before_ready_for_review(): void
     {
         Employee::factory()->sales()->create(['telegram_user_id' => 'sales-early']);

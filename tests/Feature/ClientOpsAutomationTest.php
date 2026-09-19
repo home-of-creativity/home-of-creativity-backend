@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Actions\ConfirmRequestPayment;
 use App\Actions\DeclineRenewal;
+use App\Actions\EnsureRequestDriveFolder;
 use App\Actions\RenewSubscription;
 use App\Actions\ReRequestReceipt;
 use App\Actions\SchedulePaymentReminders;
@@ -115,7 +116,6 @@ class ClientOpsAutomationTest extends TestCase
 
         $client = Client::query()->where('telegram_user_id', 'tg-lead')->firstOrFail();
         $this->assertSame('77', $client->odoo_lead_id);
-        $this->assertSame('خدمات عامة', $client->company_activity);
     }
 
     public function test_catalog_tree_hides_prices_and_quotes_published_package(): void
@@ -150,6 +150,41 @@ class ClientOpsAutomationTest extends TestCase
             'billing_period' => 'monthly',
             'allows_renewal' => true,
         ]);
+    }
+
+    public function test_catalog_quotation_sends_period_once_to_client(): void
+    {
+        $this->fakeOdooDocuments();
+        Http::fake(array_merge($this->odooDocumentsHttpFake(), [
+            'https://api.telegram.org/*' => Http::response(['ok' => true], 200),
+        ]));
+        config(['services.telegram.bot_token' => 'client-token']);
+
+        $package = $this->seedPublishedPackage();
+        $this->completeClient('tg-period-once');
+
+        $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
+            ->postJson('/api/bot/telegram/catalog/requests', [
+                'telegram_user_id' => 'tg-period-once',
+                'package_id' => $package->id,
+                'billing_period' => 'monthly',
+            ])
+            ->assertCreated();
+
+        Http::assertSent(function (Request $httpRequest): bool {
+            if (! str_contains($httpRequest->url(), 'api.telegram.org')) {
+                return false;
+            }
+
+            $payload = $httpRequest->data();
+            $text = (string) ($payload['text'] ?? $payload['caption'] ?? $httpRequest->body());
+            if (! str_contains($text, 'عرض سعر') && ! str_contains($text, 'الفترة:')) {
+                return false;
+            }
+
+            return substr_count($text, 'الفترة:') === 1
+                && ! str_contains($text, 'وصف الطلب:');
+        });
     }
 
     public function test_every_category_has_allows_renewal_and_reach_is_full_payment(): void
@@ -629,6 +664,59 @@ class ClientOpsAutomationTest extends TestCase
 
         Http::assertSent(fn ($httpRequest): bool => str_contains($httpRequest->url(), 'botstaff-token/sendMessage')
             && (string) $httpRequest['chat_id'] === '555');
+    }
+
+    public function test_drive_folder_uses_company_name_not_telegram_id(): void
+    {
+        $client = Client::factory()->create([
+            'telegram_user_id' => 'tg-flow',
+            'name' => 'Client tg-flow',
+            'company_name' => 'شركة النور',
+        ]);
+        $request = ServiceRequest::factory()->for($client)->create([
+            'title' => 'هوية بصرية',
+            'google_drive_folder_id' => null,
+        ]);
+
+        $this->mock(GoogleDriveClient::class, function ($mock): void {
+            $mock->shouldReceive('configured')->andReturn(true);
+            $mock->shouldReceive('ensureFolderPath')
+                ->once()
+                ->withArgs(function (string $parent, string $company, string $task): bool {
+                    return $company === 'شركة النور'
+                        && ! str_contains($company, 'tg-flow')
+                        && str_contains($task, 'هوية بصرية');
+                })
+                ->andReturn('folder-company');
+        });
+
+        $updated = app(EnsureRequestDriveFolder::class)->handle($request);
+
+        $this->assertSame('folder-company', $updated->google_drive_folder_id);
+    }
+
+    public function test_drive_folder_ignores_telegram_placeholder_company(): void
+    {
+        $client = Client::factory()->create([
+            'telegram_user_id' => 'tg-flow',
+            'name' => 'Client tg-flow',
+            'company_name' => 'شركةtg-flow',
+        ]);
+        $request = ServiceRequest::factory()->for($client)->create([
+            'google_drive_folder_id' => null,
+        ]);
+
+        $this->mock(GoogleDriveClient::class, function ($mock): void {
+            $mock->shouldReceive('configured')->andReturn(true);
+            $mock->shouldReceive('ensureFolderPath')
+                ->once()
+                ->withArgs(function (string $parent, string $company): bool {
+                    return $company === 'شركة' && ! str_contains($company, 'tg-flow');
+                })
+                ->andReturn('folder-generic');
+        });
+
+        app(EnsureRequestDriveFolder::class)->handle($request);
     }
 
     public function test_drive_poll_retries_until_telegram_send_succeeds(): void
