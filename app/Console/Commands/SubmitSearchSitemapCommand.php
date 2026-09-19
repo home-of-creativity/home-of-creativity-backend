@@ -70,6 +70,7 @@ class SubmitSearchSitemapCommand extends Command
             'urlList' => [
                 $origin.'/',
                 $origin.'/pricing/',
+                $origin.'/social/',
                 $sitemap,
             ],
         ];

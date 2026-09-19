@@ -50,7 +50,7 @@ Other models: User↔Client, Employee (telegram id, no User FK; join codes `EMP-
 
 Integrations live in `app/Actions/`, `app/Services/` (Odoo, ClickUp, Gemini Arabic briefs, Telegram, Facebook Graph, Threads Graph, Google Drive/Calendar, ElevenLabs STT). Jobs: Gemini classify, integration dispatch, social publish, Drive poll, payment reminders.
 
-Artisan: `social:publish-due` (every minute, Asia/Damascus), `social:sync-inbox` / `social:sync-posts` (15 min), `social:sync-accounts` (Facebook/Instagram/Threads), `integration:process-outbox`, `odoo:reconcile` (every minute: pull CRM/HR then hydrate rotating client batches and push missing employees), `odoo:purge-crm` (delete CRM leads/customer partners and reset local Odoo ids), `ops:process-reminders` (every minute), `ops:poll-drive` (5 min, retries unsent Drive files), `ops:clickup-due-alerts` (hourly, once per task/due-day; staff chat fallback), `seo:submit-sitemap` (daily 06:15 Damascus; IndexNow + Search Console API), `e2e:purge`.
+Artisan: `social:publish-due` (every minute, Asia/Damascus), `social:sync-inbox` / `social:sync-posts` (15 min), `social:sync-accounts` (Facebook/Instagram/Threads), `integration:process-outbox`, `odoo:reconcile` (every minute: pull CRM/HR then hydrate rotating client batches and push missing employees), `odoo:purge-crm` (delete CRM leads/customer partners and reset local Odoo ids), `ops:process-reminders` (every minute), `ops:poll-drive` (5 min, retries unsent Drive files), `ops:clickup-due-alerts` (hourly, once per task/due-day; staff chat fallback), `seo:submit-sitemap` (daily 06:15 Damascus; IndexNow includes `/social/` + Search Console API), `e2e:purge`.
 
 ## Cache / queue
 
