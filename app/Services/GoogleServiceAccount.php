@@ -37,16 +37,8 @@ class GoogleServiceAccount
             return null;
         }
 
-        $raw = config('services.google.credentials_json');
-        if (! filled($raw) && ! is_file(self::storedPath())) {
-            return 'Google service account JSON is missing. Upload it from the dashboard or set GOOGLE_SERVICE_ACCOUNT_JSON.';
-        }
-
-        if (filled($raw)) {
-            $value = $this->normalizedCredentialValue((string) $raw);
-            if (! str_starts_with($value, '{') && $this->resolveCredentialsPath($value) === null && ! is_file(self::storedPath())) {
-                return 'Google service account JSON file was not found. Upload google-sa.json to storage or check the path.';
-            }
+        if ($this->firstExistingCredentialFile() === null && ! $this->hasInlineCredentials()) {
+            return 'Google service account JSON file was not found at storage/app/private/google-sa.json.';
         }
 
         return 'Google service account JSON is invalid. The file must include client_email and private_key.';
@@ -146,17 +138,85 @@ class GoogleServiceAccount
      */
     private function credentials(): ?array
     {
-        $raw = config('services.google.credentials_json');
-        if (! filled($raw)) {
-            $stored = self::storedPath();
-            if (! app()->runningUnitTests() && is_file($stored)) {
-                $raw = $stored;
-            } else {
-                return null;
+        foreach ($this->credentialSources() as $source) {
+            $parsed = $this->parseCredentials($source);
+            if ($parsed !== null) {
+                return $parsed;
             }
         }
 
-        $json = $this->normalizedCredentialValue((string) $raw);
+        return null;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function credentialSources(): array
+    {
+        $sources = [];
+        $raw = config('services.google.credentials_json');
+        if (filled($raw)) {
+            $sources[] = $this->normalizedCredentialValue((string) $raw);
+        }
+
+        foreach ($this->knownCredentialFiles() as $path) {
+            $sources[] = $path;
+        }
+
+        return array_values(array_unique(array_filter($sources)));
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function knownCredentialFiles(): array
+    {
+        $stored = self::storedPath();
+        if (app()->runningUnitTests()) {
+            return $this->isTestingDiskPath($stored) ? [$stored] : [];
+        }
+
+        return [
+            $stored,
+            storage_path('app/private/google-sa.json'),
+            base_path('storage/app/private/google-sa.json'),
+        ];
+    }
+
+    private function firstExistingCredentialFile(): ?string
+    {
+        foreach ($this->credentialSources() as $source) {
+            if (str_starts_with($source, '{')) {
+                continue;
+            }
+            $path = $this->resolveCredentialsPath($source) ?? (is_file($source) ? $source : null);
+            if ($path !== null) {
+                return $path;
+            }
+        }
+
+        return null;
+    }
+
+    private function hasInlineCredentials(): bool
+    {
+        $raw = config('services.google.credentials_json');
+        if (! filled($raw)) {
+            return false;
+        }
+
+        $value = $this->normalizedCredentialValue((string) $raw);
+
+        return str_starts_with($value, '{')
+            || (base64_decode($value, true) !== false && str_starts_with(ltrim((string) base64_decode($value, true)), '{'));
+    }
+
+    /**
+     * @return array{client_email: string, private_key: string}|null
+     */
+    private function parseCredentials(string $raw): ?array
+    {
+        $json = $this->normalizedCredentialValue($raw);
         $path = str_starts_with($json, '{') ? null : $this->resolveCredentialsPath($json);
         if ($path !== null) {
             $contents = @file_get_contents($path);
@@ -200,16 +260,27 @@ class GoogleServiceAccount
         return trim($raw, " \t\n\r\"'");
     }
 
+    private function isTestingDiskPath(string $path): bool
+    {
+        return str_contains(str_replace('\\', '/', $path), '/testing/');
+    }
+
     private function resolveCredentialsPath(string $value): ?string
     {
         $normalized = str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $value);
-        $candidates = array_unique([
+        $candidates = [
             $value,
             $normalized,
             base_path($value),
             base_path($normalized),
             storage_path('app'.DIRECTORY_SEPARATOR.ltrim($normalized, DIRECTORY_SEPARATOR)),
-        ]);
+        ];
+        if (! app()->runningUnitTests()) {
+            $baseName = basename($normalized);
+            $candidates[] = storage_path('app/private/'.$baseName);
+            $candidates[] = storage_path('app/private/google-sa.json');
+            $candidates[] = base_path('storage/app/private/google-sa.json');
+        }
 
         foreach ($candidates as $candidate) {
             if ($candidate !== '' && is_file($candidate)) {

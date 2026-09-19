@@ -3,6 +3,7 @@
 namespace Tests\Unit;
 
 use App\Services\GoogleServiceAccount;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class GoogleServiceAccountTest extends TestCase
@@ -38,11 +39,25 @@ class GoogleServiceAccountTest extends TestCase
 
     public function test_configuration_error_explains_missing_file(): void
     {
+        Storage::fake('local');
         config(['services.google.credentials_json' => storage_path('app/missing-google-sa.json')]);
 
         $this->assertStringContainsString(
             'file was not found',
             (string) app(GoogleServiceAccount::class)->configurationError(),
         );
+    }
+
+    public function test_configured_falls_back_to_stored_file_when_env_path_is_missing(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('google-sa.json', json_encode([
+            'client_email' => 'sa@test.iam.gserviceaccount.com',
+            'private_key' => "-----BEGIN PRIVATE KEY-----\nX\n-----END PRIVATE KEY-----\n",
+        ], JSON_THROW_ON_ERROR));
+
+        config(['services.google.credentials_json' => storage_path('app/missing-google-sa.json')]);
+
+        $this->assertTrue(app(GoogleServiceAccount::class)->configured());
     }
 }
