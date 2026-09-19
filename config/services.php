@@ -106,10 +106,17 @@ return [
     ],
 
     'gemini' => [
-        'api_key' => env('GOOGLE_API_KEY'),
+        'api_key' => env('GEMINI_API_KEY', env('GOOGLE_API_KEY')),
+        'base_url' => env('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta'),
         'model' => env('GEMINI_MODEL', 'gemini-2.5-flash'),
         'timeout' => (int) env('GEMINI_TIMEOUT', 30),
         'e2e_stub' => env('GEMINI_E2E_STUB', false),
+    ],
+
+    'google_translate' => [
+        'enabled' => filter_var(env('GOOGLE_TRANSLATE_ENABLED', true), FILTER_VALIDATE_BOOL),
+        'api_key' => env('GOOGLE_TRANSLATE_API_KEY', env('GOOGLE_API_KEY')),
+        'timeout' => (int) env('GOOGLE_TRANSLATE_TIMEOUT', 12),
     ],
 
     'social' => [

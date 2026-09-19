@@ -110,6 +110,15 @@ class ConfirmRequestPayment
             return $request->fresh(['client', 'files', 'pricingPackage', 'subscriptions']) ?? $request;
         });
 
+        if ($updated->status === RequestStatus::AwaitingPayment) {
+            $updated = $this->transitions->transition(
+                $updated,
+                RequestStatus::PaymentConfirmed,
+                'admin',
+                $updated->isFullyPaid() ? 'Full payment received.' : 'Payment received.',
+            );
+        }
+
         if ($updated->isFullyPaid()) {
             $this->markWon($updated);
         }

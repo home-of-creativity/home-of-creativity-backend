@@ -61,9 +61,10 @@ class AdminDashboardTest extends TestCase
             'payment_method' => 'cash',
             'amount' => 100,
         ])->assertOk()
+            ->assertJsonPath('data.status', 'payment_confirmed')
             ->assertJsonPath('data.gemini_status', 'pending');
 
-        $this->assertSame(RequestStatus::AwaitingPayment, $serviceRequest->fresh()->status);
+        $this->assertSame(RequestStatus::PaymentConfirmed, $serviceRequest->fresh()->status);
         Bus::assertDispatched(ClassifyWithGeminiJob::class);
     }
 

@@ -132,7 +132,7 @@ class ServiceRequestController extends Controller
 
         return ServiceRequestResource::make($serviceRequest->fresh([
             'client', 'files', 'invoices',
-        ]))->additional(['message' => 'Payment confirmation queued for Gemini.']);
+        ]))->additional(['message' => 'Payment confirmed.']);
     }
 
     public function retryGemini(ServiceRequest $serviceRequest): ServiceRequestResource

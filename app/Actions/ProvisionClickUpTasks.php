@@ -6,6 +6,7 @@ use App\Enums\ClickUpTaskType;
 use App\Enums\EmployeeProfession;
 use App\Models\ServiceRequest;
 use App\Services\ClickUpClient;
+use App\Services\GoogleTranslateService;
 use App\Support\ResolveServiceRequest;
 use Illuminate\Support\Facades\Log;
 
@@ -15,6 +16,7 @@ class ProvisionClickUpTasks
         private ClickUpClient $clickUp,
         private ApplyClickUpMapping $applyClickUpMapping,
         private NotifyEmployees $notifyEmployees,
+        private GoogleTranslateService $translator,
     ) {}
 
     public function handle(ServiceRequest $request, string $eventUuid): ServiceRequest
@@ -36,7 +38,7 @@ class ProvisionClickUpTasks
             ->map(fn ($brief): array => [
                 'id' => (int) $brief->id,
                 'department' => (string) ($brief->type ?? $brief->department),
-                'brief' => (string) $brief->brief,
+                'brief' => $this->translator->toArabic((string) $brief->brief),
             ])
             ->all();
 
@@ -134,7 +136,8 @@ class ProvisionClickUpTasks
                 default => 'مهمة تنفيذ',
             };
             $displayNumber = ResolveServiceRequest::displayNumber($request);
-            $text = "{$label}\n#{$displayNumber} — {$request->title}\n{$request->client?->name}\n\n{$brief->brief}";
+            $arabicBrief = $this->translator->toArabic((string) $brief->brief);
+            $text = "{$label}\n#{$displayNumber} — {$request->title}\n{$request->client?->name}\n\n{$arabicBrief}";
 
             $this->notifyEmployees->handle($request, $profession, $text);
         }

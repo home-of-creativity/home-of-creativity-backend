@@ -28,7 +28,7 @@ Seeded: `admin@example.com` / `password` (admin), `test@example.com` / `password
 
 `GET/POST /requests`, `GET /requests/{id}` — own requests only.
 
-Admin confirm-payment (`POST /admin/requests/{id}/confirm-payment`) requires `payment_method` and **`amount`** (the sum actually received after receipt review). Paid/remaining percents are derived from that amount; the invoice is issued then (`kind=received`), not on quotation approval. Gemini classifies after confirm and does not send a second invoice.
+Admin confirm-payment (`POST /admin/requests/{id}/confirm-payment`) requires `payment_method` and **`amount`** (the sum actually received after receipt review). Paid/remaining percents are derived from that amount; the invoice is issued then (`kind=received`), not on quotation approval. Status moves to **`payment_confirmed` (مدفوع)** on confirm even if Gemini is still pending or later fails. Gemini classifies after confirm (Arabic briefs via Google Translate before ClickUp) and does not send a second invoice.
 
 Ops settings (admin): `GET /admin/ops-settings` (`sham_cash_qr`, `sham_cash_qr_updated_at`), `GET/POST /admin/ops-settings/sham-cash-qr` (preview/upload), `GET/PUT /admin/ops-settings/social-profile` (`display_name`, `bio`, `theme` cream|purple|dark stored in OpsSetting `social_linktree_profile`).
 
@@ -60,7 +60,7 @@ Default `CACHE_STORE=database` (`cache` + `cache_locks` tables). Tests: array st
 
 PHPUnit PHPUnit `tests/Feature` + `tests/Unit`. Playwright `e2e/` (starts API + dashboard). Optional landing: `E2E_REQUIRE_LANDING=1`. Local E2E API port **8002**. CI: `.github/workflows/ci.yml` (placeholder; GitHub does not run Laravel). VPS deploy: `.github/workflows/deploy.yml` (SSH key secrets `SSH_HOST` / `SSH_USER` / `SSH_PRIVATE_KEY`, no password). Remote stack: `deploy/compose.yaml` with Caddy TLS for **https://hoc.agency**. `deploy/remote.sh` always runs `php artisan migrate --force` before seed (php-fpm is not recreated on every push). Dashboard dist is built in a one-shot Node container then served by Caddy from `dashboard/dist` at `/dashboard/` (asset URLs `/dashboard/assets/...`). Missing `*.css`/`*.js` on the marketing site return 404 instead of `index.html`. Clients use `SoftDeletes`; `e2e:purge` `forceDelete`s matching rows.
 
-`TELEGRAM_STRICT=false` keeps quotation/invoice/catalog flows alive when Telegram or Odoo is down. `GEMINI_E2E_STUB` for tests. Missing Google Drive/Calendar keys log and retry; they do not abort the request. Won in Odoo only after 100% paid. CORS also reads `CORS_ALLOWED_ORIGINS` and allows raw `http(s)://IP[:port]` for the VPS dashboard.
+`TELEGRAM_STRICT=false` keeps quotation/invoice/catalog flows alive when Telegram or Odoo is down. `GEMINI_E2E_STUB` for tests. Gemini uses `GEMINI_API_KEY` (AI Studio auth key, `x-goog-api-key` header) and falls back to `GOOGLE_API_KEY`; Maps/standard keys are rejected by Google as of 2026. Missing Google Drive/Calendar keys log and retry; they do not abort the request. Won in Odoo only after 100% paid. CORS also reads `CORS_ALLOWED_ORIGINS` and allows raw `http(s)://IP[:port]` for the VPS dashboard.
 
 ## Do not assume
 

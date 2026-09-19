@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\WorkType;
 use App\Models\DepartmentBrief;
 use App\Models\ServiceRequest;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
@@ -23,14 +24,8 @@ class GeminiService
             ];
         }
 
-        $apiKey = (string) config('services.gemini.api_key');
-        if ($apiKey === '') {
-            throw ValidationException::withMessages([
-                'gemini' => 'Gemini API key is not configured.',
-            ]);
-        }
+        $this->requireApiKey();
 
-        $model = (string) config('services.gemini.model', 'gemini-2.5-flash');
         $prompt = <<<PROMPT
 Analyze this creative service request and return ONLY valid JSON with this exact shape:
 {"work_type":"design|content|both","briefs":[{"type":"design|content","brief":"..."}]}
@@ -47,29 +42,18 @@ Request title: {$title}
 Request description: {$description}
 PROMPT;
 
-        $response = Http::timeout((int) config('services.gemini.timeout', 30))
-            ->connectTimeout(5)
-            ->acceptJson()
-            ->post("https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key={$apiKey}", [
-                'contents' => [
-                    ['parts' => [['text' => $prompt]]],
-                ],
-                'generationConfig' => [
-                    'temperature' => 0.2,
-                    'responseMimeType' => 'application/json',
-                ],
-            ]);
+        $response = $this->generateJson($prompt);
 
         if (! $response->successful()) {
             $apiMessage = (string) data_get($response->json(), 'error.message', $response->body());
             Log::warning('Gemini classification failed.', [
                 'status' => $response->status(),
-                'model' => $model,
+                'model' => config('services.gemini.model'),
                 'body' => $response->body(),
             ]);
 
             throw ValidationException::withMessages([
-                'gemini' => 'Gemini classification failed: '.$apiMessage,
+                'gemini' => $this->failedClassificationMessage($apiMessage),
             ]);
         }
 
@@ -78,7 +62,7 @@ PROMPT;
         $decoded = json_decode($text, true);
         if (! is_array($decoded)) {
             Log::warning('Gemini returned invalid JSON.', [
-                'model' => $model,
+                'model' => config('services.gemini.model'),
                 'text' => $text,
             ]);
 
@@ -87,7 +71,7 @@ PROMPT;
             ]);
         }
 
-        return $this->validatePayload($decoded);
+        return $this->translateBriefs($this->validatePayload($decoded));
     }
 
     public function classifyCompanyIndustry(string $companyName): ?string
@@ -101,13 +85,11 @@ PROMPT;
             return 'خدمات عامة';
         }
 
-        $apiKey = (string) config('services.gemini.api_key');
-        if ($apiKey === '') {
+        if ($this->apiKey() === '') {
             return null;
         }
 
         try {
-            $model = (string) config('services.gemini.model', 'gemini-2.5-flash');
             $prompt = <<<PROMPT
 Classify the industry of this company in one short Arabic tag (2-5 words).
 Return ONLY valid JSON: {"industry":"..."}
@@ -116,18 +98,7 @@ Write all brief text in Arabic (العربية).
 Company name: {$companyName}
 PROMPT;
 
-            $response = Http::timeout((int) config('services.gemini.timeout', 30))
-                ->connectTimeout(5)
-                ->acceptJson()
-                ->post("https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key={$apiKey}", [
-                    'contents' => [
-                        ['parts' => [['text' => $prompt]]],
-                    ],
-                    'generationConfig' => [
-                        'temperature' => 0.2,
-                        'responseMimeType' => 'application/json',
-                    ],
-                ]);
+            $response = $this->generateJson($prompt);
 
             if (! $response->successful()) {
                 Log::warning('Gemini industry classification failed.', [
@@ -215,21 +186,13 @@ PROMPT;
         return ['work_type' => $workType, 'briefs' => $normalized];
     }
 
-    private function extractJsonText(string $text): string
-    {
-        $text = trim($text);
-        if (preg_match('/```(?:json)?\s*(.*?)\s*```/s', $text, $matches) === 1) {
-            return trim($matches[1]);
-        }
-
-        return $text;
-    }
-
     /**
      * @param  list<array{type: string, brief: string}>  $briefs
      */
     public function persistBriefs(ServiceRequest $request, array $briefs): void
     {
+        $briefs = app(GoogleTranslateService::class)->briefsToArabic($briefs);
+
         foreach ($briefs as $brief) {
             DepartmentBrief::query()->firstOrCreate(
                 [
@@ -242,5 +205,77 @@ PROMPT;
                 ],
             );
         }
+    }
+
+    /**
+     * @param  array{work_type: WorkType, briefs: list<array{type: string, brief: string}>}  $payload
+     * @return array{work_type: WorkType, briefs: list<array{type: string, brief: string}>}
+     */
+    private function translateBriefs(array $payload): array
+    {
+        $payload['briefs'] = app(GoogleTranslateService::class)->briefsToArabic($payload['briefs']);
+
+        return $payload;
+    }
+
+    private function generateJson(string $prompt): Response
+    {
+        $model = (string) config('services.gemini.model', 'gemini-2.5-flash');
+
+        return Http::timeout((int) config('services.gemini.timeout', 30))
+            ->connectTimeout(5)
+            ->acceptJson()
+            ->withHeaders(['x-goog-api-key' => $this->apiKey()])
+            ->post($this->generateContentUrl($model), [
+                'contents' => [
+                    ['parts' => [['text' => $prompt]]],
+                ],
+                'generationConfig' => [
+                    'temperature' => 0.2,
+                    'responseMimeType' => 'application/json',
+                ],
+            ]);
+    }
+
+    private function generateContentUrl(string $model): string
+    {
+        $base = rtrim((string) config('services.gemini.base_url', 'https://generativelanguage.googleapis.com/v1beta'), '/');
+
+        return "{$base}/models/{$model}:generateContent";
+    }
+
+    private function apiKey(): string
+    {
+        return trim((string) config('services.gemini.api_key'));
+    }
+
+    private function requireApiKey(): void
+    {
+        if ($this->apiKey() !== '') {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'gemini' => 'Gemini API key is not configured. Set GEMINI_API_KEY to an AI Studio auth key restricted to the Gemini API.',
+        ]);
+    }
+
+    private function failedClassificationMessage(string $apiMessage): string
+    {
+        if (str_contains($apiMessage, 'are blocked') || str_contains($apiMessage, 'API_KEY_SERVICE_BLOCKED')) {
+            return 'Gemini classification failed: this API key is blocked for Gemini. Create an AI Studio auth key restricted to the Gemini API and set GEMINI_API_KEY (do not reuse a Maps or unrestricted standard GOOGLE_API_KEY).';
+        }
+
+        return 'Gemini classification failed: '.$apiMessage;
+    }
+
+    private function extractJsonText(string $text): string
+    {
+        $text = trim($text);
+        if (preg_match('/```(?:json)?\s*(.*?)\s*```/s', $text, $matches) === 1) {
+            return trim($matches[1]);
+        }
+
+        return $text;
     }
 }

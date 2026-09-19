@@ -53,6 +53,7 @@
         <env name="ODOO_URL" value=""/>
         <env name="CLICKUP_TOKEN" value=""/>
         <env name="GOOGLE_API_KEY" value="test-key"/>
+        <env name="GOOGLE_TRANSLATE_ENABLED" value="false"/>
         <env name="FACEBOOK_ACCESS_TOKEN" value=""/>
         <env name="FACEBOOK_APP_ID" value=""/>
         <env name="FACEBOOK_APP_SECRET" value=""/>
