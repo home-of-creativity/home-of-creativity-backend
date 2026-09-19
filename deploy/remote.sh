@@ -48,8 +48,12 @@ for _ in $(seq 1 60); do
   sleep 5
 done
 
-# hoc-api entrypoint already runs migrate --force and storage:link on start.
+# hoc-api stays running across deploys (bind-mounted code). Always migrate
+# here — `up -d --build` does not recreate php-fpm, so the start command
+# would skip new columns such as clients.deleted_at.
 "${COMPOSE[@]}" exec -T hoc-api php artisan storage:link || true
+echo "Running migrations..."
+"${COMPOSE[@]}" exec -T hoc-api php artisan migrate --force
 
 echo "Running database seeders..."
 "${COMPOSE[@]}" exec -T hoc-api php artisan db:seed --force
