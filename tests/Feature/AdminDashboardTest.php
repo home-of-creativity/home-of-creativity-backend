@@ -5,10 +5,12 @@ namespace Tests\Feature;
 use App\Actions\ImportOdooCrmClients;
 use App\Enums\EmployeeProfession;
 use App\Enums\RequestStatus;
+use App\Enums\SocialPostStatus;
 use App\Jobs\ClassifyWithGeminiJob;
 use App\Models\Client;
 use App\Models\Employee;
 use App\Models\ServiceRequest;
+use App\Models\SocialPost;
 use App\Models\User;
 use App\Services\GoogleDriveClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -43,6 +45,39 @@ class AdminDashboardTest extends TestCase
             ->assertJsonPath('data.requests', 0)
             ->assertJsonPath('data.pending_employees', 0)
             ->assertJsonPath('data.recent', []);
+    }
+
+    public function test_admin_can_open_live_feed(): void
+    {
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        $request = ServiceRequest::factory()->create([
+            'status' => RequestStatus::Submitted,
+        ]);
+        $post = SocialPost::factory()->recycle($admin)->create([
+            'created_by' => $admin->id,
+            'status' => SocialPostStatus::Published,
+            'body' => 'Live studio check.',
+        ]);
+
+        $this->getJson('/api/admin/live')
+            ->assertOk()
+            ->assertJsonPath('data.requests_count', 1)
+            ->assertJsonPath('data.publishing', 0)
+            ->assertJsonPath('data.requests.0.id', $request->id)
+            ->assertJsonPath('data.requests.0.status', RequestStatus::Submitted->value)
+            ->assertJsonPath('data.posts.0.id', $post->id)
+            ->assertJsonPath('data.posts.0.status', SocialPostStatus::Published->value)
+            ->assertJsonPath('data.posts.0.body', 'Live studio check.');
+    }
+
+    public function test_client_cannot_open_live_feed(): void
+    {
+        Sanctum::actingAs(User::factory()->create());
+
+        $this->getJson('/api/admin/live')->assertForbidden();
     }
 
     public function test_admin_confirm_payment_queues_gemini(): void

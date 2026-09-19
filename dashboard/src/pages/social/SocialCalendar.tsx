@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type SocialPost } from "../../api";
 import { useAuth } from "../../auth";
 import { copy, type Locale } from "../../i18n";
 import { SocialChrome } from "./SocialChrome";
 import { socialStatusLabel } from "./helpers";
+import { useLive, useLiveStamp } from "../../live";
 import { useSocialWorkspace } from "./SocialWorkspace";
 
 function startOfMonth(date: Date) {
@@ -26,7 +27,7 @@ export function SocialCalendar({ locale, t }: { locale: Locale; t: (c: { ar: str
   const from = isoDate(cursor);
   const to = isoDate(new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0));
 
-  useEffect(() => {
+  const load = useCallback(() => {
     if (!selectedAccount) {
       setItems([]);
       setError("");
@@ -39,7 +40,14 @@ export function SocialCalendar({ locale, t }: { locale: Locale; t: (c: { ar: str
         setError("");
       })
       .catch((err) => setError(err instanceof Error ? err.message : t(copy.loading)));
-  }, [from, to, selectedAccount?.id, t]);
+  }, [from, to, selectedAccount, t]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const { socialStamp } = useLive();
+  useLiveStamp(socialStamp, load);
 
   const days = useMemo(() => {
     const firstWeekday = cursor.getDay();

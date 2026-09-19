@@ -2,8 +2,9 @@ import { NavLink, Navigate, Outlet, Route, Routes, useLocation } from "react-rou
 import { AnimatePresence, motion, MotionConfig } from "framer-motion";
 import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import { Toaster } from "sonner";
-import { api, canSocial } from "./api";
+import { canSocial } from "./api";
 import { AuthProvider, useAuth } from "./auth";
+import { LiveFeedProvider, useLive } from "./live";
 import { applyLocale, applyTheme, copy, readLocale, readTheme, type Copy, type Locale, type Theme } from "./i18n";
 import { Moon, Search, Sun } from "lucide-react";
 import { BrandLockup } from "./components/BrandLockup";
@@ -99,23 +100,6 @@ function Shell({
     return () => window.removeEventListener("keydown", onKey);
   }, [navOpen]);
 
-  useEffect(() => {
-    function loadBadges() {
-      api
-        .overview()
-        .then((res) =>
-          setBadges({
-            pendingEmployees: res.data.pending_employees ?? 0,
-            openRequests: res.data.requests ?? 0,
-          }),
-        )
-        .catch(() => {});
-    }
-    loadBadges();
-    const timer = window.setInterval(loadBadges, 30000);
-    return () => window.clearInterval(timer);
-  }, []);
-
   const commandItems: CommandItem[] = [
     { id: "overview", label: t(copy.overview), to: "/", icon: <IconOverview aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
     { id: "requests", label: t(copy.requests), to: "/requests", icon: <IconRequests aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
@@ -140,6 +124,8 @@ function Shell({
   const isSocial = location.pathname.startsWith("/social");
 
   return (
+    <LiveFeedProvider locale={locale} t={t}>
+    <LiveBadgeSync onBadges={setBadges} />
     <div className={navOpen ? "app-shell nav-open" : "app-shell"}>
       <a className="skip-link" href="#main-content">
         {t(copy.skipToContent)}
@@ -278,7 +264,24 @@ function Shell({
       </main>
       <CommandPalette items={commandItems} locale={locale} t={t} open={paletteOpen} setOpen={setPaletteOpen} />
     </div>
+    </LiveFeedProvider>
   );
+}
+
+function LiveBadgeSync({
+  onBadges,
+}: {
+  onBadges: (next: { pendingEmployees: number; openRequests: number }) => void;
+}) {
+  const { snapshot } = useLive();
+  useEffect(() => {
+    if (!snapshot) return;
+    onBadges({
+      pendingEmployees: snapshot.pending_employees,
+      openRequests: snapshot.requests_count,
+    });
+  }, [snapshot, onBadges]);
+  return null;
 }
 
 function Guarded({

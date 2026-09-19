@@ -54,7 +54,7 @@ Artisan: `social:publish-due` (every minute, Asia/Damascus), `social:sync-inbox`
 
 ## Cache / queue
 
-Default `CACHE_STORE=database` (`cache` + `cache_locks` tables). Tests: array store, sync queue, SQLite memory. Instagram landing feed cached 600s. Admin list syncs: `odoo:hr:index-pull` / `odoo:crm:index-pull` / `social:facebook-sync` / `clickup:members` 60s (skipped on PHP built-in `cli-server` except tests). `PublishSocialPostJob` publishes immediately on «نشر الآن» (`dispatchSync`); scheduled/stuck posts stay on the queue. Job `failed()` and publisher exceptions mark the post **failed** (never leave it on **جاري النشر**). `social:publish-due` also retries posts stuck publishing for 2+ minutes. Database queue `retry_after` default is 420s so a 360s publish job is not released mid-run.
+Default `CACHE_STORE=database` (`cache` + `cache_locks` tables). Tests: array store, sync queue, SQLite memory. Instagram landing feed cached 600s. Admin list syncs: `odoo:hr:index-pull` / `odoo:crm:index-pull` / `social:facebook-sync` / `clickup:members` 60s (skipped on PHP built-in `cli-server` except tests). `PublishSocialPostJob` publishes immediately on «نشر الآن» (`dispatchSync`); scheduled/stuck posts stay on the queue. Job `failed()` and publisher exceptions mark the post **failed** (never leave it on **جاري النشر**). `social:publish-due` also retries posts stuck publishing for 2+ minutes. Database queue `retry_after` default is 420s so a 360s publish job is not released mid-run. Staff UI polls cheap `GET /admin/live` every 4s (stamps + last 8 request/post status rows) so lists update without a full reload.
 
 ## Tests / CI
 

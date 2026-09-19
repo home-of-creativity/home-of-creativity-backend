@@ -9,6 +9,7 @@ import { SocialBrandIcon } from "../../components/SocialBrandIcon";
 import { copy, type Locale } from "../../i18n";
 import { LinktreePhone, type LinktreeTheme } from "./LinktreePhone";
 import { SocialChrome } from "./SocialChrome";
+import { useLive, useLiveStamp } from "../../live";
 import { useSocialWorkspace } from "./SocialWorkspace";
 import {
   publishErrorMessage,
@@ -138,9 +139,10 @@ export function SocialLinks({ locale, t }: { locale: Locale; t: (c: { ar: string
 
   useEffect(() => {
     load();
-    const timer = window.setInterval(() => load(true), 15000);
-    return () => window.clearInterval(timer);
   }, [status, page, selectedAccount?.id]);
+
+  const { socialStamp } = useLive();
+  useLiveStamp(socialStamp, () => load(true));
 
   async function approve(id: number) {
     setBusyId(id);

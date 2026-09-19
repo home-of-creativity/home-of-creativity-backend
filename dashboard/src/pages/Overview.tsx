@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { DonutStat } from "../components/DonutStat";
 import { LoadingLottie } from "../components/LoadingLottie";
@@ -7,6 +7,7 @@ import { StatCard } from "../components/StatCard";
 import { IconClients, IconRequests } from "../components/icons";
 import { api, type ServiceRequest } from "../api";
 import { copy, statuses, type Locale } from "../i18n";
+import { useLive, useLiveStamp } from "../live";
 
 const ORANGE_STATUSES = new Set(["quotation_sent", "ai_analyzing", "revision_requested"]);
 const TEAL_STATUSES = new Set(["payment_confirmed", "completed", "approved", "in_progress"]);
@@ -35,7 +36,9 @@ export function Overview({ t }: { locale: Locale; t: (c: { ar: string; en: strin
   } | null>(null);
   const [recent, setRecent] = useState<ServiceRequest[]>([]);
 
-  useEffect(() => {
+  const { requestsStamp } = useLive();
+
+  const load = useCallback(() => {
     api
       .overview()
       .then((res) => {
@@ -43,10 +46,16 @@ export function Overview({ t }: { locale: Locale; t: (c: { ar: string; en: strin
         setRecent(res.data.recent ?? []);
       })
       .catch(() => {
-        setData(null);
-        setRecent([]);
+        setData((current) => current);
+        setRecent((current) => current);
       });
   }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  useLiveStamp(requestsStamp, load);
 
   if (!data) return <LoadingLottie variant="page" label={t(copy.loading)} />;
 

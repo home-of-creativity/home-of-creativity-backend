@@ -4,6 +4,7 @@ use App\Http\Controllers\Admin\ClientController as AdminClientController;
 use App\Http\Controllers\Admin\ContactChannelController as AdminContactChannelController;
 use App\Http\Controllers\Admin\EmployeeController as AdminEmployeeController;
 use App\Http\Controllers\Admin\LandingReelController as AdminLandingReelController;
+use App\Http\Controllers\Admin\LiveController;
 use App\Http\Controllers\Admin\OdooController as AdminOdooController;
 use App\Http\Controllers\Admin\OverviewController;
 use App\Http\Controllers\Admin\PortfolioCategoryController as AdminPortfolioCategoryController;
@@ -61,6 +62,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
 Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::get('overview', OverviewController::class);
+    Route::get('live', LiveController::class);
     Route::get('contact', [AdminContactChannelController::class, 'index']);
     Route::post('contact', [AdminContactChannelController::class, 'store']);
     Route::put('contact/{contact_channel}', [AdminContactChannelController::class, 'update']);

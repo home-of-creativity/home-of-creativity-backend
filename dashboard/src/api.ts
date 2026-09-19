@@ -43,6 +43,24 @@ export function canSocial(user: User | null | undefined, ability: SocialAbility)
   return Boolean(user?.social_abilities?.includes(ability));
 }
 
+export type LiveChange = {
+  id: number;
+  status: string;
+  number?: string;
+  body?: string;
+  updated_at?: string | null;
+};
+
+export type LiveSnapshot = {
+  requests_stamp: string;
+  social_stamp: string;
+  requests_count: number;
+  pending_employees: number;
+  publishing: number;
+  requests: LiveChange[];
+  posts: LiveChange[];
+};
+
 export type SocialStaff = User;
 
 export type SocialAccount = {
@@ -583,6 +601,9 @@ export const api = {
       by_status: Record<string, number>;
       recent?: ServiceRequest[];
     }>>("/admin/overview");
+  },
+  live() {
+    return request<Envelope<LiveSnapshot>>("/admin/live");
   },
   requests(status?: string, page = 1) {
     return request<Paginated<ServiceRequest>>(`/admin/requests${queryString({ status, page })}`);

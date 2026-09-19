@@ -4,6 +4,7 @@ import { LoadingLottie } from "../components/LoadingLottie";
 import { PageHeader } from "../components/PageHeader";
 import { api, type ServiceRequest } from "../api";
 import { copy, sources, statuses, type Locale } from "../i18n";
+import { useLive, useLiveStamp } from "../live";
 import { ShamCashQrThumb } from "./PaymentsQr";
 
 type QuotationLine = {
@@ -75,12 +76,16 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
     }
 
     load();
-    const timer = window.setInterval(() => load(true), 15000);
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
     };
   }, [id]);
+
+  const { requestsStamp } = useLive();
+  useLiveStamp(requestsStamp, () => {
+    if (!id) return;
+    api.request(id).then((res) => setItem(res.data)).catch(() => {});
+  });
 
   async function saveStatus(next: string) {
     if (!item) return;

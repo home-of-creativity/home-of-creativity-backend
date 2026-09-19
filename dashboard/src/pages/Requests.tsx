@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type PageMeta, type ServiceRequest } from "../api";
 import { LoadingTableRow } from "../components/LoadingTableRow";
 import { PageHeader } from "../components/PageHeader";
 import { Pagination } from "../components/Pagination";
 import { copy, sources, statuses, type Locale } from "../i18n";
+import { useLive, useLiveStamp } from "../live";
 
 export function Requests({ t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
   const [items, setItems] = useState<ServiceRequest[]>([]);
@@ -13,8 +14,10 @@ export function Requests({ t }: { locale: Locale; t: (c: { ar: string; en: strin
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    setLoading(true);
+  const { requestsStamp } = useLive();
+
+  const load = useCallback((silent = false) => {
+    if (!silent) setLoading(true);
     api
       .requests(status || undefined, page)
       .then((res) => {
@@ -22,11 +25,21 @@ export function Requests({ t }: { locale: Locale; t: (c: { ar: string; en: strin
         setMeta(res.meta);
       })
       .catch(() => {
-        setItems([]);
-        setMeta(null);
+        if (!silent) {
+          setItems([]);
+          setMeta(null);
+        }
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!silent) setLoading(false);
+      });
   }, [status, page]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  useLiveStamp(requestsStamp, () => load(true));
 
   return (
     <>

@@ -1,6 +1,6 @@
 import * as Popover from "@radix-ui/react-popover";
 import { Check, Ellipsis, Pencil, RotateCw } from "lucide-react";
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { api, canSocial, type SocialPost } from "../../api";
@@ -13,6 +13,7 @@ import { copy, type Locale } from "../../i18n";
 import { fromLocalInput, matchesSocialPlacement, orderedPageAccounts, platformLabel, publishErrorMessage } from "./helpers";
 import { SocialChrome } from "./SocialChrome";
 import { SocialPhonePreview, SocialPostCard } from "./SocialPhonePreview";
+import { useLive, useLiveStamp } from "../../live";
 import { useSocialWorkspace } from "./SocialWorkspace";
 
 const PAGE_SIZE = 100;
@@ -47,7 +48,7 @@ export function SocialHome({ locale, t }: { locale: Locale; t: (c: { ar: string;
       : [];
   const linkedIdKey = linkedNetworks.map((account) => account.id).join(",");
 
-  async function refreshPosts() {
+  const refreshPosts = useCallback(async () => {
     const ids = linkedNetworks.map((account) => account.id);
     if (ids.length === 0) {
       setPostsByAccount({});
@@ -57,7 +58,7 @@ export function SocialHome({ locale, t }: { locale: Locale; t: (c: { ar: string;
       ids.map((id) => api.socialPosts({ account_id: id, per_page: PAGE_SIZE }).then((res) => [id, res.data] as const)),
     );
     setPostsByAccount(Object.fromEntries(entries));
-  }
+  }, [linkedIdKey]);
 
   useEffect(() => {
     if (!linkedIdKey) {
@@ -78,19 +79,10 @@ export function SocialHome({ locale, t }: { locale: Locale; t: (c: { ar: string;
     };
   }, [linkedIdKey]);
 
-  const publishingKey = Object.values(postsByAccount)
-    .flat()
-    .filter((item) => item.status === "publishing")
-    .map((item) => item.id)
-    .join(",");
-
-  useEffect(() => {
-    if (!publishingKey) return;
-    const timer = window.setInterval(() => {
-      void refreshPosts();
-    }, 4000);
-    return () => window.clearInterval(timer);
-  }, [publishingKey, linkedIdKey]);
+  const { socialStamp } = useLive();
+  useLiveStamp(socialStamp, () => {
+    void refreshPosts();
+  });
 
   useEffect(() => {
     setTargetIds(
