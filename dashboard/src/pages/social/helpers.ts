@@ -11,6 +11,15 @@ export type SocialPageGroup = {
   accounts: SocialAccount[];
 };
 
+export function accountAvatarUrl(account: Pick<SocialAccount, "platform" | "page_id" | "facebook_page_id">): string | null {
+  const pageId = account.platform === "facebook" ? account.page_id : account.facebook_page_id || account.page_id;
+  if (!pageId) {
+    return null;
+  }
+
+  return `https://graph.facebook.com/${pageId}/picture?type=large`;
+}
+
 export function socialProfileUrl(account: Pick<SocialAccount, "platform" | "handle" | "page_id">): string | undefined {
   const handle = account.handle?.replace(/^@/, "").trim();
   if (account.platform === "instagram" && handle) return `https://www.instagram.com/${handle}/`;

@@ -26,7 +26,8 @@ class EnsureRequestDriveFolder
 
         $request->loadMissing('client');
         $company = $request->client?->driveCompanyFolderName() ?? 'شركة';
-        $task = trim($request->title.' '.now()->format('Y-m-d'));
+        $folderDate = ($request->paid_at ?? now())->timezone((string) config('app.timezone'))->format('Y-m-d');
+        $task = trim($request->title.' '.$folderDate);
         $parent = (string) config('services.google.drive_parent_folder_id');
 
         $folderId = $this->drive->ensureFolderPath($parent, $company, $task);

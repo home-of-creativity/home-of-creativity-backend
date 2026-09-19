@@ -132,8 +132,18 @@ class ConfirmRequestPayment
             // Continue locally if Odoo invoice fails.
         }
 
+        if (blank($updated->google_drive_folder_id)) {
+            try {
+                $updated = $this->ensureRequestDriveFolder->handle($updated);
+            } catch (\Throwable $exception) {
+                Log::warning('Drive folder after payment failed.', [
+                    'request' => $updated->number,
+                    'error' => $exception->getMessage(),
+                ]);
+            }
+        }
+
         if ($isFirst) {
-            $this->ensureRequestDriveFolder->handle($updated);
             $this->schedulePaymentReminders->handle($updated->fresh() ?? $updated);
 
             if ($updated->gemini_status !== GeminiStatus::Success) {

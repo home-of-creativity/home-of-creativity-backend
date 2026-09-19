@@ -4,7 +4,7 @@ import { api, type SocialAccount, type SocialPost, type SocialPostMedia } from "
 import { SocialBrandIcon } from "../../components/SocialBrandIcon";
 import { FileDropzone } from "../../components/FileDropzone";
 import { copy, type Locale } from "../../i18n";
-import { formatWhen, matchesSocialPlacement, platformLabel, socialStatusLabel } from "./helpers";
+import { accountAvatarUrl, formatWhen, matchesSocialPlacement, platformLabel, socialStatusLabel } from "./helpers";
 
 type PreviewFile = { name: string; url: string; kind: string };
 
@@ -242,7 +242,7 @@ export function SocialPhonePreview({
 
   const dropzone = onFiles ? (
     <FileDropzone
-      className="social-phone-drop"
+      className={account?.platform === "instagram" && viewPlacement !== "story" ? "ig-studio-compose-drop" : "social-phone-drop"}
       accept={{ "image/*": [], "video/*": [] }}
       multiple
       disabled={dropDisabled}
@@ -430,20 +430,12 @@ export function SocialPostCard({
 
 function InstagramStudioProfile({
   account,
-  handle,
-  nowLabel,
   draftLabel,
   emptyFeedLabel,
-  body,
   slides,
   index,
-  prevLabel,
-  nextLabel,
-  onIndex,
   neighbors,
-  locale,
   t,
-  mode,
   lead,
   filters,
   renderPostActions,
@@ -471,8 +463,9 @@ function InstagramStudioProfile({
   openLabel: string;
   onOpenMedia: OpenMedia;
 }) {
-  const composing = Boolean(body.trim() || slides.length > 0 || lead);
+  const composeSlot = Boolean(lead || slides.length > 0);
   const username = account.handle?.replace(/^@/, "") || account.name;
+  const postCount = neighbors.length + (composeSlot && slides.length > 0 ? 1 : 0);
 
   return (
     <div className="ig-studio">
@@ -481,125 +474,82 @@ function InstagramStudioProfile({
         {filters}
       </div>
       <div className="ig-studio-head">
-        <AccountMark account={account} />
+        <AccountMark account={account} size="profile" />
         <div>
           <p className="ig-studio-name">{account.name}</p>
           <p className="ig-studio-handle"><bdi>@{username}</bdi></p>
         </div>
         <dl className="ig-studio-stats">
           <div>
-            <dd>{neighbors.length}</dd>
+            <dd>{postCount}</dd>
             <dt>{t(copy.socialProfilePosts)}</dt>
           </div>
         </dl>
       </div>
-      {mode === "feed" && composing ? (
-        <FeedPost
-          account={account}
-          handle={handle}
-          timeLabel={nowLabel}
-          body={body}
-          slides={slides}
-          index={index}
-          prevLabel={prevLabel}
-          nextLabel={nextLabel}
-          onIndex={onIndex}
-          isDraft
-          draftLabel={draftLabel}
-          interactive
-          placeholder={!slides.length ? lead : undefined}
-          t={t}
-          openLabel={openLabel}
-          onOpenMedia={onOpenMedia}
-        />
-      ) : null}
-      {mode === "reel" && composing ? (
-        <div className="ig-studio-reels">
-          <div className="ig-studio-reel is-draft">
+      <div className="ig-studio-grid">
+        {composeSlot ? (
+          <div className="ig-studio-tile-wrap is-compose">
             {slides[0] ? (
-              <MediaHit slides={slides} index={0} openLabel={openLabel} onOpen={onOpenMedia} mediaClassName="ig-studio-reel-media" cover />
-            ) : (
-              lead ?? <p className="social-phone-empty">{t(copy.socialPreviewEmptyMedia)}</p>
-            )}
-            <div className="social-phone-reel-meta">
-              <AccountMark account={account} />
-              <div>
-                <p className="social-phone-name">{account.name}</p>
-                <p className="social-phone-handle"><bdi>{handle}</bdi> · {nowLabel}</p>
-              </div>
-              <span className="social-phone-draft-chip">{draftLabel}</span>
-            </div>
-            {body.trim() ? <p className="social-phone-reel-caption">{body}</p> : null}
-          </div>
-        </div>
-      ) : null}
-      {mode === "reel" ? (
-        <div className="ig-studio-reels">
-          {neighbors.map((post) => {
-            const media = postSlides(post);
-            return (
-              <div key={post.id} className="ig-studio-reel">
-                {media[0] ? (
-                  <MediaHit slides={media} index={0} openLabel={openLabel} onOpen={onOpenMedia} mediaClassName="ig-studio-reel-media" cover />
-                ) : (
-                  <p className="social-phone-empty">{post.body}</p>
-                )}
-                <div className="social-phone-reel-meta">
-                  <AccountMark account={account} />
-                  <div>
-                    <p className="social-phone-name">{account.name}</p>
-                    <p className="social-phone-handle"><bdi>{handle}</bdi> · {formatWhen(post.published_at || post.created_at, locale)}</p>
-                  </div>
-                  {renderPostActions?.(post)}
-                </div>
-                {post.body ? <p className="social-phone-reel-caption">{post.body}</p> : null}
-              </div>
-            );
-          })}
-        </div>
-      ) : (
-        <div className="ig-studio-grid">
-          {neighbors.map((post) => {
-            const media = postSlides(post);
-            const first = media[0];
-            const tile = (
-              <>
-                {first ? <MediaSlide slide={first} className="ig-studio-media" /> : <span className="ig-studio-tile-empty">{post.body.trim() || t(copy.socialUntitledPost)}</span>}
-                {post.media && post.media.length > 1 ? (
+              <button type="button" className="ig-studio-tile is-compose" aria-label={openLabel} onClick={() => onOpenMedia(slides, index)}>
+                <MediaSlide slide={slides[0]} className="ig-studio-media" />
+                {slides.length > 1 ? (
                   <svg className="ig-studio-badge" viewBox="0 0 24 24" aria-hidden>
                     <path fill="currentColor" d="M7 7h10v10H7V7Zm-3 3h2v8h8v2H4V10Zm16-6H9a2 2 0 0 0-2 2v1h11v11h1a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2Z" />
                   </svg>
-                ) : first?.kind === "video" ? (
+                ) : slides[0].kind === "video" ? (
                   <svg className="ig-studio-badge" viewBox="0 0 24 24" aria-hidden>
                     <path fill="currentColor" d="M8 6.8v10.4L18 12 8 6.8Z" />
                   </svg>
                 ) : null}
-              </>
-            );
-            return (
-              <div key={post.id} className="ig-studio-tile-wrap">
-                {first ? (
-                  <button type="button" className="ig-studio-tile" aria-label={openLabel} onClick={() => onOpenMedia(media, 0)}>
-                    {tile}
-                  </button>
-                ) : (
-                  <div className="ig-studio-tile">{tile}</div>
-                )}
-                {renderPostActions ? <div className="ig-studio-tile-more">{renderPostActions(post)}</div> : null}
-              </div>
-            );
-          })}
-        </div>
-      )}
-      {!composing && neighbors.length === 0 ? <p className="social-phone-empty-feed">{emptyFeedLabel}</p> : null}
+                <span className="ig-studio-compose-chip">{draftLabel}</span>
+              </button>
+            ) : (
+              <div className="ig-studio-tile is-compose">{lead}</div>
+            )}
+          </div>
+        ) : null}
+        {neighbors.map((post) => {
+          const media = postSlides(post);
+          const first = media[0];
+          const tile = (
+            <>
+              {first ? <MediaSlide slide={first} className="ig-studio-media" /> : <span className="ig-studio-tile-empty">{post.body.trim() || t(copy.socialUntitledPost)}</span>}
+              {post.media && post.media.length > 1 ? (
+                <svg className="ig-studio-badge" viewBox="0 0 24 24" aria-hidden>
+                  <path fill="currentColor" d="M7 7h10v10H7V7Zm-3 3h2v8h8v2H4V10Zm16-6H9a2 2 0 0 0-2 2v1h11v11h1a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2Z" />
+                </svg>
+              ) : first?.kind === "video" ? (
+                <svg className="ig-studio-badge" viewBox="0 0 24 24" aria-hidden>
+                  <path fill="currentColor" d="M8 6.8v10.4L18 12 8 6.8Z" />
+                </svg>
+              ) : null}
+            </>
+          );
+          return (
+            <div key={post.id} className="ig-studio-tile-wrap">
+              {first ? (
+                <button type="button" className="ig-studio-tile" aria-label={openLabel} onClick={() => onOpenMedia(media, 0)}>
+                  {tile}
+                </button>
+              ) : (
+                <div className="ig-studio-tile">{tile}</div>
+              )}
+              {renderPostActions ? <div className="ig-studio-tile-more">{renderPostActions(post)}</div> : null}
+            </div>
+          );
+        })}
+      </div>
+      {!composeSlot && neighbors.length === 0 ? <p className="social-phone-empty-feed">{emptyFeedLabel}</p> : null}
     </div>
   );
 }
 
-function AccountMark({ account }: { account: SocialAccount }) {
+function AccountMark({ account, size = "sm" }: { account: SocialAccount; size?: "sm" | "profile" }) {
+  const src = accountAvatarUrl(account) ?? (size === "profile" ? `${import.meta.env.BASE_URL}hummingbird.svg` : null);
+
   return (
-    <span className={`social-phone-avatar is-${account.platform}`} aria-hidden>
-      <SocialBrandIcon platform={account.platform} />
+    <span className={`social-phone-avatar is-${account.platform}${size === "profile" ? " is-profile" : ""}`} aria-hidden>
+      {src ? <img src={src} alt="" referrerPolicy="no-referrer" /> : <SocialBrandIcon platform={account.platform} />}
     </span>
   );
 }

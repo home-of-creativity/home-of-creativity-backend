@@ -6,6 +6,7 @@ use App\Actions\CompleteRequest;
 use App\Actions\ConfirmRequestPayment;
 use App\Actions\DispatchStatusWorkflow;
 use App\Actions\EnqueueIntegrationEvent;
+use App\Actions\EnsureRequestDriveFolder;
 use App\Actions\HydrateServiceRequestFromOdoo;
 use App\Actions\RenewSubscription;
 use App\Actions\ReRequestReceipt;
@@ -28,6 +29,7 @@ use App\Services\RequestStatusTransitionService;
 use App\Support\ShamCashQr;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -46,9 +48,26 @@ class ServiceRequestController extends Controller
             ->additional(['message' => 'ok']);
     }
 
-    public function show(ServiceRequest $serviceRequest, HydrateServiceRequestFromOdoo $hydrateServiceRequestFromOdoo): ServiceRequestResource
-    {
+    public function show(
+        ServiceRequest $serviceRequest,
+        HydrateServiceRequestFromOdoo $hydrateServiceRequestFromOdoo,
+        EnsureRequestDriveFolder $ensureRequestDriveFolder,
+    ): ServiceRequestResource {
         $serviceRequest = $hydrateServiceRequestFromOdoo->handle($serviceRequest);
+
+        if (blank($serviceRequest->google_drive_folder_id)
+            && ($serviceRequest->paid_at
+                || $serviceRequest->status === RequestStatus::PaymentConfirmed
+                || (float) $serviceRequest->amount_paid > 0)) {
+            try {
+                $serviceRequest = $ensureRequestDriveFolder->handle($serviceRequest);
+            } catch (\Throwable $exception) {
+                Log::warning('Drive folder on request show failed.', [
+                    'request' => $serviceRequest->number,
+                    'error' => $exception->getMessage(),
+                ]);
+            }
+        }
 
         $serviceRequest->load([
             'client',

@@ -2,6 +2,8 @@
 
 namespace App\Console\Commands;
 
+use App\Actions\EnsureRequestDriveFolder;
+use App\Enums\RequestStatus;
 use App\Models\DriveDelivery;
 use App\Models\ServiceRequest;
 use App\Services\GoogleDriveClient;
@@ -20,13 +22,14 @@ class PollDriveDeliveriesCommand extends Command
 
     protected $description = 'Send new Google Drive files from request folders to the client bot.';
 
-    public function handle(GoogleDriveClient $drive, TelegramNotifier $telegram): int
+    public function handle(GoogleDriveClient $drive, TelegramNotifier $telegram, EnsureRequestDriveFolder $ensureRequestDriveFolder): int
     {
         if (! $drive->configured()) {
             return self::SUCCESS;
         }
 
         $limit = max(1, (int) $this->option('limit'));
+        $this->backfillMissingFolders($ensureRequestDriveFolder, $limit);
         $requests = $this->nextFolderBatch($limit);
 
         foreach ($requests as $request) {
@@ -116,8 +119,36 @@ class PollDriveDeliveriesCommand extends Command
         ])->save();
     }
 
+    private function backfillMissingFolders(EnsureRequestDriveFolder $ensureRequestDriveFolder, int $limit): void
+    {
+        $requests = ServiceRequest::query()
+            ->with('client')
+            ->where(function ($query): void {
+                $query->whereNotNull('paid_at')
+                    ->orWhere('status', RequestStatus::PaymentConfirmed)
+                    ->orWhere('amount_paid', '>', 0);
+            })
+            ->where(function ($query): void {
+                $query->whereNull('google_drive_folder_id')
+                    ->orWhere('google_drive_folder_id', '');
+            })
+            ->orderBy('id')
+            ->limit($limit)
+            ->get();
+
+        foreach ($requests as $request) {
+            try {
+                $ensureRequestDriveFolder->handle($request);
+            } catch (Throwable $exception) {
+                Log::warning('Drive folder backfill failed.', [
+                    'request' => $request->number,
+                    'error' => $exception->getMessage(),
+                ]);
+            }
+        }
+    }
+
     /**
-     * @return Collection<int, ServiceRequest>
      * @return EloquentCollection<int, ServiceRequest>
      */
     private function nextFolderBatch(int $limit)

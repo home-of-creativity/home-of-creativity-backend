@@ -810,6 +810,55 @@ class ClientOpsAutomationTest extends TestCase
         $this->assertSame('folder-company', $updated->google_drive_folder_id);
     }
 
+    public function test_remaining_payment_creates_drive_folder_when_missing(): void
+    {
+        Http::fake();
+        config(['services.gemini.e2e_stub' => true]);
+
+        $client = Client::factory()->create(['company_name' => 'شركة النور']);
+        $request = ServiceRequest::factory()->for($client)->create([
+            'status' => RequestStatus::PaymentConfirmed,
+            'title' => 'هوية بصرية',
+            'quotation_amount' => 1000,
+            'amount_total' => 1000,
+            'amount_paid' => 400,
+            'amount_remaining' => 600,
+            'paid_at' => now()->subDay(),
+            'google_drive_folder_id' => null,
+        ]);
+
+        $this->mock(GoogleDriveClient::class, function ($mock): void {
+            $mock->shouldReceive('configured')->andReturn(true);
+            $mock->shouldReceive('ensureFolderPath')->once()->andReturn('folder-retry');
+        });
+
+        app(ConfirmRequestPayment::class)->handle($request, PaymentMethod::Receipt, 600);
+
+        $this->assertSame('folder-retry', $request->fresh()?->google_drive_folder_id);
+    }
+
+    public function test_drive_poll_creates_missing_folder_for_paid_request(): void
+    {
+        Cache::flush();
+        $client = Client::factory()->create(['company_name' => 'شركة النور']);
+        $request = ServiceRequest::factory()->for($client)->create([
+            'status' => RequestStatus::PaymentConfirmed,
+            'paid_at' => now(),
+            'google_drive_folder_id' => null,
+            'title' => 'هوية',
+        ]);
+
+        $this->mock(GoogleDriveClient::class, function ($mock): void {
+            $mock->shouldReceive('configured')->andReturn(true);
+            $mock->shouldReceive('ensureFolderPath')->once()->andReturn('folder-poll');
+            $mock->shouldReceive('listNewFiles')->with('folder-poll')->andReturn([]);
+        });
+
+        $this->artisan('ops:poll-drive')->assertSuccessful();
+
+        $this->assertSame('folder-poll', $request->fresh()?->google_drive_folder_id);
+    }
+
     public function test_drive_folder_ignores_telegram_placeholder_company(): void
     {
         $client = Client::factory()->create([

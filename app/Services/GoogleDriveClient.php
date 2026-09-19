@@ -76,6 +76,7 @@ class GoogleDriveClient
                     'q' => $query,
                     'fields' => 'files(id,name,mimeType)',
                     'pageSize' => 100,
+                    'corpora' => 'allDrives',
                     'supportsAllDrives' => 'true',
                     'includeItemsFromAllDrives' => 'true',
                 ]);
@@ -192,6 +193,7 @@ class GoogleDriveClient
                 'q' => $query,
                 'fields' => 'files(id,name)',
                 'pageSize' => 1,
+                'corpora' => 'allDrives',
                 'supportsAllDrives' => 'true',
                 'includeItemsFromAllDrives' => 'true',
             ]);
