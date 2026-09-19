@@ -268,33 +268,30 @@ class OdooClient
      */
     public function resolveTelegramPipeline(?int $teamId = null, ?int $stageId = null): array
     {
-        $teamId ??= $this->ensureCrmTeamId('تلغرام');
-        if ($stageId !== null) {
-            return [
-                'stage_id' => $stageId,
-                'team_id' => $teamId,
-            ];
-        }
-
-        try {
-            $stage = $this->findCrmStage('تلغرام', $teamId);
-            if ($stage !== null) {
-                return [
-                    'stage_id' => $stage['id'],
-                    'team_id' => $teamId ?? $stage['team_id'],
-                ];
+        $stage = null;
+        if ($stageId === null) {
+            try {
+                $stage = $this->findCrmStage('تلغرام', $teamId);
+            } catch (Throwable) {
+                $stage = null;
             }
 
-            return [
-                'stage_id' => $this->createCrmStage('تلغرام', $teamId),
-                'team_id' => $teamId,
-            ];
-        } catch (Throwable) {
-            return [
-                'stage_id' => $this->ensureCrmStage('تلغرام'),
-                'team_id' => $teamId,
-            ];
+            $stageId = $stage['id'] ?? null;
+            if ($stageId === null) {
+                try {
+                    $stageId = $this->ensureCrmStage('تلغرام');
+                } catch (Throwable) {
+                    $stageId = null;
+                }
+            }
         }
+
+        $teamId ??= $stage['team_id'] ?? $this->findCrmTeamId('تلغرام');
+
+        return [
+            'stage_id' => $stageId,
+            'team_id' => $teamId,
+        ];
     }
 
     public function ensureCrmStage(string $name): int
@@ -695,16 +692,55 @@ class OdooClient
             $domain[] = ['partner_name', '=', $partnerName];
         }
 
-        $ids = $this->call('crm.lead', 'search', [
-            'domain' => $domain,
-            'limit' => 1,
-        ]);
+        return $this->firstId('crm.lead', $domain);
+    }
 
-        if (! is_array($ids) || ! isset($ids[0])) {
+    public function findCrmLeadByContact(?string $phone, ?string $email = null, ?string $contactName = null): ?int
+    {
+        if (filled($phone)) {
+            foreach ([['phone', '=', $phone], ['mobile', '=', $phone]] as $clause) {
+                $id = $this->firstId('crm.lead', [$clause]);
+                if ($id !== null) {
+                    return $id;
+                }
+            }
+        }
+
+        if (filled($email)) {
+            $id = $this->firstId('crm.lead', [['email_from', '=', $email]]);
+            if ($id !== null) {
+                return $id;
+            }
+        }
+
+        if (filled($contactName)) {
+            return $this->firstId('crm.lead', [['contact_name', '=', $contactName]]);
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  list<list<mixed>>  $domain
+     */
+    private function firstId(string $model, array $domain): ?int
+    {
+        try {
+            $ids = $this->call($model, 'search', [
+                'domain' => $domain,
+                'limit' => 1,
+            ]);
+        } catch (Throwable) {
             return null;
         }
 
-        return (int) $ids[0];
+        if (! is_array($ids) || ! isset($ids[0]) || ! is_numeric($ids[0])) {
+            return null;
+        }
+
+        $id = (int) $ids[0];
+
+        return $id > 0 ? $id : null;
     }
 
     /**

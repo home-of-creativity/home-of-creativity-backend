@@ -65,6 +65,7 @@ trait FakesOdooDocuments
                         ['id' => 21, 'name' => 'تلغرام'],
                     ]], 200),
                     $model === 'crm.team' && $action === 'create' => Http::response(['jsonrpc' => '2.0', 'result' => 21], 200),
+                    $model === 'crm.lead' && $action === 'search' => Http::response(['jsonrpc' => '2.0', 'result' => []], 200),
                     $model === 'crm.lead' && $action === 'create' => Http::response(['jsonrpc' => '2.0', 'result' => 77], 200),
                     $model === 'crm.lead' && $action === 'write' => Http::response(['jsonrpc' => '2.0', 'result' => true], 200),
                     $model === 'crm.lead' && $action === 'unlink' => Http::response(['jsonrpc' => '2.0', 'result' => true], 200),

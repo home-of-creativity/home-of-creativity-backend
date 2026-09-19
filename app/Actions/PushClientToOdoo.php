@@ -47,7 +47,7 @@ class PushClientToOdoo
             );
             $client->forceFill(['odoo_partner_id' => $partnerId])->save();
         } catch (\Throwable $exception) {
-            Log::warning('Odoo partner sync failed for client.', [
+            Log::error('Odoo partner sync failed for client.', [
                 'client_id' => $client->id,
                 'error' => $exception->getMessage(),
             ]);

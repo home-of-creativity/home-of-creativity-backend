@@ -61,6 +61,16 @@ echo "Running database seeders..."
 "${COMPOSE[@]}" exec -T hoc-api php artisan config:cache
 "${COMPOSE[@]}" exec -T hoc-api php artisan route:cache
 "${COMPOSE[@]}" exec -T hoc-api php artisan view:cache || true
+
+# php-fpm PID 1 is the wrapper shell; reload the real master. schedule:work
+# keeps old code in memory until the scheduler container restarts.
+echo "Reloading API workers and scheduler..."
+"${COMPOSE[@]}" exec -T hoc-api sh -c 'pgrep -x php-fpm | xargs -r kill -USR2' || true
+"${COMPOSE[@]}" restart hoc-scheduler || true
+
+echo "Pushing missing Odoo CRM leads onto the Telegram pipeline..."
+"${COMPOSE[@]}" exec -T hoc-api php artisan odoo:reconcile --limit=200 || true
+
 "${COMPOSE[@]}" exec -T hoc-api php artisan seo:submit-sitemap || true
 
 echo "Deploy finished. API: https://api.hoc.agency/up | Site: https://hoc.agency"

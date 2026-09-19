@@ -61,6 +61,19 @@ class PushClientLeadToOdoo
                 }
             }
 
+            $leadId = $this->odoo->findCrmLead($this->leadName($client), $client->company_name)
+                ?? $this->odoo->findCrmLeadByContact($client->phone, $client->email, $client->name);
+
+            if ($leadId) {
+                $client->forceFill([
+                    'odoo_lead_id' => (string) $leadId,
+                    'odoo_stage_name' => $client->odoo_stage_name ?: 'تلغرام',
+                ])->save();
+                $this->writeLead($client);
+
+                return $client->fresh() ?? $client;
+            }
+
             $leadId = $this->odoo->createCrmLead([
                 'name' => $this->leadName($client),
                 'contact_name' => $client->name,
@@ -82,7 +95,7 @@ class PushClientLeadToOdoo
                 ])->save();
             }
         } catch (\Throwable $exception) {
-            Log::warning('Odoo CRM lead create failed for client.', [
+            Log::error('Odoo CRM lead create failed for client.', [
                 'client_id' => $client->id,
                 'error' => $exception->getMessage(),
             ]);
@@ -111,7 +124,7 @@ class PushClientLeadToOdoo
                 $client->forceFill(['odoo_stage_name' => 'تلغرام'])->save();
             }
         } catch (\Throwable $exception) {
-            Log::warning('Odoo CRM lead update failed for client.', [
+            Log::error('Odoo CRM lead update failed for client.', [
                 'client_id' => $client->id,
                 'error' => $exception->getMessage(),
             ]);
