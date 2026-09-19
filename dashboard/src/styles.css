@@ -555,7 +555,9 @@ html[dir="rtl"] .command-palette-content {
 .app-shell {
   display: grid;
   min-height: 100svh;
+  height: 100svh;
   min-width: 0;
+  overflow: hidden;
   grid-template-columns: var(--sidebar) minmax(0, 1fr);
 }
 
@@ -750,9 +752,46 @@ html[dir="rtl"] .btn-logout svg {
 }
 
 .main {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
-  max-width: 88rem;
-  padding: 1.7rem clamp(1.1rem, 2.6vw, 2.2rem) 2.5rem;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  overflow: auto;
+  padding: 0.7rem 0.65rem 0.95rem;
+}
+
+.main-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1 0 auto;
+  width: 100%;
+  min-width: 0;
+}
+
+.main-pane > * {
+  width: 100%;
+}
+
+.main.is-social {
+  padding: 0.55rem 0.6rem 0.7rem;
+}
+
+.main.is-social:has(.is-immersive) {
+  padding: 0;
+  overflow: hidden;
+}
+
+.main.is-social:has(.is-immersive) .main-pane {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+}
+
+.main.is-social:has(.is-immersive) .main-pane > * {
+  flex: 1;
+  min-height: 0;
 }
 
 .main:focus {
@@ -764,8 +803,8 @@ html[dir="rtl"] .btn-logout svg {
   flex-wrap: wrap;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 1.35rem;
+  gap: 0.75rem;
+  margin-bottom: 0.85rem;
 }
 
 .page-head > .toolbar {
@@ -796,14 +835,14 @@ html[dir="rtl"] .btn-logout svg {
 
 .page-lede {
   margin: 0.4rem 0 0;
-  max-width: 38rem;
+  max-width: none;
   color: var(--brand-muted);
 }
 
 .cards {
   display: grid;
-  gap: 1rem;
-  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
 }
 
 .card,
@@ -891,7 +930,7 @@ html[dir="rtl"] .btn-logout svg {
 }
 
 .recent-panel {
-  margin-top: 1.4rem;
+  margin-top: 0;
   overflow: hidden;
 }
 
@@ -915,6 +954,7 @@ html[dir="rtl"] .btn-logout svg {
 }
 
 .table-wrap {
+  width: 100%;
   overflow: auto;
 }
 
@@ -1560,7 +1600,60 @@ td[colspan] {
 
 .detail {
   display: grid;
-  gap: 1rem;
+  gap: 0.75rem;
+}
+
+.overview-layout,
+.detail-layout {
+  display: grid;
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.overview-layout {
+  grid-template-columns: minmax(17rem, 22rem) minmax(0, 1fr);
+}
+
+.detail-layout {
+  grid-template-columns: minmax(0, 1fr) minmax(16.5rem, 21rem);
+}
+
+.overview-side,
+.detail-main,
+.detail-aside {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.overview-side .cards {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.overview-recent {
+  min-width: 0;
+}
+
+.detail-briefs {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(13.5rem, 1fr));
+}
+
+.detail-briefs .briefs {
+  margin-top: 0;
+}
+
+.detail-aside .toolbar,
+.detail-aside .field-label,
+.detail-aside .btn {
+  width: 100%;
+}
+
+.detail-aside .toolbar {
+  flex-direction: column;
+  align-items: stretch;
 }
 
 .back-link {
@@ -1599,6 +1692,10 @@ html[dir="rtl"] .back-link span {
 }
 
 .meta-grid dd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
   margin: 0.25rem 0 0;
   font-weight: 600;
 }
@@ -1803,6 +1900,9 @@ html[dir="rtl"] .back-link span {
   .login-grid,
   .app-shell {
     grid-template-columns: 1fr;
+    height: auto;
+    min-height: 100svh;
+    overflow: visible;
   }
 
   .mobile-bar {
@@ -1870,7 +1970,12 @@ html[dir="rtl"] .back-link span {
   }
 
   .main {
-    padding: 1.15rem max(1rem, env(safe-area-inset-right)) 2rem max(1rem, env(safe-area-inset-left));
+    padding: 0.85rem max(0.75rem, env(safe-area-inset-right)) 1.25rem max(0.75rem, env(safe-area-inset-left));
+  }
+
+  .overview-layout,
+  .detail-layout {
+    grid-template-columns: 1fr;
   }
 
   .page-head .btn,
@@ -2885,17 +2990,31 @@ html[dir="rtl"] .back-link span {
   align-items: start;
 }
 
+.studio-shell.is-fill {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  width: 100%;
+  min-height: 0;
+}
+
 .studio-shell.is-immersive {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  min-height: calc(100svh - 3.4rem);
+  gap: 0.55rem;
+  height: 100%;
+  min-height: 0;
+  padding: 0.65rem 0.7rem 0.7rem;
+  background:
+    radial-gradient(circle at 12% 0%, color-mix(in srgb, var(--brand-orange) 10%, transparent), transparent 22rem),
+    radial-gradient(circle at 100% 100%, color-mix(in srgb, var(--brand-purple) 14%, transparent), transparent 24rem),
+    color-mix(in srgb, var(--brand-off-white) 88%, var(--tint-base));
 }
 
 .studio-board {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(20rem, 24.5rem);
-  gap: 1.35rem;
+  grid-template-columns: minmax(0, 1fr) minmax(22rem, 28rem);
+  gap: 0.85rem;
   align-items: stretch;
   flex: 1;
   min-height: 0;
@@ -2904,25 +3023,35 @@ html[dir="rtl"] .back-link span {
 .studio-phone-col {
   display: flex;
   min-width: 0;
+  min-height: 0;
   justify-content: center;
+  align-items: stretch;
   gap: 1rem;
+  padding: 0.85rem;
+  border: 1px solid var(--brand-line);
+  border-radius: calc(var(--radius) + 0.15rem);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--brand-purple-deep) 10%, var(--tint-base)), color-mix(in srgb, var(--brand-cream) 70%, var(--tint-base)));
 }
 
 .studio-phone-col.is-split {
   justify-content: center;
   overflow-x: auto;
-  padding-block-end: 0.4rem;
 }
 
 .studio-phone-col .social-phone-preview.is-studio {
-  width: min(100%, 34rem);
-  height: min(calc(100svh - 8.1rem), 70rem);
+  height: 100%;
+  width: auto;
+  max-width: 100%;
+  aspect-ratio: 9 / 19.5;
 }
 
 .studio-phone-col.is-split .social-phone-preview.is-studio {
   flex: 0 0 auto;
-  width: min(100%, 19.5rem);
-  height: min(calc(100svh - 8.1rem), 58rem);
+  height: 100%;
+  width: auto;
+  max-width: calc(50% - 0.5rem);
+  aspect-ratio: 9 / 19.5;
 }
 
 .social-phone-preview.is-studio.is-focus .social-phone-bezel.is-studio {
@@ -2937,10 +3066,33 @@ html[dir="rtl"] .back-link span {
 }
 
 .studio-rail {
-  display: grid;
-  gap: 0.9rem;
-  align-content: start;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.studio-rail-compose,
+.studio-composer {
+  flex: 0 0 auto;
+}
+
+.studio-rail-posts {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.studio-rail-posts.stack {
+  display: flex;
+  flex-direction: column;
+}
+
+.studio-rail-posts .studio-ig-list {
+  flex: 1;
+  min-height: 0;
 }
 
 .studio-rail-head {
@@ -2983,8 +3135,9 @@ html[dir="rtl"] .back-link span {
   margin: 0;
   padding: 0;
   list-style: none;
-  max-height: min(38rem, 52vh);
+  max-height: none;
   overflow: auto;
+  flex: 1;
 }
 
 .studio-ig-list .social-phone-feed-post {
@@ -3131,9 +3284,22 @@ html[dir="rtl"] .back-link span {
     position: static;
   }
 
-  .studio-phone-col .social-phone-preview.is-studio {
-    width: min(100%, 28rem);
-    height: min(82svh, 54rem);
+  .studio-shell.is-immersive {
+    height: auto;
+    min-height: 100%;
+    overflow: auto;
+  }
+
+  .studio-phone-col {
+    min-height: min(78svh, 46rem);
+  }
+
+  .studio-phone-col .social-phone-preview.is-studio,
+  .studio-phone-col.is-split .social-phone-preview.is-studio {
+    width: min(100%, 22rem);
+    height: min(78svh, 46rem);
+    max-width: 100%;
+    aspect-ratio: auto;
   }
 
   .studio-phone-col.is-split .social-phone-preview.is-studio {
@@ -3898,7 +4064,9 @@ div.ig-studio-tile {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 0.45rem;
-  padding: 1rem;
+  width: 100%;
+  min-height: calc(100svh - 11rem);
+  padding: 0.85rem;
 }
 
 .social-calendar-day {
@@ -3966,7 +4134,8 @@ html[lang="ar"] .form-dialog-title {
 
 .social-inbox-list {
   display: grid;
-  gap: 0.9rem;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr));
 }
 
 .social-inbox-empty {
@@ -4056,9 +4225,13 @@ html[lang="ar"] .form-dialog-title {
 }
 
 @media (max-width: 900px) {
-  .social-compose,
-  .social-calendar {
+  .social-compose {
     grid-template-columns: 1fr;
+  }
+
+  .social-calendar {
+    min-height: 0;
+    overflow-x: auto;
   }
 
   .social-inbox-source {
@@ -4113,11 +4286,12 @@ html[dir="rtl"] .breadcrumb-sep {
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
-  max-width: 46rem;
+  width: 100%;
+  max-width: none;
 }
 
 .form-page.is-wide {
-  max-width: 68rem;
+  max-width: none;
 }
 
 .form-page-head {
@@ -4560,6 +4734,18 @@ html[dir="rtl"] .placement-tile-toggle[data-state="checked"] .placement-tile-tog
   margin-inline-start: auto;
 }
 
+.social-accounts-layout {
+  display: grid;
+  gap: 0.85rem;
+  align-items: start;
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr) minmax(18rem, 26rem);
+}
+
+.social-accounts-layout:not(:has(.social-staff-card)) {
+  grid-template-columns: 1fr;
+}
+
 .social-account-tile-grid {
   display: grid;
   gap: 0.9rem;
@@ -4990,6 +5176,7 @@ html[dir="rtl"] .placement-tile-toggle[data-state="checked"] .placement-tile-tog
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
+  flex-shrink: 0;
   margin-bottom: 0.4rem;
 }
 
@@ -5429,9 +5616,10 @@ html[dir="rtl"] .placement-tile-toggle[data-state="checked"] .placement-tile-tog
 
 .lt-admin {
   display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(18rem, 0.95fr);
-  gap: 1.2rem;
+  grid-template-columns: minmax(0, 1.2fr) minmax(20rem, 26rem);
+  gap: 0.85rem;
   align-items: start;
+  width: 100%;
 }
 
 .lt-admin-list {
@@ -5511,9 +5699,10 @@ html[dir="rtl"] .placement-tile-toggle[data-state="checked"] .placement-tile-tog
 
 .qr-studio {
   display: grid;
-  grid-template-columns: minmax(16rem, 0.85fr) minmax(0, 1.15fr);
-  gap: 1.2rem;
+  grid-template-columns: minmax(18rem, 24rem) minmax(0, 1fr);
+  gap: 0.85rem;
   align-items: start;
+  width: 100%;
 }
 
 .qr-phone-col {
@@ -5641,7 +5830,8 @@ html[dir="rtl"] .placement-tile-toggle[data-state="checked"] .placement-tile-tog
 @media (max-width: 960px) {
   .studio-cards,
   .lt-admin,
-  .qr-studio {
+  .qr-studio,
+  .social-accounts-layout {
     grid-template-columns: 1fr 1fr;
   }
 }
@@ -5650,7 +5840,9 @@ html[dir="rtl"] .placement-tile-toggle[data-state="checked"] .placement-tile-tog
   .studio-cards,
   .lt-admin,
   .qr-studio,
-  .studio-platform-grid {
+  .studio-platform-grid,
+  .social-accounts-layout,
+  .social-inbox-list {
     grid-template-columns: 1fr;
   }
 

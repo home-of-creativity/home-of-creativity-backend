@@ -340,7 +340,7 @@ export function SocialHome({ locale, t }: { locale: Locale; t: (c: { ar: string;
               </div>
             ) : null}
             {canCreate ? (
-              <section className="card stack">
+              <section className="card stack studio-rail-compose">
                 <h2 className="section-title">{t(copy.socialCreatePost)}</h2>
                 <label className="field-label">
                   {t(copy.socialCaptionOptional)}
@@ -375,7 +375,7 @@ export function SocialHome({ locale, t }: { locale: Locale; t: (c: { ar: string;
                 </button>
               </section>
             ) : null}
-            <section className="card stack">
+            <section className="card stack studio-rail-posts">
               <header className="studio-rail-head">
                 <h2 className="section-title">{t(copy.socialAccountPosts)}</h2>
                 <span className="muted">{t(copy.socialPostsCount).replace("{count}", String(listed.length))}</span>

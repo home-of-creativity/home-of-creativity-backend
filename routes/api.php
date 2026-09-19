@@ -87,6 +87,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
     Route::post('requests/{service_request}/quotation', [AdminServiceRequestController::class, 'sendQuotation']);
     Route::post('requests/{service_request}/confirm-payment', [AdminServiceRequestController::class, 'confirmPayment']);
     Route::post('requests/{service_request}/retry-gemini', [AdminServiceRequestController::class, 'retryGemini']);
+    Route::post('requests/{service_request}/ensure-drive-folder', [AdminServiceRequestController::class, 'ensureDriveFolder']);
     Route::post('requests/{service_request}/re-request-receipt', [AdminServiceRequestController::class, 'reRequestReceipt']);
     Route::post('requests/{service_request}/renew', [AdminServiceRequestController::class, 'renew']);
     Route::get('ops-settings', [AdminServiceRequestController::class, 'opsSettings']);

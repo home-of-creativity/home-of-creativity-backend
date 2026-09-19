@@ -137,6 +137,8 @@ function Shell({
 
   if (!user?.is_admin) return <Navigate to="/" replace />;
 
+  const isSocial = location.pathname.startsWith("/social");
+
   return (
     <div className={navOpen ? "app-shell nav-open" : "app-shell"}>
       <a className="skip-link" href="#main-content">
@@ -260,9 +262,10 @@ function Shell({
           </div>
         </div>
       </aside>
-      <main className="main" id="main-content" tabIndex={-1}>
+      <main className={isSocial ? "main is-social" : "main"} id="main-content" tabIndex={-1}>
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
+            className="main-pane"
             key={location.pathname}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}

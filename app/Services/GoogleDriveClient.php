@@ -39,7 +39,9 @@ class GoogleDriveClient
                 return null;
             }
 
-            return $this->findOrCreateFolder($token, $companyFolderId, $this->safeName($taskFolderName));
+            $taskFolderId = $this->findOrCreateFolder($token, $companyFolderId, $this->safeName($taskFolderName));
+
+            return $taskFolderId ?? $companyFolderId;
         } catch (Throwable $exception) {
             Log::warning('Google Drive ensureFolderPath failed.', [
                 'error' => $exception->getMessage(),
@@ -209,7 +211,7 @@ class GoogleDriveClient
             ->timeout(20)
             ->acceptJson()
             ->asJson()
-            ->post(self::API.'/files?supportsAllDrives=true', [
+            ->post(self::API.'/files?supportsAllDrives=true&fields=id', [
                 'name' => $name,
                 'mimeType' => 'application/vnd.google-apps.folder',
                 'parents' => [$parentId],

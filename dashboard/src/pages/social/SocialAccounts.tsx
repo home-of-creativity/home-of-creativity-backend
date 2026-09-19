@@ -209,6 +209,7 @@ export function SocialAccounts({ locale, t }: { locale: Locale; t: (c: { ar: str
       ) : null}
       {loading ? <p className="muted">{t(copy.loading)}</p> : null}
       {!loading && pages.length === 0 ? <p className="card social-inbox-empty">{t(copy.socialNoAccounts)}</p> : null}
+      <div className="social-accounts-layout">
       <div className="social-account-tile-grid">
         {pages.map((page) => (
           <article key={page.key} className="social-account-tile">
@@ -322,6 +323,7 @@ export function SocialAccounts({ locale, t }: { locale: Locale; t: (c: { ar: str
           </div>
         </section>
       ) : null}
+      </div>
     </SocialChrome>
   );
 }

@@ -173,6 +173,7 @@ export const copy = {
   quotationDecision: { ar: "قرار العرض", en: "Quotation decision" },
   contactTelegram: { ar: "تواصل خاص عبر تيليجرام", en: "Private Telegram chat" },
   openDriveFolder: { ar: "فتح المجلد", en: "Open folder" },
+  createDriveFolder: { ar: "إنشاء مجلد Drive", en: "Create Drive folder" },
   attachments: { ar: "مرفقات الطلب", en: "Request attachments" },
   viewReceipt: { ar: "عرض الوصل", en: "View receipt" },
   viewAttachment: { ar: "عرض المرفق", en: "View attachment" },

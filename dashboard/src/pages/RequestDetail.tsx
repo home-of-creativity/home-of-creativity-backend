@@ -37,6 +37,7 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
   const [receiptReason, setReceiptReason] = useState("");
   const [receivedAmount, setReceivedAmount] = useState("");
   const [requiresFullPayment, setRequiresFullPayment] = useState(false);
+  const [creatingDrive, setCreatingDrive] = useState(false);
 
   useEffect(() => {
     if (!receiptUrl) return;
@@ -183,6 +184,22 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
     }
   }
 
+  async function ensureDriveFolder() {
+    if (!item || creatingDrive) return;
+    setError("");
+    setNotice("");
+    setCreatingDrive(true);
+    try {
+      const res = await api.ensureDriveFolder(item.id);
+      setItem(res.data);
+      setNotice(res.message ?? "");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t(copy.saveFailed));
+    } finally {
+      setCreatingDrive(false);
+    }
+  }
+
   async function renew() {
     if (!item) return;
     setError("");
@@ -237,6 +254,8 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
           {item.allows_renewal ? t(copy.renewalOn) : t(copy.renewalOff)}
         </span>
       </p>
+      <div className="detail-layout">
+      <div className="detail-main">
       <section className="card detail-card">
         <p>{item.description}</p>
         <dl className="meta-grid">
@@ -340,111 +359,126 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
           </div>
           <div>
             <dt>{t(copy.driveFolder)}</dt>
-            <dd dir="ltr">
-              {item.google_drive_folder_url || item.google_drive_folder_id ? (
-                <a
-                  href={item.google_drive_folder_url ?? `https://drive.google.com/drive/folders/${item.google_drive_folder_id}`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
+            <dd>
+              {item.google_drive_folder_url ? (
+                <a href={item.google_drive_folder_url} target="_blank" rel="noreferrer">
                   {t(copy.openDriveFolder)}
                 </a>
               ) : (
                 "—"
               )}
+              {!item.google_drive_folder_ready &&
+              (item.paid_at || item.status === "payment_confirmed" || Number(item.amount_paid ?? 0) > 0) ? (
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={creatingDrive}
+                  onClick={() => void ensureDriveFolder()}
+                >
+                  {t(copy.createDriveFolder)}
+                </button>
+              ) : null}
             </dd>
           </div>
         </dl>
-        {item.quotations?.length ? (
-          <div className="briefs">
-            <h3>{t(copy.sendQuotation)}</h3>
-            <ul>
-              {item.quotations.map((quote) => (
-                <li key={quote.id}>
-                  v{quote.version} · {quote.amount} USD
-                  {quote.sent_at ? ` · ${quote.sent_at}` : ""}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-        {item.quotation_decisions?.length ? (
-          <div className="briefs">
-            <h3>{t(copy.quotationDecision)}</h3>
-            <ul>
-              {item.quotation_decisions.map((decision) => (
-                <li key={decision.id}>
-                  {decision.decision === "approved" ? t(copy.approved) : t(copy.rejected)}
-                  {item.client?.name ? ` · ${item.client.name}` : ""}
-                  {decision.reason ? ` · ${decision.reason}` : ""}
-                  {item.client?.telegram_url ? (
-                    <>
-                      {" · "}
-                      <a href={item.client.telegram_url} rel="noreferrer">
-                        {t(copy.contactTelegram)}
-                      </a>
-                    </>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-        {item.clickup_tasks?.length ? (
-          <div className="briefs">
-            <h3>{t(copy.clickupTasks)}</h3>
-            <ul>
-              {item.clickup_tasks.map((task) => (
-                <li key={task.integration_key}>
-                  <strong>{task.task_type}</strong>
-                  {task.clickup_task_id ? <span dir="ltr"> · {task.clickup_task_id}</span> : null}
-                  {task.clickup_url ? (
-                    <a href={task.clickup_url} target="_blank" rel="noreferrer">
-                      {" "}
-                      · Open
-                    </a>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-        {attachments.length ? (
-          <div className="briefs">
-            <h3>{t(copy.attachments)}</h3>
-            <ul className="file-list">
-              {attachments.map((file) => (
-                <li key={file.id}>
-                  <span>{file.original_name}</span>
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    onClick={() => void api.receiptBlob(item.id, file.id).then((blob) => setReceiptUrl(URL.createObjectURL(blob)))}
-                  >
-                    {t(copy.viewAttachment)}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-        {showReceipts && receipts.length ? (
-          <div className="briefs">
-            <h3>{t(copy.receipts)}</h3>
-            <ul className="file-list">
-              {receipts.map((file) => (
-                <li key={file.id}>
-                  <span>{file.original_name}</span>
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    onClick={() => void api.receiptBlob(item.id, file.id).then((blob) => setReceiptUrl(URL.createObjectURL(blob)))}
-                  >
-                    {t(copy.viewReceipt)}
-                  </button>
-                </li>
-              ))}
-            </ul>
+        {(item.quotations?.length ||
+          item.quotation_decisions?.length ||
+          item.clickup_tasks?.length ||
+          attachments.length ||
+          (showReceipts && receipts.length)) ? (
+          <div className="detail-briefs">
+            {item.quotations?.length ? (
+              <div className="briefs">
+                <h3>{t(copy.sendQuotation)}</h3>
+                <ul>
+                  {item.quotations.map((quote) => (
+                    <li key={quote.id}>
+                      v{quote.version} · {quote.amount} USD
+                      {quote.sent_at ? ` · ${quote.sent_at}` : ""}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {item.quotation_decisions?.length ? (
+              <div className="briefs">
+                <h3>{t(copy.quotationDecision)}</h3>
+                <ul>
+                  {item.quotation_decisions.map((decision) => (
+                    <li key={decision.id}>
+                      {decision.decision === "approved" ? t(copy.approved) : t(copy.rejected)}
+                      {item.client?.name ? ` · ${item.client.name}` : ""}
+                      {decision.reason ? ` · ${decision.reason}` : ""}
+                      {item.client?.telegram_url ? (
+                        <>
+                          {" · "}
+                          <a href={item.client.telegram_url} rel="noreferrer">
+                            {t(copy.contactTelegram)}
+                          </a>
+                        </>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {item.clickup_tasks?.length ? (
+              <div className="briefs">
+                <h3>{t(copy.clickupTasks)}</h3>
+                <ul>
+                  {item.clickup_tasks.map((task) => (
+                    <li key={task.integration_key}>
+                      <strong>{task.task_type}</strong>
+                      {task.clickup_task_id ? <span dir="ltr"> · {task.clickup_task_id}</span> : null}
+                      {task.clickup_url ? (
+                        <a href={task.clickup_url} target="_blank" rel="noreferrer">
+                          {" "}
+                          · Open
+                        </a>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {attachments.length ? (
+              <div className="briefs">
+                <h3>{t(copy.attachments)}</h3>
+                <ul className="file-list">
+                  {attachments.map((file) => (
+                    <li key={file.id}>
+                      <span>{file.original_name}</span>
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        onClick={() => void api.receiptBlob(item.id, file.id).then((blob) => setReceiptUrl(URL.createObjectURL(blob)))}
+                      >
+                        {t(copy.viewAttachment)}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {showReceipts && receipts.length ? (
+              <div className="briefs">
+                <h3>{t(copy.receipts)}</h3>
+                <ul className="file-list">
+                  {receipts.map((file) => (
+                    <li key={file.id}>
+                      <span>{file.original_name}</span>
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        onClick={() => void api.receiptBlob(item.id, file.id).then((blob) => setReceiptUrl(URL.createObjectURL(blob)))}
+                      >
+                        {t(copy.viewReceipt)}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </div>
         ) : null}
       </section>
@@ -533,6 +567,8 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
           </form>
         </section>
       ) : null}
+      </div>
+      <aside className="detail-aside">
       <section className="card action-card">
         <h2 className="form-title">{t(copy.status)}</h2>
         <form className="toolbar" onSubmit={onSave}>
@@ -614,6 +650,8 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
           {t(copy.qrManage)}
         </Link>
       </section>
+      </aside>
+      </div>
       {notice ? <p className="notice notice-info">{notice}</p> : null}
       {error ? <p className="error">{error}</p> : null}
       {receiptUrl ? (

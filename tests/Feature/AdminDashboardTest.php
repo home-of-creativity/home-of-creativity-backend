@@ -908,6 +908,7 @@ class AdminDashboardTest extends TestCase
             ->assertJsonPath('data.odoo_quotation_live.state', 'sent')
             ->assertJsonPath('data.odoo_invoice_live.state', 'posted')
             ->assertJsonPath('data.google_drive_folder_url', 'https://drive.google.com/drive/folders/folder-abc')
+            ->assertJsonPath('data.google_drive_folder_ready', true)
             ->assertJsonPath('data.client.telegram_url', 'tg://user?id=213309826');
 
         $this->assertEquals(250.0, (float) $serviceRequest->fresh()->quotation_amount);
@@ -936,6 +937,51 @@ class AdminDashboardTest extends TestCase
             ->assertJsonPath('data.google_drive_folder_url', 'https://drive.google.com/drive/folders/folder-show');
 
         $this->assertSame('folder-show', $serviceRequest->fresh()?->google_drive_folder_id);
+    }
+
+    public function test_admin_request_show_links_parent_drive_when_request_folder_missing(): void
+    {
+        config(['services.google.drive_parent_folder_id' => 'parent-hoc']);
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        $serviceRequest = ServiceRequest::factory()->create([
+            'status' => RequestStatus::PaymentConfirmed,
+            'paid_at' => now(),
+            'google_drive_folder_id' => null,
+        ]);
+
+        $this->getJson("/api/admin/requests/{$serviceRequest->id}")
+            ->assertOk()
+            ->assertJsonPath('data.google_drive_folder_ready', false)
+            ->assertJsonPath('data.google_drive_folder_url', 'https://drive.google.com/drive/folders/parent-hoc');
+    }
+
+    public function test_admin_can_ensure_drive_folder(): void
+    {
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        $serviceRequest = ServiceRequest::factory()->create([
+            'status' => RequestStatus::PaymentConfirmed,
+            'paid_at' => now(),
+            'google_drive_folder_id' => null,
+            'title' => 'هوية',
+        ]);
+
+        $this->mock(GoogleDriveClient::class, function ($mock): void {
+            $mock->shouldReceive('configured')->andReturn(true);
+            $mock->shouldReceive('ensureFolderPath')->once()->andReturn('folder-ensured');
+        });
+
+        $this->postJson("/api/admin/requests/{$serviceRequest->id}/ensure-drive-folder")
+            ->assertOk()
+            ->assertJsonPath('data.google_drive_folder_ready', true)
+            ->assertJsonPath('data.google_drive_folder_id', 'folder-ensured')
+            ->assertJsonPath('data.google_drive_folder_url', 'https://drive.google.com/drive/folders/folder-ensured');
     }
 
     public function test_admin_request_show_posts_and_pays_draft_odoo_invoice_when_locally_paid(): void

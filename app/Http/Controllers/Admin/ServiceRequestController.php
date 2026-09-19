@@ -177,6 +177,19 @@ class ServiceRequestController extends Controller
             ->additional(['message' => 'Gemini retry queued.']);
     }
 
+    public function ensureDriveFolder(ServiceRequest $serviceRequest, EnsureRequestDriveFolder $ensureRequestDriveFolder): ServiceRequestResource
+    {
+        $serviceRequest = $ensureRequestDriveFolder->handle($serviceRequest);
+        abort_if(
+            blank($serviceRequest->google_drive_folder_id),
+            422,
+            'Google Drive folder could not be created.',
+        );
+
+        return ServiceRequestResource::make($serviceRequest->load('client'))
+            ->additional(['message' => 'Drive folder ready.']);
+    }
+
     public function reRequestReceipt(Request $request, ServiceRequest $serviceRequest, ReRequestReceipt $reRequestReceipt): ServiceRequestResource
     {
         $validated = $request->validate([

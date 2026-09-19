@@ -33,7 +33,7 @@ export function SocialChrome({ t, user, title, lede, actions, immersive, childre
   const pageSummary = selectedPage ? pageChannelSummary(selectedPage, t) : selectedAccount ? platformLabel(selectedAccount.platform, t) : "";
 
   return (
-    <div className={immersive ? "studio-shell is-immersive" : "studio-shell"}>
+    <div className={immersive ? "studio-shell is-fill is-immersive" : "studio-shell is-fill"}>
       <div className="studio-top">
         <nav className="studio-nav" aria-label={t(copy.navSocial)}>
           {visible.map((tab) => (

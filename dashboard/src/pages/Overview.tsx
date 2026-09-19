@@ -62,62 +62,64 @@ export function Overview({ t }: { locale: Locale; t: (c: { ar: string; en: strin
     <>
       <PageHeader eyebrow={t(copy.brandMark)} title={t(copy.overview)} lede={t(copy.overviewLede)} />
 
-      <div className="cards">
-        <StatCard icon={<IconClients aria-hidden />} label={t(copy.clientsCount)} value={data.clients} />
-        <StatCard icon={<IconRequests aria-hidden />} label={t(copy.requestsCount)} value={data.requests} />
-      </div>
-
-      <section className="panel recent-panel">
-        <div className="panel-head">
-          <h2>{t(copy.status)}</h2>
+      <div className="overview-layout">
+        <div className="overview-side">
+          <div className="cards">
+            <StatCard icon={<IconClients aria-hidden />} label={t(copy.clientsCount)} value={data.clients} />
+            <StatCard icon={<IconRequests aria-hidden />} label={t(copy.requestsCount)} value={data.requests} />
+          </div>
+          <section className="panel recent-panel">
+            <div className="panel-head">
+              <h2>{t(copy.status)}</h2>
+            </div>
+            <div style={{ padding: "0.5rem 1.15rem 1.25rem" }}>
+              <DonutStat slices={slices} total={statusTotal} centerLabel={t(copy.status)} emptyLabel={t(copy.empty)} />
+            </div>
+          </section>
         </div>
-        <div style={{ padding: "0.5rem 1.15rem 1.25rem" }}>
-          <DonutStat slices={slices} total={statusTotal} centerLabel={t(copy.status)} emptyLabel={t(copy.empty)} />
-        </div>
-      </section>
-
-      <section className="panel recent-panel">
-        <div className="panel-head">
-          <h2>{t(copy.recent)}</h2>
-          <Link className="btn btn-ghost" to="/requests">
-            {t(copy.viewAll)}
-          </Link>
-        </div>
-        <div className="table-wrap table-flush">
-          <table>
-            <thead>
-              <tr>
-                <th>{t(copy.number)}</th>
-                <th>{t(copy.title)}</th>
-                <th>{t(copy.status)}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recent.length === 0 ? (
+        <section className="panel recent-panel overview-recent">
+          <div className="panel-head">
+            <h2>{t(copy.recent)}</h2>
+            <Link className="btn btn-ghost" to="/requests">
+              {t(copy.viewAll)}
+            </Link>
+          </div>
+          <div className="table-wrap table-flush">
+            <table>
+              <thead>
                 <tr>
-                  <td colSpan={3}>{t(copy.empty)}</td>
+                  <th>{t(copy.number)}</th>
+                  <th>{t(copy.title)}</th>
+                  <th>{t(copy.status)}</th>
                 </tr>
-              ) : (
-                recent.map((item) => (
-                  <tr key={item.id}>
-                    <td>
-                      <Link className="table-link" to={`/requests/${item.id}`}>
-                        {item.number}
-                      </Link>
-                    </td>
-                    <td>{item.title}</td>
-                    <td>
-                      <span className={`status status-${item.status}`}>
-                        {t(statuses[item.status] ?? { ar: item.status, en: item.status })}
-                      </span>
-                    </td>
+              </thead>
+              <tbody>
+                {recent.length === 0 ? (
+                  <tr>
+                    <td colSpan={3}>{t(copy.empty)}</td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
+                ) : (
+                  recent.map((item) => (
+                    <tr key={item.id}>
+                      <td>
+                        <Link className="table-link" to={`/requests/${item.id}`}>
+                          {item.number}
+                        </Link>
+                      </td>
+                      <td>{item.title}</td>
+                      <td>
+                        <span className={`status status-${item.status}`}>
+                          {t(statuses[item.status] ?? { ar: item.status, en: item.status })}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
     </>
   );
 }

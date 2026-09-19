@@ -124,13 +124,18 @@ class GoogleServiceAccount
             return null;
         }
 
-        $json = (string) $raw;
+        $json = trim((string) $raw);
         if (is_file($json)) {
             $contents = @file_get_contents($json);
             if ($contents === false || $contents === '') {
                 return null;
             }
             $json = $contents;
+        } elseif (! str_starts_with(ltrim($json), '{')) {
+            $decodedB64 = base64_decode($json, true);
+            if (is_string($decodedB64) && str_starts_with(ltrim($decodedB64), '{')) {
+                $json = $decodedB64;
+            }
         }
 
         try {

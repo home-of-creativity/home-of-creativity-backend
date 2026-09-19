@@ -119,6 +119,13 @@ class ServiceRequest extends Model
         return $this->hasMany(DriveDelivery::class, 'request_id');
     }
 
+    public function googleDriveFolderUrl(): ?string
+    {
+        $id = $this->google_drive_folder_id ?: config('services.google.drive_parent_folder_id');
+
+        return filled($id) ? 'https://drive.google.com/drive/folders/'.$id : null;
+    }
+
     public function hasRemainingBalance(): bool
     {
         return (float) ($this->amount_remaining ?? 0) > 0.009;

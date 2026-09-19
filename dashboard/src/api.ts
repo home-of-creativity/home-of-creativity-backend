@@ -249,6 +249,7 @@ export type ServiceRequest = {
   subscription_starts_at?: string | null;
   subscription_ends_at?: string | null;
   google_drive_folder_id?: string | null;
+  google_drive_folder_ready?: boolean;
   google_drive_folder_url?: string | null;
   receipt_reupload_required?: boolean;
   receipt_reupload_reason?: string | null;
@@ -613,6 +614,9 @@ export const api = {
   },
   retryGemini(id: number) {
     return request<Envelope<ServiceRequest>>(`/admin/requests/${id}/retry-gemini`, { method: "POST" });
+  },
+  ensureDriveFolder(id: number) {
+    return request<Envelope<ServiceRequest>>(`/admin/requests/${id}/ensure-drive-folder`, { method: "POST" });
   },
   reRequestReceipt(id: number, reason?: string) {
     return request<Envelope<ServiceRequest>>(`/admin/requests/${id}/re-request-receipt`, {
