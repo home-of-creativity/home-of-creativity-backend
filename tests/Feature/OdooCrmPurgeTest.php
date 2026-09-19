@@ -107,7 +107,9 @@ class OdooCrmPurgeTest extends TestCase
                 'locale' => 'ar',
             ])
             ->assertOk()
-            ->assertJsonPath('data.profile_complete', true);
+            ->assertJsonPath('data.profile_complete', true)
+            ->assertJsonPath('data.odoo_lead_id', '77')
+            ->assertJsonPath('data.odoo_stage_name', 'تلغرام');
 
         Http::assertSent(function (Request $request): bool {
             $args = $request->data()['params']['args'] ?? [];
@@ -118,7 +120,7 @@ class OdooCrmPurgeTest extends TestCase
             $vals = $args[5][0][0] ?? [];
 
             return ($vals['stage_id'] ?? null) === 11
-                && ! array_key_exists('team_id', $vals)
+                && ($vals['team_id'] ?? null) === 21
                 && ($vals['type'] ?? null) === 'opportunity';
         });
     }

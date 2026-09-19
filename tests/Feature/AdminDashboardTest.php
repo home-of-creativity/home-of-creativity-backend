@@ -386,6 +386,46 @@ class AdminDashboardTest extends TestCase
         });
     }
 
+    public function test_admin_clients_index_pushes_complete_telegram_clients_to_telegram_pipeline(): void
+    {
+        Cache::flush();
+        Http::preventStrayRequests();
+        $this->fakeOdooDocuments();
+        Http::fake($this->odooDocumentsHttpFake());
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        Client::factory()->create([
+            'name' => 'AmmarHeroo',
+            'company_name' => 'Prodesign',
+            'phone' => '0950000700',
+            'telegram_user_id' => '213309826',
+            'odoo_partner_id' => null,
+            'odoo_lead_id' => null,
+            'odoo_stage_name' => null,
+        ]);
+
+        $this->getJson('/api/admin/clients')
+            ->assertOk()
+            ->assertJsonPath('data.0.odoo_lead_id', '77')
+            ->assertJsonPath('data.0.odoo_stage_name', 'تلغرام');
+
+        Http::assertSent(function (Request $request): bool {
+            $args = $request->data()['params']['args'] ?? [];
+            if (($args[3] ?? null) !== 'crm.lead' || ($args[4] ?? null) !== 'create') {
+                return false;
+            }
+
+            $vals = $args[5][0][0] ?? [];
+
+            return ($vals['stage_id'] ?? null) === 11
+                && ($vals['team_id'] ?? null) === 21
+                && ($vals['type'] ?? null) === 'opportunity';
+        });
+    }
+
     public function test_admin_clients_index_pulls_live_odoo_crm_fields(): void
     {
         Cache::flush();

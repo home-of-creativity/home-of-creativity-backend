@@ -56,7 +56,7 @@ trait FakesOdooDocuments
                     $model === 'hr.employee' && $action === 'unlink' => Http::response(['jsonrpc' => '2.0', 'result' => true], 200),
                     $model === 'res.currency' && $action === 'search_read' => Http::response(['jsonrpc' => '2.0', 'result' => [['id' => 1, 'name' => 'SYP']]], 200),
                     $model === 'crm.stage' && $action === 'search_read' => Http::response(['jsonrpc' => '2.0', 'result' => [
-                        ['id' => 11, 'name' => 'تلغرام'],
+                        ['id' => 11, 'name' => 'تلغرام', 'team_id' => [21, 'تلغرام']],
                         ['id' => 12, 'name' => 'خسارة'],
                         ['id' => 13, 'name' => 'تم الفوز بها'],
                     ]], 200),

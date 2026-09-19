@@ -32,8 +32,25 @@ class ImportOdooCrmClients
             ];
         }
 
-        $fromCrm = $this->importFromCrmLeads($limit);
-        $fromPartners = $this->syncOdooPartners->handle($limit);
+        $fromCrm = ['synced' => 0, 'created' => 0, 'updated' => 0];
+        $fromPartners = ['synced' => 0, 'created' => 0, 'updated' => 0, 'pushed' => 0];
+
+        try {
+            $fromCrm = $this->importFromCrmLeads($limit);
+        } catch (\Throwable $exception) {
+            Log::warning('Odoo CRM lead import failed.', [
+                'error' => $exception->getMessage(),
+            ]);
+        }
+
+        try {
+            $fromPartners = $this->syncOdooPartners->handle($limit);
+        } catch (\Throwable $exception) {
+            Log::warning('Odoo partner import failed.', [
+                'error' => $exception->getMessage(),
+            ]);
+        }
+
         $pushedLeads = $this->pushMissingLeads();
 
         return [

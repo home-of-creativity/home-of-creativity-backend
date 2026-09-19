@@ -75,10 +75,10 @@ class PushClientLeadToOdoo
             ]);
 
             if ($leadId > 0) {
-                $snapshot = $this->odoo->leadSnapshot($leadId);
+                $snapshot = $this->odoo->leadSnapshot($leadId) ?? [];
                 $client->forceFill([
                     'odoo_lead_id' => (string) $leadId,
-                    'odoo_stage_name' => $snapshot['stage'] ?? 'تلغرام',
+                    'odoo_stage_name' => filled($snapshot['stage'] ?? null) ? (string) $snapshot['stage'] : 'تلغرام',
                 ])->save();
             }
         } catch (\Throwable $exception) {
@@ -94,6 +94,7 @@ class PushClientLeadToOdoo
     private function writeLead(Client $client): void
     {
         try {
+            $pipeline = $this->odoo->resolveTelegramPipeline();
             $this->odoo->writeRecord('crm.lead', (string) $client->odoo_lead_id, array_filter([
                 'name' => $this->leadName($client),
                 'contact_name' => $client->name,
@@ -102,7 +103,13 @@ class PushClientLeadToOdoo
                 'mobile' => $client->phone,
                 'email_from' => $client->email,
                 'partner_id' => filled($client->odoo_partner_id) ? (int) $client->odoo_partner_id : null,
+                'stage_id' => $pipeline['stage_id'],
+                'team_id' => $pipeline['team_id'],
             ], fn (mixed $value): bool => $value !== null && $value !== ''));
+
+            if (blank($client->odoo_stage_name)) {
+                $client->forceFill(['odoo_stage_name' => 'تلغرام'])->save();
+            }
         } catch (\Throwable $exception) {
             Log::warning('Odoo CRM lead update failed for client.', [
                 'client_id' => $client->id,

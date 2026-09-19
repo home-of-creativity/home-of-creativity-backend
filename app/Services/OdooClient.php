@@ -223,21 +223,12 @@ class OdooClient
      */
     public function createCrmLead(array $values): int
     {
-        $stageId = $values['stage_id'] ?? null;
-        $teamId = $values['team_id'] ?? null;
-        if ($stageId === null) {
-            try {
-                $stage = $this->findCrmStage('تلغرام');
-                if ($stage !== null) {
-                    $stageId = $stage['id'];
-                    $teamId ??= $stage['team_id'];
-                } else {
-                    $stageId = $this->ensureCrmStage('تلغرام');
-                }
-            } catch (Throwable) {
-                $stageId = null;
-            }
-        }
+        $pipeline = $this->resolveTelegramPipeline(
+            isset($values['team_id']) ? (int) $values['team_id'] : null,
+            isset($values['stage_id']) ? (int) $values['stage_id'] : null,
+        );
+        $teamId = $pipeline['team_id'];
+        $stageId = $pipeline['stage_id'];
 
         $tagIds = $values['tag_ids'] ?? null;
         if (is_array($tagIds) && $tagIds !== [] && ! is_array($tagIds[0] ?? null)) {
@@ -259,9 +250,51 @@ class OdooClient
             'type' => 'opportunity',
         ], fn (mixed $value): bool => $value !== null && $value !== '');
 
-        $leadId = $this->call('crm.lead', 'create', [$payload]);
+        try {
+            return (int) $this->call('crm.lead', 'create', [$payload]);
+        } catch (Throwable $exception) {
+            unset($payload['type'], $payload['tag_ids']);
 
-        return (int) $leadId;
+            try {
+                return (int) $this->call('crm.lead', 'create', [$payload]);
+            } catch (Throwable) {
+                throw $exception;
+            }
+        }
+    }
+
+    /**
+     * @return array{stage_id: int|null, team_id: int|null}
+     */
+    public function resolveTelegramPipeline(?int $teamId = null, ?int $stageId = null): array
+    {
+        $teamId ??= $this->ensureCrmTeamId('تلغرام');
+        if ($stageId !== null) {
+            return [
+                'stage_id' => $stageId,
+                'team_id' => $teamId,
+            ];
+        }
+
+        try {
+            $stage = $this->findCrmStage('تلغرام', $teamId);
+            if ($stage !== null) {
+                return [
+                    'stage_id' => $stage['id'],
+                    'team_id' => $teamId ?? $stage['team_id'],
+                ];
+            }
+
+            return [
+                'stage_id' => $this->createCrmStage('تلغرام', $teamId),
+                'team_id' => $teamId,
+            ];
+        } catch (Throwable) {
+            return [
+                'stage_id' => $this->ensureCrmStage('تلغرام'),
+                'team_id' => $teamId,
+            ];
+        }
     }
 
     public function ensureCrmStage(string $name): int
@@ -274,21 +307,20 @@ class OdooClient
         return $this->createCrmStage($name);
     }
 
-    public function createCrmStage(string $name): int
+    public function createCrmStage(string $name, ?int $teamId = null): int
     {
-        $existing = $this->findCrmStageId($name);
+        $existing = $this->findCrmStage($name, $teamId);
         if ($existing !== null) {
-            return $existing;
+            return $existing['id'];
         }
 
-        $values = [
+        $values = array_filter([
             'name' => trim($name),
             'sequence' => 1,
-        ];
+            'team_id' => $teamId,
+        ], fn (mixed $value): bool => $value !== null && $value !== '');
 
-        $stageId = $this->call('crm.stage', 'create', [[$values]]);
-
-        return (int) $stageId;
+        return (int) $this->call('crm.stage', 'create', [$values]);
     }
 
     public function ensureCrmTeamId(string $name): ?int
@@ -580,7 +612,7 @@ class OdooClient
             return null;
         }
 
-        if ($rows === []) {
+        if ($rows === [] || ! isset($rows[0]) || ! is_array($rows[0])) {
             return null;
         }
 
@@ -678,53 +710,74 @@ class OdooClient
     /**
      * @return array{id: int, team_id: int|null}|null
      */
-    public function findCrmStage(string $stageName): ?array
+    public function findCrmStage(string $stageName, ?int $preferTeamId = null): ?array
     {
         $normalized = trim($stageName);
         if ($normalized === '') {
             return null;
         }
 
-        $rows = $this->searchRead('crm.stage', [], ['id', 'name', 'team_id'], 200, 0, 'sequence asc');
-        $match = null;
+        try {
+            $rows = $this->searchRead('crm.stage', [], ['id', 'name', 'team_id'], 200, 0, 'sequence asc');
+        } catch (Throwable) {
+            $rows = $this->searchRead('crm.stage', [], ['id', 'name'], 200, 0, 'sequence asc');
+        }
 
+        $matches = [];
         foreach ($rows as $row) {
-            if (trim((string) ($row['name'] ?? '')) === $normalized) {
-                $match = $row;
-                break;
+            $candidate = trim((string) ($row['name'] ?? ''));
+            if ($candidate === $normalized || ($candidate !== '' && mb_stripos($candidate, $normalized) !== false)) {
+                $matches[] = $row;
             }
         }
 
-        if ($match === null) {
-            foreach ($rows as $row) {
-                $candidate = trim((string) ($row['name'] ?? ''));
-                if ($candidate !== '' && mb_stripos($candidate, $normalized) !== false) {
+        if ($matches === []) {
+            return null;
+        }
+
+        $match = $matches[0];
+        if ($preferTeamId !== null) {
+            foreach ($matches as $row) {
+                if ($this->stageTeamId($row) === $preferTeamId) {
                     $match = $row;
                     break;
                 }
             }
         }
 
-        if ($match === null) {
-            return null;
-        }
-
-        $teamId = 0;
-        if (is_array($match['team_id'] ?? null) && isset($match['team_id'][0])) {
-            $teamId = (int) $match['team_id'][0];
-        } elseif (is_numeric($match['team_id'] ?? null)) {
-            $teamId = (int) $match['team_id'];
-        }
+        $teamId = $this->stageTeamId($match);
 
         return [
             'id' => (int) $match['id'],
-            'team_id' => $teamId > 0 ? $teamId : null,
+            'team_id' => $teamId,
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     */
+    private function stageTeamId(array $row): ?int
+    {
+        if (is_array($row['team_id'] ?? null) && isset($row['team_id'][0])) {
+            $id = (int) $row['team_id'][0];
+
+            return $id > 0 ? $id : null;
+        }
+
+        if (is_numeric($row['team_id'] ?? null)) {
+            $id = (int) $row['team_id'];
+
+            return $id > 0 ? $id : null;
+        }
+
+        return null;
     }
 
     public function findCrmStageId(string $stageName): ?int
     {
-        return $this->findCrmStage($stageName)['id'] ?? null;
+        $stage = $this->findCrmStage($stageName);
+
+        return $stage['id'] ?? null;
     }
 
     /**
