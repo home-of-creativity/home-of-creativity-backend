@@ -178,6 +178,8 @@ export const copy = {
   contactTelegram: { ar: "تواصل خاص عبر تيليجرام", en: "Private Telegram chat" },
   openDriveFolder: { ar: "فتح المجلد", en: "Open folder" },
   createDriveFolder: { ar: "إنشاء مجلد Drive", en: "Create Drive folder" },
+  creatingDriveFolder: { ar: "جاري إنشاء المجلد…", en: "Creating folder…" },
+  driveFolderCreated: { ar: "تم إنشاء مجلد Drive.", en: "Drive folder created." },
   attachments: { ar: "مرفقات الطلب", en: "Request attachments" },
   viewReceipt: { ar: "عرض الوصل", en: "View receipt" },
   viewAttachment: { ar: "عرض المرفق", en: "View attachment" },

@@ -59,7 +59,7 @@ return [
     ],
 
     'google' => [
-        'credentials_json' => env('GOOGLE_CREDENTIALS_JSON', env('GOOGLE_SERVICE_ACCOUNT_JSON')),
+        'credentials_json' => env('GOOGLE_CREDENTIALS_JSON', env('GOOGLE_SERVICE_ACCOUNT_JSON', env('GOOGLE_APPLICATION_CREDENTIALS'))),
         'drive_parent_folder_id' => env('GOOGLE_DRIVE_PARENT_FOLDER_ID'),
         'calendar_id' => env('GOOGLE_CALENDAR_ID', 'primary'),
         'search_site_url' => env('GOOGLE_SEARCH_SITE_URL', 'https://hoc.agency/'),

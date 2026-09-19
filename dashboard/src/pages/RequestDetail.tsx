@@ -171,6 +171,9 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
       setStatus(res.data.status);
       setNotice(res.message ?? "");
       setReceivedAmount(res.data.expected_due != null ? String(res.data.expected_due) : "");
+      if (!res.data.google_drive_folder_ready) {
+        await ensureDriveFolderFor(res.data.id);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : t(copy.saveFailed));
     }
@@ -190,14 +193,19 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
   }
 
   async function ensureDriveFolder() {
-    if (!item || creatingDrive) return;
+    if (!item) return;
+    await ensureDriveFolderFor(item.id);
+  }
+
+  async function ensureDriveFolderFor(requestId: number) {
+    if (creatingDrive) return;
     setError("");
     setNotice("");
     setCreatingDrive(true);
     try {
-      const res = await api.ensureDriveFolder(item.id);
+      const res = await api.ensureDriveFolder(requestId);
       setItem(res.data);
-      setNotice(res.message ?? "");
+      setNotice(res.message || t(copy.driveFolderCreated));
     } catch (err) {
       setError(err instanceof Error ? err.message : t(copy.saveFailed));
     } finally {
@@ -372,15 +380,14 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
               ) : (
                 "—"
               )}
-              {!item.google_drive_folder_ready &&
-              (item.paid_at || item.status === "payment_confirmed" || Number(item.amount_paid ?? 0) > 0) ? (
+              {!item.google_drive_folder_ready ? (
                 <button
                   type="button"
                   className="btn btn-ghost"
                   disabled={creatingDrive}
                   onClick={() => void ensureDriveFolder()}
                 >
-                  {t(copy.createDriveFolder)}
+                  {creatingDrive ? t(copy.creatingDriveFolder) : t(copy.createDriveFolder)}
                 </button>
               ) : null}
             </dd>

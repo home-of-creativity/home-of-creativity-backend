@@ -28,7 +28,7 @@ class GoogleDriveClient
     public function configurationError(): ?string
     {
         if (! $this->auth->configured()) {
-            return 'Google service account JSON is missing or invalid.';
+            return $this->auth->configurationError() ?? 'Google service account JSON is missing or invalid.';
         }
 
         if (! filled($this->parentFolderId())) {

@@ -25,6 +25,25 @@ class GoogleServiceAccount
         return $this->credentials() !== null;
     }
 
+    public function configurationError(): ?string
+    {
+        $raw = config('services.google.credentials_json');
+        if (! filled($raw)) {
+            return 'Google service account JSON is missing. Set GOOGLE_SERVICE_ACCOUNT_JSON to the JSON file path.';
+        }
+
+        if ($this->credentials() !== null) {
+            return null;
+        }
+
+        $value = $this->normalizedCredentialValue((string) $raw);
+        if (! str_starts_with($value, '{') && $this->resolveCredentialsPath($value) === null) {
+            return 'Google service account JSON file was not found. Check GOOGLE_SERVICE_ACCOUNT_JSON.';
+        }
+
+        return 'Google service account JSON is invalid. The file must include client_email and private_key.';
+    }
+
     public function accessToken(): ?string
     {
         return $this->tokenFor(self::SCOPES);
@@ -124,14 +143,15 @@ class GoogleServiceAccount
             return null;
         }
 
-        $json = trim((string) $raw);
-        if (is_file($json)) {
-            $contents = @file_get_contents($json);
+        $json = $this->normalizedCredentialValue((string) $raw);
+        $path = str_starts_with($json, '{') ? null : $this->resolveCredentialsPath($json);
+        if ($path !== null) {
+            $contents = @file_get_contents($path);
             if ($contents === false || $contents === '') {
                 return null;
             }
             $json = $contents;
-        } elseif (! str_starts_with(ltrim($json), '{')) {
+        } elseif (! str_starts_with($json, '{')) {
             $decodedB64 = base64_decode($json, true);
             if (is_string($decodedB64) && str_starts_with(ltrim($decodedB64), '{')) {
                 $json = $decodedB64;
@@ -160,6 +180,31 @@ class GoogleServiceAccount
             'client_email' => (string) $decoded['client_email'],
             'private_key' => $privateKey,
         ];
+    }
+
+    private function normalizedCredentialValue(string $raw): string
+    {
+        return trim($raw, " \t\n\r\"'");
+    }
+
+    private function resolveCredentialsPath(string $value): ?string
+    {
+        $normalized = str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $value);
+        $candidates = array_unique([
+            $value,
+            $normalized,
+            base_path($value),
+            base_path($normalized),
+            storage_path('app'.DIRECTORY_SEPARATOR.ltrim($normalized, DIRECTORY_SEPARATOR)),
+        ]);
+
+        foreach ($candidates as $candidate) {
+            if ($candidate !== '' && is_file($candidate)) {
+                return $candidate;
+            }
+        }
+
+        return null;
     }
 
     private function base64UrlEncode(string $data): string

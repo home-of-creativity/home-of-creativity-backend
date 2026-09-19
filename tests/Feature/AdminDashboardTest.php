@@ -1001,8 +1001,7 @@ class AdminDashboardTest extends TestCase
         Sanctum::actingAs($admin);
 
         $serviceRequest = ServiceRequest::factory()->create([
-            'status' => RequestStatus::PaymentConfirmed,
-            'paid_at' => now(),
+            'status' => RequestStatus::Submitted,
             'google_drive_folder_id' => null,
             'title' => 'هوية',
         ]);
