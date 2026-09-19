@@ -28,7 +28,7 @@ Seeded: `admin@example.com` / `password` (admin), `test@example.com` / `password
 
 `GET/POST /requests`, `GET /requests/{id}` — own requests only.
 
-Admin request show includes `google_drive_folder_url` (request folder, or the Hoc Client parent when the request folder is still missing) plus `google_drive_folder_ready`. Staff can `POST /admin/requests/{id}/ensure-drive-folder` to create the client folder. `client.telegram_url` is `tg://user?id=` when the Telegram id is numeric. Sales approve/reject notifications append `تواصل خاص`. Admin confirm-payment (`POST /admin/requests/{id}/confirm-payment`) requires `payment_method` and **`amount`** (the sum actually received after receipt review). Paid/remaining percents are derived from that amount; the invoice is issued then (`kind=received`), not on quotation approval. Status moves to **`payment_confirmed` (مدفوع)** on confirm even if Gemini is still pending or later fails. Gemini classifies after confirm (Arabic briefs via Google Translate before ClickUp) and does not send a second invoice.
+Admin request show includes `google_drive_folder_url` (request folder, or the Hoc Client parent when the request folder is still missing) plus `google_drive_folder_ready`. Staff can `POST /admin/requests/{id}/ensure-drive-folder` to create the client folder (422 includes the Drive reason: missing SA/parent, token, or share the Hoc Client folder with the service account). `client.telegram_url` is `tg://user?id=` when the Telegram id is numeric. Sales approve/reject notifications append `تواصل خاص`. Admin confirm-payment (`POST /admin/requests/{id}/confirm-payment`) requires `payment_method` and **`amount`** (the sum actually received after receipt review). Paid/remaining percents are derived from that amount; the invoice is issued then (`kind=received`), not on quotation approval. Status moves to **`payment_confirmed` (مدفوع)** on confirm even if Gemini is still pending or later fails. Gemini classifies after confirm (Arabic briefs via Google Translate before ClickUp) and does not send a second invoice.
 
 Ops settings (admin): `GET /admin/ops-settings` (`sham_cash_qr`, `sham_cash_qr_updated_at`), `GET/POST /admin/ops-settings/sham-cash-qr` (preview/upload), `GET/PUT /admin/ops-settings/social-profile` (`display_name`, `bio`, `theme` cream|purple|dark stored in OpsSetting `social_linktree_profile`).
 
@@ -54,7 +54,7 @@ Artisan: `social:publish-due` (every minute, Asia/Damascus), `social:sync-inbox`
 
 ## Cache / queue
 
-Default `CACHE_STORE=database` (`cache` + `cache_locks` tables). Tests: array store, sync queue, SQLite memory. Instagram landing feed cached 600s. Admin list syncs: `odoo:hr:index-pull` / `odoo:crm:index-pull` / `social:facebook-sync` / `clickup:members` 60s (skipped on PHP built-in `cli-server` except tests).
+Default `CACHE_STORE=database` (`cache` + `cache_locks` tables). Tests: array store, sync queue, SQLite memory. Instagram landing feed cached 600s. Admin list syncs: `odoo:hr:index-pull` / `odoo:crm:index-pull` / `social:facebook-sync` / `clickup:members` 60s (skipped on PHP built-in `cli-server` except tests). `PublishSocialPostJob` publishes immediately on «نشر الآن» (`dispatchSync`); scheduled/stuck posts stay on the queue. Job `failed()` and publisher exceptions mark the post **failed** (never leave it on **جاري النشر**). `social:publish-due` also retries posts stuck publishing for 2+ minutes. Database queue `retry_after` default is 420s so a 360s publish job is not released mid-run.
 
 ## Tests / CI
 

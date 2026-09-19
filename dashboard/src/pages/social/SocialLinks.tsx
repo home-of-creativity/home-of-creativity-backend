@@ -38,8 +38,8 @@ function LinkActions({
   onRemove: () => void;
 }) {
   const canApprove = item.status === "draft" || item.status === "failed";
-  const canPublishNow = item.status === "draft" || item.status === "scheduled" || item.status === "failed";
-  const canDelete = item.is_deletable !== false && item.status !== "publishing";
+  const canPublishNow = item.can_publish !== false && item.status !== "published";
+  const canDelete = item.is_deletable !== false;
   const showApprove = canSocial(user, "approve") && canApprove;
   const showPublish = canSocial(user, "approve") && canPublishNow;
   const showDelete = canSocial(user, "create") && canDelete;
@@ -69,7 +69,7 @@ function LinkActions({
         ) : null}
         {showPublish ? (
           <button type="button" className="linktree-menu-item" disabled={busy} onClick={onPublish}>
-            {t(copy.socialPublishNow)}
+            {item.status === "publishing" || item.status === "failed" ? t(copy.socialRetryPublish) : t(copy.socialPublishNow)}
           </button>
         ) : null}
         {showDelete ? (

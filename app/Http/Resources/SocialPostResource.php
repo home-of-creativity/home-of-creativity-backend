@@ -25,6 +25,7 @@ class SocialPostResource extends JsonResource
             'last_error' => $this->last_error,
             'is_editable' => $this->isEditable(),
             'is_deletable' => $this->isDeletable(),
+            'can_publish' => $this->canRetryPublish(),
             'created_by' => $this->whenLoaded('creator', fn () => $this->staff($this->creator)),
             'updated_by' => $this->whenLoaded('updater', fn () => $this->staff($this->updater)),
             'approved_by' => $this->whenLoaded('approver', fn () => $this->staff($this->approver)),

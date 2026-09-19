@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -10,44 +11,73 @@ class GoogleDriveClient
 {
     private const API = 'https://www.googleapis.com/drive/v3';
 
+    private ?string $lastError = null;
+
     public function __construct(private GoogleServiceAccount $auth) {}
 
     public function configured(): bool
     {
-        return $this->auth->configured()
-            && filled(config('services.google.drive_parent_folder_id'));
+        return $this->configurationError() === null;
+    }
+
+    public function lastError(): ?string
+    {
+        return $this->lastError;
+    }
+
+    public function configurationError(): ?string
+    {
+        if (! $this->auth->configured()) {
+            return 'Google service account JSON is missing or invalid.';
+        }
+
+        if (! filled($this->parentFolderId())) {
+            return 'GOOGLE_DRIVE_PARENT_FOLDER_ID is missing.';
+        }
+
+        return null;
     }
 
     public function ensureFolderPath(string $parentId, string $company, string $taskFolderName): ?string
     {
-        if (! $this->configured()) {
-            return null;
+        $this->lastError = null;
+
+        if ($error = $this->configurationError()) {
+            return $this->fail($error);
         }
 
         $token = $this->auth->accessToken();
         if ($token === null) {
-            return null;
+            return $this->fail('Google service account could not get an access token. Check the private key.');
         }
 
         try {
-            $rootParent = $parentId !== ''
-                ? $parentId
-                : (string) config('services.google.drive_parent_folder_id');
+            $rootParent = $parentId !== '' ? $parentId : $this->parentFolderId();
+            $context = $this->parentContext($token, $rootParent);
+            if ($context === null) {
+                return null;
+            }
 
-            $companyFolderId = $this->findOrCreateFolder($token, $rootParent, $this->safeName($company));
+            $companyFolderId = $this->findOrCreateFolder(
+                $token,
+                $context['id'],
+                $this->safeName($company),
+                $context['driveId'],
+            );
             if ($companyFolderId === null) {
                 return null;
             }
 
-            $taskFolderId = $this->findOrCreateFolder($token, $companyFolderId, $this->safeName($taskFolderName));
+            $taskFolderId = $this->findOrCreateFolder(
+                $token,
+                $companyFolderId,
+                $this->safeName($taskFolderName),
+                $context['driveId'],
+            );
 
             return $taskFolderId ?? $companyFolderId;
         } catch (Throwable $exception) {
-            Log::warning('Google Drive ensureFolderPath failed.', [
-                'error' => $exception->getMessage(),
-            ]);
-
-            return null;
+            return $this->fail('Google Drive ensureFolderPath failed: '.$exception->getMessage());
         }
     }
 
@@ -180,7 +210,37 @@ class GoogleDriveClient
         }
     }
 
-    private function findOrCreateFolder(string $token, string $parentId, string $name): ?string
+    /**
+     * @return array{id: string, driveId: ?string}|null
+     */
+    private function parentContext(string $token, string $parentId): ?array
+    {
+        $meta = Http::withToken($token)
+            ->timeout(15)
+            ->acceptJson()
+            ->get(self::API.'/files/'.$parentId, [
+                'fields' => 'id,driveId,mimeType',
+                'supportsAllDrives' => 'true',
+            ]);
+
+        if (! $meta->successful()) {
+            $this->fail($this->googleErrorMessage(
+                $meta,
+                'Cannot open the parent Drive folder. Share Hoc Client with the service account as Content manager.',
+            ));
+
+            return null;
+        }
+
+        $driveId = $meta->json('driveId');
+
+        return [
+            'id' => (string) $meta->json('id', $parentId),
+            'driveId' => filled($driveId) ? (string) $driveId : null,
+        ];
+    }
+
+    private function findOrCreateFolder(string $token, string $parentId, string $name, ?string $driveId = null): ?string
     {
         $query = sprintf(
             "name = '%s' and '%s' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
@@ -188,17 +248,22 @@ class GoogleDriveClient
             str_replace("'", "\\'", $parentId),
         );
 
+        $search = [
+            'q' => $query,
+            'fields' => 'files(id,name)',
+            'pageSize' => 1,
+            'supportsAllDrives' => 'true',
+            'includeItemsFromAllDrives' => 'true',
+        ];
+        if ($driveId) {
+            $search['corpora'] = 'drive';
+            $search['driveId'] = $driveId;
+        }
+
         $existing = Http::withToken($token)
             ->timeout(15)
             ->acceptJson()
-            ->get(self::API.'/files', [
-                'q' => $query,
-                'fields' => 'files(id,name)',
-                'pageSize' => 1,
-                'corpora' => 'allDrives',
-                'supportsAllDrives' => 'true',
-                'includeItemsFromAllDrives' => 'true',
-            ]);
+            ->get(self::API.'/files', $search);
 
         if ($existing->successful()) {
             $id = data_get($existing->json(), 'files.0.id');
@@ -218,18 +283,38 @@ class GoogleDriveClient
             ]);
 
         if (! $created->successful()) {
-            Log::warning('Google Drive folder create failed.', [
-                'name' => $name,
-                'status' => $created->status(),
-                'body' => $created->body(),
-            ]);
+            $this->fail($this->googleErrorMessage(
+                $created,
+                'Google Drive rejected folder create. Share the parent folder with the service account.',
+            ));
 
             return null;
         }
 
         $id = $created->json('id');
 
-        return filled($id) ? (string) $id : null;
+        return filled($id) ? (string) $id : $this->fail('Google Drive created a folder without an id.');
+    }
+
+    private function parentFolderId(): string
+    {
+        return trim((string) config('services.google.drive_parent_folder_id'), " \t\n\r\"'");
+    }
+
+    private function googleErrorMessage(Response $response, string $fallback): string
+    {
+        $message = $response->json('error.message');
+        $status = $response->json('error.status') ?? $response->status();
+
+        return $fallback.(is_string($message) && $message !== '' ? ' '.$message : '').' ['.$status.']';
+    }
+
+    private function fail(string $message): null
+    {
+        $this->lastError = $message;
+        Log::warning('Google Drive: '.$message);
+
+        return null;
     }
 
     private function safeName(string $name): string

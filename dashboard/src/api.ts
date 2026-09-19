@@ -100,6 +100,7 @@ export type SocialPost = {
   last_error: string | null;
   is_editable?: boolean;
   is_deletable?: boolean;
+  can_publish?: boolean;
   created_by?: { id: number; name: string } | null;
   updated_by?: { id: number; name: string } | null;
   approved_by?: { id: number; name: string } | null;

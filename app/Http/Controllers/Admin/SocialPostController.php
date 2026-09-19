@@ -203,7 +203,7 @@ class SocialPostController extends Controller
             $socialPost->forceFill(['status' => SocialPostStatus::Scheduled])->save();
             $this->logger->log(request()->user(), SocialActivityAction::Scheduled, $socialPost);
         } else {
-            $this->dispatchPublish($socialPost, request()->user());
+            $this->dispatchPublish($socialPost, request()->user(), immediately: true);
         }
 
         $this->logger->log(request()->user(), SocialActivityAction::Approved, $socialPost);
@@ -215,10 +215,10 @@ class SocialPostController extends Controller
     public function publish(SocialPost $socialPost): SocialPostResource
     {
         abort_unless(request()->user()?->canSocial(SocialAbility::Approve), 403);
-        abort_unless($socialPost->isEditable(), 422, 'This post cannot be published.');
+        abort_unless($socialPost->canRetryPublish(), 422, 'This post cannot be published.');
 
         $this->markApproved($socialPost, request()->user());
-        $this->dispatchPublish($socialPost, request()->user());
+        $this->dispatchPublish($socialPost, request()->user(), immediately: true);
 
         return SocialPostResource::make($this->fresh($socialPost))
             ->additional(['message' => 'Publishing.']);
@@ -244,7 +244,7 @@ class SocialPostController extends Controller
             abort_unless($post->scheduled_at !== null, 422, 'A schedule time is required.');
 
             if ($post->scheduled_at->lte(now())) {
-                $this->dispatchPublish($post, $user);
+                $this->dispatchPublish($post, $user, immediately: true);
 
                 return;
             }
@@ -258,7 +258,7 @@ class SocialPostController extends Controller
         if ($intent === 'publish') {
             if ($user->canSocial(SocialAbility::Approve)) {
                 $this->markApproved($post, $user);
-                $this->dispatchPublish($post, $user);
+                $this->dispatchPublish($post, $user, immediately: true);
             } else {
                 $post->forceFill(['status' => SocialPostStatus::Draft])->save();
             }
@@ -273,7 +273,7 @@ class SocialPostController extends Controller
         ])->save();
     }
 
-    private function dispatchPublish(SocialPost $post, mixed $user): void
+    private function dispatchPublish(SocialPost $post, mixed $user, bool $immediately = false): void
     {
         $post->forceFill([
             'status' => SocialPostStatus::Publishing,
@@ -281,7 +281,7 @@ class SocialPostController extends Controller
         ])->save();
 
         $this->logger->log($user, SocialActivityAction::Publishing, $post);
-        PublishSocialPostJob::dispatch($post->id);
+        PublishSocialPostJob::dispatchFor($post->id, $immediately);
     }
 
     private function scheduledAt(mixed $value): ?Carbon

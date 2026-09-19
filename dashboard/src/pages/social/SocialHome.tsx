@@ -1,5 +1,5 @@
 import * as Popover from "@radix-ui/react-popover";
-import { Check, Ellipsis, Pencil } from "lucide-react";
+import { Check, Ellipsis, Pencil, RotateCw } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -78,6 +78,20 @@ export function SocialHome({ locale, t }: { locale: Locale; t: (c: { ar: string;
     };
   }, [linkedIdKey]);
 
+  const publishingKey = Object.values(postsByAccount)
+    .flat()
+    .filter((item) => item.status === "publishing")
+    .map((item) => item.id)
+    .join(",");
+
+  useEffect(() => {
+    if (!publishingKey) return;
+    const timer = window.setInterval(() => {
+      void refreshPosts();
+    }, 4000);
+    return () => window.clearInterval(timer);
+  }, [publishingKey, linkedIdKey]);
+
   useEffect(() => {
     setTargetIds(
       linkedIdKey
@@ -117,8 +131,9 @@ export function SocialHome({ locale, t }: { locale: Locale; t: (c: { ar: string;
 
   function postActions(post: SocialPost): ReactNode {
     const showEdit = canCreate && post.is_editable !== false;
-    const showDelete = canCreate && post.is_deletable !== false && post.status !== "publishing";
-    if (!showEdit && !showDelete) return null;
+    const showRetry = canPublish && (post.can_publish !== false) && (post.status === "publishing" || post.status === "failed");
+    const showDelete = canCreate && post.is_deletable !== false;
+    if (!showEdit && !showRetry && !showDelete) return null;
     return (
       <Popover.Root>
         <Popover.Trigger asChild>
@@ -133,6 +148,18 @@ export function SocialHome({ locale, t }: { locale: Locale; t: (c: { ar: string;
                 <Pencil size={14} aria-hidden="true" />
                 {t(copy.edit)}
               </Link>
+            ) : null}
+            {showRetry ? (
+              <button
+                type="button"
+                className="menu-popover-item"
+                role="menuitem"
+                disabled={busyId === post.id}
+                onClick={() => void retryPublish(post.id)}
+              >
+                <RotateCw size={14} aria-hidden="true" />
+                {t(copy.socialRetryPublish)}
+              </button>
             ) : null}
             {showDelete ? (
               <ConfirmAction
@@ -149,6 +176,26 @@ export function SocialHome({ locale, t }: { locale: Locale; t: (c: { ar: string;
         </Popover.Portal>
       </Popover.Root>
     );
+  }
+
+  async function retryPublish(id: number) {
+    setBusyId(id);
+    setError("");
+    try {
+      const res = await api.publishSocialPost(id);
+      if (res.data.last_error) {
+        const message = publishErrorMessage(res.data.last_error, t);
+        setError(message);
+        toast.error(message);
+      }
+      await refreshPosts();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t(copy.loading);
+      setError(message);
+      toast.error(message);
+    } finally {
+      setBusyId(null);
+    }
   }
 
   async function removePost(id: number) {

@@ -151,9 +151,14 @@ class GoogleServiceAccount
             return null;
         }
 
+        $privateKey = (string) $decoded['private_key'];
+        if (! str_contains($privateKey, "\n") && str_contains($privateKey, '\\n')) {
+            $privateKey = str_replace('\\n', "\n", $privateKey);
+        }
+
         return [
             'client_email' => (string) $decoded['client_email'],
-            'private_key' => (string) $decoded['private_key'],
+            'private_key' => $privateKey,
         ];
     }
 

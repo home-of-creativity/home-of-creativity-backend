@@ -180,11 +180,6 @@ class ServiceRequestController extends Controller
     public function ensureDriveFolder(ServiceRequest $serviceRequest, EnsureRequestDriveFolder $ensureRequestDriveFolder): ServiceRequestResource
     {
         $serviceRequest = $ensureRequestDriveFolder->handle($serviceRequest);
-        abort_if(
-            blank($serviceRequest->google_drive_folder_id),
-            422,
-            'Google Drive folder could not be created.',
-        );
 
         return ServiceRequestResource::make($serviceRequest->load('client'))
             ->additional(['message' => 'Drive folder ready.']);

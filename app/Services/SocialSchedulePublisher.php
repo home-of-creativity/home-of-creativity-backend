@@ -12,15 +12,23 @@ class SocialSchedulePublisher
     {
         $count = 0;
 
-        SocialPost::query()->dueForPublish()->orderBy('scheduled_at')->each(function (SocialPost $post) use (&$count): void {
-            $post->forceFill([
-                'status' => SocialPostStatus::Publishing,
-                'last_error' => null,
-            ])->save();
+        SocialPost::query()
+            ->where(function ($query): void {
+                $query->dueForPublish()
+                    ->orWhere(fn ($stuck) => $stuck->stuckPublishing());
+            })
+            ->orderBy('scheduled_at')
+            ->each(function (SocialPost $post) use (&$count): void {
+                if ($post->status !== SocialPostStatus::Publishing) {
+                    $post->forceFill([
+                        'status' => SocialPostStatus::Publishing,
+                        'last_error' => null,
+                    ])->save();
+                }
 
-            PublishSocialPostJob::dispatch($post->id);
-            $count++;
-        });
+                PublishSocialPostJob::dispatchFor($post->id);
+                $count++;
+            });
 
         return $count;
     }

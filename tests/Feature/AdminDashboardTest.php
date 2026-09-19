@@ -984,6 +984,28 @@ class AdminDashboardTest extends TestCase
             ->assertJsonPath('data.google_drive_folder_url', 'https://drive.google.com/drive/folders/folder-ensured');
     }
 
+    public function test_ensure_drive_folder_explains_when_not_configured(): void
+    {
+        config([
+            'services.google.credentials_json' => null,
+            'services.google.drive_parent_folder_id' => null,
+        ]);
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        $serviceRequest = ServiceRequest::factory()->create([
+            'status' => RequestStatus::PaymentConfirmed,
+            'paid_at' => now(),
+            'google_drive_folder_id' => null,
+        ]);
+
+        $this->postJson("/api/admin/requests/{$serviceRequest->id}/ensure-drive-folder")
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('drive');
+    }
+
     public function test_admin_request_show_posts_and_pays_draft_odoo_invoice_when_locally_paid(): void
     {
         Http::preventStrayRequests();

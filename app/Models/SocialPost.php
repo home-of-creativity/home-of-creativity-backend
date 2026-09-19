@@ -98,6 +98,11 @@ class SocialPost extends Model
         return $this->status->isEditable();
     }
 
+    public function canRetryPublish(): bool
+    {
+        return $this->status->canRetryPublish();
+    }
+
     public function isDeletable(): bool
     {
         return $this->status->isDeletable();
@@ -113,5 +118,16 @@ class SocialPost extends Model
             ->where('status', SocialPostStatus::Scheduled)
             ->whereNotNull('scheduled_at')
             ->where('scheduled_at', '<=', now());
+    }
+
+    /**
+     * @param  Builder<SocialPost>  $query
+     * @return Builder<SocialPost>
+     */
+    public function scopeStuckPublishing(Builder $query): Builder
+    {
+        return $query
+            ->where('status', SocialPostStatus::Publishing)
+            ->where('updated_at', '<=', now()->subMinutes(2));
     }
 }

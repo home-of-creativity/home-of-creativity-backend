@@ -21,8 +21,13 @@ enum SocialPostStatus: string
         return in_array($this, [self::Draft, self::Scheduled, self::Failed, self::Published], true);
     }
 
+    public function canRetryPublish(): bool
+    {
+        return in_array($this, [self::Draft, self::Scheduled, self::Failed, self::Publishing], true);
+    }
+
     public function isDeletable(): bool
     {
-        return $this !== self::Publishing;
+        return true;
     }
 }

@@ -534,6 +534,7 @@ export const copy = {
   socialSaveDraft: { ar: "حفظ مسودة", en: "Save draft" },
   socialSchedule: { ar: "جدولة", en: "Schedule" },
   socialPublishNow: { ar: "نشر الآن", en: "Publish now" },
+  socialRetryPublish: { ar: "أعد النشر", en: "Retry publish" },
   socialApprove: { ar: "موافقة", en: "Approve" },
   socialNoAccounts: { ar: "لا توجد صفحات فيسبوك مربوطة بهذا التوكن.", en: "No Facebook Pages are linked to this token." },
   socialFacebookError: { ar: "تعذر جلب الحسابات من فيسبوك. حدّث FACEBOOK_ACCESS_TOKEN ثم أعد تشغيل الخادم وأعد تحميل الصفحة.", en: "Could not load Facebook accounts. Refresh FACEBOOK_ACCESS_TOKEN, restart the server, and reload." },

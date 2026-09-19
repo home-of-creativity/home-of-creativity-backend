@@ -8,6 +8,7 @@ use App\Enums\SocialInboxKind;
 use App\Enums\SocialPlatform;
 use App\Enums\SocialPostStatus;
 use App\Enums\SocialPublishStatus;
+use App\Jobs\PublishSocialPostJob;
 use App\Models\SocialAccount;
 use App\Models\SocialInboxItem;
 use App\Models\SocialPost;
@@ -15,6 +16,7 @@ use App\Models\SocialPostAccount;
 use App\Models\SocialPostMedia;
 use App\Models\User;
 use App\Services\SocialAccountSync;
+use App\Services\SocialActivityLogger;
 use App\Services\SocialPublisher;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -1185,6 +1187,87 @@ class SocialAutomationTest extends TestCase
         $this->artisan('social:publish-due')->assertSuccessful();
 
         $this->assertSame(SocialPostStatus::Published, $post->fresh()->status);
+    }
+
+    public function test_publish_job_failed_marks_post_failed(): void
+    {
+        $admin = $this->admin();
+        $account = SocialAccount::factory()->connected()->recycle($admin)->create();
+        $post = SocialPost::factory()->recycle($admin)->create([
+            'created_by' => $admin->id,
+            'status' => SocialPostStatus::Publishing,
+        ]);
+        $post->accounts()->attach($account->id, ['status' => SocialPublishStatus::Publishing->value]);
+
+        (new PublishSocialPostJob($post->id))->failed(new \RuntimeException('Worker timed out.'));
+
+        $fresh = $post->fresh();
+        $this->assertSame(SocialPostStatus::Failed, $fresh->status);
+        $this->assertSame('Worker timed out.', $fresh->last_error);
+        $this->assertSame(SocialPublishStatus::Failed, $fresh->targets()->first()?->status);
+    }
+
+    public function test_publish_job_records_publisher_exception_as_failed(): void
+    {
+        $this->mock(SocialPublisher::class, function ($mock): void {
+            $mock->shouldReceive('publish')->once()->andThrow(new \RuntimeException('graph timeout'));
+        });
+
+        $admin = $this->admin();
+        $account = SocialAccount::factory()->connected()->recycle($admin)->create();
+        $post = SocialPost::factory()->recycle($admin)->create([
+            'created_by' => $admin->id,
+            'status' => SocialPostStatus::Publishing,
+        ]);
+        $post->accounts()->attach($account->id, ['status' => SocialPublishStatus::Pending->value]);
+
+        (new PublishSocialPostJob($post->id))->handle(app(SocialPublisher::class), app(SocialActivityLogger::class));
+
+        $fresh = $post->fresh();
+        $this->assertSame(SocialPostStatus::Failed, $fresh->status);
+        $this->assertStringContainsString('graph timeout', (string) $fresh->last_error);
+    }
+
+    public function test_stuck_publishing_post_is_retried_when_due(): void
+    {
+        Http::fake([
+            'https://graph.facebook.com/*' => Http::response(['id' => 'fb_stuck'], 200),
+        ]);
+
+        $admin = $this->admin();
+        $account = SocialAccount::factory()->connected()->recycle($admin)->create();
+        $post = SocialPost::factory()->recycle($admin)->create([
+            'created_by' => $admin->id,
+            'status' => SocialPostStatus::Publishing,
+        ]);
+        $post->accounts()->attach($account->id, ['status' => SocialPublishStatus::Publishing->value]);
+        SocialPost::query()->whereKey($post->id)->update(['updated_at' => now()->subMinutes(5)]);
+
+        $this->artisan('social:publish-due')->assertSuccessful();
+
+        $this->assertSame(SocialPostStatus::Published, $post->fresh()->status);
+    }
+
+    public function test_admin_can_retry_a_publishing_post(): void
+    {
+        Http::fake([
+            'https://graph.facebook.com/*' => Http::response(['id' => 'fb_retry'], 200),
+        ]);
+
+        $admin = $this->admin();
+        Sanctum::actingAs($admin);
+
+        $account = SocialAccount::factory()->connected()->recycle($admin)->create();
+        $post = SocialPost::factory()->recycle($admin)->create([
+            'created_by' => $admin->id,
+            'status' => SocialPostStatus::Publishing,
+        ]);
+        $post->accounts()->attach($account->id, ['status' => SocialPublishStatus::Publishing->value]);
+
+        $this->postJson("/api/admin/social/posts/{$post->id}/publish")
+            ->assertOk()
+            ->assertJsonPath('data.status', SocialPostStatus::Published->value)
+            ->assertJsonPath('data.can_publish', false);
     }
 
     public function test_creator_can_schedule_without_approval(): void
