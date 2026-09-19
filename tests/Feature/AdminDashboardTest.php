@@ -422,6 +422,7 @@ class AdminDashboardTest extends TestCase
 
             return ($vals['stage_id'] ?? null) === 11
                 && ($vals['team_id'] ?? null) === 21
+                && ($vals['user_id'] ?? null) === 2
                 && ($vals['type'] ?? null) === 'opportunity';
         });
     }

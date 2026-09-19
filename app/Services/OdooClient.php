@@ -241,6 +241,7 @@ class OdooClient
             'partner_name' => $values['partner_name'] ?? null,
             'stage_id' => $stageId,
             'team_id' => $teamId,
+            'user_id' => $values['user_id'] ?? $this->crmOwnerUserId(),
             'phone' => $values['phone'] ?? $values['mobile'] ?? null,
             'mobile' => $values['mobile'] ?? $values['phone'] ?? null,
             'email_from' => $values['email_from'] ?? null,
@@ -248,18 +249,67 @@ class OdooClient
             'tag_ids' => $tagIds,
             'partner_id' => $values['partner_id'] ?? null,
             'type' => 'opportunity',
+            'active' => true,
         ], fn (mixed $value): bool => $value !== null && $value !== '');
 
         try {
             return (int) $this->call('crm.lead', 'create', [$payload]);
         } catch (Throwable $exception) {
-            unset($payload['type'], $payload['tag_ids']);
-
-            try {
-                return (int) $this->call('crm.lead', 'create', [$payload]);
-            } catch (Throwable) {
-                throw $exception;
+            foreach ($this->crmLeadCreateFallbacks($payload) as $attempt) {
+                try {
+                    return (int) $this->call('crm.lead', 'create', [$attempt]);
+                } catch (Throwable) {
+                    continue;
+                }
             }
+
+            throw $exception;
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return list<array<string, mixed>>
+     */
+    private function crmLeadCreateFallbacks(array $payload): array
+    {
+        $withoutTags = $payload;
+        unset($withoutTags['tag_ids']);
+
+        $withoutTeam = $withoutTags;
+        unset($withoutTeam['team_id']);
+
+        $minimal = array_filter([
+            'name' => $payload['name'] ?? null,
+            'contact_name' => $payload['contact_name'] ?? null,
+            'phone' => $payload['phone'] ?? null,
+            'type' => 'opportunity',
+            'stage_id' => $payload['stage_id'] ?? null,
+            'team_id' => $payload['team_id'] ?? null,
+            'user_id' => $payload['user_id'] ?? null,
+        ], fn (mixed $value): bool => $value !== null && $value !== '');
+
+        return [$withoutTags, $withoutTeam, $minimal];
+    }
+
+    public function crmOwnerUserId(): ?int
+    {
+        try {
+            if (! $this->useJson2()) {
+                $uid = $this->legacyUid();
+                if ($uid > 0) {
+                    return $uid;
+                }
+            }
+
+            $login = trim((string) config('services.odoo.username'));
+            if ($login === '') {
+                return null;
+            }
+
+            return $this->firstId('res.users', [['login', '=', $login]]);
+        } catch (Throwable) {
+            return null;
         }
     }
 
@@ -754,9 +804,13 @@ class OdooClient
         }
 
         try {
-            $rows = $this->searchRead('crm.stage', [], ['id', 'name', 'team_id'], 200, 0, 'sequence asc');
+            $rows = $this->searchRead('crm.stage', [], ['id', 'name', 'team_id', 'team_ids'], 200, 0, 'sequence asc');
         } catch (Throwable) {
-            $rows = $this->searchRead('crm.stage', [], ['id', 'name'], 200, 0, 'sequence asc');
+            try {
+                $rows = $this->searchRead('crm.stage', [], ['id', 'name', 'team_id'], 200, 0, 'sequence asc');
+            } catch (Throwable) {
+                $rows = $this->searchRead('crm.stage', [], ['id', 'name'], 200, 0, 'sequence asc');
+            }
         }
 
         $matches = [];
@@ -802,6 +856,12 @@ class OdooClient
 
         if (is_numeric($row['team_id'] ?? null)) {
             $id = (int) $row['team_id'];
+
+            return $id > 0 ? $id : null;
+        }
+
+        if (is_array($row['team_ids'] ?? null) && isset($row['team_ids'][0]) && is_numeric($row['team_ids'][0])) {
+            $id = (int) $row['team_ids'][0];
 
             return $id > 0 ? $id : null;
         }

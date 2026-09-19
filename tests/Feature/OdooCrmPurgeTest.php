@@ -121,7 +121,29 @@ class OdooCrmPurgeTest extends TestCase
 
             return ($vals['stage_id'] ?? null) === 11
                 && ($vals['team_id'] ?? null) === 21
+                && ($vals['user_id'] ?? null) === 2
                 && ($vals['type'] ?? null) === 'opportunity';
         });
+    }
+
+    public function test_push_telegram_command_creates_missing_opportunity(): void
+    {
+        Http::preventStrayRequests();
+        $this->fakeOdooDocuments();
+        Http::fake($this->odooDocumentsHttpFake());
+
+        $client = Client::factory()->create([
+            'name' => 'AmmarHeroo',
+            'phone' => '0950000700',
+            'company_name' => 'Prodesign',
+            'telegram_user_id' => '213309826',
+            'odoo_lead_id' => null,
+        ]);
+
+        $this->artisan('odoo:push-telegram')
+            ->expectsOutputToContain('pushed #'.$client->id)
+            ->assertSuccessful();
+
+        $this->assertSame('77', $client->fresh()->odoo_lead_id);
     }
 }

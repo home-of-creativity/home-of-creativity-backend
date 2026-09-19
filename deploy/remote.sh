@@ -65,11 +65,11 @@ echo "Running database seeders..."
 # php-fpm PID 1 is the wrapper shell; reload the real master. schedule:work
 # keeps old code in memory until the scheduler container restarts.
 echo "Reloading API workers and scheduler..."
-"${COMPOSE[@]}" exec -T hoc-api sh -c 'pgrep -x php-fpm | xargs -r kill -USR2' || true
+"${COMPOSE[@]}" exec -T hoc-api sh -c 'ps -e -o pid,comm | awk '\''$2=="php-fpm"{print $1; exit}'\'' | xargs -r kill -USR2' || true
 "${COMPOSE[@]}" restart hoc-scheduler || true
 
 echo "Pushing missing Odoo CRM leads onto the Telegram pipeline..."
-"${COMPOSE[@]}" exec -T hoc-api php artisan odoo:reconcile --limit=200 || true
+"${COMPOSE[@]}" exec -T hoc-api php artisan odoo:push-telegram || true
 
 "${COMPOSE[@]}" exec -T hoc-api php artisan seo:submit-sitemap || true
 
