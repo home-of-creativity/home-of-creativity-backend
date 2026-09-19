@@ -7,6 +7,7 @@ use App\Http\Requests\StoreLandingReelRequest;
 use App\Http\Requests\UpdateLandingReelRequest;
 use App\Http\Resources\LandingReelResource;
 use App\Models\LandingReel;
+use App\Support\VideoFaststart;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Storage;
 
@@ -28,6 +29,7 @@ class LandingReelController extends Controller
         $data['sort_order'] = $data['sort_order'] ?? ((int) LandingReel::query()->max('sort_order')) + 1;
         $data['is_published'] = $data['is_published'] ?? true;
         $data['video_path'] = $request->file('video')->store('reels', 'public');
+        VideoFaststart::apply($data['video_path']);
 
         if ($request->hasFile('poster')) {
             $data['poster_path'] = $request->file('poster')->store('reels/posters', 'public');
@@ -47,6 +49,7 @@ class LandingReelController extends Controller
 
         if ($request->hasFile('video')) {
             $newPath = $request->file('video')->store('reels', 'public');
+            VideoFaststart::apply($newPath);
             Storage::disk('public')->delete($landingReel->video_path);
             $data['video_path'] = $newPath;
         }
