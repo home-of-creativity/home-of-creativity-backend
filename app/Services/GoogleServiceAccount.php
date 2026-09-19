@@ -4,6 +4,7 @@ namespace App\Services;
 
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Throwable;
 
 class GoogleServiceAccount
@@ -25,20 +26,27 @@ class GoogleServiceAccount
         return $this->credentials() !== null;
     }
 
+    public static function storedPath(): string
+    {
+        return Storage::disk('local')->path('google-sa.json');
+    }
+
     public function configurationError(): ?string
     {
-        $raw = config('services.google.credentials_json');
-        if (! filled($raw)) {
-            return 'Google service account JSON is missing. Set GOOGLE_SERVICE_ACCOUNT_JSON to the JSON file path.';
-        }
-
         if ($this->credentials() !== null) {
             return null;
         }
 
-        $value = $this->normalizedCredentialValue((string) $raw);
-        if (! str_starts_with($value, '{') && $this->resolveCredentialsPath($value) === null) {
-            return 'Google service account JSON file was not found. Check GOOGLE_SERVICE_ACCOUNT_JSON.';
+        $raw = config('services.google.credentials_json');
+        if (! filled($raw) && ! is_file(self::storedPath())) {
+            return 'Google service account JSON is missing. Upload it from the dashboard or set GOOGLE_SERVICE_ACCOUNT_JSON.';
+        }
+
+        if (filled($raw)) {
+            $value = $this->normalizedCredentialValue((string) $raw);
+            if (! str_starts_with($value, '{') && $this->resolveCredentialsPath($value) === null && ! is_file(self::storedPath())) {
+                return 'Google service account JSON file was not found. Upload google-sa.json to storage or check the path.';
+            }
         }
 
         return 'Google service account JSON is invalid. The file must include client_email and private_key.';
@@ -140,7 +148,12 @@ class GoogleServiceAccount
     {
         $raw = config('services.google.credentials_json');
         if (! filled($raw)) {
-            return null;
+            $stored = self::storedPath();
+            if (! app()->runningUnitTests() && is_file($stored)) {
+                $raw = $stored;
+            } else {
+                return null;
+            }
         }
 
         $json = $this->normalizedCredentialValue((string) $raw);

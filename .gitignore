@@ -17,6 +17,7 @@
 /public/hot
 /public/storage
 /storage/*.key
+/storage/app/private/google-sa.json
 /storage/pail
 /vendor
 *.tsbuildinfo

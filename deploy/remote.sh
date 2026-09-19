@@ -14,7 +14,7 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
-mkdir -p storage/logs storage/framework/{cache,sessions,views} bootstrap/cache
+mkdir -p storage/app/private storage/logs storage/framework/{cache,sessions,views} bootstrap/cache
 chmod -R ug+rwx storage bootstrap/cache || true
 
 COMPOSE=(docker compose --env-file "$ROOT/.env" -f deploy/compose.yaml)

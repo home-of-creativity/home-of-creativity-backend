@@ -58,6 +58,7 @@ jobs:
           SSH_PORT: ${{ secrets.SSH_PORT }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
           BACKEND_ENV_FILE_B64: ${{ secrets.BACKEND_ENV_FILE_B64 }}
+          GOOGLE_SERVICE_ACCOUNT_JSON_B64: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON_B64 }}
         run: |
           set -euo pipefail
           : "${SSH_HOST:?Set repository secret SSH_HOST to the server IP}"
@@ -94,5 +95,9 @@ jobs:
             ./ "${SSH_USER}@${SSH_HOST}:${REMOTE}/"
 
           echo "$BACKEND_ENV_FILE_B64" | base64 -d | tr -d '\r' | "${SSH[@]}" "${SSH_USER}@${SSH_HOST}" "umask 177; cat > '$REMOTE/.env' && chmod 600 '$REMOTE/.env'"
+
+          if [ -n "${GOOGLE_SERVICE_ACCOUNT_JSON_B64:-}" ]; then
+            echo "$GOOGLE_SERVICE_ACCOUNT_JSON_B64" | base64 -d | tr -d '\r' | "${SSH[@]}" "${SSH_USER}@${SSH_HOST}" "umask 177; mkdir -p '$REMOTE/storage/app/private' && cat > '$REMOTE/storage/app/private/google-sa.json' && chmod 600 '$REMOTE/storage/app/private/google-sa.json'"
+          fi
 
           "${SSH[@]}" "${SSH_USER}@${SSH_HOST}" "bash '$REMOTE/deploy/remote.sh'"

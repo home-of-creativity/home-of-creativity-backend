@@ -67,5 +67,12 @@ if (Get-Command rsync -ErrorAction SilentlyContinue) {
   }
 }
 
+$saLocal = Join-Path $Root "storage\app\private\google-sa.json"
+if (Test-Path $saLocal) {
+  ssh @ssh "mkdir -p '$RemotePath/storage/app/private'"
+  scp -i $IdentityFile -P $Port -o IdentitiesOnly=yes $saLocal "${User}@${HostName}:${RemotePath}/storage/app/private/google-sa.json"
+  ssh @ssh "chmod 600 '$RemotePath/storage/app/private/google-sa.json'"
+}
+
 ssh @ssh "bash '$RemotePath/deploy/remote.sh'"
 Write-Host "Done."
