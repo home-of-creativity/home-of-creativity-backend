@@ -204,6 +204,7 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
   const remaining = Number(item.amount_remaining ?? 0);
   const canConfirmPayment = item.status === "awaiting_payment";
   const canConfirmRemaining = remaining > 0.009 && Boolean(item.paid_at);
+  const showReceipts = item.status === "awaiting_payment";
   const receipts = item.files?.filter((file) => file.kind === "payment_receipt") ?? [];
   const attachments = item.files?.filter((file) => file.kind === "brief_attachment") ?? [];
   const quotationTotal = quotationLines.reduce((sum, line) => {
@@ -264,7 +265,15 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
           </div>
           <div>
             <dt>{t(copy.telegram)}</dt>
-            <dd dir="ltr">{item.client?.telegram_user_id ?? "—"}</dd>
+            <dd dir="ltr">
+              {item.client?.telegram_url ? (
+                <a href={item.client.telegram_url} rel="noreferrer">
+                  {t(copy.contactTelegram)}
+                </a>
+              ) : (
+                item.client?.telegram_user_id ?? "—"
+              )}
+            </dd>
           </div>
           <div>
             <dt>{t(copy.odooPartner)}</dt>
@@ -331,7 +340,19 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
           </div>
           <div>
             <dt>{t(copy.driveFolder)}</dt>
-            <dd dir="ltr">{item.google_drive_folder_id ?? "—"}</dd>
+            <dd dir="ltr">
+              {item.google_drive_folder_url || item.google_drive_folder_id ? (
+                <a
+                  href={item.google_drive_folder_url ?? `https://drive.google.com/drive/folders/${item.google_drive_folder_id}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {t(copy.openDriveFolder)}
+                </a>
+              ) : (
+                "—"
+              )}
+            </dd>
           </div>
         </dl>
         {item.quotations?.length ? (
@@ -342,6 +363,28 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
                 <li key={quote.id}>
                   v{quote.version} · {quote.amount} USD
                   {quote.sent_at ? ` · ${quote.sent_at}` : ""}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {item.quotation_decisions?.length ? (
+          <div className="briefs">
+            <h3>{t(copy.quotationDecision)}</h3>
+            <ul>
+              {item.quotation_decisions.map((decision) => (
+                <li key={decision.id}>
+                  {decision.decision === "approved" ? t(copy.approved) : t(copy.rejected)}
+                  {item.client?.name ? ` · ${item.client.name}` : ""}
+                  {decision.reason ? ` · ${decision.reason}` : ""}
+                  {item.client?.telegram_url ? (
+                    <>
+                      {" · "}
+                      <a href={item.client.telegram_url} rel="noreferrer">
+                        {t(copy.contactTelegram)}
+                      </a>
+                    </>
+                  ) : null}
                 </li>
               ))}
             </ul>
@@ -385,7 +428,7 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
             </ul>
           </div>
         ) : null}
-        {receipts.length ? (
+        {showReceipts && receipts.length ? (
           <div className="briefs">
             <h3>{t(copy.receipts)}</h3>
             <ul className="file-list">
@@ -547,20 +590,22 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
           ) : null}
         </form>
       </section>
-      <section className="card action-card">
-        <h2 className="form-title">{t(copy.receipts)}</h2>
-        <div className="toolbar">
-          <input
-            className="field"
-            value={receiptReason}
-            onChange={(e) => setReceiptReason(e.target.value)}
-            placeholder={t(copy.receiptReason)}
-          />
-          <button className="btn btn-ghost" type="button" onClick={() => void reRequestReceipt()}>
-            {t(copy.reRequestReceipt)}
-          </button>
-        </div>
-      </section>
+      {showReceipts ? (
+        <section className="card action-card">
+          <h2 className="form-title">{t(copy.receipts)}</h2>
+          <div className="toolbar">
+            <input
+              className="field"
+              value={receiptReason}
+              onChange={(e) => setReceiptReason(e.target.value)}
+              placeholder={t(copy.receiptReason)}
+            />
+            <button className="btn btn-ghost" type="button" onClick={() => void reRequestReceipt()}>
+              {t(copy.reRequestReceipt)}
+            </button>
+          </div>
+        </section>
+      ) : null}
       <section className="card action-card qr-request-card">
         <h2 className="form-title">{t(copy.shamCashQr)}</h2>
         <p className="muted">{t(copy.shamCashQrHelp)}</p>

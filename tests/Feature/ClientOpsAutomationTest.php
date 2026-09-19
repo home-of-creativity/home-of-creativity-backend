@@ -394,6 +394,109 @@ class ClientOpsAutomationTest extends TestCase
         $this->assertNotNull($request->fresh()?->odoo_won_at);
     }
 
+    public function test_full_payment_writes_won_expected_revenue_on_odoo_lead(): void
+    {
+        Http::preventStrayRequests();
+        $this->fakeOdooDocuments();
+        Http::fake($this->odooDocumentsHttpFake());
+        config(['services.gemini.e2e_stub' => true]);
+
+        $client = Client::factory()->create([
+            'telegram_user_id' => 'tg-won-rev',
+            'company_name' => 'شركة',
+            'phone' => '099',
+            'odoo_lead_id' => '77',
+        ]);
+        $first = ServiceRequest::factory()->create([
+            'client_id' => $client->id,
+            'status' => RequestStatus::AwaitingPayment,
+            'quotation_amount' => 1499,
+            'amount_total' => 1499,
+            'amount_paid' => 0,
+            'amount_remaining' => 1499,
+        ]);
+        $second = ServiceRequest::factory()->create([
+            'client_id' => $client->id,
+            'status' => RequestStatus::PaymentConfirmed,
+            'quotation_amount' => 800,
+            'amount_total' => 800,
+            'amount_paid' => 800,
+            'amount_remaining' => 0,
+            'odoo_won_at' => now()->subDay(),
+            'paid_at' => now()->subDay(),
+        ]);
+
+        app(ConfirmRequestPayment::class)->handle($first, PaymentMethod::Cash, 1499);
+
+        $this->assertNotNull($first->fresh()?->odoo_won_at);
+        $this->assertEqualsWithDelta(2299.0, $client->fresh()?->pipelineRevenue(wonOnly: true), 0.01);
+
+        Http::assertSent(function (Request $request): bool {
+            $args = $request->data()['params']['args'] ?? [];
+            if (($args[3] ?? null) !== 'crm.lead' || ($args[4] ?? null) !== 'write') {
+                return false;
+            }
+
+            $vals = $args[5][1] ?? [];
+
+            return (int) ($vals['expected_revenue'] ?? 0) === 2299
+                && (int) ($vals['probability'] ?? 0) === 100;
+        });
+    }
+
+    public function test_confirm_payment_posts_and_registers_odoo_invoice_payment(): void
+    {
+        Http::preventStrayRequests();
+        $this->fakeOdooDocuments();
+        Http::fake($this->odooDocumentsHttpFake());
+        config(['services.gemini.e2e_stub' => true]);
+
+        $client = Client::factory()->create([
+            'telegram_user_id' => 'tg-odoo-paid',
+            'company_name' => 'شركة',
+            'phone' => '099',
+            'odoo_partner_id' => '44',
+        ]);
+        $request = ServiceRequest::factory()->create([
+            'client_id' => $client->id,
+            'status' => RequestStatus::AwaitingPayment,
+            'quotation_amount' => 3830,
+            'amount_total' => 3830,
+            'amount_paid' => 0,
+            'amount_remaining' => 3830,
+            'odoo_quotation_id' => '51',
+        ]);
+
+        app(ConfirmRequestPayment::class)->handle($request, PaymentMethod::Cash, 3830);
+
+        $this->assertSame('501', $request->fresh()?->odoo_invoice_id);
+
+        Http::assertSent(function (Request $request): bool {
+            $args = $request->data()['params']['args'] ?? [];
+
+            return ($args[3] ?? null) === 'account.move'
+                && ($args[4] ?? null) === 'action_post'
+                && (int) (($args[5][0][0] ?? 0) ?: 0) === 501;
+        });
+
+        Http::assertSent(function (Request $request): bool {
+            $args = $request->data()['params']['args'] ?? [];
+            $context = $args[6]['context'] ?? [];
+
+            return ($args[3] ?? null) === 'account.payment.register'
+                && ($args[4] ?? null) === 'create'
+                && (($context['active_model'] ?? null) === 'account.move')
+                && in_array(501, $context['active_ids'] ?? [], true);
+        });
+
+        Http::assertSent(function (Request $request): bool {
+            $args = $request->data()['params']['args'] ?? [];
+
+            return ($args[3] ?? null) === 'account.payment.register'
+                && ($args[4] ?? null) === 'action_create_payments';
+        });
+    }
+
     public function test_invoice_uses_actual_received_amount_not_requested_deposit(): void
     {
         Http::fake();

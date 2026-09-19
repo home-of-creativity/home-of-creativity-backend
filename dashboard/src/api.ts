@@ -144,6 +144,7 @@ export type Client = {
   email: string | null;
   phone: string | null;
   telegram_user_id: string | null;
+  telegram_url?: string | null;
   odoo_partner_id?: string | null;
   odoo_lead_id?: string | null;
   odoo_stage_name?: string | null;
@@ -200,6 +201,13 @@ export type Quotation = {
   sent_at?: string | null;
 };
 
+export type QuotationDecision = {
+  id: number;
+  decision: "approved" | "rejected";
+  reason?: string | null;
+  created_at?: string | null;
+};
+
 export type ClickUpTask = {
   task_type: string;
   clickup_task_id?: string | null;
@@ -241,6 +249,7 @@ export type ServiceRequest = {
   subscription_starts_at?: string | null;
   subscription_ends_at?: string | null;
   google_drive_folder_id?: string | null;
+  google_drive_folder_url?: string | null;
   receipt_reupload_required?: boolean;
   receipt_reupload_reason?: string | null;
   can_renew?: boolean;
@@ -248,6 +257,7 @@ export type ServiceRequest = {
   briefs?: Brief[];
   files?: RequestFile[];
   quotations?: Quotation[];
+  quotation_decisions?: QuotationDecision[];
   clickup_tasks?: ClickUpTask[];
   client?: Client;
   created_at: string | null;

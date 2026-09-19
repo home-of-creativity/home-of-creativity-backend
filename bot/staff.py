@@ -107,6 +107,9 @@ def format_staff_card(item: dict[str, Any]) -> str:
         f"  الحالة: {status}",
         f"  المسند: {assignee}",
     ]
+    telegram_url = item.get("telegram_url")
+    if telegram_url:
+        lines.append(f"  تواصل خاص: {telegram_url}")
     return "\n".join(lines)
 
 

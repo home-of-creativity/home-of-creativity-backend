@@ -25,6 +25,7 @@ class ConfirmRequestPayment
         private EnsureRequestDriveFolder $ensureRequestDriveFolder,
         private SchedulePaymentReminders $schedulePaymentReminders,
         private IssueInvoice $issueInvoice,
+        private SyncClientExpectedRevenue $syncClientExpectedRevenue,
     ) {}
 
     public function handle(ServiceRequest $request, PaymentMethod $method, float $receivedAmount): ServiceRequest
@@ -166,8 +167,8 @@ class ConfirmRequestPayment
         }
 
         $leadId = (int) ($request->client?->odoo_lead_id ?? 0);
-        if ($leadId > 0 && $this->odoo->configured()) {
-            $this->odoo->markLeadWon($leadId);
+        if ($leadId > 0 && $this->odoo->configured() && $request->client) {
+            $this->syncClientExpectedRevenue->handle($request->client, markWon: true);
         }
 
         $request->forceFill(['odoo_won_at' => now()])->save();

@@ -13,6 +13,8 @@ class OdooClient
 
     private ?int $currencyId = null;
 
+    private ?int $paymentJournalId = null;
+
     /** @var array<string, int|null> */
     private array $tagIdCache = [];
 
@@ -71,7 +73,7 @@ class OdooClient
      */
     private function invoiceFields(): array
     {
-        return ['id', 'name', 'partner_id', 'amount_total', 'state', 'payment_state', 'invoice_origin', 'ref', 'invoice_date'];
+        return ['id', 'name', 'partner_id', 'amount_total', 'amount_residual', 'state', 'payment_state', 'invoice_origin', 'ref', 'invoice_date'];
     }
 
     /**
@@ -104,6 +106,7 @@ class OdooClient
             'name' => (string) ($row['name'] ?? ''),
             'partner_name' => $this->relationName($row['partner_id'] ?? null),
             'amount_total' => (float) ($row['amount_total'] ?? 0),
+            'amount_residual' => $this->invoiceResidual($row),
             'state' => (string) ($row['state'] ?? ''),
             'payment_state' => (string) ($row['payment_state'] ?? ''),
             'invoice_origin' => $this->optionalString($row['invoice_origin'] ?? null),
@@ -639,7 +642,7 @@ class OdooClient
         }
     }
 
-    public function markLeadWon(int $leadId): void
+    public function markLeadWon(int $leadId, ?float $expectedRevenue = null): void
     {
         if ($leadId <= 0) {
             return;
@@ -658,14 +661,40 @@ class OdooClient
                 return;
             }
 
-            $this->writeRecord('crm.lead', $leadId, array_filter([
+            $values = [
                 'stage_id' => $stageId,
                 'probability' => 100,
                 'color' => 10,
                 'date_closed' => now()->toDateTimeString(),
-            ], fn (mixed $value): bool => $value !== null && $value !== ''));
+            ];
+            if ($expectedRevenue !== null && $expectedRevenue > 0.009) {
+                $values['expected_revenue'] = round($expectedRevenue, 2);
+            }
+
+            $this->writeRecord('crm.lead', $leadId, array_filter(
+                $values,
+                fn (mixed $value): bool => $value !== null && $value !== '',
+            ));
         } catch (Throwable $exception) {
             Log::error('Odoo markLeadWon failed.', [
+                'lead_id' => $leadId,
+                'error' => $exception->getMessage(),
+            ]);
+        }
+    }
+
+    public function writeLeadExpectedRevenue(int $leadId, float $expectedRevenue): void
+    {
+        if ($leadId <= 0 || $expectedRevenue <= 0.009) {
+            return;
+        }
+
+        try {
+            $this->writeRecord('crm.lead', $leadId, [
+                'expected_revenue' => round($expectedRevenue, 2),
+            ]);
+        } catch (Throwable $exception) {
+            Log::warning('Odoo expected_revenue write failed.', [
                 'lead_id' => $leadId,
                 'error' => $exception->getMessage(),
             ]);
@@ -1305,6 +1334,7 @@ class OdooClient
             'partner_id' => (int) $partnerId,
             'invoice_origin' => $quotationId ?: $requestNumber,
             'ref' => $requestNumber,
+            'invoice_date' => now()->toDateString(),
         ];
 
         if ($currencyId = $this->resolveCurrencyId()) {
@@ -1320,6 +1350,63 @@ class OdooClient
         }
 
         return (string) $this->call('account.move', 'create', [$values]);
+    }
+
+    public function postAndPayInvoice(int|string $invoiceId, ?float $amount = null): void
+    {
+        if (! $this->configured()) {
+            return;
+        }
+
+        $id = (int) $invoiceId;
+        if ($id <= 0) {
+            return;
+        }
+
+        $row = $this->invoiceAccountingRow($id);
+        if ($row === null) {
+            return;
+        }
+
+        $state = (string) ($row['state'] ?? '');
+        $paymentState = (string) ($row['payment_state'] ?? '');
+
+        if ($state === 'cancel' || in_array($paymentState, ['paid', 'in_payment', 'reversed'], true)) {
+            return;
+        }
+
+        if ($state === 'draft') {
+            $this->call('account.move', 'action_post', ['ids' => [$id]]);
+            $row = $this->invoiceAccountingRow($id) ?? $row;
+            $paymentState = (string) ($row['payment_state'] ?? $paymentState);
+            if (in_array($paymentState, ['paid', 'in_payment', 'reversed'], true)) {
+                return;
+            }
+        }
+
+        $residual = $this->invoiceResidual($row);
+        $payAmount = $amount !== null && $amount > 0
+            ? min(round($amount, 2), round($residual, 2))
+            : round($residual, 2);
+
+        if ($payAmount <= 0.009) {
+            return;
+        }
+
+        $this->registerInvoicePayment($id, $payAmount);
+    }
+
+    /**
+     * @param  array<string, mixed>  $invoice
+     */
+    public function unpaidAmountForLocalPayment(array $invoice, float $localPaid): float
+    {
+        $residual = $this->invoiceResidual($invoice);
+        $total = (float) ($invoice['amount_total'] ?? 0);
+        $paidOnOdoo = max(round($total - $residual, 2), 0);
+        $needed = max(round($localPaid, 2) - $paidOnOdoo, 0);
+
+        return min($needed, max($residual, 0));
     }
 
     /**
@@ -1375,6 +1462,115 @@ class OdooClient
         }
 
         return (string) $value;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function invoiceAccountingRow(int $invoiceId): ?array
+    {
+        return $this->firstRecord($this->searchRead('account.move', [['id', '=', $invoiceId]], [
+            'id',
+            'state',
+            'payment_state',
+            'amount_total',
+            'amount_residual',
+        ], 1, 0, 'id desc'));
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     */
+    private function invoiceResidual(array $row): float
+    {
+        if (array_key_exists('amount_residual', $row) && is_numeric($row['amount_residual'])) {
+            return (float) $row['amount_residual'];
+        }
+
+        $paymentState = (string) ($row['payment_state'] ?? '');
+        if (in_array($paymentState, ['paid', 'in_payment', 'reversed'], true)) {
+            return 0.0;
+        }
+
+        return (float) ($row['amount_total'] ?? 0);
+    }
+
+    private function registerInvoicePayment(int $invoiceId, float $amount): void
+    {
+        $values = [
+            'payment_date' => now()->toDateString(),
+            'amount' => $amount,
+        ];
+
+        $journalId = $this->resolvePaymentJournalId();
+        if ($journalId !== null) {
+            $values['journal_id'] = $journalId;
+        }
+
+        $wizardId = $this->createWithContext('account.payment.register', $values, [
+            'active_model' => 'account.move',
+            'active_ids' => [$invoiceId],
+            'active_id' => $invoiceId,
+        ]);
+
+        $id = is_array($wizardId) ? (int) ($wizardId[0] ?? 0) : (int) $wizardId;
+        if ($id <= 0) {
+            throw new RuntimeException('Odoo payment register did not return a wizard id.');
+        }
+
+        $this->call('account.payment.register', 'action_create_payments', ['ids' => [$id]]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $values
+     * @param  array<string, mixed>  $context
+     */
+    private function createWithContext(string $model, array $values, array $context): mixed
+    {
+        if ($this->useJson2()) {
+            return $this->json2($model, 'create', [
+                'vals_list' => [$values],
+                'context' => $context,
+            ]);
+        }
+
+        return $this->executeKw($this->legacyUid(), $model, 'create', [[$values]], [
+            'context' => $context,
+        ]);
+    }
+
+    private function resolvePaymentJournalId(): ?int
+    {
+        if ($this->paymentJournalId !== null) {
+            return $this->paymentJournalId > 0 ? $this->paymentJournalId : null;
+        }
+
+        if (! $this->configured()) {
+            $this->paymentJournalId = 0;
+
+            return null;
+        }
+
+        $rows = $this->searchRead('account.journal', [
+            ['type', 'in', ['bank', 'cash']],
+            ['active', '=', true],
+        ], ['id', 'type', 'name'], 8, 0, 'id asc');
+
+        $chosen = null;
+        foreach ($rows as $row) {
+            if (($row['type'] ?? '') === 'cash' && isset($row['id'])) {
+                $chosen = (int) $row['id'];
+                break;
+            }
+        }
+
+        if ($chosen === null && isset($rows[0]['id'])) {
+            $chosen = (int) $rows[0]['id'];
+        }
+
+        $this->paymentJournalId = $chosen ?? 0;
+
+        return $this->paymentJournalId > 0 ? $this->paymentJournalId : null;
     }
 
     private function resolveCurrencyId(): ?int
@@ -1463,6 +1659,12 @@ class OdooClient
         }
 
         if ($method === 'unlink') {
+            return [
+                'ids' => $payload['ids'] ?? [],
+            ];
+        }
+
+        if (in_array($method, ['action_post', 'action_create_payments'], true)) {
             return [
                 'ids' => $payload['ids'] ?? [],
             ];
@@ -1571,6 +1773,12 @@ class OdooClient
         }
 
         if ($method === 'unlink') {
+            return $this->execute($uid, $model, $method, [
+                $payload['ids'] ?? [],
+            ]);
+        }
+
+        if (in_array($method, ['action_post', 'action_create_payments'], true)) {
             return $this->execute($uid, $model, $method, [
                 $payload['ids'] ?? [],
             ]);

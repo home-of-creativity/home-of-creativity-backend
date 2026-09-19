@@ -6,6 +6,7 @@ use App\Actions\HydrateClientFromOdoo;
 use App\Actions\HydrateEmployeeFromOdoo;
 use App\Actions\ImportOdooCrmClients;
 use App\Actions\PushEmployeeToOdoo;
+use App\Actions\SyncClientExpectedRevenue;
 use App\Actions\SyncOdooEmployees;
 use App\Models\Client;
 use App\Models\Employee;
@@ -28,6 +29,7 @@ class ReconcileOdooCommand extends Command
         HydrateClientFromOdoo $hydrateClientFromOdoo,
         HydrateEmployeeFromOdoo $hydrateEmployeeFromOdoo,
         PushEmployeeToOdoo $pushEmployeeToOdoo,
+        SyncClientExpectedRevenue $syncClientExpectedRevenue,
     ): int {
         if (! $odoo->configured()) {
             return self::SUCCESS;
@@ -54,6 +56,7 @@ class ReconcileOdooCommand extends Command
         foreach ($this->nextClientBatch($limit) as $client) {
             try {
                 $hydrateClientFromOdoo->handle($client);
+                $syncClientExpectedRevenue->handle($client);
             } catch (\Throwable $exception) {
                 Log::warning('odoo:reconcile client failed.', [
                     'client_id' => $client->id,

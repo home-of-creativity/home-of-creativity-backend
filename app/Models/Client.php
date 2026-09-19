@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\RequestStatus;
 use App\Support\ClientProfileValue;
 use Database\Factories\ClientFactory;
 use Illuminate\Database\Eloquent\Builder;
@@ -67,9 +68,53 @@ class Client extends Model
             ?? 'شركة';
     }
 
+    public function telegramPrivateUrl(): ?string
+    {
+        $id = trim((string) ($this->telegram_user_id ?? ''));
+        if ($id === '' || ! ctype_digit($id)) {
+            return null;
+        }
+
+        return 'tg://user?id='.$id;
+    }
+
+    public function telegramContactLine(): ?string
+    {
+        $url = $this->telegramPrivateUrl();
+
+        return filled($url) ? 'تواصل خاص: '.$url : null;
+    }
+
     public function readyForOdoo(): bool
     {
         return ! filled($this->telegram_user_id) || $this->profileComplete();
+    }
+
+    /**
+     * Quotation / contract totals on this client's requests for the Odoo CRM
+     * expected_revenue field. Won-only is used after full payment.
+     */
+    public function pipelineRevenue(bool $wonOnly = false): float
+    {
+        $this->loadMissing('requests');
+
+        $total = 0.0;
+        foreach ($this->requests as $request) {
+            if (in_array($request->status, [RequestStatus::Cancelled, RequestStatus::QuotationRejected], true)) {
+                continue;
+            }
+
+            if ($wonOnly && ! $request->isFullyPaid() && $request->odoo_won_at === null) {
+                continue;
+            }
+
+            $amount = (float) ($request->amount_total ?? $request->quotation_amount ?? 0);
+            if ($amount > 0.009) {
+                $total += $amount;
+            }
+        }
+
+        return round($total, 2);
     }
 
     /**

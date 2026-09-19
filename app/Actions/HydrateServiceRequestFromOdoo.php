@@ -102,6 +102,29 @@ class HydrateServiceRequestFromOdoo
             'odoo_invoice_id' => (string) $invoice['id'],
         ])->save();
 
+        $localPaid = (float) ($request->amount_paid ?? 0);
+        $isDraft = ($invoice['state'] ?? '') === 'draft';
+        $unpaid = $this->odoo->unpaidAmountForLocalPayment($invoice, $localPaid);
+
+        if ($localPaid > 0.009 && ($isDraft || $unpaid > 0.009)) {
+            try {
+                $this->odoo->postAndPayInvoice(
+                    (int) $invoice['id'],
+                    $unpaid > 0.009 ? $unpaid : null,
+                );
+                $fresh = $this->odoo->invoiceSnapshot((int) $invoice['id']);
+                if (is_array($fresh)) {
+                    $invoice = $fresh;
+                }
+            } catch (Throwable $exception) {
+                Log::warning('Odoo invoice post/pay during hydrate failed.', [
+                    'request_id' => $request->id,
+                    'odoo_invoice_id' => $invoice['id'] ?? null,
+                    'error' => $exception->getMessage(),
+                ]);
+            }
+        }
+
         return $invoice;
     }
 }

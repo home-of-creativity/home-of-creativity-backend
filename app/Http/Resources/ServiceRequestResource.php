@@ -65,6 +65,9 @@ class ServiceRequestResource extends JsonResource
             'subscription_starts_at' => $this->subscription_starts_at?->toIso8601String(),
             'subscription_ends_at' => $this->subscription_ends_at?->toIso8601String(),
             'google_drive_folder_id' => $this->google_drive_folder_id,
+            'google_drive_folder_url' => filled($this->google_drive_folder_id)
+                ? 'https://drive.google.com/drive/folders/'.$this->google_drive_folder_id
+                : null,
             'receipt_reupload_required' => (bool) $this->receipt_reupload_required,
             'receipt_reupload_reason' => $this->receipt_reupload_reason,
             'can_renew' => (bool) $this->allows_renewal && $this->status !== RequestStatus::Cancelled,

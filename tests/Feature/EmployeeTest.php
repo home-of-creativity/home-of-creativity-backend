@@ -365,7 +365,7 @@ class EmployeeTest extends TestCase
         Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true], 200)]);
 
         Employee::factory()->sales()->create(['telegram_user_id' => '6350001']);
-        $client = Client::factory()->create(['telegram_user_id' => 'tg-client-9']);
+        $client = Client::factory()->create(['telegram_user_id' => '213309826']);
         $serviceRequest = ServiceRequest::factory()->for($client)->create([
             'status' => RequestStatus::QuotationSent,
         ]);
@@ -378,12 +378,13 @@ class EmployeeTest extends TestCase
 
         $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
             ->postJson("/api/bot/telegram/requests/{$serviceRequest->number}/approve", [
-                'telegram_user_id' => 'tg-client-9',
+                'telegram_user_id' => '213309826',
             ])->assertOk();
 
         Http::assertSent(fn (Request $request): bool => str_contains($request->url(), 'botstaff-token/sendMessage')
             && $request['chat_id'] === '6350001'
-            && str_contains((string) $request['text'], 'وافق الزبون على عرض السعر'));
+            && str_contains((string) $request['text'], 'وافق الزبون على عرض السعر')
+            && str_contains((string) $request['text'], 'tg://user?id=213309826'));
 
         $rejected = ServiceRequest::factory()->for($client)->create([
             'status' => RequestStatus::QuotationSent,
@@ -397,14 +398,15 @@ class EmployeeTest extends TestCase
 
         $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
             ->postJson("/api/bot/telegram/requests/{$rejected->number}/reject", [
-                'telegram_user_id' => 'tg-client-9',
+                'telegram_user_id' => '213309826',
                 'reason' => 'السعر مرتفع',
             ])->assertOk();
 
         Http::assertSent(fn (Request $request): bool => str_contains($request->url(), 'botstaff-token/sendMessage')
             && $request['chat_id'] === '6350001'
             && str_contains((string) $request['text'], 'رفض الزبون عرض السعر')
-            && str_contains((string) $request['text'], 'السعر مرتفع'));
+            && str_contains((string) $request['text'], 'السعر مرتفع')
+            && str_contains((string) $request['text'], 'tg://user?id=213309826'));
     }
 
     public function test_receipt_upload_notifies_sales(): void

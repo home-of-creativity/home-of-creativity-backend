@@ -56,7 +56,10 @@ class RejectQuotation
             $this->notifyEmployees->handle(
                 $fresh,
                 EmployeeProfession::Sales,
-                "❌ رفض الزبون عرض السعر\n#{$displayNumber} — {$fresh->title}\n{$fresh->client?->name}\n\nالسبب: {$storedReason}",
+                $this->salesDecisionMessage(
+                    $fresh,
+                    "❌ رفض الزبون عرض السعر\n#{$displayNumber} — {$fresh->title}\n{$fresh->client?->name}\n\nالسبب: {$storedReason}",
+                ),
             );
 
             return $fresh;
@@ -65,6 +68,13 @@ class RejectQuotation
         $this->pushRejectionToOdoo($updated, $reason);
 
         return $updated;
+    }
+
+    private function salesDecisionMessage(ServiceRequest $request, string $body): string
+    {
+        $line = $request->client?->telegramContactLine();
+
+        return filled($line) ? $body."\n\n{$line}" : $body;
     }
 
     private function pushRejectionToOdoo(ServiceRequest $request, string $reason): void

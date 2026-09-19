@@ -114,8 +114,13 @@ class SendQuotation
             return $quotation->fresh() ?? $quotation;
         });
 
+        $fresh = $request->fresh(['client']) ?? $request;
+        if ($fresh->client) {
+            app(SyncClientExpectedRevenue::class)->handle($fresh->client);
+        }
+
         app(SyncClickUpFromStaff::class)->handle(
-            $request->fresh() ?? $request,
+            $fresh,
             ClickUpSyncEvent::Quotation,
             $employee,
             $notes,

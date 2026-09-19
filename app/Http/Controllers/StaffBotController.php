@@ -398,6 +398,7 @@ class StaffBotController extends Controller
             'status' => $item->status->value,
             'status_label' => StatusLabel::requestAr($item->status->value),
             'client_name' => $item->client?->name,
+            'telegram_url' => $item->client?->telegramPrivateUrl(),
             'company_name' => $item->client?->company_name,
             'package_name' => $item->pricingPackage?->name_ar ?: $item->pricingPackage?->name_en,
             'is_manual' => $item->pricing_package_id === null,

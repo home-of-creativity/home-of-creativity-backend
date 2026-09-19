@@ -148,6 +148,16 @@ class IssueInvoice
             );
             $request->forceFill(['odoo_invoice_id' => $odooInvoiceId])->save();
 
+            try {
+                $this->odoo->postAndPayInvoice($odooInvoiceId, $amount > 0 ? $amount : null);
+            } catch (Throwable $exception) {
+                Log::warning('Odoo invoice was created but not posted or paid.', [
+                    'request' => $request->number,
+                    'odoo_invoice_id' => $odooInvoiceId,
+                    'error' => $exception->getMessage(),
+                ]);
+            }
+
             $pdfBinary = $this->odoo->downloadInvoicePdf($odooInvoiceId);
             if (! is_string($pdfBinary) || $pdfBinary === '') {
                 throw ValidationException::withMessages([

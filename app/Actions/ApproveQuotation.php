@@ -52,7 +52,10 @@ class ApproveQuotation
             $this->notifyEmployees->handle(
                 $fresh,
                 EmployeeProfession::Sales,
-                "✅ وافق الزبون على عرض السعر\n#{$displayNumber} — {$fresh->title}\n{$fresh->client?->name}",
+                $this->salesDecisionMessage(
+                    $fresh,
+                    "✅ وافق الزبون على عرض السعر\n#{$displayNumber} — {$fresh->title}\n{$fresh->client?->name}",
+                ),
             );
 
             return $fresh;
@@ -62,5 +65,12 @@ class ApproveQuotation
         $this->clientPaymentNotice = $this->applyQuotationAcceptance->clientNotice;
 
         return $updated->fresh(['client', 'invoices', 'pricingPackage']) ?? $updated;
+    }
+
+    private function salesDecisionMessage(ServiceRequest $request, string $body): string
+    {
+        $line = $request->client?->telegramContactLine();
+
+        return filled($line) ? $body."\n\n{$line}" : $body;
     }
 }

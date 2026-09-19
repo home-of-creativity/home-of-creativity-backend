@@ -891,10 +891,13 @@ class AdminDashboardTest extends TestCase
         $admin->forceFill(['is_admin' => true])->save();
         Sanctum::actingAs($admin);
 
+        $client = Client::factory()->create(['telegram_user_id' => '213309826']);
         $serviceRequest = ServiceRequest::factory()->create([
+            'client_id' => $client->id,
             'number' => 'REQ-TEST',
             'odoo_quotation_id' => '301',
             'quotation_amount' => 10,
+            'google_drive_folder_id' => 'folder-abc',
         ]);
 
         $this->getJson("/api/admin/requests/{$serviceRequest->id}")
@@ -902,9 +905,119 @@ class AdminDashboardTest extends TestCase
             ->assertJsonPath('data.odoo_quotation_id', '301')
             ->assertJsonPath('data.odoo_invoice_id', '501')
             ->assertJsonPath('data.odoo_quotation_live.state', 'sent')
-            ->assertJsonPath('data.odoo_invoice_live.state', 'posted');
+            ->assertJsonPath('data.odoo_invoice_live.state', 'posted')
+            ->assertJsonPath('data.google_drive_folder_url', 'https://drive.google.com/drive/folders/folder-abc')
+            ->assertJsonPath('data.client.telegram_url', 'tg://user?id=213309826');
 
         $this->assertEquals(250.0, (float) $serviceRequest->fresh()->quotation_amount);
+    }
+
+    public function test_admin_request_show_posts_and_pays_draft_odoo_invoice_when_locally_paid(): void
+    {
+        Http::preventStrayRequests();
+        config([
+            'services.odoo.enabled' => true,
+            'services.odoo.url' => 'https://odoo.test',
+            'services.odoo.db' => 'hoc',
+            'services.odoo.username' => 'admin',
+            'services.odoo.api_key' => 'secret-key',
+            'services.odoo.use_json2' => false,
+        ]);
+
+        $invoice = [
+            'id' => 22,
+            'name' => 'INV/2026/0022',
+            'partner_id' => [44, 'Startup Build'],
+            'amount_total' => 3830.0,
+            'amount_residual' => 3830.0,
+            'state' => 'draft',
+            'payment_state' => 'not_paid',
+            'invoice_origin' => 'REQ-2026-000012',
+            'ref' => 'REQ-2026-000012',
+            'invoice_date' => '2026-09-19',
+        ];
+
+        Http::fake([
+            'https://odoo.test/jsonrpc' => function (Request $request) use (&$invoice) {
+                $params = $request->data()['params'] ?? [];
+                if (($params['service'] ?? '') === 'common') {
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => 2], 200);
+                }
+
+                $args = $params['args'] ?? [];
+                $model = $args[3] ?? null;
+                $action = $args[4] ?? null;
+
+                if ($model === 'sale.order' && $action === 'search_read') {
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => []], 200);
+                }
+
+                if ($model === 'account.move' && $action === 'search_read') {
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => [$invoice]], 200);
+                }
+
+                if ($model === 'account.move' && $action === 'action_post') {
+                    $invoice['state'] = 'posted';
+
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => true], 200);
+                }
+
+                if ($model === 'account.journal' && $action === 'search_read') {
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => [[
+                        'id' => 8,
+                        'name' => 'Cash',
+                        'type' => 'cash',
+                    ]]], 200);
+                }
+
+                if ($model === 'account.payment.register' && $action === 'create') {
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => 701], 200);
+                }
+
+                if ($model === 'account.payment.register' && $action === 'action_create_payments') {
+                    $invoice['payment_state'] = 'paid';
+                    $invoice['amount_residual'] = 0.0;
+
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => true], 200);
+                }
+
+                return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => []], 200);
+            },
+        ]);
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        $serviceRequest = ServiceRequest::factory()->create([
+            'number' => 'REQ-2026-000012',
+            'status' => RequestStatus::PaymentConfirmed,
+            'odoo_invoice_id' => '22',
+            'quotation_amount' => 3830,
+            'amount_total' => 3830,
+            'amount_paid' => 3830,
+            'amount_remaining' => 0,
+        ]);
+
+        $this->getJson("/api/admin/requests/{$serviceRequest->id}")
+            ->assertOk()
+            ->assertJsonPath('data.odoo_invoice_id', '22')
+            ->assertJsonPath('data.odoo_invoice_live.state', 'posted')
+            ->assertJsonPath('data.odoo_invoice_live.payment_state', 'paid');
+
+        Http::assertSent(function (Request $request): bool {
+            $args = $request->data()['params']['args'] ?? [];
+
+            return ($args[3] ?? null) === 'account.move'
+                && ($args[4] ?? null) === 'action_post';
+        });
+
+        Http::assertSent(function (Request $request): bool {
+            $args = $request->data()['params']['args'] ?? [];
+
+            return ($args[3] ?? null) === 'account.payment.register'
+                && ($args[4] ?? null) === 'action_create_payments';
+        });
     }
 
     public function test_admin_can_sync_odoo_partners_into_clients(): void
