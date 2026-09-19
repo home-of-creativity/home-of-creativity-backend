@@ -29,6 +29,7 @@ use App\Services\RequestStatusTransitionService;
 use App\Support\ShamCashQr;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -38,7 +39,16 @@ class ServiceRequestController extends Controller
 {
     public function index(AdminServiceRequestIndexRequest $request)
     {
-        $query = ServiceRequest::query()->with('client')->latest('id');
+        $query = ServiceRequest::query()
+            ->with('client')
+            ->withCount([
+                'driveDeliveries as drive_sent_count' => fn ($deliveries) => $deliveries->whereNotNull('sent_at'),
+                'driveDeliveries as drive_failed_count' => fn ($deliveries) => $deliveries->whereNotNull('failed_at'),
+                'driveDeliveries as drive_pending_count' => fn ($deliveries) => $deliveries
+                    ->whereNull('sent_at')
+                    ->whereNull('failed_at'),
+            ])
+            ->latest('id');
 
         if ($request->filled('status')) {
             $query->where('status', $request->string('status'));
@@ -83,6 +93,7 @@ class ServiceRequestController extends Controller
             'integrationEvents',
             'pricingPackage.subcategory.category',
             'subscriptions',
+            'driveDeliveries' => fn ($deliveries) => $deliveries->latest('id'),
         ]);
 
         return ServiceRequestResource::make($serviceRequest)
@@ -181,8 +192,25 @@ class ServiceRequestController extends Controller
     {
         $serviceRequest = $ensureRequestDriveFolder->handle($serviceRequest);
 
-        return ServiceRequestResource::make($serviceRequest->load('client'))
-            ->additional(['message' => 'Drive folder ready.']);
+        return ServiceRequestResource::make($serviceRequest->load([
+            'client',
+            'driveDeliveries' => fn ($deliveries) => $deliveries->latest('id'),
+        ]))->additional(['message' => 'Drive folder ready.']);
+    }
+
+    public function pollDrive(ServiceRequest $serviceRequest): ServiceRequestResource
+    {
+        Artisan::call('ops:poll-drive', [
+            '--request' => (string) $serviceRequest->id,
+        ]);
+
+        $serviceRequest->refresh()->load([
+            'client',
+            'driveDeliveries' => fn ($deliveries) => $deliveries->latest('id'),
+        ]);
+
+        return ServiceRequestResource::make($serviceRequest)
+            ->additional(['message' => 'Drive delivery status refreshed.']);
     }
 
     public function reRequestReceipt(Request $request, ServiceRequest $serviceRequest, ReRequestReceipt $reRequestReceipt): ServiceRequestResource

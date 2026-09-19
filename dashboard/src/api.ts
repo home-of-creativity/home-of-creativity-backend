@@ -234,6 +234,20 @@ export type ClickUpTask = {
   integration_key: string;
 };
 
+export type DriveDelivery = {
+  id: number;
+  name: string | null;
+  mime_type?: string | null;
+  drive_file_id: string;
+  status: "sent" | "pending" | "failed";
+  status_label: string;
+  sent_at?: string | null;
+  failed_at?: string | null;
+  fail_reason?: string | null;
+  telegram_message_id?: number | null;
+  drive_modified_at?: string | null;
+};
+
 export type ServiceRequest = {
   id: number;
   uuid?: string;
@@ -270,6 +284,13 @@ export type ServiceRequest = {
   google_drive_folder_id?: string | null;
   google_drive_folder_ready?: boolean;
   google_drive_folder_url?: string | null;
+  drive_delivery_summary?: {
+    sent: number;
+    pending: number;
+    failed: number;
+    total: number;
+  };
+  drive_deliveries?: DriveDelivery[];
   receipt_reupload_required?: boolean;
   receipt_reupload_reason?: string | null;
   can_renew?: boolean;
@@ -651,6 +672,9 @@ export const api = {
   },
   ensureDriveFolder(id: number) {
     return request<Envelope<ServiceRequest>>(`/admin/requests/${id}/ensure-drive-folder`, { method: "POST" });
+  },
+  pollDriveDeliveries(id: number) {
+    return request<Envelope<ServiceRequest>>(`/admin/requests/${id}/poll-drive`, { method: "POST" });
   },
   reRequestReceipt(id: number, reason?: string) {
     return request<Envelope<ServiceRequest>>(`/admin/requests/${id}/re-request-receipt`, {

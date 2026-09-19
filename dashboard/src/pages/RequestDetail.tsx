@@ -39,6 +39,7 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
   const [receivedAmount, setReceivedAmount] = useState("");
   const [requiresFullPayment, setRequiresFullPayment] = useState(false);
   const [creatingDrive, setCreatingDrive] = useState(false);
+  const [pollingDrive, setPollingDrive] = useState(false);
 
   useEffect(() => {
     if (!receiptUrl) return;
@@ -210,6 +211,22 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
       setError(err instanceof Error ? err.message : t(copy.saveFailed));
     } finally {
       setCreatingDrive(false);
+    }
+  }
+
+  async function pollDrive() {
+    if (!item) return;
+    setError("");
+    setNotice("");
+    setPollingDrive(true);
+    try {
+      const res = await api.pollDriveDeliveries(item.id);
+      setItem(res.data);
+      setNotice(res.message || t(copy.driveRefreshed));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t(copy.saveFailed));
+    } finally {
+      setPollingDrive(false);
     }
   }
 
@@ -390,6 +407,15 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
                   {creatingDrive ? t(copy.creatingDriveFolder) : t(copy.createDriveFolder)}
                 </button>
               ) : null}
+              {item.drive_delivery_summary && item.drive_delivery_summary.total > 0 ? (
+                <p className="muted">
+                  {item.drive_delivery_summary.sent} {t(copy.driveSent)}
+                  {" · "}
+                  {item.drive_delivery_summary.pending} {t(copy.drivePending)}
+                  {" · "}
+                  {item.drive_delivery_summary.failed} {t(copy.driveFailed)}
+                </p>
+              ) : null}
             </dd>
           </div>
         </dl>
@@ -398,8 +424,34 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
           item.clickup_tasks?.length ||
           item.work_plan?.operations?.length ||
           attachments.length ||
-          (showReceipts && receipts.length)) ? (
+          (showReceipts && receipts.length) ||
+          item.google_drive_folder_ready ||
+          (item.drive_deliveries?.length ?? 0) > 0) ? (
           <div className="detail-briefs">
+            {item.google_drive_folder_ready || (item.drive_deliveries?.length ?? 0) > 0 ? (
+              <div className="briefs">
+                <h3>{t(copy.driveDeliveries)}</h3>
+                <p className="muted">{t(copy.driveDeliveriesHelp)}</p>
+                <button type="button" className="btn btn-ghost" disabled={pollingDrive} onClick={() => void pollDrive()}>
+                  {pollingDrive ? t(copy.driveRefreshing) : t(copy.driveRefresh)}
+                </button>
+                {item.drive_deliveries?.length ? (
+                  <ul>
+                    {item.drive_deliveries.map((delivery) => (
+                      <li key={delivery.id}>
+                        <span className={`status status-${delivery.status}`}>{delivery.status_label}</span>
+                        {" "}
+                        <strong>{delivery.name || delivery.drive_file_id}</strong>
+                        {delivery.sent_at ? ` · ${delivery.sent_at}` : ""}
+                        {delivery.fail_reason ? ` — ${delivery.fail_reason}` : ""}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="muted">{t(copy.driveNone)}</p>
+                )}
+              </div>
+            ) : null}
             {item.work_plan?.operations?.length ? (
               <div className="briefs">
                 <h3>{t(copy.workPlan)}</h3>

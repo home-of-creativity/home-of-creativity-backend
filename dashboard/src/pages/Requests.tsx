@@ -74,14 +74,15 @@ export function Requests({ t }: { locale: Locale; t: (c: { ar: string; en: strin
               <th>{t(copy.client)}</th>
               <th>{t(copy.status)}</th>
               <th>{t(copy.source)}</th>
+              <th>{t(copy.driveDeliveries)}</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <LoadingTableRow colSpan={5} label={t(copy.loading)} />
+              <LoadingTableRow colSpan={6} label={t(copy.loading)} />
             ) : items.length === 0 ? (
               <tr>
-                <td colSpan={5}>{t(copy.empty)}</td>
+                <td colSpan={6}>{t(copy.empty)}</td>
               </tr>
             ) : (
               items.map((item) => (
@@ -102,6 +103,15 @@ export function Requests({ t }: { locale: Locale; t: (c: { ar: string; en: strin
                     <span className={`source source-${item.source}`}>
                       {t(sources[item.source] ?? { ar: item.source, en: item.source })}
                     </span>
+                  </td>
+                  <td>
+                    {item.drive_delivery_summary && item.drive_delivery_summary.total > 0 ? (
+                      <span className={`status status-${item.drive_delivery_summary.failed ? "failed" : item.drive_delivery_summary.pending ? "pending" : "sent"}`}>
+                        {item.drive_delivery_summary.sent}/{item.drive_delivery_summary.total} {t(copy.driveSent)}
+                      </span>
+                    ) : (
+                      "—"
+                    )}
                   </td>
                 </tr>
               ))

@@ -15,6 +15,7 @@ use App\Services\TelegramNotifier;
 use App\Support\ResolveServiceRequest;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -27,7 +28,7 @@ class PollDriveDeliveriesCommand extends Command
 
     private const MAX_FILE_BYTES = 20 * 1024 * 1024;
 
-    protected $signature = 'ops:poll-drive {--limit=200}';
+    protected $signature = 'ops:poll-drive {--limit=200} {--request=}';
 
     protected $description = 'Send new Google Drive files from request folders to the client bot.';
 
@@ -49,8 +50,13 @@ class PollDriveDeliveriesCommand extends Command
         }
 
         $limit = max(1, (int) $this->option('limit'));
-        $this->backfillMissingFolders($ensureRequestDriveFolder, $limit);
-        $requests = $this->nextFolderBatch($limit);
+        $target = $this->targetedRequest($ensureRequestDriveFolder);
+        if ($target !== null) {
+            $requests = $target;
+        } else {
+            $this->backfillMissingFolders($ensureRequestDriveFolder, $limit);
+            $requests = $this->nextFolderBatch($limit);
+        }
 
         foreach ($requests as $request) {
             try {
@@ -331,6 +337,44 @@ class PollDriveDeliveriesCommand extends Command
                 ]);
             }
         }
+    }
+
+    /**
+     * @return EloquentCollection<int, ServiceRequest>|null
+     */
+    private function targetedRequest(EnsureRequestDriveFolder $ensureRequestDriveFolder): ?EloquentCollection
+    {
+        $reference = trim((string) $this->option('request'));
+        if ($reference === '') {
+            return null;
+        }
+
+        try {
+            $request = ctype_digit($reference)
+                ? ServiceRequest::query()->with('client')->find((int) $reference)
+                : app(ResolveServiceRequest::class)->byReference($reference)->load('client');
+        } catch (ModelNotFoundException) {
+            $request = null;
+        }
+
+        if ($request === null) {
+            $this->error('Request not found: '.$reference);
+
+            return new EloquentCollection;
+        }
+
+        if (blank($request->google_drive_folder_id)) {
+            try {
+                $request = $ensureRequestDriveFolder->handle($request)->load('client');
+            } catch (Throwable $exception) {
+                Log::warning('Drive folder target backfill failed.', [
+                    'request' => $request->number,
+                    'error' => $exception->getMessage(),
+                ]);
+            }
+        }
+
+        return new EloquentCollection([$request]);
     }
 
     /**

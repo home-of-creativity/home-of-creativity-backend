@@ -35,6 +35,28 @@ class DriveDelivery extends Model
         return $this->belongsTo(ServiceRequest::class, 'request_id');
     }
 
+    public function clientDeliveryStatus(): string
+    {
+        if ($this->sent_at !== null) {
+            return 'sent';
+        }
+
+        if ($this->failed_at !== null) {
+            return 'failed';
+        }
+
+        return 'pending';
+    }
+
+    public function clientDeliveryLabelAr(): string
+    {
+        return match ($this->clientDeliveryStatus()) {
+            'sent' => 'وصل للعميل',
+            'failed' => 'فشل الإرسال',
+            default => 'لم يصل بعد',
+        };
+    }
+
     /**
      * @return array{inline_keyboard: list<list<array{text: string, callback_data: string}>>}
      */

@@ -67,6 +67,8 @@ class ServiceRequestResource extends JsonResource
             'google_drive_folder_id' => $this->google_drive_folder_id,
             'google_drive_folder_ready' => filled($this->google_drive_folder_id),
             'google_drive_folder_url' => $this->googleDriveFolderUrl(),
+            'drive_delivery_summary' => $this->driveDeliverySummary(),
+            'drive_deliveries' => DriveDeliveryResource::collection($this->whenLoaded('driveDeliveries')),
             'receipt_reupload_required' => (bool) $this->receipt_reupload_required,
             'receipt_reupload_reason' => $this->receipt_reupload_reason,
             'can_renew' => $this->canRenew(),
@@ -84,6 +86,30 @@ class ServiceRequestResource extends JsonResource
             'status_history' => $this->whenLoaded('statusHistory'),
             'integration_events' => $this->whenLoaded('integrationEvents'),
             'created_at' => $this->created_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * @return array{sent: int, pending: int, failed: int, total: int}
+     */
+    private function driveDeliverySummary(): array
+    {
+        if ($this->relationLoaded('driveDeliveries')) {
+            $items = $this->driveDeliveries;
+            $sent = $items->whereNotNull('sent_at')->count();
+            $failed = $items->whereNotNull('failed_at')->count();
+            $pending = $items->whereNull('sent_at')->whereNull('failed_at')->count();
+        } else {
+            $sent = (int) ($this->drive_sent_count ?? 0);
+            $failed = (int) ($this->drive_failed_count ?? 0);
+            $pending = (int) ($this->drive_pending_count ?? 0);
+        }
+
+        return [
+            'sent' => $sent,
+            'pending' => $pending,
+            'failed' => $failed,
+            'total' => $sent + $pending + $failed,
         ];
     }
 }

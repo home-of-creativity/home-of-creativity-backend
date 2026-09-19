@@ -1037,7 +1037,8 @@ td[colspan] {
 .status-payment_confirmed,
 .status-completed,
 .status-approved,
-.status-in_progress {
+.status-in_progress,
+.status-sent {
   background: color-mix(in srgb, var(--brand-teal) 22%, var(--tint-base));
   color: color-mix(in srgb, var(--brand-teal) 55%, var(--brand-ink));
 }

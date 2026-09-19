@@ -8,6 +8,7 @@ use App\Enums\RequestStatus;
 use App\Enums\SocialPostStatus;
 use App\Jobs\ClassifyWithGeminiJob;
 use App\Models\Client;
+use App\Models\DriveDelivery;
 use App\Models\Employee;
 use App\Models\ServiceRequest;
 use App\Models\SocialPost;
@@ -1038,6 +1039,92 @@ class AdminDashboardTest extends TestCase
         $this->postJson("/api/admin/requests/{$serviceRequest->id}/ensure-drive-folder")
             ->assertStatus(422)
             ->assertJsonValidationErrors('drive');
+    }
+
+    public function test_admin_request_show_lists_drive_delivery_status_to_the_client(): void
+    {
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        $serviceRequest = ServiceRequest::factory()->create([
+            'status' => RequestStatus::InProgress,
+            'google_drive_folder_id' => 'folder-status',
+        ]);
+        DriveDelivery::query()->create([
+            'request_id' => $serviceRequest->id,
+            'drive_file_id' => 'file-sent',
+            'name' => 'logo.png',
+            'mime_type' => 'image/png',
+            'sent_at' => now(),
+        ]);
+        DriveDelivery::query()->create([
+            'request_id' => $serviceRequest->id,
+            'drive_file_id' => 'file-pending',
+            'name' => 'draft.jpg',
+            'mime_type' => 'image/jpeg',
+        ]);
+        DriveDelivery::query()->create([
+            'request_id' => $serviceRequest->id,
+            'drive_file_id' => 'file-failed',
+            'name' => 'huge.heic',
+            'mime_type' => 'image/heic',
+            'failed_at' => now(),
+            'fail_reason' => 'الملف أكبر من حد تلغرام.',
+        ]);
+
+        $this->getJson("/api/admin/requests/{$serviceRequest->id}")
+            ->assertOk()
+            ->assertJsonPath('data.drive_delivery_summary.sent', 1)
+            ->assertJsonPath('data.drive_delivery_summary.pending', 1)
+            ->assertJsonPath('data.drive_delivery_summary.failed', 1)
+            ->assertJsonPath('data.drive_delivery_summary.total', 3)
+            ->assertJsonPath('data.drive_deliveries.0.status', 'failed')
+            ->assertJsonPath('data.drive_deliveries.0.status_label', 'فشل الإرسال')
+            ->assertJsonPath('data.drive_deliveries.1.status', 'pending')
+            ->assertJsonPath('data.drive_deliveries.2.status', 'sent')
+            ->assertJsonPath('data.drive_deliveries.2.status_label', 'وصل للعميل');
+
+        $this->getJson('/api/admin/requests')
+            ->assertOk()
+            ->assertJsonPath('data.0.drive_delivery_summary.sent', 1)
+            ->assertJsonPath('data.0.drive_delivery_summary.total', 3);
+    }
+
+    public function test_admin_can_poll_one_request_drive_folder_and_see_delivery(): void
+    {
+        config(['services.telegram.bot_token' => 'client-token']);
+        Http::fake([
+            'https://api.telegram.org/*' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 88, 'photo' => [['file_id' => 'tg-photo']]],
+            ], 200),
+        ]);
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        $client = Client::factory()->create(['telegram_user_id' => 'tg-drive-status']);
+        $serviceRequest = ServiceRequest::factory()->for($client)->create([
+            'status' => RequestStatus::PaymentConfirmed,
+            'google_drive_folder_id' => 'folder-poll-one',
+        ]);
+
+        $this->mock(GoogleDriveClient::class, function ($mock): void {
+            $mock->shouldReceive('configured')->andReturn(true);
+            $mock->shouldReceive('configurationError')->andReturn(null);
+            $mock->shouldReceive('listNewFiles')->with('folder-poll-one')->andReturn([
+                ['id' => 'file-one', 'name' => 'pack.png', 'mimeType' => 'image/png'],
+            ]);
+            $mock->shouldReceive('downloadFile')->with('file-one')->andReturn('PNG');
+        });
+
+        $this->postJson("/api/admin/requests/{$serviceRequest->id}/poll-drive")
+            ->assertOk()
+            ->assertJsonPath('data.drive_delivery_summary.sent', 1)
+            ->assertJsonPath('data.drive_deliveries.0.name', 'pack.png')
+            ->assertJsonPath('data.drive_deliveries.0.status', 'sent');
     }
 
     public function test_admin_request_show_posts_and_pays_draft_odoo_invoice_when_locally_paid(): void
