@@ -21,6 +21,7 @@ class SubmitSearchSitemapCommandTest extends TestCase
         Http::assertSent(fn ($request) => $request->url() === 'https://api.indexnow.org/indexnow'
             && $request['host'] === 'hoc.agency'
             && $request['urlList'][0] === 'https://hoc.agency/'
-            && in_array('https://hoc.agency/social/', $request['urlList'], true));
+            && in_array('https://hoc.agency/social/', $request['urlList'], true)
+            && in_array('https://hoc.agency/locations/', $request['urlList'], true));
     }
 }
