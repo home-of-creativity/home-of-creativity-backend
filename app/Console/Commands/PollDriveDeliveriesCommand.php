@@ -124,6 +124,11 @@ class PollDriveDeliveriesCommand extends Command
                 'request' => $request->number,
                 'file' => $fileId,
             ]);
+            $this->alertStaffOnce(
+                $notifyEmployees,
+                'تعذر تنزيل ملف Drive للطلب '.$request->number.' ('.((string) ($file['name'] ?? $fileId)).'). اختصارات صور Google أو الملفات غير المشاركة مع الحساب الخدمي لا تصل للبوت.',
+                'ops:poll-drive:empty-dl:'.$request->number,
+            );
 
             return false;
         }
@@ -153,6 +158,13 @@ class PollDriveDeliveriesCommand extends Command
         $sent = false;
         $chatId = $request->client?->telegram_user_id;
         $tmp = null;
+        if (! filled($chatId) || ! $telegram->configured('client')) {
+            $this->alertStaffOnce(
+                $notifyEmployees,
+                'ملف Drive جاهز للطلب '.$request->number.' لكن بوت الزبون غير مربوط أو توكن التلجرام غير مضبوط، لذلك لم تُرسل الصورة.',
+                'ops:poll-drive:no-tg:'.$request->number,
+            );
+        }
         if (filled($chatId) && $telegram->configured('client')) {
             $safeName = preg_replace('/[^A-Za-z0-9._-]+/', '_', basename((string) $file['name'])) ?: 'file';
             $tmp = 'drive-deliveries/'.$fileId.'-'.$safeName;
@@ -283,9 +295,9 @@ class PollDriveDeliveriesCommand extends Command
             || str_contains($haystack, 'unsupported');
     }
 
-    private function alertStaffOnce(NotifyEmployees $notifyEmployees, string $text): void
+    private function alertStaffOnce(NotifyEmployees $notifyEmployees, string $text, string $key = 'ops:poll-drive:unconfigured'): void
     {
-        if (! Cache::add('ops:poll-drive:unconfigured', true, now()->addHour())) {
+        if (! Cache::add($key, true, now()->addHour())) {
             return;
         }
 

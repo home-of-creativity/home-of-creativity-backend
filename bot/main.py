@@ -473,6 +473,70 @@ def clear_pending_intents(context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.pop("submitting", None)
     context.user_data.pop("catalog_submitting", None)
     context.user_data.pop("catalog_stack", None)
+    context.user_data.pop("_handled_message_id", None)
+
+
+def mark_text_handled(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.message is not None:
+        context.user_data["_handled_message_id"] = update.message.message_id
+
+
+def text_already_handled(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    return (
+        update.message is not None
+        and context.user_data.get("_handled_message_id") == update.message.message_id
+    )
+
+
+async def consume_pending_followup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if text_already_handled(update, context):
+        return True
+    if update.message is None or not update.message.text:
+        return False
+    if update.message.text.strip() in NAV_BUTTONS:
+        return False
+    if context.user_data.get("revision_number"):
+        await capture_revision_reason(update, context)
+        return True
+    if context.user_data.get("reject_number"):
+        await capture_reject_reason(update, context)
+        return True
+    return False
+
+
+async def safe_callback_reply(query, text: str) -> None:
+    message = query.message
+    try:
+        if message is not None and hasattr(message, "reply_text"):
+            await message.reply_text(text)
+            return
+    except Exception:
+        pass
+    chat_id = None
+    if message is not None and getattr(message, "chat", None) is not None:
+        chat_id = message.chat.id
+    elif query.from_user is not None:
+        chat_id = query.from_user.id
+    if chat_id is not None:
+        await query.get_bot().send_message(chat_id=chat_id, text=text)
+
+
+def api_error_text(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+    except Exception:
+        return (response.text or f"HTTP {response.status_code}")[:300]
+    errors = payload.get("errors")
+    if isinstance(errors, dict):
+        for value in errors.values():
+            if isinstance(value, list) and value:
+                return str(value[0])
+            if isinstance(value, str) and value:
+                return value
+    message = payload.get("message")
+    if isinstance(message, str) and message:
+        return message
+    return (response.text or f"HTTP {response.status_code}")[:300]
 
 
 async def maybe_route_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int | None:
@@ -884,6 +948,8 @@ async def capture_title(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     routed = await maybe_route_nav(update, context)
     if routed is not None:
         return routed
+    if await consume_pending_followup(update, context):
+        return ConversationHandler.END
     if update.message is None or not update.message.text:
         return WAITING_TITLE
     context.user_data["title"] = update.message.text.strip()
@@ -903,6 +969,8 @@ async def capture_body(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     routed = await maybe_route_nav(update, context)
     if routed is not None:
         return routed
+    if await consume_pending_followup(update, context):
+        return ConversationHandler.END
     message = update.message
     if message is None:
         return WAITING_BODY
@@ -1003,12 +1071,13 @@ async def list_requests(update: Update, context: ContextTypes.DEFAULT_TYPE, offs
             lines.append("📎 أرسل وصل الدفع كصورة أو PDF")
 
         rows: list[list[InlineKeyboardButton]] = []
+        request_ref = str(item.get("display_number") or item["number"])
         if item.get("can_revise"):
-            rows.append([InlineKeyboardButton("🔁 تعديل الطلب بالكامل", callback_data=f"revision:{item['number']}")])
+            rows.append([InlineKeyboardButton("🔁 تعديل الطلب بالكامل", callback_data=f"revision:{request_ref}")])
         if item.get("can_complete"):
-            rows.append([InlineKeyboardButton("✅ اعتماد التسليم", callback_data=f"complete:{item['number']}")])
+            rows.append([InlineKeyboardButton("✅ اعتماد التسليم", callback_data=f"complete:{request_ref}")])
         if item.get("receipt_reupload_required") or item.get("accepts_receipt"):
-            rows.append([InlineKeyboardButton("📎 رفع وصل الدفع", callback_data=f"receipt_hint:{item['number']}")])
+            rows.append([InlineKeyboardButton("📎 رفع وصل الدفع", callback_data=f"receipt_hint:{request_ref}")])
         if item.get("can_renew"):
             rows.append(
                 [
@@ -1046,6 +1115,8 @@ async def capture_edit_title(update: Update, context: ContextTypes.DEFAULT_TYPE)
     routed = await maybe_route_nav(update, context)
     if routed is not None:
         return routed
+    if await consume_pending_followup(update, context):
+        return ConversationHandler.END
     if update.message is None or not update.message.text:
         return WAITING_EDIT_TITLE
     context.user_data["edit_title"] = update.message.text.strip()
@@ -1057,6 +1128,8 @@ async def capture_edit_body(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     routed = await maybe_route_nav(update, context)
     if routed is not None:
         return routed
+    if await consume_pending_followup(update, context):
+        return ConversationHandler.END
     user = update.effective_user
     if user is None or update.message is None or not update.message.text:
         return ConversationHandler.END
@@ -1092,6 +1165,8 @@ async def capture_support(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     routed = await maybe_route_nav(update, context)
     if routed is not None:
         return routed
+    if await consume_pending_followup(update, context):
+        return ConversationHandler.END
     user = update.effective_user
     if user is None or update.message is None or not update.message.text:
         return ConversationHandler.END
@@ -1119,11 +1194,7 @@ def parse_callback(data: str) -> tuple[str, str]:
 
 
 async def api_error_alert(query, response: httpx.Response) -> None:
-    try:
-        detail = response.json().get("message", response.text)
-    except Exception:
-        detail = response.text or f"HTTP {response.status_code}"
-    await query.answer(str(detail)[:200], show_alert=True)
+    await query.answer(api_error_text(response)[:200], show_alert=True)
 
 
 async def client_request_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1133,6 +1204,9 @@ async def client_request_action(update: Update, context: ContextTypes.DEFAULT_TY
 
     action, number = parse_callback(query.data)
     user = query.from_user
+    if user is None:
+        await query.answer("تعذر معرفة حسابك. أعد تشغيل البوت بـ /start.", show_alert=True)
+        return
     if action == "more_reqs":
         await query.answer()
         await list_requests(update, context, offset=int(number or 0))
@@ -1194,7 +1268,7 @@ async def client_request_action(update: Update, context: ContextTypes.DEFAULT_TY
             await query.answer()
             context.user_data["revision_number"] = number
             context.user_data.pop("revision_delivery_id", None)
-            await query.message.reply_text("ما التعديل المطلوب على الطلب بالكامل؟")
+            await safe_callback_reply(query, "ما التعديل المطلوب على الطلب بالكامل؟ اكتب السبب هنا.")
             return
 
         if action == "revfile":
@@ -1205,7 +1279,7 @@ async def client_request_action(update: Update, context: ContextTypes.DEFAULT_TY
             await query.answer()
             context.user_data["revision_number"] = request_number
             context.user_data["revision_delivery_id"] = delivery_id
-            await query.message.reply_text("ما التعديل المطلوب على هذه الصورة؟")
+            await safe_callback_reply(query, "ما التعديل المطلوب على هذه الصورة؟ اكتب السبب هنا.")
             return
 
         if action == "receipt_hint":
@@ -1358,7 +1432,10 @@ async def capture_revision_reason(update: Update, context: ContextTypes.DEFAULT_
             context.user_data["revision_number"] = number
             if delivery_id:
                 context.user_data["revision_delivery_id"] = delivery_id
-            await update.message.reply_text("تعذر تسجيل طلب التعديل.", reply_markup=main_keyboard())
+            await update.message.reply_text(
+                f"تعذر تسجيل طلب التعديل: {escape(api_error_text(response))}",
+                reply_markup=main_keyboard(),
+            )
             return
 
     scope = "على الصورة" if delivery_id else "على الطلب بالكامل"
@@ -1403,12 +1480,15 @@ async def pending_callback_followup(update: Update, context: ContextTypes.DEFAUL
         clear_pending_intents(context)
         return
     if context.user_data.get("profile_field"):
+        mark_text_handled(update, context)
         await capture_profile_field(update, context)
         return
     if context.user_data.get("reject_number"):
+        mark_text_handled(update, context)
         await capture_reject_reason(update, context)
         return
     if context.user_data.get("revision_number"):
+        mark_text_handled(update, context)
         await capture_revision_reason(update, context)
 
 
@@ -1503,6 +1583,8 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 async def route_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if update.message is None or not update.message.text:
+        return ConversationHandler.END
+    if await consume_pending_followup(update, context):
         return ConversationHandler.END
     text = update.message.text.strip()
     if text == BTN_NEW:

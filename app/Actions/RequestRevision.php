@@ -25,7 +25,7 @@ class RequestRevision
     {
         if (! $request->allowsClientRevision()) {
             throw ValidationException::withMessages([
-                'status' => 'Revision is only available after work files are delivered.',
+                'status' => 'طلب التعديل متاح بعد وصول ملفات العمل إلى البوت.',
             ]);
         }
 

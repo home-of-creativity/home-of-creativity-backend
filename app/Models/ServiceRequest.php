@@ -216,7 +216,7 @@ class ServiceRequest extends Model
             return true;
         }
 
-        if ($this->status !== RequestStatus::InProgress) {
+        if (! in_array($this->status, [RequestStatus::PaymentConfirmed, RequestStatus::InProgress], true)) {
             return false;
         }
 

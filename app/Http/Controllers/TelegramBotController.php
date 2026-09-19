@@ -159,6 +159,7 @@ class TelegramBotController extends Controller
             ->get()
             ->map(fn (ServiceRequest $item) => [
                 'number' => $item->number,
+                'display_number' => ResolveServiceRequest::displayNumber($item),
                 'title' => $item->title,
                 'status' => $item->status->value,
                 'status_label' => StatusLabel::requestAr($item->status->value),
@@ -329,7 +330,7 @@ class TelegramBotController extends Controller
                 ->first();
             if ($delivery === null) {
                 throw ValidationException::withMessages([
-                    'drive_delivery_id' => 'This Drive file does not belong to the request.',
+                    'drive_delivery_id' => 'هذا الملف لا يتبع هذا الطلب.',
                 ]);
             }
         }

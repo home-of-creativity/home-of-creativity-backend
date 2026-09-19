@@ -96,62 +96,16 @@ class GoogleDriveClient
         }
 
         try {
-            $query = sprintf(
-                "'%s' in parents and trashed = false and mimeType != 'application/vnd.google-apps.folder'",
-                str_replace("'", "\\'", $folderId),
-            );
+            $seen = [];
+            $this->collectDownloadableFiles($token, $folderId, 0, true, $seen);
 
-            $result = [];
-            $pageToken = null;
+            $parentId = $this->immediateParentId($token, $folderId);
+            $root = $this->parentFolderId();
+            if (filled($parentId) && $parentId !== $folderId && $parentId !== $root) {
+                $this->collectDownloadableFiles($token, $parentId, 0, false, $seen);
+            }
 
-            do {
-                $params = [
-                    'q' => $query,
-                    'fields' => 'nextPageToken,files(id,name,mimeType,modifiedTime,md5Checksum,size)',
-                    'pageSize' => 100,
-                    'corpora' => 'allDrives',
-                    'supportsAllDrives' => 'true',
-                    'includeItemsFromAllDrives' => 'true',
-                ];
-                if (is_string($pageToken) && $pageToken !== '') {
-                    $params['pageToken'] = $pageToken;
-                }
-
-                $response = Http::withToken($token)
-                    ->timeout(20)
-                    ->acceptJson()
-                    ->get(self::API.'/files', $params);
-
-                if (! $response->successful()) {
-                    Log::warning('Google Drive listNewFiles failed.', [
-                        'status' => $response->status(),
-                        'body' => $response->body(),
-                    ]);
-
-                    break;
-                }
-
-                $files = $response->json('files');
-                if (is_array($files)) {
-                    foreach ($files as $file) {
-                        if (! is_array($file) || ! filled($file['id'] ?? null)) {
-                            continue;
-                        }
-                        $result[] = [
-                            'id' => (string) $file['id'],
-                            'name' => (string) ($file['name'] ?? $file['id']),
-                            'mimeType' => (string) ($file['mimeType'] ?? 'application/octet-stream'),
-                            'modifiedTime' => filled($file['modifiedTime'] ?? null) ? (string) $file['modifiedTime'] : null,
-                            'md5Checksum' => filled($file['md5Checksum'] ?? null) ? (string) $file['md5Checksum'] : null,
-                            'size' => isset($file['size']) && is_numeric($file['size']) ? (int) $file['size'] : null,
-                        ];
-                    }
-                }
-
-                $pageToken = $response->json('nextPageToken');
-            } while (is_string($pageToken) && $pageToken !== '');
-
-            return $result;
+            return array_values($seen);
         } catch (Throwable $exception) {
             Log::warning('Google Drive listNewFiles exception.', [
                 'error' => $exception->getMessage(),
@@ -173,36 +127,37 @@ class GoogleDriveClient
         }
 
         try {
-            $meta = Http::withToken($token)
-                ->timeout(15)
-                ->acceptJson()
-                ->get(self::API.'/files/'.$fileId, [
-                    'fields' => 'id,mimeType',
-                    'supportsAllDrives' => 'true',
-                ]);
+            $resolved = $this->resolveDownloadableMeta($token, $fileId);
+            if ($resolved === null) {
+                return null;
+            }
 
-            $mime = (string) $meta->json('mimeType', '');
-            if (str_starts_with($mime, 'application/vnd.google-apps.')) {
-                $exportMime = $mime === 'application/vnd.google-apps.document'
-                    ? 'application/pdf'
-                    : 'application/pdf';
+            $resolvedId = $resolved['id'];
+            $mime = $resolved['mimeType'];
+            $exportMime = $this->exportMimeFor($mime);
+
+            if ($exportMime !== null) {
                 $response = Http::withToken($token)
                     ->timeout(60)
-                    ->get(self::API.'/files/'.$fileId.'/export', [
+                    ->get(self::API.'/files/'.$resolvedId.'/export', [
                         'mimeType' => $exportMime,
+                        'supportsAllDrives' => 'true',
                     ]);
             } else {
                 $response = Http::withToken($token)
                     ->timeout(60)
-                    ->get(self::API.'/files/'.$fileId, [
+                    ->get(self::API.'/files/'.$resolvedId, [
                         'alt' => 'media',
                         'supportsAllDrives' => 'true',
+                        'acknowledgeAbuse' => 'true',
                     ]);
             }
 
             if (! $response->successful()) {
                 Log::warning('Google Drive downloadFile failed.', [
                     'file_id' => $fileId,
+                    'resolved_id' => $resolvedId,
+                    'mime' => $mime,
                     'status' => $response->status(),
                 ]);
 
@@ -220,6 +175,180 @@ class GoogleDriveClient
 
             return null;
         }
+    }
+
+    /**
+     * @param  array<string, array{id: string, name: string, mimeType: string, modifiedTime: ?string, md5Checksum: ?string, size: ?int}>  $seen
+     */
+    private function collectDownloadableFiles(string $token, string $folderId, int $depth, bool $recurse, array &$seen): void
+    {
+        if ($folderId === '' || $depth > 3 || count($seen) >= 200) {
+            return;
+        }
+
+        $pageToken = null;
+
+        do {
+            $params = [
+                'q' => sprintf("'%s' in parents and trashed = false", str_replace("'", "\\'", $folderId)),
+                'fields' => 'nextPageToken,files(id,name,mimeType,modifiedTime,md5Checksum,size,shortcutDetails)',
+                'pageSize' => 100,
+                'corpora' => 'allDrives',
+                'supportsAllDrives' => 'true',
+                'includeItemsFromAllDrives' => 'true',
+            ];
+            if (is_string($pageToken) && $pageToken !== '') {
+                $params['pageToken'] = $pageToken;
+            }
+
+            $response = Http::withToken($token)
+                ->timeout(20)
+                ->acceptJson()
+                ->get(self::API.'/files', $params);
+
+            if (! $response->successful()) {
+                Log::warning('Google Drive listNewFiles failed.', [
+                    'folder' => $folderId,
+                    'status' => $response->status(),
+                    'body' => $response->body(),
+                ]);
+
+                return;
+            }
+
+            $files = $response->json('files');
+            if (is_array($files)) {
+                foreach ($files as $file) {
+                    if (! is_array($file) || ! filled($file['id'] ?? null) || count($seen) >= 200) {
+                        continue;
+                    }
+
+                    $mime = (string) ($file['mimeType'] ?? 'application/octet-stream');
+                    if ($mime === 'application/vnd.google-apps.folder') {
+                        if ($recurse) {
+                            $this->collectDownloadableFiles($token, (string) $file['id'], $depth + 1, true, $seen);
+                        }
+
+                        continue;
+                    }
+
+                    $normalized = $this->normalizeListedFile($file);
+                    if ($normalized === null || isset($seen[$normalized['id']])) {
+                        continue;
+                    }
+
+                    $seen[$normalized['id']] = $normalized;
+                }
+            }
+
+            $pageToken = $response->json('nextPageToken');
+        } while (is_string($pageToken) && $pageToken !== '');
+    }
+
+    /**
+     * @param  array<string, mixed>  $file
+     * @return array{id: string, name: string, mimeType: string, modifiedTime: ?string, md5Checksum: ?string, size: ?int}|null
+     */
+    private function normalizeListedFile(array $file): ?array
+    {
+        $id = (string) ($file['id'] ?? '');
+        $mime = (string) ($file['mimeType'] ?? 'application/octet-stream');
+        $name = (string) ($file['name'] ?? $id);
+
+        if ($mime === 'application/vnd.google-apps.shortcut') {
+            $id = (string) data_get($file, 'shortcutDetails.targetId', '');
+            $targetMime = data_get($file, 'shortcutDetails.targetMimeType');
+            $mime = is_string($targetMime) && $targetMime !== ''
+                ? $targetMime
+                : 'application/octet-stream';
+        }
+
+        if ($id === '' || $mime === 'application/vnd.google-apps.folder' || $mime === 'application/vnd.google-apps.shortcut') {
+            return null;
+        }
+
+        return [
+            'id' => $id,
+            'name' => $name !== '' ? $name : $id,
+            'mimeType' => $mime,
+            'modifiedTime' => filled($file['modifiedTime'] ?? null) ? (string) $file['modifiedTime'] : null,
+            'md5Checksum' => filled($file['md5Checksum'] ?? null) ? (string) $file['md5Checksum'] : null,
+            'size' => isset($file['size']) && is_numeric($file['size']) ? (int) $file['size'] : null,
+        ];
+    }
+
+    /**
+     * @return array{id: string, mimeType: string}|null
+     */
+    private function resolveDownloadableMeta(string $token, string $fileId): ?array
+    {
+        $meta = Http::withToken($token)
+            ->timeout(15)
+            ->acceptJson()
+            ->get(self::API.'/files/'.$fileId, [
+                'fields' => 'id,mimeType,shortcutDetails',
+                'supportsAllDrives' => 'true',
+            ]);
+
+        if (! $meta->successful()) {
+            Log::warning('Google Drive file meta failed.', [
+                'file_id' => $fileId,
+                'status' => $meta->status(),
+            ]);
+
+            return null;
+        }
+
+        $mime = (string) $meta->json('mimeType', '');
+        $resolvedId = (string) $meta->json('id', $fileId);
+
+        if ($mime === 'application/vnd.google-apps.shortcut') {
+            $targetId = (string) $meta->json('shortcutDetails.targetId', '');
+            if ($targetId === '') {
+                return null;
+            }
+
+            return $this->resolveDownloadableMeta($token, $targetId);
+        }
+
+        if ($mime === 'application/vnd.google-apps.folder') {
+            return null;
+        }
+
+        return [
+            'id' => $resolvedId !== '' ? $resolvedId : $fileId,
+            'mimeType' => $mime !== '' ? $mime : 'application/octet-stream',
+        ];
+    }
+
+    private function exportMimeFor(string $mime): ?string
+    {
+        return match ($mime) {
+            'application/vnd.google-apps.document',
+            'application/vnd.google-apps.spreadsheet',
+            'application/vnd.google-apps.presentation' => 'application/pdf',
+            'application/vnd.google-apps.drawing' => 'image/png',
+            default => str_starts_with($mime, 'application/vnd.google-apps.') ? 'application/pdf' : null,
+        };
+    }
+
+    private function immediateParentId(string $token, string $folderId): ?string
+    {
+        $meta = Http::withToken($token)
+            ->timeout(15)
+            ->acceptJson()
+            ->get(self::API.'/files/'.$folderId, [
+                'fields' => 'id,parents',
+                'supportsAllDrives' => 'true',
+            ]);
+
+        if (! $meta->successful()) {
+            return null;
+        }
+
+        $parent = data_get($meta->json(), 'parents.0');
+
+        return filled($parent) ? (string) $parent : null;
     }
 
     /**

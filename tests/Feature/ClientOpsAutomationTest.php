@@ -29,6 +29,7 @@ use App\Models\ServiceRequest;
 use App\Models\User;
 use App\Services\GoogleDriveClient;
 use App\Support\PaymentPlanResolver;
+use App\Support\ResolveServiceRequest;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Http\UploadedFile;
@@ -949,7 +950,8 @@ class ClientOpsAutomationTest extends TestCase
             ->assertJsonPath('data.0.status', 'in_progress')
             ->assertJsonPath('data.0.status_label', 'قيد التنفيذ')
             ->assertJsonPath('data.0.can_revise', true)
-            ->assertJsonPath('data.0.can_complete', false);
+            ->assertJsonPath('data.0.can_complete', false)
+            ->assertJsonPath('data.0.display_number', ResolveServiceRequest::displayNumber($request));
 
         $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
             ->postJson("/api/bot/telegram/requests/{$request->number}/revision", [
@@ -1061,6 +1063,35 @@ class ClientOpsAutomationTest extends TestCase
                 'reason' => 'بكّر',
             ])
             ->assertUnprocessable();
+    }
+
+    public function test_client_can_revise_payment_confirmed_request_after_drive_file_exists(): void
+    {
+        $client = Client::factory()->create(['telegram_user_id' => 'tg-revpaid']);
+        $request = ServiceRequest::factory()->for($client)->create([
+            'status' => RequestStatus::PaymentConfirmed,
+            'title' => 'هوية',
+        ]);
+        DriveDelivery::query()->create([
+            'request_id' => $request->id,
+            'drive_file_id' => 'file-paid',
+            'name' => 'mark.jpg',
+            'mime_type' => 'image/jpeg',
+            'sent_at' => now(),
+        ]);
+
+        $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
+            ->getJson('/api/bot/telegram/requests?telegram_user_id=tg-revpaid')
+            ->assertOk()
+            ->assertJsonPath('data.0.can_revise', true);
+
+        $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
+            ->postJson("/api/bot/telegram/requests/{$request->number}/revision", [
+                'telegram_user_id' => 'tg-revpaid',
+                'reason' => 'كبّر الشعار',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'revision_requested');
     }
 
     public function test_receipt_is_rejected_before_awaiting_payment(): void

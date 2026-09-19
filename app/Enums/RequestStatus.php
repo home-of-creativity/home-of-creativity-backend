@@ -23,7 +23,7 @@ enum RequestStatus: string
             self::QuotationSent => [self::QuotationRejected, self::AwaitingPayment, self::Cancelled],
             self::QuotationRejected => [self::QuotationSent, self::Cancelled],
             self::AwaitingPayment => [self::PaymentConfirmed, self::Cancelled],
-            self::PaymentConfirmed => [self::InProgress, self::Cancelled],
+            self::PaymentConfirmed => [self::InProgress, self::RevisionRequested, self::Cancelled],
             self::InProgress => [self::ReadyForReview, self::RevisionRequested, self::Cancelled],
             self::ReadyForReview => [self::Completed, self::RevisionRequested, self::Cancelled],
             self::RevisionRequested => [self::InProgress, self::ReadyForReview, self::Cancelled],
