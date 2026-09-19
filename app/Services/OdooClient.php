@@ -241,7 +241,7 @@ class OdooClient
             'partner_name' => $values['partner_name'] ?? null,
             'stage_id' => $stageId,
             'team_id' => $teamId,
-            'user_id' => $values['user_id'] ?? $this->crmOwnerUserId(),
+            'user_id' => $values['user_id'] ?? $this->crmOwnerUserId($teamId),
             'phone' => $values['phone'] ?? $values['mobile'] ?? null,
             'mobile' => $values['mobile'] ?? $values['phone'] ?? null,
             'email_from' => $values['email_from'] ?? null,
@@ -292,9 +292,16 @@ class OdooClient
         return [$withoutTags, $withoutTeam, $minimal];
     }
 
-    public function crmOwnerUserId(): ?int
+    public function crmOwnerUserId(?int $teamId = null): ?int
     {
         try {
+            if ($teamId !== null) {
+                $leaderId = $this->crmTeamLeaderId($teamId);
+                if ($leaderId !== null) {
+                    return $leaderId;
+                }
+            }
+
             if (! $this->useJson2()) {
                 $uid = $this->legacyUid();
                 if ($uid > 0) {
@@ -311,6 +318,38 @@ class OdooClient
         } catch (Throwable) {
             return null;
         }
+    }
+
+    public function crmTeamLeaderId(int $teamId): ?int
+    {
+        if ($teamId <= 0) {
+            return null;
+        }
+
+        try {
+            $rows = $this->searchRead('crm.team', [['id', '=', $teamId]], ['id', 'user_id'], 1, 0, 'id asc');
+        } catch (Throwable) {
+            return null;
+        }
+
+        $row = $rows[0] ?? null;
+        if (! is_array($row)) {
+            return null;
+        }
+
+        if (is_array($row['user_id'] ?? null) && isset($row['user_id'][0])) {
+            $id = (int) $row['user_id'][0];
+
+            return $id > 0 ? $id : null;
+        }
+
+        if (is_numeric($row['user_id'] ?? null)) {
+            $id = (int) $row['user_id'];
+
+            return $id > 0 ? $id : null;
+        }
+
+        return null;
     }
 
     /**

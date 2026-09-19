@@ -28,12 +28,9 @@ class PushTelegramLeadsCommand extends Command
         $pipeline = $odoo->resolveTelegramPipeline();
         $this->info('Telegram pipeline stage='.($pipeline['stage_id'] ?? 'none').' team='.($pipeline['team_id'] ?? 'none').' user='.($odoo->crmOwnerUserId() ?? 'none'));
 
-        $clients = Client::query()
-            ->whereNull('odoo_lead_id')
-            ->orderBy('id')
-            ->get();
-
-        $this->info('Clients missing a lead: '.$clients->count());
+        $clients = Client::query()->orderBy('id')->get();
+        $missing = $clients->where(fn (Client $client): bool => blank($client->odoo_lead_id))->count();
+        $this->info('Clients missing a lead: '.$missing);
 
         $pushed = 0;
         foreach ($clients as $client) {
@@ -43,9 +40,10 @@ class PushTelegramLeadsCommand extends Command
                 continue;
             }
 
-            $client = $pushClientLeadToOdoo->handle($pushClientToOdoo->handle($client), false, false);
+            $hadLead = filled($client->odoo_lead_id);
+            $client = $pushClientLeadToOdoo->handle($pushClientToOdoo->handle($client), $hadLead, false);
             if (filled($client->odoo_lead_id)) {
-                $this->info("pushed #{$client->id} -> lead {$client->odoo_lead_id}");
+                $this->info(($hadLead ? 'updated' : 'pushed')." #{$client->id} -> lead {$client->odoo_lead_id}");
                 $pushed++;
 
                 continue;

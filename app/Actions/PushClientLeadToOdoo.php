@@ -121,7 +121,7 @@ class PushClientLeadToOdoo
                 'partner_id' => filled($client->odoo_partner_id) ? (int) $client->odoo_partner_id : null,
                 'stage_id' => $pipeline['stage_id'],
                 'team_id' => $pipeline['team_id'],
-                'user_id' => $this->odoo->crmOwnerUserId(),
+                'user_id' => $this->odoo->crmOwnerUserId($pipeline['team_id']),
                 'type' => 'opportunity',
             ], fn (mixed $value): bool => $value !== null && $value !== ''));
 
