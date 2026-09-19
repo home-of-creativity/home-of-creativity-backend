@@ -17,6 +17,8 @@ use Illuminate\Validation\ValidationException;
 
 class CreateCatalogRequest
 {
+    public bool $quotationDelivered = false;
+
     public function __construct(
         private GenerateRequestNumber $generateRequestNumber,
         private SendQuotation $sendQuotation,
@@ -47,6 +49,20 @@ class CreateCatalogRequest
 
         if ($amount === null || $amount <= 0) {
             throw ValidationException::withMessages(['billing_period' => 'No price available for this package/period.']);
+        }
+
+        $recent = ServiceRequest::query()
+            ->where('client_id', $client->id)
+            ->where('pricing_package_id', $package->id)
+            ->where('billing_period', $period)
+            ->whereIn('status', [RequestStatus::Submitted, RequestStatus::QuotationSent])
+            ->where('created_at', '>=', now()->subMinutes(3))
+            ->latest('id')
+            ->first();
+        if ($recent) {
+            $this->quotationDelivered = filled($recent->quotations()->latest('id')->value('telegram_file_id'));
+
+            return $recent;
         }
 
         $plan = PaymentPlanResolver::forPackage($package);
@@ -94,6 +110,7 @@ class CreateCatalogRequest
             "الفترة: {$periodLabel}",
             'client:catalog',
         );
+        $this->quotationDelivered = $this->sendQuotation->deliveredToClient;
 
         return $serviceRequest->fresh(['client', 'pricingPackage', 'quotations']) ?? $serviceRequest;
     }

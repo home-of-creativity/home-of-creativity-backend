@@ -7,6 +7,7 @@ use App\Actions\CompleteRequest;
 use App\Actions\CreateCatalogRequest;
 use App\Actions\DeclineRenewal;
 use App\Actions\NotifyEmployees;
+use App\Actions\NotifyPaymentStage;
 use App\Actions\ProvisionSalesClickUpTask;
 use App\Actions\PushClientLeadToOdoo;
 use App\Actions\PushClientToOdoo;
@@ -25,6 +26,7 @@ use App\Http\Requests\TelegramSubmitRequest;
 use App\Http\Resources\ClientResource;
 use App\Http\Resources\ServiceRequestResource;
 use App\Models\Client;
+use App\Models\DriveDelivery;
 use App\Models\PricingPackage;
 use App\Models\RequestFile;
 use App\Models\ServiceRequest;
@@ -136,8 +138,12 @@ class TelegramBotController extends Controller
             'attachments' => $request->validated('attachments') ?? [],
         ]);
 
+        $fresh = $serviceRequest->fresh() ?? $serviceRequest;
+
         return response()->json([
-            'data' => ServiceRequestResource::make($serviceRequest),
+            'data' => array_merge(ServiceRequestResource::make($fresh)->resolve(), [
+                'status_label' => $fresh->status->labelAr(),
+            ]),
             'message' => 'Created.',
         ], 201);
     }
@@ -148,6 +154,7 @@ class TelegramBotController extends Controller
 
         $items = $client->requests()
             ->with('pricingPackage')
+            ->withCount('driveDeliveries')
             ->latest('id')
             ->get()
             ->map(fn (ServiceRequest $item) => [
@@ -163,8 +170,10 @@ class TelegramBotController extends Controller
                 'amount_remaining' => $item->amount_remaining,
                 'amount_total' => $item->amount_total ?? $item->quotation_amount,
                 'allows_renewal' => (bool) $item->allows_renewal,
-                'can_renew' => (bool) $item->allows_renewal && $item->status !== RequestStatus::Cancelled,
+                'can_renew' => $item->canRenew(),
                 'can_edit' => $item->status->allowsClientEdit(),
+                'can_revise' => $item->allowsClientRevision(),
+                'can_complete' => $item->status === RequestStatus::ReadyForReview,
                 'receipt_reupload_required' => (bool) $item->receipt_reupload_required,
                 'accepts_receipt' => $item->acceptsReceiptUpload(),
             ]);
@@ -235,7 +244,7 @@ class TelegramBotController extends Controller
     public function receipt(
         Request $request,
         ServiceRequest $serviceRequest,
-        NotifyEmployees $notifyEmployees,
+        NotifyPaymentStage $notifyPaymentStage,
         ProvisionSalesClickUpTask $provisionSalesClickUpTask,
     ): JsonResponse {
         $this->assertClientOwns($request, $serviceRequest);
@@ -288,18 +297,10 @@ class TelegramBotController extends Controller
 
         $serviceRequest->load('client');
         $displayNumber = ResolveServiceRequest::displayNumber($serviceRequest);
-        $caption = "📎 رفع الزبون وصل دفع\n#{$displayNumber} — {$serviceRequest->title}\n{$serviceRequest->client?->name}";
-
-        $notifyEmployees->handle(
+        $notifyPaymentStage->handle(
             $serviceRequest,
-            EmployeeProfession::Sales,
-            $caption,
-            null,
-            [
-                'path' => Storage::disk('local')->path($path),
-                'mime' => $mime,
-                'name' => $validated['file_name'],
-            ],
+            $receiptFile,
+            "📎 رفع الزبون وصل دفع\n#{$displayNumber} — {$serviceRequest->title}\n{$serviceRequest->client?->name}",
         );
 
         $provisionSalesClickUpTask->appendReceipt($serviceRequest, $receiptFile);
@@ -313,14 +314,27 @@ class TelegramBotController extends Controller
     public function revision(Request $request, ServiceRequest $serviceRequest, RequestRevision $requestRevision): ServiceRequestResource
     {
         $this->assertClientOwns($request, $serviceRequest);
-        abort_unless($serviceRequest->status === RequestStatus::ReadyForReview, 422, 'Revision is only available after delivery.');
 
         $validated = $request->validate([
             'telegram_user_id' => ['required', 'string'],
             'reason' => ['required', 'string', 'max:5000'],
+            'drive_delivery_id' => ['nullable', 'integer'],
         ]);
 
-        $updated = $requestRevision->handle($serviceRequest, $validated['reason']);
+        $delivery = null;
+        if (filled($validated['drive_delivery_id'] ?? null)) {
+            $delivery = DriveDelivery::query()
+                ->where('id', $validated['drive_delivery_id'])
+                ->where('request_id', $serviceRequest->id)
+                ->first();
+            if ($delivery === null) {
+                throw ValidationException::withMessages([
+                    'drive_delivery_id' => 'This Drive file does not belong to the request.',
+                ]);
+            }
+        }
+
+        $updated = $requestRevision->handle($serviceRequest, $validated['reason'], $delivery);
 
         return ServiceRequestResource::make($updated->fresh('client'))
             ->additional(['message' => 'Revision requested.']);
@@ -379,7 +393,7 @@ class TelegramBotController extends Controller
             ->additional(['message' => 'Completed.']);
     }
 
-    public function support(Request $request): JsonResponse
+    public function support(Request $request, NotifyEmployees $notifyEmployees): JsonResponse
     {
         $validated = $request->validate([
             'telegram_user_id' => ['required', 'string'],
@@ -389,19 +403,28 @@ class TelegramBotController extends Controller
 
         $client = $this->resolveTelegramClient->handle($validated['telegram_user_id']);
 
-        $requestId = null;
+        $serviceRequest = null;
         if (filled($validated['request_number'] ?? null)) {
-            $requestId = ServiceRequest::query()
+            $serviceRequest = ServiceRequest::query()
                 ->where('number', $validated['request_number'])
                 ->where('client_id', $client->id)
-                ->value('id');
+                ->first();
         }
 
         SupportMessage::query()->create([
             'client_id' => $client->id,
-            'request_id' => $requestId,
+            'request_id' => $serviceRequest?->id,
             'message' => $validated['message'],
         ]);
+
+        $who = trim($client->name.($client->company_name ? ' ('.$client->company_name.')' : ''));
+        $ref = $serviceRequest?->number;
+        $text = "رسالة دعم من {$who}".($ref ? "\n#{$ref}" : '')."\n\n{$validated['message']}";
+        if ($serviceRequest) {
+            $notifyEmployees->handle($serviceRequest, EmployeeProfession::Sales, $text);
+        } else {
+            $notifyEmployees->handlePlain(EmployeeProfession::Sales, $text);
+        }
 
         return response()->json(['data' => ['stored' => true], 'message' => 'Support message saved.']);
     }
@@ -463,9 +486,13 @@ class TelegramBotController extends Controller
 
         $package = PricingPackage::query()->with('subcategory.category')->findOrFail($validated['package_id']);
         $serviceRequest = $createCatalogRequest->handle($client, $package, $validated['billing_period'] ?? null);
+        $fresh = $serviceRequest->fresh() ?? $serviceRequest;
 
         return response()->json([
-            'data' => ServiceRequestResource::make($serviceRequest),
+            'data' => array_merge(ServiceRequestResource::make($fresh)->resolve(), [
+                'status_label' => $fresh->status->labelAr(),
+                'quotation_delivered' => $createCatalogRequest->quotationDelivered,
+            ]),
             'message' => 'Created.',
         ], 201);
     }

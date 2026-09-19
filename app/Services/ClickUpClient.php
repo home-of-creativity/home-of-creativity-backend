@@ -14,7 +14,7 @@ class ClickUpClient
     }
 
     /**
-     * @param  array<int, array{department: string, brief: string}>  $briefs
+     * @param  array<int, array{department: string, brief: string, clickup_user_id?: string|null, due_at?: string|null, priority?: int|null}>  $briefs
      * @return array<int, array{department: string, brief: string, clickup_task_id: string}>
      */
     public function createTasks(string $requestNumber, array $briefs): array
@@ -23,6 +23,24 @@ class ClickUpClient
 
         foreach ($briefs as $brief) {
             $listId = $this->listIdForDepartment((string) $brief['department']);
+            $payload = [
+                'name' => $requestNumber.' · '.$brief['department'],
+                'description' => $brief['brief'],
+                'tags' => ['hoc', $brief['department']],
+            ];
+            if (filled($brief['clickup_user_id'] ?? null)) {
+                $assignee = (string) $brief['clickup_user_id'];
+                $payload['assignees'] = [ctype_digit($assignee) ? (int) $assignee : $assignee];
+            }
+            if (isset($brief['priority']) && is_numeric($brief['priority'])) {
+                $payload['priority'] = max(1, min(4, (int) $brief['priority']));
+            }
+            if (filled($brief['due_at'] ?? null)) {
+                $due = strtotime((string) $brief['due_at']);
+                if ($due) {
+                    $payload['due_date'] = $due * 1000;
+                }
+            }
             $response = Http::timeout((int) config('services.clickup.timeout', 12))
                 ->connectTimeout(3)
                 ->retry(2, 200)
@@ -30,11 +48,7 @@ class ClickUpClient
                 ->withHeaders([
                     'Authorization' => (string) config('services.clickup.token'),
                 ])
-                ->post('https://api.clickup.com/api/v2/list/'.$listId.'/task', [
-                    'name' => $requestNumber.' · '.$brief['department'],
-                    'description' => $brief['brief'],
-                    'tags' => ['hoc', $brief['department']],
-                ])
+                ->post('https://api.clickup.com/api/v2/list/'.$listId.'/task', $payload)
                 ->throw();
 
             $taskId = $response->json('id');
@@ -77,7 +91,7 @@ class ClickUpClient
         return $taskId;
     }
 
-    public function updateTask(string $taskId, ?string $status = null, ?string $assigneeId = null, ?int $dueDateMs = null): void
+    public function updateTask(string $taskId, ?string $status = null, ?string $assigneeId = null, ?int $dueDateMs = null, ?int $priority = null): void
     {
         $payload = [];
 
@@ -93,6 +107,10 @@ class ClickUpClient
 
         if ($dueDateMs !== null && $dueDateMs > 0) {
             $payload['due_date'] = $dueDateMs;
+        }
+
+        if ($priority !== null) {
+            $payload['priority'] = max(1, min(4, $priority));
         }
 
         if ($payload === []) {
@@ -238,12 +256,14 @@ class ClickUpClient
                     'name' => (string) ($assignee['username'] ?? $assignee['email'] ?? $id),
                 ];
             }
+            $priority = $task['priority'] ?? null;
             $tasks[] = [
                 'id' => (string) ($task['id'] ?? ''),
                 'name' => (string) ($task['name'] ?? ''),
                 'status' => is_array($task['status'] ?? null)
                     ? (string) ($task['status']['status'] ?? '')
                     : (isset($task['status']) ? (string) $task['status'] : null),
+                'priority' => is_array($priority) ? ($priority['id'] ?? $priority['priority'] ?? null) : $priority,
                 'url' => isset($task['url']) ? (string) $task['url'] : null,
                 'due_date' => $task['due_date'] ?? null,
                 'assignees' => $assignees,

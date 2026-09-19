@@ -82,7 +82,7 @@ class GoogleDriveClient
     }
 
     /**
-     * @return list<array{id: string, name: string, mimeType: string}>
+     * @return list<array{id: string, name: string, mimeType: string, modifiedTime: ?string, md5Checksum: ?string, size: ?int}>
      */
     public function listNewFiles(string $folderId): array
     {
@@ -101,43 +101,55 @@ class GoogleDriveClient
                 str_replace("'", "\\'", $folderId),
             );
 
-            $response = Http::withToken($token)
-                ->timeout(20)
-                ->acceptJson()
-                ->get(self::API.'/files', [
+            $result = [];
+            $pageToken = null;
+
+            do {
+                $params = [
                     'q' => $query,
-                    'fields' => 'files(id,name,mimeType)',
+                    'fields' => 'nextPageToken,files(id,name,mimeType,modifiedTime,md5Checksum,size)',
                     'pageSize' => 100,
                     'corpora' => 'allDrives',
                     'supportsAllDrives' => 'true',
                     'includeItemsFromAllDrives' => 'true',
-                ]);
-
-            if (! $response->successful()) {
-                Log::warning('Google Drive listNewFiles failed.', [
-                    'status' => $response->status(),
-                    'body' => $response->body(),
-                ]);
-
-                return [];
-            }
-
-            $files = $response->json('files');
-            if (! is_array($files)) {
-                return [];
-            }
-
-            $result = [];
-            foreach ($files as $file) {
-                if (! is_array($file) || ! filled($file['id'] ?? null)) {
-                    continue;
-                }
-                $result[] = [
-                    'id' => (string) $file['id'],
-                    'name' => (string) ($file['name'] ?? $file['id']),
-                    'mimeType' => (string) ($file['mimeType'] ?? 'application/octet-stream'),
                 ];
-            }
+                if (is_string($pageToken) && $pageToken !== '') {
+                    $params['pageToken'] = $pageToken;
+                }
+
+                $response = Http::withToken($token)
+                    ->timeout(20)
+                    ->acceptJson()
+                    ->get(self::API.'/files', $params);
+
+                if (! $response->successful()) {
+                    Log::warning('Google Drive listNewFiles failed.', [
+                        'status' => $response->status(),
+                        'body' => $response->body(),
+                    ]);
+
+                    break;
+                }
+
+                $files = $response->json('files');
+                if (is_array($files)) {
+                    foreach ($files as $file) {
+                        if (! is_array($file) || ! filled($file['id'] ?? null)) {
+                            continue;
+                        }
+                        $result[] = [
+                            'id' => (string) $file['id'],
+                            'name' => (string) ($file['name'] ?? $file['id']),
+                            'mimeType' => (string) ($file['mimeType'] ?? 'application/octet-stream'),
+                            'modifiedTime' => filled($file['modifiedTime'] ?? null) ? (string) $file['modifiedTime'] : null,
+                            'md5Checksum' => filled($file['md5Checksum'] ?? null) ? (string) $file['md5Checksum'] : null,
+                            'size' => isset($file['size']) && is_numeric($file['size']) ? (int) $file['size'] : null,
+                        ];
+                    }
+                }
+
+                $pageToken = $response->json('nextPageToken');
+            } while (is_string($pageToken) && $pageToken !== '');
 
             return $result;
         } catch (Throwable $exception) {

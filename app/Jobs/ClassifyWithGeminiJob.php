@@ -46,7 +46,10 @@ class ClassifyWithGeminiJob implements ShouldQueue
         ])->save();
 
         try {
-            $result = $gemini->classify($request->title, $request->description);
+            $operations = data_get($request->work_plan, 'operations');
+            $result = is_array($operations) && $operations !== []
+                ? $gemini->classificationFromWorkPlan($operations)
+                : $gemini->classify((string) $request->title, (string) $request->description);
         } catch (Throwable $exception) {
             $request->forceFill([
                 'gemini_status' => GeminiStatus::Failed,

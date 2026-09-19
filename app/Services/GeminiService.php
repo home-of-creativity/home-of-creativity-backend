@@ -74,6 +74,107 @@ PROMPT;
         return $this->translateBriefs($this->validatePayload($decoded));
     }
 
+    /**
+     * @param  list<array<string, mixed>>  $operations
+     * @return array{work_type: WorkType, briefs: list<array{type: string, brief: string}>}
+     */
+    public function classificationFromWorkPlan(array $operations): array
+    {
+        $briefs = [];
+        foreach ($operations as $operation) {
+            if (! is_array($operation)) {
+                continue;
+            }
+            $type = trim((string) ($operation['department'] ?? ''));
+            $brief = trim((string) ($operation['brief'] ?? ''));
+            if ($type === '' || $brief === '') {
+                continue;
+            }
+            $briefs[] = ['type' => $type, 'brief' => $brief];
+        }
+
+        if ($briefs === []) {
+            $briefs[] = ['type' => 'design', 'brief' => 'تنفيذ العمل المطلوب'];
+        }
+
+        $types = array_column($briefs, 'type');
+        $hasDesign = in_array('design', $types, true);
+        $hasContent = in_array('content', $types, true);
+        $workType = match (true) {
+            $hasDesign && $hasContent => WorkType::Both,
+            $hasContent && ! $hasDesign => WorkType::Content,
+            default => WorkType::Design,
+        };
+
+        return [
+            'work_type' => $workType,
+            'briefs' => $briefs,
+        ];
+    }
+
+    /**
+     * @return list<array{department: string, brief: string, hours: int, priority: int}>
+     */
+    public function planWork(string $title, string $description, ?string $packageContext = null): array
+    {
+        if (config('services.gemini.e2e_stub')) {
+            return [[
+                'department' => 'design',
+                'brief' => "تنفيذ الطلب: {$title}",
+                'hours' => 24,
+                'priority' => 3,
+            ]];
+        }
+
+        if ($this->apiKey() === '') {
+            return $this->heuristicPlan($title, $description, $packageContext);
+        }
+
+        $packageBlock = filled($packageContext) ? "Package / catalog context:\n{$packageContext}\n" : "This is a manual request (no catalog package).\n";
+
+        $prompt = <<<PROMPT
+Plan the production work for this creative-agency request. Return ONLY valid JSON:
+{"operations":[{"department":"design|content|programming|photography","brief":"...","hours":8,"priority":3}]}
+
+Rules:
+- department must be one of: design, content, programming, photography
+- Include every department that the package or request actually needs
+- hours = estimated working hours until due (8 to 120)
+- priority: 1 urgent, 2 high, 3 normal, 4 low
+- brief must be actionable and in Arabic
+- Do not invent departments that are not implied
+
+{$packageBlock}
+Title: {$title}
+Description: {$description}
+PROMPT;
+
+        try {
+            $response = $this->generateJson($prompt);
+            if (! $response->successful()) {
+                Log::warning('Gemini work plan failed.', [
+                    'status' => $response->status(),
+                    'body' => $response->body(),
+                ]);
+
+                return $this->heuristicPlan($title, $description, $packageContext);
+            }
+
+            $text = $this->extractJsonText(trim((string) data_get($response->json(), 'candidates.0.content.parts.0.text', '')));
+            $decoded = json_decode($text, true);
+            $operations = is_array($decoded) ? ($decoded['operations'] ?? $decoded) : null;
+            if (! is_array($operations) || $operations === []) {
+                return $this->heuristicPlan($title, $description, $packageContext);
+            }
+
+            return $this->normalizeOperations($operations) ?: $this->heuristicPlan($title, $description, $packageContext);
+        } catch (\Throwable $exception) {
+            Log::warning('Gemini work plan exception.', ['error' => $exception->getMessage()]);
+
+            return $this->heuristicPlan($title, $description, $packageContext);
+        }
+    }
+
     public function classifyCompanyIndustry(string $companyName): ?string
     {
         $companyName = trim($companyName);
@@ -216,6 +317,80 @@ PROMPT;
         $payload['briefs'] = app(GoogleTranslateService::class)->briefsToArabic($payload['briefs']);
 
         return $payload;
+    }
+
+    /**
+     * @param  list<mixed>  $operations
+     * @return list<array{department: string, brief: string, hours: int, priority: int}>
+     */
+    private function normalizeOperations(array $operations): array
+    {
+        $allowed = ['design', 'content', 'programming', 'photography'];
+        $normalized = [];
+
+        foreach ($operations as $operation) {
+            if (! is_array($operation)) {
+                continue;
+            }
+            $department = strtolower(trim((string) ($operation['department'] ?? '')));
+            $department = match ($department) {
+                'web', 'dev', 'development', 'برمجة', 'ويب' => 'programming',
+                'photo', 'media', 'تصوير', '3d' => 'photography',
+                'تصميم', 'branding', 'print' => 'design',
+                'محتوى' => 'content',
+                default => $department,
+            };
+            if (! in_array($department, $allowed, true)) {
+                continue;
+            }
+            $brief = trim((string) ($operation['brief'] ?? ''));
+            if ($brief === '') {
+                continue;
+            }
+            $hours = (int) ($operation['hours'] ?? 24);
+            $priority = (int) ($operation['priority'] ?? 3);
+            $normalized[] = [
+                'department' => $department,
+                'brief' => $brief,
+                'hours' => max(8, min(120, $hours)),
+                'priority' => max(1, min(4, $priority)),
+            ];
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * @return list<array{department: string, brief: string, hours: int, priority: int}>
+     */
+    private function heuristicPlan(string $title, string $description, ?string $packageContext): array
+    {
+        $haystack = mb_strtolower($title.' '.$description.' '.($packageContext ?? ''));
+        $operations = [];
+
+        $add = function (string $department, string $brief, int $hours, int $priority) use (&$operations): void {
+            $operations[] = compact('department', 'brief', 'hours', 'priority');
+        };
+
+        if (str_contains($haystack, 'برمج') || str_contains($haystack, 'موقع') || str_contains($haystack, 'web') || str_contains($haystack, 'program')) {
+            $add('programming', 'تنفيذ الجانب التقني للطلب: '.$title, 72, 2);
+        }
+        if (str_contains($haystack, 'تصوير') || str_contains($haystack, 'فيديو') || str_contains($haystack, 'photo') || str_contains($haystack, 'reel')) {
+            $add('photography', 'تصوير أو إنتاج بصري للطلب: '.$title, 36, 2);
+        }
+        if (str_contains($haystack, 'محتوى') || str_contains($haystack, 'كتابة') || str_contains($haystack, 'content') || str_contains($haystack, 'copy')) {
+            $add('content', 'إعداد المحتوى للطلب: '.$title, 24, 3);
+        }
+        if (str_contains($haystack, 'تصميم') || str_contains($haystack, 'شعار') || str_contains($haystack, 'هوي') || str_contains($haystack, 'design') || str_contains($haystack, 'brand')) {
+            $add('design', 'تنفيذ التصميم للطلب: '.$title, 48, 2);
+        }
+
+        return $operations !== [] ? $operations : [[
+            'department' => 'design',
+            'brief' => 'تنفيذ العمل المطلوب: '.$title,
+            'hours' => 48,
+            'priority' => 3,
+        ]];
     }
 
     private function generateJson(string $prompt): Response

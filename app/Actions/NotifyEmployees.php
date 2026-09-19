@@ -87,12 +87,16 @@ class NotifyEmployees
 
         try {
             if ($attachment !== null && is_file($attachment['path'])) {
+                $markup = $inlineButtons !== null && $inlineButtons !== []
+                    ? ['inline_keyboard' => [$inlineButtons]]
+                    : null;
                 $this->telegram->sendFile(
                     $chatId,
                     $attachment['path'],
                     (string) ($attachment['mime'] ?? 'application/octet-stream'),
                     $text,
                     $bot,
+                    $markup,
                 );
 
                 return true;

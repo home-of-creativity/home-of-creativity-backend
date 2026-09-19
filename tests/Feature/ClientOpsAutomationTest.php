@@ -9,11 +9,14 @@ use App\Actions\RenewSubscription;
 use App\Actions\ReRequestReceipt;
 use App\Actions\SchedulePaymentReminders;
 use App\Enums\ClickUpTaskType;
+use App\Enums\EmployeeProfession;
+use App\Enums\EmployeeStatus;
 use App\Enums\PaymentMethod;
 use App\Enums\RequestStatus;
 use App\Models\ClickUpTask;
 use App\Models\Client;
 use App\Models\DriveDelivery;
+use App\Models\Employee;
 use App\Models\OpsSetting;
 use App\Models\PaymentReminder;
 use App\Models\PricingCategory;
@@ -21,6 +24,7 @@ use App\Models\PricingPackage;
 use App\Models\PricingSubcategory;
 use App\Models\Quotation;
 use App\Models\RequestFile;
+use App\Models\Revision;
 use App\Models\ServiceRequest;
 use App\Models\User;
 use App\Services\GoogleDriveClient;
@@ -142,6 +146,8 @@ class ClientOpsAutomationTest extends TestCase
             ->json('data');
 
         $this->assertSame('quotation_sent', $created['status']);
+        $this->assertSame('عرض سعر مرسل', $created['status_label']);
+        $this->assertArrayHasKey('quotation_delivered', $created);
         $this->assertTrue($created['allows_renewal']);
         $this->assertFalse($created['requires_full_payment']);
         $this->assertDatabaseHas('requests', [
@@ -321,7 +327,7 @@ class ClientOpsAutomationTest extends TestCase
 
         $request = ServiceRequest::query()->findOrFail($created['id']);
         $request->forceFill([
-            'status' => RequestStatus::PaymentConfirmed,
+            'status' => RequestStatus::Completed,
             'paid_at' => now()->subDays(20),
             'amount_total' => 400,
             'amount_paid' => 400,
@@ -892,6 +898,7 @@ class ClientOpsAutomationTest extends TestCase
         $client = Client::factory()->create(['telegram_user_id' => 'tg-drive']);
         ServiceRequest::factory()->create([
             'client_id' => $client->id,
+            'status' => RequestStatus::PaymentConfirmed,
             'google_drive_folder_id' => 'folder-1',
         ]);
 
@@ -918,6 +925,299 @@ class ClientOpsAutomationTest extends TestCase
 
         $this->artisan('ops:poll-drive')->assertSuccessful();
         $this->assertNotNull($delivery->fresh()?->sent_at);
+        Http::assertSent(fn (Request $httpRequest): bool => str_contains($httpRequest->url(), 'botclient-token/sendPhoto'));
+    }
+
+    public function test_client_can_request_revision_on_drive_file_and_see_status_in_my_requests(): void
+    {
+        $client = Client::factory()->create(['telegram_user_id' => 'tg-revfile']);
+        $request = ServiceRequest::factory()->for($client)->create([
+            'status' => RequestStatus::InProgress,
+            'title' => 'شعار',
+        ]);
+        $delivery = DriveDelivery::query()->create([
+            'request_id' => $request->id,
+            'drive_file_id' => 'file-logo',
+            'name' => 'logo.png',
+            'mime_type' => 'image/png',
+            'sent_at' => now(),
+        ]);
+
+        $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
+            ->getJson('/api/bot/telegram/requests?telegram_user_id=tg-revfile')
+            ->assertOk()
+            ->assertJsonPath('data.0.status', 'in_progress')
+            ->assertJsonPath('data.0.status_label', 'قيد التنفيذ')
+            ->assertJsonPath('data.0.can_revise', true)
+            ->assertJsonPath('data.0.can_complete', false);
+
+        $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
+            ->postJson("/api/bot/telegram/requests/{$request->number}/revision", [
+                'telegram_user_id' => 'tg-revfile',
+                'reason' => 'غطيّر اللون',
+                'drive_delivery_id' => $delivery->id,
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'revision_requested');
+
+        $revision = Revision::query()->where('request_id', $request->id)->latest('id')->first();
+        $this->assertNotNull($revision);
+        $this->assertStringContainsString('logo.png', (string) $revision->comments);
+        $this->assertStringContainsString('غطيّر اللون', (string) $revision->comments);
+
+        $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
+            ->postJson("/api/bot/telegram/requests/{$request->number}/revision", [
+                'telegram_user_id' => 'tg-revfile',
+                'reason' => 'أعد كل الملفات',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'revision_requested');
+
+        $this->assertSame(2, Revision::query()->where('request_id', $request->id)->count());
+        $this->assertStringContainsString(
+            'الطلب بالكامل',
+            (string) Revision::query()->where('request_id', $request->id)->latest('id')->value('comments'),
+        );
+
+        $keyboard = $delivery->clientRevisionKeyboard('12');
+        $this->assertSame('revfile:12:'.$delivery->id, $keyboard['inline_keyboard'][0][0]['callback_data']);
+        $this->assertSame('revision:12', $keyboard['inline_keyboard'][1][0]['callback_data']);
+        $this->assertSame('complete:12', $keyboard['inline_keyboard'][2][0]['callback_data']);
+    }
+
+    public function test_drive_file_opens_request_for_client_review(): void
+    {
+        Cache::flush();
+        Storage::fake('local');
+        config(['services.telegram.bot_token' => 'client-token']);
+        Http::fake([
+            'https://api.telegram.org/*' => Http::response([
+                'ok' => true,
+                'result' => ['photo' => [['file_id' => 'tg-photo']]],
+            ], 200),
+        ]);
+
+        $client = Client::factory()->create(['telegram_user_id' => 'tg-drive-ready']);
+        $request = ServiceRequest::factory()->for($client)->create([
+            'status' => RequestStatus::PaymentConfirmed,
+            'google_drive_folder_id' => 'folder-ready',
+            'paid_at' => now(),
+        ]);
+
+        $this->mock(GoogleDriveClient::class, function ($mock): void {
+            $mock->shouldReceive('configured')->andReturn(true);
+            $mock->shouldReceive('listNewFiles')->andReturn([
+                ['id' => 'file-ready', 'name' => 'final.png', 'mimeType' => 'image/png'],
+            ]);
+            $mock->shouldReceive('downloadFile')->with('file-ready')->andReturn('PNG');
+        });
+
+        $this->artisan('ops:poll-drive')->assertSuccessful();
+
+        $this->assertSame(RequestStatus::InProgress, $request->fresh()?->status);
+        $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
+            ->getJson('/api/bot/telegram/requests?telegram_user_id=tg-drive-ready')
+            ->assertOk()
+            ->assertJsonPath('data.0.can_complete', false)
+            ->assertJsonPath('data.0.can_revise', true);
+
+        $this->travel(3)->minutes();
+        $this->artisan('ops:poll-drive')->assertSuccessful();
+
+        $this->assertSame(RequestStatus::ReadyForReview, $request->fresh()?->status);
+        $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
+            ->getJson('/api/bot/telegram/requests?telegram_user_id=tg-drive-ready')
+            ->assertOk()
+            ->assertJsonPath('data.0.can_complete', true)
+            ->assertJsonPath('data.0.can_revise', true);
+    }
+
+    public function test_revision_is_blocked_before_drive_files_or_delivery(): void
+    {
+        $client = Client::factory()->create(['telegram_user_id' => 'tg-revblock']);
+        $paid = ServiceRequest::factory()->for($client)->create([
+            'status' => RequestStatus::PaymentConfirmed,
+        ]);
+        $progress = ServiceRequest::factory()->for($client)->create([
+            'status' => RequestStatus::InProgress,
+        ]);
+
+        $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
+            ->getJson('/api/bot/telegram/requests?telegram_user_id=tg-revblock')
+            ->assertOk()
+            ->assertJsonPath('data.0.can_revise', false)
+            ->assertJsonPath('data.1.can_revise', false);
+
+        $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
+            ->postJson("/api/bot/telegram/requests/{$paid->number}/revision", [
+                'telegram_user_id' => 'tg-revblock',
+                'reason' => 'بكّر',
+            ])
+            ->assertUnprocessable();
+
+        $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
+            ->postJson("/api/bot/telegram/requests/{$progress->number}/revision", [
+                'telegram_user_id' => 'tg-revblock',
+                'reason' => 'بكّر',
+            ])
+            ->assertUnprocessable();
+    }
+
+    public function test_receipt_is_rejected_before_awaiting_payment(): void
+    {
+        $client = Client::factory()->create(['telegram_user_id' => 'tg-receipt-gate']);
+        $request = ServiceRequest::factory()->for($client)->create([
+            'status' => RequestStatus::QuotationSent,
+            'amount_remaining' => 400,
+        ]);
+
+        $this->assertFalse($request->acceptsReceiptUpload());
+
+        $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
+            ->postJson("/api/bot/telegram/requests/{$request->number}/receipt", [
+                'telegram_user_id' => 'tg-receipt-gate',
+                'file_name' => 'receipt.jpg',
+                'file_base64' => base64_encode('img'),
+                'mime_type' => 'image/jpeg',
+            ])
+            ->assertStatus(422);
+    }
+
+    public function test_drive_file_replace_is_resent_to_client(): void
+    {
+        Cache::flush();
+        Storage::fake('local');
+        config(['services.telegram.bot_token' => 'client-token']);
+        Http::fake([
+            'https://api.telegram.org/*' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 88, 'photo' => [['file_id' => 'tg-photo']]],
+            ], 200),
+        ]);
+
+        $client = Client::factory()->create(['telegram_user_id' => 'tg-drive-replace']);
+        $request = ServiceRequest::factory()->for($client)->create([
+            'status' => RequestStatus::RevisionRequested,
+            'google_drive_folder_id' => 'folder-replace',
+        ]);
+        DriveDelivery::query()->create([
+            'request_id' => $request->id,
+            'drive_file_id' => 'file-same',
+            'name' => 'logo.png',
+            'mime_type' => 'image/png',
+            'content_hash' => md5('OLD'),
+            'drive_modified_at' => now()->subHour(),
+            'sent_at' => now()->subHour(),
+        ]);
+
+        $this->mock(GoogleDriveClient::class, function ($mock): void {
+            $mock->shouldReceive('configured')->andReturn(true);
+            $mock->shouldReceive('listNewFiles')->andReturn([
+                [
+                    'id' => 'file-same',
+                    'name' => 'logo.png',
+                    'mimeType' => 'image/png',
+                    'modifiedTime' => now()->toIso8601String(),
+                    'md5Checksum' => md5('NEW'),
+                ],
+            ]);
+            $mock->shouldReceive('downloadFile')->with('file-same')->andReturn('NEW');
+        });
+
+        $this->artisan('ops:poll-drive')->assertSuccessful();
+
+        $delivery = DriveDelivery::query()->where('drive_file_id', 'file-same')->first();
+        $this->assertNotNull($delivery?->sent_at);
+        $this->assertSame(md5('NEW'), $delivery?->content_hash);
+        Http::assertSent(fn (Request $httpRequest): bool => str_contains($httpRequest->url(), 'botclient-token/sendPhoto'));
+    }
+
+    public function test_drive_poll_skips_completed_folders(): void
+    {
+        Cache::flush();
+        $client = Client::factory()->create(['telegram_user_id' => 'tg-done']);
+        ServiceRequest::factory()->for($client)->create([
+            'status' => RequestStatus::Completed,
+            'google_drive_folder_id' => 'folder-done',
+        ]);
+
+        $this->mock(GoogleDriveClient::class, function ($mock): void {
+            $mock->shouldReceive('configured')->andReturn(true);
+            $mock->shouldReceive('listNewFiles')->never();
+        });
+
+        $this->artisan('ops:poll-drive')->assertSuccessful();
+    }
+
+    public function test_support_notifies_sales_staff(): void
+    {
+        config(['services.telegram.staff_bot_token' => 'staff-token']);
+        Http::fake([
+            'https://api.telegram.org/*' => Http::response(['ok' => true], 200),
+        ]);
+
+        $this->completeClient('tg-support-alert');
+        Employee::factory()->create([
+            'profession' => EmployeeProfession::Sales,
+            'status' => EmployeeStatus::Approved,
+            'telegram_user_id' => '555',
+        ]);
+
+        $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
+            ->postJson('/api/bot/telegram/support', [
+                'telegram_user_id' => 'tg-support-alert',
+                'message' => 'متى يبدأ العمل؟',
+            ])
+            ->assertOk();
+
+        Http::assertSent(fn (Request $httpRequest): bool => str_contains($httpRequest->url(), 'botstaff-token/sendMessage')
+            && str_contains((string) ($httpRequest['text'] ?? ''), 'متى يبدأ العمل؟'));
+    }
+
+    public function test_can_renew_only_after_completed(): void
+    {
+        $client = Client::factory()->create(['telegram_user_id' => 'tg-renew-gate']);
+        ServiceRequest::factory()->for($client)->create([
+            'status' => RequestStatus::InProgress,
+            'allows_renewal' => true,
+        ]);
+        $done = ServiceRequest::factory()->for($client)->create([
+            'status' => RequestStatus::Completed,
+            'allows_renewal' => true,
+        ]);
+
+        $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
+            ->getJson('/api/bot/telegram/requests?telegram_user_id=tg-renew-gate')
+            ->assertOk()
+            ->assertJsonPath('data.0.can_renew', true)
+            ->assertJsonPath('data.1.can_renew', false);
+
+        $this->assertTrue($done->canRenew());
+    }
+
+    public function test_catalog_request_is_not_duplicated_within_three_minutes(): void
+    {
+        $package = $this->seedPublishedPackage();
+        $this->completeClient('tg-catalog-once');
+
+        $first = $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
+            ->postJson('/api/bot/telegram/catalog/requests', [
+                'telegram_user_id' => 'tg-catalog-once',
+                'package_id' => $package->id,
+                'billing_period' => 'monthly',
+            ])->assertCreated()
+            ->json('data');
+
+        $second = $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
+            ->postJson('/api/bot/telegram/catalog/requests', [
+                'telegram_user_id' => 'tg-catalog-once',
+                'package_id' => $package->id,
+                'billing_period' => 'monthly',
+            ])->assertCreated()
+            ->json('data');
+
+        $this->assertSame($first['number'], $second['number']);
+        $this->assertSame(1, ServiceRequest::query()->where('number', $first['number'])->count());
     }
 
     public function test_admin_bot_forbidden_without_allowlist(): void

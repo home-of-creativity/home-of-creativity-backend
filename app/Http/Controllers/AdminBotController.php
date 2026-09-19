@@ -2,12 +2,15 @@
 
 namespace App\Http\Controllers;
 
+use App\Actions\AdminBotDesk;
 use App\Actions\GenerateEmployeeCode;
 use App\Actions\PushEmployeeToOdoo;
+use App\Actions\ResolveWorkPlan;
 use App\Enums\EmployeeProfession;
 use App\Enums\EmployeeStatus;
 use App\Models\Employee;
 use App\Services\ClickUpClient;
+use App\Support\ResolveServiceRequest;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -151,6 +154,113 @@ class AdminBotController extends Controller
             'data' => ['assigned' => true],
             'message' => 'Assigned.',
         ]);
+    }
+
+    public function updateTask(Request $request, ClickUpClient $clickUp): JsonResponse
+    {
+        $this->assertAdmin($request);
+        $validated = $request->validate([
+            'telegram_user_id' => ['required', 'string'],
+            'department' => ['nullable', 'string'],
+            'task_id' => ['required', 'string'],
+            'status' => ['nullable', 'string', 'max:80'],
+            'priority' => ['nullable', 'integer', 'min:1', 'max:4'],
+            'due_hours' => ['nullable', 'integer', 'min:1', 'max:720'],
+        ]);
+
+        $dueMs = isset($validated['due_hours'])
+            ? now()->addHours((int) $validated['due_hours'])->getTimestamp() * 1000
+            : null;
+
+        $clickUp->updateTask(
+            $validated['task_id'],
+            $validated['status'] ?? null,
+            null,
+            $dueMs,
+            isset($validated['priority']) ? (int) $validated['priority'] : null,
+        );
+
+        return response()->json([
+            'data' => ['updated' => true],
+            'message' => 'Task updated.',
+        ]);
+    }
+
+    public function overview(Request $request, AdminBotDesk $desk): JsonResponse
+    {
+        $this->assertAdmin($request);
+
+        return response()->json(['data' => $desk->overview(), 'message' => 'ok']);
+    }
+
+    public function clients(Request $request, AdminBotDesk $desk): JsonResponse
+    {
+        $this->assertAdmin($request);
+
+        return response()->json(['data' => $desk->clients(), 'message' => 'ok']);
+    }
+
+    public function client(Request $request, int $client, AdminBotDesk $desk): JsonResponse
+    {
+        $this->assertAdmin($request);
+
+        return response()->json(['data' => $desk->client($client), 'message' => 'ok']);
+    }
+
+    public function operations(Request $request, AdminBotDesk $desk): JsonResponse
+    {
+        $this->assertAdmin($request);
+
+        return response()->json(['data' => $desk->operations(), 'message' => 'ok']);
+    }
+
+    public function rebuildPlan(
+        Request $request,
+        AdminBotDesk $desk,
+        ResolveWorkPlan $resolveWorkPlan,
+        ResolveServiceRequest $resolveServiceRequest,
+    ): JsonResponse {
+        $this->assertAdmin($request);
+        $validated = $request->validate([
+            'telegram_user_id' => ['required', 'string'],
+            'request_number' => ['required', 'string'],
+        ]);
+
+        $serviceRequest = $resolveServiceRequest->byReference($validated['request_number']);
+        $resolveWorkPlan->handle($serviceRequest);
+
+        return response()->json([
+            'data' => $desk->operation($serviceRequest->fresh(['client', 'pricingPackage']) ?? $serviceRequest),
+            'message' => 'Plan rebuilt.',
+        ]);
+    }
+
+    public function finance(Request $request, AdminBotDesk $desk): JsonResponse
+    {
+        $this->assertAdmin($request);
+
+        return response()->json(['data' => $desk->finance(), 'message' => 'ok']);
+    }
+
+    public function storeExpense(Request $request, AdminBotDesk $desk): JsonResponse
+    {
+        $telegramId = $this->assertAdmin($request);
+        $validated = $request->validate([
+            'telegram_user_id' => ['required', 'string'],
+            'amount' => ['required', 'numeric', 'min:0.01'],
+            'category' => ['required', 'string', 'max:40'],
+            'note' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        return response()->json([
+            'data' => $desk->recordExpense(
+                (float) $validated['amount'],
+                $validated['category'],
+                $validated['note'] ?? null,
+                $telegramId,
+            ),
+            'message' => 'Expense recorded.',
+        ], 201);
     }
 
     private function assertAdmin(Request $request): string

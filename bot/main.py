@@ -34,7 +34,7 @@ load_dotenv()
     WAITING_RECEIPT,
 ) = range(8)
 
-_local_api = (os.environ.get("HOC_LOCAL_API_URL") or "http://127.0.0.1:8001").rstrip("/")
+_local_api = (os.environ.get("HOC_LOCAL_API_URL") or "http://127.0.0.1:8000").rstrip("/")
 _origin = (os.environ.get("HOC_API_URL") or _local_api).rstrip("/")
 if "trycloudflare.com" in _origin:
     _origin = _local_api
@@ -44,6 +44,7 @@ BTN_NEW = "🆕 طلب جديد"
 BTN_MY = "📋 طلباتي"
 BTN_SUPPORT = "💬 دعم"
 BTN_SUBMIT = "✅ تم الإرسال"
+NAV_BUTTONS = {BTN_NEW, BTN_MY, BTN_SUPPORT}
 MAX_ATTACHMENTS = 5
 PERIOD_LABELS = {
     "monthly": "شهري",
@@ -331,8 +332,9 @@ async def submit_new_request(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if attachments:
         attachment_note = f"\n📎 مرفقات: {len(attachments)}"
 
+    status_label = result.get("status_label") or result.get("status")
     await message.reply_text(
-        f"تم تسجيل الطلب {escape(result['number'])}.{attachment_note}\nالحالة: {result['status']}",
+        f"تم تسجيل الطلب {result['number']}.{attachment_note}\nالحالة: {status_label}",
         reply_markup=main_keyboard(),
     )
     return ConversationHandler.END
@@ -418,6 +420,8 @@ def catalog_footer_rows(scope: str, parent: int, has_more: bool, next_offset: in
     rows: list[list[InlineKeyboardButton]] = []
     if has_more:
         rows.append([InlineKeyboardButton("عرض المزيد", callback_data=f"more:{scope}:{parent}:{next_offset}")])
+    if scope != "root":
+        rows.append([InlineKeyboardButton("رجوع", callback_data="back")])
     rows.append([InlineKeyboardButton("طلب يدوي", callback_data="cman")])
     return rows
 
@@ -458,6 +462,32 @@ def catalog_markup(payload: dict, *, scope: str = "root", parent: int = 0) -> In
 
     rows.extend(catalog_footer_rows(scope, parent, has_more, next_offset))
     return InlineKeyboardMarkup(rows)
+
+
+def clear_pending_intents(context: ContextTypes.DEFAULT_TYPE) -> None:
+    context.user_data.pop("revision_number", None)
+    context.user_data.pop("revision_delivery_id", None)
+    context.user_data.pop("reject_number", None)
+    context.user_data.pop("receipt_number", None)
+    context.user_data.pop("composing_request", None)
+    context.user_data.pop("submitting", None)
+    context.user_data.pop("catalog_submitting", None)
+    context.user_data.pop("catalog_stack", None)
+
+
+async def maybe_route_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int | None:
+    if update.message is None or not update.message.text:
+        return None
+    text = update.message.text.strip()
+    if text not in NAV_BUTTONS:
+        return None
+    clear_pending_intents(context)
+    if text == BTN_NEW:
+        return await new_request(update, context)
+    if text == BTN_MY:
+        await list_requests(update, context)
+        return ConversationHandler.END
+    return await support_start(update, context)
 
 
 def next_profile_field(me: dict) -> str | None:
@@ -666,6 +696,26 @@ async def show_catalog(
     )
 
 
+async def show_catalog_back(message, context: ContextTypes.DEFAULT_TYPE, telegram_id: int) -> None:
+    stack = context.user_data.get("catalog_stack") or []
+    if stack:
+        stack.pop()
+        context.user_data["catalog_stack"] = stack
+    prev = stack[-1] if stack else None
+    if prev is None:
+        await show_catalog(message, context, telegram_id, replace=True)
+        return
+    kind = str(prev.get("kind") or "")
+    item_id = int(prev.get("id") or 0)
+    if kind == "cat":
+        await show_catalog(message, context, telegram_id, category_id=item_id, parent=item_id, replace=True)
+        return
+    if kind == "sub":
+        await show_catalog(message, context, telegram_id, subcategory_id=item_id, parent=item_id, replace=True)
+        return
+    await show_catalog(message, context, telegram_id, replace=True)
+
+
 async def create_catalog_request(
     message,
     telegram_id: int,
@@ -683,7 +733,14 @@ async def create_catalog_request(
     elif period == "one_time":
         payload["billing_period"] = "one_time"
 
-    async with httpx.AsyncClient(timeout=30) as client:
+    await send_catalog_view(
+        message,
+        "جاري إنشاء طلبك وانتظار عرض السعر…\nيرجى الانتظار لحظات، لا تغلق المحادثة.",
+        None,
+        replace=replace,
+    )
+
+    async with httpx.AsyncClient(timeout=45) as client:
         response = await client.post(
             f"{API_URL}/bot/telegram/catalog/requests",
             headers=api_headers(),
@@ -693,13 +750,27 @@ async def create_catalog_request(
             detail = response.json().get("message", response.text) if response.headers.get("content-type", "").startswith("application/json") else response.text
             await send_catalog_result(
                 message,
-                f"تعذر إنشاء الطلب: {escape(str(detail))}",
-                replace=replace,
+                f"تعذر إنشاء الطلب: {detail}",
+                replace=True,
             )
             return
+        result = response.json().get("data") or {}
 
-    if replace:
-        await clear_catalog_message(message)
+    number = str(result.get("number") or "")
+    label = str(result.get("status_label") or "عرض سعر مرسل")
+    if result.get("quotation_delivered"):
+        text = (
+            f"تم إنشاء الطلب #{number}.\n"
+            f"الحالة: {label}.\n"
+            "سيصلك عرض السعر الآن في المحادثة."
+        )
+    else:
+        text = (
+            f"تم إنشاء الطلب #{number}.\n"
+            f"الحالة: {label}.\n"
+            "إذا لم يصلك عرض السعر خلال لحظات، افتح طلباتي."
+        )
+    await send_catalog_result(message, text, replace=True)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -741,6 +812,7 @@ async def new_request(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         return ConversationHandler.END
     if not await ensure_profile(update, context):
         return ConversationHandler.END
+    context.user_data["catalog_stack"] = []
     await show_catalog(update.message, context, update.effective_user.id)
     return ConversationHandler.END
 
@@ -766,21 +838,34 @@ async def catalog_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     data = query.data
     telegram_id = query.from_user.id
 
+    if data == "back":
+        await show_catalog_back(query.message, context, telegram_id)
+        return
     if data.startswith("cat:"):
         category_id = int(data.split(":", 1)[1])
+        context.user_data.setdefault("catalog_stack", []).append({"kind": "cat", "id": category_id})
         await show_catalog(query.message, context, telegram_id, category_id=category_id, parent=category_id, replace=True)
         return
     if data.startswith("sub:"):
         subcategory_id = int(data.split(":", 1)[1])
+        context.user_data.setdefault("catalog_stack", []).append({"kind": "sub", "id": subcategory_id})
         await show_catalog(query.message, context, telegram_id, subcategory_id=subcategory_id, parent=subcategory_id, replace=True)
         return
     if data.startswith("pkg:"):
         package_id = int(data.split(":", 1)[1])
+        context.user_data.setdefault("catalog_stack", []).append({"kind": "pkg", "id": package_id})
         await show_catalog(query.message, context, telegram_id, package_id=package_id, parent=package_id, replace=True)
         return
     if data.startswith("per:"):
+        if context.user_data.get("catalog_submitting"):
+            await query.answer("جاري إنشاء الطلب…")
+            return
+        context.user_data["catalog_submitting"] = True
         _, package_id, period = data.split(":", 2)
-        await create_catalog_request(query.message, telegram_id, int(package_id), period, replace=True)
+        try:
+            await create_catalog_request(query.message, telegram_id, int(package_id), period, replace=True)
+        finally:
+            context.user_data.pop("catalog_submitting", None)
         return
     if data.startswith("more:"):
         _, scope, parent_raw, offset_raw = data.split(":", 3)
@@ -796,6 +881,9 @@ async def catalog_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def capture_title(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    routed = await maybe_route_nav(update, context)
+    if routed is not None:
+        return routed
     if update.message is None or not update.message.text:
         return WAITING_TITLE
     context.user_data["title"] = update.message.text.strip()
@@ -812,6 +900,9 @@ async def capture_title(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
 
 async def capture_body(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    routed = await maybe_route_nav(update, context)
+    if routed is not None:
+        return routed
     message = update.message
     if message is None:
         return WAITING_BODY
@@ -859,9 +950,10 @@ async def capture_body(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     return WAITING_BODY
 
 
-async def list_requests(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def list_requests(update: Update, context: ContextTypes.DEFAULT_TYPE, offset: int = 0) -> None:
     user = update.effective_user
-    if user is None or update.message is None:
+    message = update.message or (update.callback_query.message if update.callback_query else None)
+    if user is None or message is None:
         return
 
     try:
@@ -881,43 +973,61 @@ async def list_requests(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             response.raise_for_status()
             items = response.json().get("data", [])
     except (httpx.TimeoutException, httpx.HTTPStatusError, httpx.RequestError):
-        await notify_api_failure(update.message)
+        await notify_api_failure(message)
         return
 
     if not items:
-        await update.message.reply_text("لا توجد طلبات بعد.", reply_markup=main_keyboard())
+        await message.reply_text("لا توجد طلبات بعد.", reply_markup=main_keyboard())
         return
 
-    lines = []
-    renew_rows: list[list[InlineKeyboardButton]] = []
-    for item in items[:10]:
+    page_size = 10
+    shown = items[offset:offset + page_size]
+    header = "طلباتك:" if len(items) <= page_size else f"طلباتك ({offset + 1}–{offset + len(shown)} من {len(items)}):"
+    await message.reply_text(header, reply_markup=main_keyboard())
+    for item in shown:
         label = item.get("status_label") or item.get("execution_status_label") or item.get("status")
         package = item.get("package_name") or "طلب يدوي"
         period = PERIOD_LABELS.get(str(item.get("billing_period") or ""), item.get("billing_period") or "")
         paid = item.get("amount_paid")
         remaining = item.get("amount_remaining")
-        money = ""
+        lines = [
+            f"#{item['number']} — {item['title']}",
+            f"الحالة: {label}",
+            f"الباقة: {package}" + (f" — {period}" if period else ""),
+        ]
         if paid is not None or remaining is not None:
-            money = f"\n  المدفوع: {paid or 0} USD — المتبقي: {remaining or 0} USD"
-        extra = f"\n  الباقة: {package}"
-        if period:
-            extra += f" — {period}"
-        lines.append(f"• {item['number']}: {item['title']} — {label}{extra}{money}")
+            lines.append(f"المدفوع: {paid or 0} USD — المتبقي: {remaining or 0} USD")
         if item.get("can_edit"):
-            lines.append(f"  ✏️ للتعديل: /edit {item['number']}")
+            lines.append(f"✏️ لتعديل بيانات الطلب: /edit {item['number']}")
         if item.get("receipt_reupload_required") or item.get("accepts_receipt"):
-            lines.append("  📎 أرسل وصل الدفع كصورة أو PDF")
+            lines.append("📎 أرسل وصل الدفع كصورة أو PDF")
+
+        rows: list[list[InlineKeyboardButton]] = []
+        if item.get("can_revise"):
+            rows.append([InlineKeyboardButton("🔁 تعديل الطلب بالكامل", callback_data=f"revision:{item['number']}")])
+        if item.get("can_complete"):
+            rows.append([InlineKeyboardButton("✅ اعتماد التسليم", callback_data=f"complete:{item['number']}")])
+        if item.get("receipt_reupload_required") or item.get("accepts_receipt"):
+            rows.append([InlineKeyboardButton("📎 رفع وصل الدفع", callback_data=f"receipt_hint:{item['number']}")])
         if item.get("can_renew"):
-            renew_rows.append(
+            rows.append(
                 [
-                    InlineKeyboardButton(f"تجديد {item['number']}", callback_data=f"renew:{item['number']}"),
+                    InlineKeyboardButton("تجديد", callback_data=f"renew:{item['number']}"),
                     InlineKeyboardButton("لن أجدد", callback_data=f"norenew:{item['number']}"),
                 ]
             )
 
-    await update.message.reply_text("\n".join(lines), reply_markup=main_keyboard())
-    if renew_rows:
-        await update.message.reply_text("تجديد الاشتراك:", reply_markup=InlineKeyboardMarkup(renew_rows))
+        markup = InlineKeyboardMarkup(rows) if rows else None
+        await message.reply_text("\n".join(lines), reply_markup=markup)
+
+    next_offset = offset + page_size
+    if next_offset < len(items):
+        await message.reply_text(
+            "عرض الطلبات الأقدم:",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("عرض الأقدم", callback_data=f"more_reqs:{next_offset}")]]
+            ),
+        )
 
 
 async def edit_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -933,6 +1043,9 @@ async def edit_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 async def capture_edit_title(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    routed = await maybe_route_nav(update, context)
+    if routed is not None:
+        return routed
     if update.message is None or not update.message.text:
         return WAITING_EDIT_TITLE
     context.user_data["edit_title"] = update.message.text.strip()
@@ -941,6 +1054,9 @@ async def capture_edit_title(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def capture_edit_body(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    routed = await maybe_route_nav(update, context)
+    if routed is not None:
+        return routed
     user = update.effective_user
     if user is None or update.message is None or not update.message.text:
         return ConversationHandler.END
@@ -973,12 +1089,15 @@ async def support_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
 
 async def capture_support(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    routed = await maybe_route_nav(update, context)
+    if routed is not None:
+        return routed
     user = update.effective_user
     if user is None or update.message is None or not update.message.text:
         return ConversationHandler.END
 
     async with httpx.AsyncClient(timeout=12) as client:
-        await client.post(
+        response = await client.post(
             f"{API_URL}/bot/telegram/support",
             headers=api_headers(),
             json={
@@ -986,6 +1105,9 @@ async def capture_support(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 "message": update.message.text.strip(),
             },
         )
+        if response.status_code >= 400:
+            await notify_api_failure(update.message)
+            return ConversationHandler.END
 
     await update.message.reply_text("تم إرسال رسالة الدعم.", reply_markup=main_keyboard())
     return ConversationHandler.END
@@ -1008,10 +1130,13 @@ async def client_request_action(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     if query is None or query.data is None:
         return
-    await query.answer()
 
     action, number = parse_callback(query.data)
     user = query.from_user
+    if action == "more_reqs":
+        await query.answer()
+        await list_requests(update, context, offset=int(number or 0))
+        return
 
     async with httpx.AsyncClient(timeout=12) as client:
         if action == "reqack":
@@ -1021,6 +1146,7 @@ async def client_request_action(update: Update, context: ContextTypes.DEFAULT_TY
                 json={"telegram_user_id": str(user.id)},
             )
             if response.status_code < 400:
+                await query.answer()
                 await query.edit_message_reply_markup(reply_markup=None)
                 await query.message.reply_text(
                     f"شكراً! تم تأكيد اهتمامك بالطلب #{escape(number)}.",
@@ -1037,6 +1163,7 @@ async def client_request_action(update: Update, context: ContextTypes.DEFAULT_TY
                 json={"telegram_user_id": str(user.id)},
             )
             if response.status_code < 400:
+                await query.answer()
                 await query.edit_message_reply_markup(reply_markup=None)
                 await query.message.reply_text(
                     f"تم إلغاء الطلب #{escape(number)}.",
@@ -1053,6 +1180,7 @@ async def client_request_action(update: Update, context: ContextTypes.DEFAULT_TY
                 json={"telegram_user_id": str(user.id)},
             )
             if response.status_code < 400:
+                await query.answer()
                 await query.edit_message_reply_markup(reply_markup=None)
                 await query.message.reply_text(
                     f"تم اعتماد تسليم الطلب #{escape(number)}. شكراً لك!",
@@ -1063,12 +1191,25 @@ async def client_request_action(update: Update, context: ContextTypes.DEFAULT_TY
             return
 
         if action == "revision":
+            await query.answer()
             context.user_data["revision_number"] = number
-            await query.edit_message_reply_markup(reply_markup=None)
-            await query.message.reply_text("ما التعديل المطلوب؟")
+            context.user_data.pop("revision_delivery_id", None)
+            await query.message.reply_text("ما التعديل المطلوب على الطلب بالكامل؟")
+            return
+
+        if action == "revfile":
+            request_number, sep, delivery_id = number.rpartition(":")
+            if not sep:
+                await query.answer("تعذر قراءة ملف التعديل.", show_alert=True)
+                return
+            await query.answer()
+            context.user_data["revision_number"] = request_number
+            context.user_data["revision_delivery_id"] = delivery_id
+            await query.message.reply_text("ما التعديل المطلوب على هذه الصورة؟")
             return
 
         if action == "receipt_hint":
+            await query.answer()
             context.user_data["receipt_number"] = number
             await query.edit_message_reply_markup(reply_markup=None)
             await query.message.reply_text(
@@ -1103,7 +1244,6 @@ async def quotation_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     query = update.callback_query
     if query is None or query.data is None:
         return
-    await query.answer()
 
     action, number = parse_callback(query.data)
     user = query.from_user
@@ -1115,6 +1255,7 @@ async def quotation_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 json={"telegram_user_id": str(user.id)},
             )
             if response.status_code < 400:
+                await query.answer()
                 context.user_data["receipt_number"] = number
                 await query.edit_message_reply_markup(reply_markup=None)
                 await send_sham_cash_qr(query, number, response)
@@ -1123,10 +1264,12 @@ async def quotation_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             return
 
         if action in REJECT_REASONS:
+            await query.answer()
             await post_reject(query, number, REJECT_REASONS[action])
             return
 
         if action == "reject":
+            await query.answer()
             try:
                 await query.edit_message_text(
                     "ما سبب الرفض؟",
@@ -1144,6 +1287,7 @@ async def quotation_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             return
 
         if action == "rjother":
+            await query.answer()
             context.user_data["reject_number"] = number
             await query.edit_message_reply_markup(reply_markup=None)
             await query.message.reply_text("اكتب سبب رفضك:")
@@ -1156,6 +1300,7 @@ async def quotation_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 json={"telegram_user_id": str(user.id)},
             )
             if response.status_code < 400:
+                await query.answer()
                 await query.edit_message_reply_markup(reply_markup=None)
                 await query.message.reply_text(
                     f"تم بدء تجديد الاشتراك للطلب #{escape(number)}.",
@@ -1172,6 +1317,7 @@ async def quotation_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 json={"telegram_user_id": str(user.id)},
             )
             if response.status_code < 400:
+                await query.answer()
                 await query.edit_message_reply_markup(reply_markup=None)
                 await query.message.reply_text(
                     f"لن يتم تجديد الاشتراك للطلب #{escape(number)}. يبقى حتى تاريخ انتهائه.",
@@ -1188,25 +1334,36 @@ async def capture_revision_reason(update: Update, context: ContextTypes.DEFAULT_
         return
 
     number = context.user_data.pop("revision_number", None)
+    delivery_id = context.user_data.pop("revision_delivery_id", None)
     if not number:
+        if delivery_id:
+            context.user_data["revision_delivery_id"] = delivery_id
+            await update.message.reply_text("تعذر معرفة رقم الطلب. افتح طلباتي ثم اضغط تعديل الطلب بالكامل.")
         return
+
+    payload = {
+        "telegram_user_id": str(user.id),
+        "reason": update.message.text.strip(),
+    }
+    if delivery_id:
+        payload["drive_delivery_id"] = int(delivery_id)
 
     async with httpx.AsyncClient(timeout=12) as client:
         response = await client.post(
             f"{API_URL}/bot/telegram/requests/{number}/revision",
             headers=api_headers(),
-            json={
-                "telegram_user_id": str(user.id),
-                "reason": update.message.text.strip(),
-            },
+            json=payload,
         )
         if response.status_code >= 400:
             context.user_data["revision_number"] = number
+            if delivery_id:
+                context.user_data["revision_delivery_id"] = delivery_id
             await update.message.reply_text("تعذر تسجيل طلب التعديل.", reply_markup=main_keyboard())
             return
 
+    scope = "على الصورة" if delivery_id else "على الطلب بالكامل"
     await update.message.reply_text(
-        f"تم تسجيل طلب التعديل للطلب #{escape(number)}.",
+        f"تم تسجيل طلب التعديل {scope} للطلب #{escape(str(number))}.",
         reply_markup=main_keyboard(),
     )
 
@@ -1241,10 +1398,11 @@ async def capture_reject_reason(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def pending_callback_followup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    text = update.message.text.strip() if update.message and update.message.text else ""
+    if text in NAV_BUTTONS:
+        clear_pending_intents(context)
+        return
     if context.user_data.get("profile_field"):
-        text = update.message.text.strip() if update.message and update.message.text else ""
-        if text in {BTN_NEW, BTN_MY, BTN_SUPPORT}:
-            return
         await capture_profile_field(update, context)
         return
     if context.user_data.get("reject_number"):
@@ -1296,14 +1454,19 @@ async def upload_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         requests_resp.raise_for_status()
         items = requests_resp.json().get("data", [])
         hinted = context.user_data.get("receipt_number")
-        awaiting = None
-        if hinted:
-            awaiting = next((i for i in items if i.get("number") == hinted or str(i.get("number", "")).endswith(str(hinted))), None)
-        if awaiting is None:
-            awaiting = next((i for i in items if i.get("receipt_reupload_required")), None)
-        if awaiting is None:
-            awaiting = next((i for i in items if i.get("accepts_receipt") or i.get("status") == "awaiting_payment"), None)
-        if not awaiting:
+        if not hinted:
+            await message.reply_text(
+                "لرفع وصل الدفع اضغط «رفع وصل الدفع» من طلباتي، أو وافق على العرض أولاً.",
+                reply_markup=main_keyboard(),
+            )
+            return
+        awaiting = next((i for i in items if i.get("number") == hinted or str(i.get("number", "")).endswith(str(hinted))), None)
+        if awaiting is None or not (awaiting.get("receipt_reupload_required") or awaiting.get("accepts_receipt")):
+            context.user_data.pop("receipt_number", None)
+            await message.reply_text(
+                "هذا الطلب لم يعد بانتظار وصل. افتح طلباتي واضغط رفع وصل الدفع إن لزم.",
+                reply_markup=main_keyboard(),
+            )
             return
 
         response = await client.post(
@@ -1373,14 +1536,14 @@ def main() -> None:
     application.add_handler(
         CallbackQueryHandler(
             catalog_action,
-            pattern=r"^(cat|sub|pkg|per|more):",
+            pattern=r"^(cat|sub|pkg|per|more:|back)",
         ),
         group=-1,
     )
     application.add_handler(
         CallbackQueryHandler(
             client_request_action,
-            pattern=r"^(reqack|reqcancel|complete|revision|receipt_hint):",
+            pattern=r"^(reqack|reqcancel|complete|revision|revfile|receipt_hint|more_reqs):",
         ),
         group=-1,
     )

@@ -36,6 +36,7 @@ class ServiceRequest extends Model
         'work_type',
         'execution_status',
         'ai_analysis',
+        'work_plan',
         'odoo_quotation_id',
         'odoo_invoice_id',
         'paid_at',
@@ -55,6 +56,7 @@ class ServiceRequest extends Model
         'subscription_starts_at',
         'subscription_ends_at',
         'google_drive_folder_id',
+        'drive_last_activity_at',
         'receipt_reupload_required',
         'receipt_reupload_reason',
         'odoo_won_at',
@@ -70,6 +72,7 @@ class ServiceRequest extends Model
             'payment_method' => PaymentMethod::class,
             'gemini_status' => GeminiStatus::class,
             'ai_analysis' => 'array',
+            'work_plan' => 'array',
             'paid_at' => 'datetime',
             'gemini_processed_at' => 'datetime',
             'quotation_amount' => 'decimal:2',
@@ -80,6 +83,7 @@ class ServiceRequest extends Model
             'allows_renewal' => 'boolean',
             'subscription_starts_at' => 'datetime',
             'subscription_ends_at' => 'datetime',
+            'drive_last_activity_at' => 'datetime',
             'receipt_reupload_required' => 'boolean',
             'odoo_won_at' => 'datetime',
         ];
@@ -182,7 +186,46 @@ class ServiceRequest extends Model
             return true;
         }
 
-        return $this->hasRemainingBalance();
+        return $this->hasRemainingBalance()
+            && in_array($this->status, [
+                RequestStatus::PaymentConfirmed,
+                RequestStatus::InProgress,
+                RequestStatus::ReadyForReview,
+                RequestStatus::RevisionRequested,
+            ], true);
+    }
+
+    public function canRenew(): bool
+    {
+        return (bool) $this->allows_renewal && $this->status === RequestStatus::Completed;
+    }
+
+    public function isLiveForDrivePoll(): bool
+    {
+        return in_array($this->status, [
+            RequestStatus::PaymentConfirmed,
+            RequestStatus::InProgress,
+            RequestStatus::RevisionRequested,
+            RequestStatus::ReadyForReview,
+        ], true);
+    }
+
+    public function allowsClientRevision(): bool
+    {
+        if (in_array($this->status, [RequestStatus::ReadyForReview, RequestStatus::RevisionRequested], true)) {
+            return true;
+        }
+
+        if ($this->status !== RequestStatus::InProgress) {
+            return false;
+        }
+
+        $delivered = $this->drive_deliveries_count ?? null;
+        if ($delivered !== null) {
+            return (int) $delivered > 0;
+        }
+
+        return $this->driveDeliveries()->exists();
     }
 
     public function files(): HasMany
@@ -208,6 +251,32 @@ class ServiceRequest extends Model
     public function clickupTasks(): HasMany
     {
         return $this->hasMany(ClickUpTask::class, 'request_id');
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function plannedDepartments(): array
+    {
+        $operations = data_get($this->work_plan, 'operations');
+        if (is_array($operations) && $operations !== []) {
+            $departments = [];
+            foreach ($operations as $operation) {
+                if (! is_array($operation)) {
+                    continue;
+                }
+                $department = trim((string) ($operation['department'] ?? ''));
+                if ($department !== '' && ! in_array($department, $departments, true)) {
+                    $departments[] = $department;
+                }
+            }
+
+            if ($departments !== []) {
+                return $departments;
+            }
+        }
+
+        return $this->work_type?->requiredClickUpTaskTypes() ?? [];
     }
 
     public function quotations(): HasMany

@@ -20,6 +20,8 @@ use Throwable;
 
 class SendQuotation
 {
+    public bool $deliveredToClient = false;
+
     public function __construct(
         private TelegramNotifier $telegram,
         private RequestStatusTransitionService $transitions,
@@ -39,6 +41,8 @@ class SendQuotation
         bool $skipStatusTransition = false,
         ?bool $requiresFullPayment = null,
     ): Quotation {
+        $this->deliveredToClient = false;
+
         if (! $skipStatusTransition && ! in_array($request->status, [RequestStatus::Submitted, RequestStatus::QuotationRejected], true)) {
             throw ValidationException::withMessages([
                 'status' => 'Quotation can only be sent from submitted or quotation_rejected.',
@@ -92,6 +96,7 @@ class SendQuotation
                     );
                     if ($fileId) {
                         $quotation->forceFill(['telegram_file_id' => $fileId])->save();
+                        $this->deliveredToClient = true;
                     }
                 } elseif ($chatId) {
                     $this->telegram->sendInlineKeyboard(
@@ -99,6 +104,7 @@ class SendQuotation
                         $caption,
                         $keyboard['inline_keyboard'] ?? [],
                     );
+                    $this->deliveredToClient = true;
                 }
             } catch (Throwable $exception) {
                 if ((bool) config('services.telegram.strict')) {

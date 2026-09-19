@@ -208,6 +208,7 @@ Route::prefix('bot/staff')->middleware('shared.secret:services.telegram.staff_bo
     Route::post('in-progress', [StaffBotController::class, 'markInProgress']);
     Route::get('progressable-requests', [StaffBotController::class, 'progressableRequests']);
     Route::get('completable-requests', [StaffBotController::class, 'completableRequests']);
+    Route::post('confirm-payment', [StaffBotController::class, 'confirmPayment']);
 });
 
 Route::prefix('bot/admin')->middleware('shared.secret:services.telegram.admin_bot_secret')->group(function () {
@@ -217,4 +218,12 @@ Route::prefix('bot/admin')->middleware('shared.secret:services.telegram.admin_bo
     Route::get('tasks', [AdminBotController::class, 'tasks']);
     Route::post('guests', [AdminBotController::class, 'inviteGuest']);
     Route::post('assign', [AdminBotController::class, 'assign']);
+    Route::post('task', [AdminBotController::class, 'updateTask']);
+    Route::get('overview', [AdminBotController::class, 'overview']);
+    Route::get('clients', [AdminBotController::class, 'clients']);
+    Route::get('clients/{client}', [AdminBotController::class, 'client']);
+    Route::get('operations', [AdminBotController::class, 'operations']);
+    Route::post('operations/rebuild', [AdminBotController::class, 'rebuildPlan']);
+    Route::get('finance', [AdminBotController::class, 'finance']);
+    Route::post('expenses', [AdminBotController::class, 'storeExpense']);
 });

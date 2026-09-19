@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\ServiceRequest;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -10,6 +11,8 @@ use RuntimeException;
 
 class TelegramNotifier
 {
+    public ?int $lastMessageId = null;
+
     public function configured(string $bot = 'client'): bool
     {
         return filled($this->token($bot));
@@ -66,13 +69,18 @@ class TelegramNotifier
         if (! $response->successful() || $response->json('ok') !== true) {
             Log::warning('Telegram document send failed.', ['body' => $response->body()]);
 
-            throw new RuntimeException('Telegram did not accept the document.');
+            throw new RuntimeException($this->failureMessage($response, 'Telegram did not accept the document.'));
         }
+
+        $this->lastMessageId = $this->messageIdFrom($response->json());
 
         return data_get($response->json(), 'result.document.file_id');
     }
 
-    public function sendPhoto(string $chatId, string $absolutePath, ?string $caption = null, string $bot = 'client'): ?string
+    /**
+     * @param  array<string, mixed>|null  $replyMarkup
+     */
+    public function sendPhoto(string $chatId, string $absolutePath, ?string $caption = null, string $bot = 'client', ?array $replyMarkup = null): ?string
     {
         $token = $this->token($bot);
         if ($token === '') {
@@ -83,19 +91,26 @@ class TelegramNotifier
             throw new RuntimeException('Photo file not found.');
         }
 
+        $fields = array_filter([
+            'chat_id' => $chatId,
+            'caption' => $caption,
+        ], fn ($value) => $value !== null && $value !== '');
+        if ($replyMarkup !== null) {
+            $fields['reply_markup'] = json_encode($replyMarkup, JSON_UNESCAPED_UNICODE);
+        }
+
         $response = Http::timeout(30)
             ->connectTimeout(5)
             ->attach('photo', fopen($absolutePath, 'r'), basename($absolutePath))
-            ->post("https://api.telegram.org/bot{$token}/sendPhoto", array_filter([
-                'chat_id' => $chatId,
-                'caption' => $caption,
-            ]));
+            ->post("https://api.telegram.org/bot{$token}/sendPhoto", $fields);
 
         if (! $response->successful() || $response->json('ok') !== true) {
             Log::warning('Telegram photo send failed.', ['body' => $response->body()]);
 
-            throw new RuntimeException('Telegram did not accept the photo.');
+            throw new RuntimeException($this->failureMessage($response, 'Telegram did not accept the photo.'));
         }
+
+        $this->lastMessageId = $this->messageIdFrom($response->json());
 
         $photoSizes = data_get($response->json(), 'result.photo');
         if (! is_array($photoSizes) || $photoSizes === []) {
@@ -107,13 +122,50 @@ class TelegramNotifier
         return is_array($largest) ? ($largest['file_id'] ?? null) : null;
     }
 
-    public function sendFile(string $chatId, string $absolutePath, string $mimeType, ?string $caption = null, string $bot = 'client'): ?string
+    /**
+     * @param  array<string, mixed>|null  $replyMarkup
+     */
+    public function sendFile(string $chatId, string $absolutePath, string $mimeType, ?string $caption = null, string $bot = 'client', ?array $replyMarkup = null): ?string
     {
-        if (str_starts_with($mimeType, 'image/')) {
-            return $this->sendPhoto($chatId, $absolutePath, $caption, $bot);
+        $mime = strtolower($mimeType);
+        $isHeic = str_contains($mime, 'heic') || str_contains($mime, 'heif');
+        if (str_starts_with($mime, 'image/') && ! $isHeic) {
+            try {
+                return $this->sendPhoto($chatId, $absolutePath, $caption, $bot, $replyMarkup);
+            } catch (RuntimeException $exception) {
+                Log::warning('Telegram photo send fell back to document.', [
+                    'error' => $exception->getMessage(),
+                ]);
+            }
         }
 
-        return $this->sendDocument($chatId, $absolutePath, $caption, $bot);
+        return $this->sendDocument($chatId, $absolutePath, $caption, $bot, $replyMarkup);
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $replyMarkup
+     */
+    public function editReplyMarkup(string $chatId, int $messageId, ?array $replyMarkup = null, string $bot = 'client'): void
+    {
+        $token = $this->token($bot);
+        if ($token === '') {
+            return;
+        }
+
+        $response = Http::timeout(10)
+            ->connectTimeout(3)
+            ->acceptJson()
+            ->post("https://api.telegram.org/bot{$token}/editMessageReplyMarkup", [
+                'chat_id' => $chatId,
+                'message_id' => $messageId,
+                'reply_markup' => $replyMarkup ?? ['inline_keyboard' => []],
+            ]);
+
+        if (! $response->successful() || $response->json('ok') !== true) {
+            Log::info('Telegram keyboard clear skipped.', [
+                'body' => $response->body(),
+            ]);
+        }
     }
 
     /**
@@ -194,6 +246,23 @@ class TelegramNotifier
         if (! $response->successful() || $response->json('ok') !== true) {
             throw new RuntimeException('Telegram did not accept the inline message.');
         }
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $payload
+     */
+    private function messageIdFrom(mixed $payload): ?int
+    {
+        $id = data_get($payload, 'result.message_id');
+
+        return is_numeric($id) ? (int) $id : null;
+    }
+
+    private function failureMessage(Response $response, string $fallback): string
+    {
+        $description = $response->json('description');
+
+        return is_string($description) && $description !== '' ? $description : $fallback;
     }
 
     private function token(string $bot): string

@@ -35,7 +35,7 @@ STATUS_AR = {
     "payment_confirmed": "تم تأكيد الدفع",
     "submitted": "قيد المراجعة",
 }
-_local_api = (os.environ.get("HOC_LOCAL_API_URL") or "http://127.0.0.1:8001").rstrip("/")
+_local_api = (os.environ.get("HOC_LOCAL_API_URL") or "http://127.0.0.1:8000").rstrip("/")
 _origin = (os.environ.get("HOC_API_URL") or _local_api).rstrip("/")
 if "trycloudflare.com" in _origin:
     _origin = _local_api
@@ -720,6 +720,43 @@ async def on_select_complete(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return ConversationHandler.END
 
 
+async def on_confirm_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if query is None or query.data is None or query.from_user is None:
+        return
+    employee = await ensure_approved(update)
+    if employee is None:
+        await query.answer("حسابك غير مفعّل.", show_alert=True)
+        return
+    if not is_sales(employee):
+        await query.answer("تأكيد الدفع متاح للمبيعات فقط.", show_alert=True)
+        return
+
+    request_ref = query.data.split(":", 1)[1]
+    async with httpx.AsyncClient(timeout=API_TIMEOUT) as client:
+        response = await client.post(
+            f"{API_URL}/bot/staff/confirm-payment",
+            headers=api_headers(),
+            json={"telegram_user_id": str(query.from_user.id), "request_number": request_ref},
+        )
+        if response.status_code >= 400:
+            await api_staff_error(query, response)
+            return
+
+    data = response.json().get("data") or {}
+    amount = data.get("amount", "")
+    text = f"✅ تم تأكيد الدفع للطلب #{escape(request_ref)}"
+    if amount != "":
+        text += f" — {escape(str(amount))} USD"
+    await query.answer("تم تأكيد الدفع.")
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    if query.message:
+        await query.message.reply_text(text, reply_markup=staff_keyboard(employee))
+
+
 async def api_staff_error(query, response: httpx.Response) -> None:
     try:
         detail = response.json().get("message", response.text)
@@ -764,6 +801,7 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("join", start))
     application.add_handler(CommandHandler("reply", reply_menu))
+    application.add_handler(CallbackQueryHandler(on_confirm_payment, pattern=r"^payok:"))
     application.add_handler(CallbackQueryHandler(on_select_request, pattern=r"^rsel:"))
     application.add_handler(CallbackQueryHandler(on_send_template, pattern=r"^rtpl:"))
     application.add_handler(MessageHandler(filters.Regex(f"^{BTN_TASKS}$"), list_tasks))

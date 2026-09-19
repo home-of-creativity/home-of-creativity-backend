@@ -2,7 +2,6 @@
 
 namespace App\Http\Resources;
 
-use App\Enums\RequestStatus;
 use App\Models\ServiceRequest;
 use App\Services\ClickUpStatusMapper;
 use App\Services\OdooClient;
@@ -43,6 +42,7 @@ class ServiceRequestResource extends JsonResource
             'odoo_quotation_live' => is_array($this->odoo_quotation_live ?? null) ? $this->odoo_quotation_live : null,
             'odoo_invoice_live' => is_array($this->odoo_invoice_live ?? null) ? $this->odoo_invoice_live : null,
             'ai_analysis' => $this->ai_analysis,
+            'work_plan' => $this->work_plan,
             'paid_at' => $this->paid_at?->toIso8601String(),
             'payment_method' => $this->payment_method?->value,
             'gemini_status' => $this->gemini_status?->value,
@@ -69,7 +69,7 @@ class ServiceRequestResource extends JsonResource
             'google_drive_folder_url' => $this->googleDriveFolderUrl(),
             'receipt_reupload_required' => (bool) $this->receipt_reupload_required,
             'receipt_reupload_reason' => $this->receipt_reupload_reason,
-            'can_renew' => (bool) $this->allows_renewal && $this->status !== RequestStatus::Cancelled,
+            'can_renew' => $this->canRenew(),
             'pricing_package' => $this->whenLoaded('pricingPackage'),
             'subscriptions' => $this->whenLoaded('subscriptions'),
             'client' => ClientResource::make($this->whenLoaded('client')),

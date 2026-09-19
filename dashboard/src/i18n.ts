@@ -185,6 +185,8 @@ export const copy = {
   viewAttachment: { ar: "عرض المرفق", en: "View attachment" },
   geminiStatus: { ar: "حالة Gemini", en: "Gemini status" },
   workType: { ar: "نوع العمل", en: "Work type" },
+  workPlan: { ar: "خطة العمل", en: "Work plan" },
+  workPlanHours: { ar: "ساعة", en: "hours" },
   executionStatus: { ar: "حالة التنفيذ", en: "Execution status" },
   paymentBlocked: { ar: "لا يمكن تأكيد الدفع قبل موافقة العميل على العرض.", en: "Payment cannot be confirmed before the client approves the quotation." },
   saveFailed: { ar: "تعذر حفظ الحالة.", en: "Could not save the status." },

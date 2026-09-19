@@ -16,6 +16,7 @@ class CompleteRequest
         private RequestStatusTransitionService $transitions,
         private EnqueueIntegrationEvent $enqueueIntegrationEvent,
         private SyncClickUpFromStaff $syncClickUp,
+        private ClearDriveDeliveryKeyboards $clearDriveDeliveryKeyboards,
     ) {}
 
     public function handle(ServiceRequest $request, ?string $actor = 'admin', ?Employee $employee = null): ServiceRequest
@@ -37,6 +38,7 @@ class CompleteRequest
         });
 
         $this->syncClickUp->handle($updated, ClickUpSyncEvent::Completed, $employee);
+        $this->clearDriveDeliveryKeyboards->handle($updated->fresh('client') ?? $updated);
 
         return $updated;
     }

@@ -45,6 +45,7 @@ class FullWorkflowTest extends TestCase
             'services.clickup.lists.design' => '901821114103',
             'services.n8n.webhook_url' => 'https://n8n.test/webhook/hoc-events',
             'services.n8n.webhook_secret' => 'change-me',
+            'services.gemini.e2e_stub' => true,
         ]);
 
         Http::fake(array_merge($this->odooDocumentsHttpFake(), [
@@ -124,10 +125,12 @@ class FullWorkflowTest extends TestCase
 
         $persistGemini = new GeminiService;
         $gemini = Mockery::mock(GeminiService::class);
-        $gemini->shouldReceive('classify')->once()->andReturn([
+        $classified = [
             'work_type' => WorkType::Design,
             'briefs' => [['type' => 'design', 'brief' => 'Design the booth signage.']],
-        ]);
+        ];
+        $gemini->shouldReceive('classificationFromWorkPlan')->once()->andReturn($classified);
+        $gemini->shouldReceive('classify')->never();
         $gemini->shouldReceive('persistBriefs')->once()->andReturnUsing(
             fn (ServiceRequest $request, array $briefs): mixed => $persistGemini->persistBriefs($request, $briefs),
         );

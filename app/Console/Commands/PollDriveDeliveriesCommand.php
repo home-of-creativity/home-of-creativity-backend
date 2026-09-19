@@ -3,14 +3,19 @@
 namespace App\Console\Commands;
 
 use App\Actions\EnsureRequestDriveFolder;
+use App\Actions\NotifyEmployees;
+use App\Actions\OpenRequestForClientReview;
+use App\Enums\EmployeeProfession;
 use App\Enums\RequestStatus;
 use App\Models\DriveDelivery;
 use App\Models\ServiceRequest;
 use App\Services\GoogleDriveClient;
+use App\Services\RequestStatusTransitionService;
 use App\Services\TelegramNotifier;
 use App\Support\ResolveServiceRequest;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -18,13 +23,28 @@ use Throwable;
 
 class PollDriveDeliveriesCommand extends Command
 {
-    protected $signature = 'ops:poll-drive {--limit=25}';
+    private const IDLE_MINUTES = 2;
+
+    private const MAX_FILE_BYTES = 20 * 1024 * 1024;
+
+    protected $signature = 'ops:poll-drive {--limit=200}';
 
     protected $description = 'Send new Google Drive files from request folders to the client bot.';
 
-    public function handle(GoogleDriveClient $drive, TelegramNotifier $telegram, EnsureRequestDriveFolder $ensureRequestDriveFolder): int
-    {
+    public function handle(
+        GoogleDriveClient $drive,
+        TelegramNotifier $telegram,
+        EnsureRequestDriveFolder $ensureRequestDriveFolder,
+        OpenRequestForClientReview $openRequestForClientReview,
+        RequestStatusTransitionService $transitions,
+        NotifyEmployees $notifyEmployees,
+    ): int {
         if (! $drive->configured()) {
+            $error = $drive->configurationError() ?? 'Google Drive is not configured.';
+            $this->error($error);
+            Log::error('Drive poll skipped; Google Drive is not configured.', ['error' => $error]);
+            $this->alertStaffOnce($notifyEmployees, 'Google Drive غير جاهز. الملفات في المجلدات لن تصل للزبون حتى يُضبط الحساب الخدمي.');
+
             return self::SUCCESS;
         }
 
@@ -44,8 +64,15 @@ class PollDriveDeliveriesCommand extends Command
                 continue;
             }
 
+            $sentThisRun = 0;
             foreach ($files as $file) {
-                $this->deliverFile($drive, $telegram, $request, $file);
+                if ($this->deliverFile($drive, $telegram, $notifyEmployees, $transitions, $request, $file)) {
+                    $sentThisRun++;
+                }
+            }
+
+            if ($sentThisRun === 0) {
+                $this->openWhenIdle($openRequestForClientReview, $telegram, $request->fresh(['client']) ?? $request);
             }
         }
 
@@ -53,17 +80,19 @@ class PollDriveDeliveriesCommand extends Command
     }
 
     /**
-     * @param  array{id: string, name: string, mimeType: string}  $file
+     * @param  array{id: string, name: string, mimeType: string, modifiedTime?: ?string, md5Checksum?: ?string, size?: ?int}  $file
      */
     private function deliverFile(
         GoogleDriveClient $drive,
         TelegramNotifier $telegram,
+        NotifyEmployees $notifyEmployees,
+        RequestStatusTransitionService $transitions,
         ServiceRequest $request,
         array $file,
-    ): void {
+    ): bool {
         $fileId = (string) ($file['id'] ?? '');
         if ($fileId === '') {
-            return;
+            return false;
         }
 
         $delivery = DriveDelivery::query()->firstOrNew(
@@ -71,8 +100,22 @@ class PollDriveDeliveriesCommand extends Command
             ['request_id' => $request->id],
         );
 
-        if ($delivery->sent_at !== null) {
-            return;
+        if ($delivery->failed_at !== null) {
+            return false;
+        }
+
+        $remoteHash = filled($file['md5Checksum'] ?? null) ? (string) $file['md5Checksum'] : null;
+        $modifiedTime = filled($file['modifiedTime'] ?? null) ? (string) $file['modifiedTime'] : null;
+
+        if ($delivery->exists && ! $delivery->needsResend($modifiedTime, $remoteHash, null)) {
+            return false;
+        }
+
+        $size = $file['size'] ?? null;
+        if (is_int($size) && $size > self::MAX_FILE_BYTES) {
+            $this->markPermanentFailure($delivery, $request, $notifyEmployees, $file, 'الملف أكبر من حد تلغرام.');
+
+            return false;
         }
 
         $binary = $drive->downloadFile($fileId);
@@ -82,8 +125,30 @@ class PollDriveDeliveriesCommand extends Command
                 'file' => $fileId,
             ]);
 
-            return;
+            return false;
         }
+
+        if (strlen($binary) > self::MAX_FILE_BYTES) {
+            $this->markPermanentFailure($delivery, $request, $notifyEmployees, $file, 'الملف أكبر من حد تلغرام.');
+
+            return false;
+        }
+
+        $hash = md5($binary);
+        if ($delivery->exists && ! $delivery->needsResend($modifiedTime, $remoteHash, $hash)) {
+            return false;
+        }
+
+        $delivery->forceFill([
+            'request_id' => $request->id,
+            'name' => $file['name'],
+            'mime_type' => $file['mimeType'],
+            'content_hash' => $hash,
+            'drive_modified_at' => $modifiedTime ? Carbon::parse($modifiedTime) : now(),
+            'sent_at' => null,
+            'failed_at' => null,
+            'fail_reason' => null,
+        ])->save();
 
         $sent = false;
         $chatId = $request->client?->telegram_user_id;
@@ -93,30 +158,138 @@ class PollDriveDeliveriesCommand extends Command
             $tmp = 'drive-deliveries/'.$fileId.'-'.$safeName;
             Storage::disk('local')->put($tmp, $binary);
             try {
+                $fresh = $request->fresh() ?? $request;
+                $ref = ResolveServiceRequest::displayNumber($fresh);
+                $canComplete = $fresh->status === RequestStatus::ReadyForReview;
+                $telegram->lastMessageId = null;
                 $telegram->sendFile(
                     (string) $chatId,
                     Storage::disk('local')->path($tmp),
                     (string) $file['mimeType'],
-                    'ملف جديد للطلب #'.ResolveServiceRequest::displayNumber($request).': '.$file['name'],
+                    'ملف جديد للطلب #'.$ref.': '.$file['name'],
+                    'client',
+                    $delivery->clientRevisionKeyboard($ref, $canComplete),
                 );
                 $sent = true;
+                $delivery->forceFill([
+                    'telegram_message_id' => $telegram->lastMessageId,
+                ])->save();
+                $this->markDriveActivity($transitions, $fresh);
             } catch (Throwable $exception) {
+                $message = $exception->getMessage();
                 Log::warning('Drive delivery telegram send failed.', [
                     'request' => $request->number,
                     'file' => $fileId,
-                    'error' => $exception->getMessage(),
+                    'error' => $message,
                 ]);
+                if ($this->isPermanentTelegramFailure($message)) {
+                    $this->markPermanentFailure($delivery, $request, $notifyEmployees, $file, $message);
+                }
             } finally {
                 Storage::disk('local')->delete($tmp);
             }
         }
 
         $delivery->forceFill([
-            'request_id' => $request->id,
-            'name' => $file['name'],
-            'mime_type' => $file['mimeType'],
             'sent_at' => $sent ? now() : null,
         ])->save();
+
+        return $sent;
+    }
+
+    private function markDriveActivity(RequestStatusTransitionService $transitions, ServiceRequest $request): void
+    {
+        $request->forceFill(['drive_last_activity_at' => now()])->save();
+
+        if ($request->status === RequestStatus::PaymentConfirmed) {
+            $transitions->transition(
+                $request,
+                RequestStatus::InProgress,
+                'drive',
+                'Work files uploaded to Drive.',
+            );
+        }
+    }
+
+    private function openWhenIdle(
+        OpenRequestForClientReview $openRequestForClientReview,
+        TelegramNotifier $telegram,
+        ServiceRequest $request,
+    ): void {
+        if (! in_array($request->status, [
+            RequestStatus::PaymentConfirmed,
+            RequestStatus::InProgress,
+            RequestStatus::RevisionRequested,
+        ], true)) {
+            return;
+        }
+
+        if (! $request->driveDeliveries()->whereNotNull('sent_at')->exists()) {
+            return;
+        }
+
+        $last = $request->drive_last_activity_at
+            ?? $request->driveDeliveries()->whereNotNull('sent_at')->max('sent_at');
+        if ($last === null || Carbon::parse($last)->gt(now()->subMinutes(self::IDLE_MINUTES))) {
+            return;
+        }
+
+        $updated = $openRequestForClientReview->handle($request);
+        $chatId = $updated->client?->telegram_user_id;
+        if (! filled($chatId) || ! $telegram->configured('client')) {
+            return;
+        }
+
+        $ref = ResolveServiceRequest::displayNumber($updated);
+        $telegram->sendInlineKeyboard(
+            (string) $chatId,
+            'اكتملت ملفات الطلب #'.$ref.".\nيمكنك اعتماد التسليم أو طلب تعديل.",
+            DriveDelivery::clientReviewKeyboard($ref, true)['inline_keyboard'],
+        );
+    }
+
+    /**
+     * @param  array{id?: string, name?: string}  $file
+     */
+    private function markPermanentFailure(
+        DriveDelivery $delivery,
+        ServiceRequest $request,
+        NotifyEmployees $notifyEmployees,
+        array $file,
+        string $reason,
+    ): void {
+        $delivery->forceFill([
+            'request_id' => $request->id,
+            'name' => $file['name'] ?? $delivery->name,
+            'failed_at' => now(),
+            'fail_reason' => mb_substr($reason, 0, 255),
+        ])->save();
+
+        $notifyEmployees->handle(
+            $request,
+            EmployeeProfession::Sales,
+            "تعذر إرسال ملف Drive للزبون\n{$request->number}\n".($file['name'] ?? $delivery->drive_file_id)."\n{$reason}",
+        );
+    }
+
+    private function isPermanentTelegramFailure(string $message): bool
+    {
+        $haystack = strtolower($message);
+
+        return str_contains($haystack, 'too big')
+            || str_contains($haystack, 'file is too big')
+            || str_contains($haystack, 'image_process_failed')
+            || str_contains($haystack, 'photo_invalid_dimensions')
+            || str_contains($haystack, 'unsupported');
+    }
+
+    private function alertStaffOnce(NotifyEmployees $notifyEmployees, string $text): void
+    {
+        if (! Cache::add('ops:poll-drive:unconfigured', true, now()->addHour())) {
+            return;
+        }
+
+        $notifyEmployees->handlePlain(EmployeeProfession::Sales, $text);
     }
 
     private function backfillMissingFolders(EnsureRequestDriveFolder $ensureRequestDriveFolder, int $limit): void
@@ -132,7 +305,7 @@ class PollDriveDeliveriesCommand extends Command
                 $query->whereNull('google_drive_folder_id')
                     ->orWhere('google_drive_folder_id', '');
             })
-            ->orderBy('id')
+            ->orderByDesc('id')
             ->limit($limit)
             ->get();
 
@@ -153,26 +326,19 @@ class PollDriveDeliveriesCommand extends Command
      */
     private function nextFolderBatch(int $limit)
     {
-        $lastId = (int) Cache::get('ops:poll-drive:last_id', 0);
-        $query = ServiceRequest::query()
+        return ServiceRequest::query()
             ->with('client')
-            ->whereNotNull('google_drive_folder_id');
-
-        $requests = (clone $query)
-            ->where('id', '>', $lastId)
-            ->orderBy('id')
+            ->whereNotNull('google_drive_folder_id')
+            ->where('google_drive_folder_id', '!=', '')
+            ->whereIn('status', [
+                RequestStatus::PaymentConfirmed,
+                RequestStatus::InProgress,
+                RequestStatus::RevisionRequested,
+                RequestStatus::ReadyForReview,
+            ])
+            ->orderByDesc('updated_at')
+            ->orderByDesc('id')
             ->limit($limit)
             ->get();
-
-        if ($requests->isEmpty() && $lastId > 0) {
-            Cache::forget('ops:poll-drive:last_id');
-            $requests = $query->orderBy('id')->limit($limit)->get();
-        }
-
-        if ($requests->isNotEmpty()) {
-            Cache::put('ops:pFoll-drive:last_id', (int) $requests->last()->id, now()->addDay());
-        }
-
-        return $requests;
     }
 }

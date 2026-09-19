@@ -361,7 +361,10 @@ class EmployeeTest extends TestCase
     public function test_quotation_approve_and_reject_notify_sales(): void
     {
         Http::preventStrayRequests();
-        config(['services.telegram.staff_bot_token' => 'staff-token']);
+        config([
+            'services.telegram.staff_bot_token' => 'staff-token',
+            'services.gemini.e2e_stub' => true,
+        ]);
         Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true], 200)]);
 
         Employee::factory()->sales()->create(['telegram_user_id' => '6350001']);
@@ -412,7 +415,10 @@ class EmployeeTest extends TestCase
     public function test_receipt_upload_notifies_sales(): void
     {
         Http::preventStrayRequests();
-        config(['services.telegram.staff_bot_token' => 'staff-token']);
+        config([
+            'services.telegram.staff_bot_token' => 'staff-token',
+            'services.gemini.e2e_stub' => true,
+        ]);
         Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true], 200)]);
 
         Employee::factory()->sales()->create(['telegram_user_id' => '6350001']);
@@ -442,7 +448,10 @@ class EmployeeTest extends TestCase
     public function test_receipt_upload_sends_pdf_as_document_to_sales(): void
     {
         Http::preventStrayRequests();
-        config(['services.telegram.staff_bot_token' => 'staff-token']);
+        config([
+            'services.telegram.staff_bot_token' => 'staff-token',
+            'services.gemini.e2e_stub' => true,
+        ]);
         Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true], 200)]);
 
         Employee::factory()->sales()->create(['telegram_user_id' => '6350001']);

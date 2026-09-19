@@ -24,7 +24,7 @@ enum RequestStatus: string
             self::QuotationRejected => [self::QuotationSent, self::Cancelled],
             self::AwaitingPayment => [self::PaymentConfirmed, self::Cancelled],
             self::PaymentConfirmed => [self::InProgress, self::Cancelled],
-            self::InProgress => [self::ReadyForReview, self::Cancelled],
+            self::InProgress => [self::ReadyForReview, self::RevisionRequested, self::Cancelled],
             self::ReadyForReview => [self::Completed, self::RevisionRequested, self::Cancelled],
             self::RevisionRequested => [self::InProgress, self::ReadyForReview, self::Cancelled],
             self::Completed, self::Cancelled => [],
@@ -39,6 +39,15 @@ enum RequestStatus: string
     public function allowsClientEdit(): bool
     {
         return $this === self::Submitted;
+    }
+
+    public function allowsClientRevision(): bool
+    {
+        return in_array($this, [
+            self::InProgress,
+            self::ReadyForReview,
+            self::RevisionRequested,
+        ], true);
     }
 
     public function labelAr(): string

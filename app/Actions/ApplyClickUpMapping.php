@@ -76,7 +76,7 @@ class ApplyClickUpMapping
                 return $request->fresh(['clickupTasks', 'client']) ?? $request;
             }
 
-            if (in_array($taskType, [ClickUpTaskType::Design, ClickUpTaskType::Content, ClickUpTaskType::Programming, ClickUpTaskType::Revision], true)) {
+            if (in_array($taskType, [ClickUpTaskType::Design, ClickUpTaskType::Content, ClickUpTaskType::Programming, ClickUpTaskType::Photography, ClickUpTaskType::Revision], true)) {
                 $this->notifyTaskEmployees($request, $taskType, $payload);
             }
 
@@ -101,7 +101,8 @@ class ApplyClickUpMapping
     private function allRequiredTasksExist(ServiceRequest $request): bool
     {
         $request->load('clickupTasks');
-        if (! $request->work_type) {
+        $required = $request->plannedDepartments();
+        if ($required === []) {
             return false;
         }
 
@@ -110,8 +111,8 @@ class ApplyClickUpMapping
             ->map(fn (ClickUpTaskType $type) => $type->value)
             ->all();
 
-        foreach ($request->work_type->requiredClickUpTaskTypes() as $required) {
-            if (! in_array($required, $existing, true)) {
+        foreach ($required as $department) {
+            if (! in_array($department, $existing, true)) {
                 return false;
             }
         }
@@ -128,6 +129,7 @@ class ApplyClickUpMapping
             ClickUpTaskType::Design => EmployeeProfession::Design,
             ClickUpTaskType::Content => EmployeeProfession::Content,
             ClickUpTaskType::Programming => EmployeeProfession::Web,
+            ClickUpTaskType::Photography => EmployeeProfession::Media,
             ClickUpTaskType::Revision => EmployeeProfession::Design,
             default => null,
         };
@@ -140,6 +142,7 @@ class ApplyClickUpMapping
             ClickUpTaskType::Design => 'مهمة تنفيذ (تصميم)',
             ClickUpTaskType::Content => 'مهمة تنفيذ (محتوى)',
             ClickUpTaskType::Programming => 'مهمة تنفيذ (برمجة)',
+            ClickUpTaskType::Photography => 'مهمة تنفيذ (تصوير)',
             ClickUpTaskType::Revision => 'طلب تعديل',
             default => 'مهمة',
         };

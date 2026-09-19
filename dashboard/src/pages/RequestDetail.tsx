@@ -396,9 +396,26 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
         {(item.quotations?.length ||
           item.quotation_decisions?.length ||
           item.clickup_tasks?.length ||
+          item.work_plan?.operations?.length ||
           attachments.length ||
           (showReceipts && receipts.length)) ? (
           <div className="detail-briefs">
+            {item.work_plan?.operations?.length ? (
+              <div className="briefs">
+                <h3>{t(copy.workPlan)}</h3>
+                <ul>
+                  {item.work_plan.operations.map((operation, index) => (
+                    <li key={`${operation.department}-${index}`}>
+                      <strong>{operation.department}</strong>
+                      {operation.employee_name ? ` · ${operation.employee_name}` : ""}
+                      {operation.priority_label ? ` · ${operation.priority_label}` : ""}
+                      {operation.hours ? ` · ${operation.hours} ${t(copy.workPlanHours)}` : ""}
+                      {operation.brief ? ` — ${operation.brief}` : ""}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             {item.quotations?.length ? (
               <div className="briefs">
                 <h3>{t(copy.sendQuotation)}</h3>

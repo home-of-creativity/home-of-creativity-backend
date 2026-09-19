@@ -2,7 +2,6 @@
 
 namespace App\Actions;
 
-use App\Enums\EmployeeProfession;
 use App\Enums\QuotationDecisionType;
 use App\Enums\RequestStatus;
 use App\Models\Quotation;
@@ -20,8 +19,8 @@ class ApproveQuotation
 
     public function __construct(
         private RequestStatusTransitionService $transitions,
-        private NotifyEmployees $notifyEmployees,
         private ApplyQuotationAcceptance $applyQuotationAcceptance,
+        private NotifyPaymentStage $notifyPaymentStage,
     ) {}
 
     public function handle(ServiceRequest $request, ?Quotation $quotation = null): ServiceRequest
@@ -47,22 +46,21 @@ class ApproveQuotation
 
             $updated = $this->transitions->transition($request, RequestStatus::AwaitingPayment, 'client', 'Quotation approved.');
 
-            $fresh = $updated->fresh(['client', 'pricingPackage']) ?? $updated;
-            $displayNumber = ResolveServiceRequest::displayNumber($fresh);
-            $this->notifyEmployees->handle(
-                $fresh,
-                EmployeeProfession::Sales,
-                $this->salesDecisionMessage(
-                    $fresh,
-                    "✅ وافق الزبون على عرض السعر\n#{$displayNumber} — {$fresh->title}\n{$fresh->client?->name}",
-                ),
-            );
-
-            return $fresh;
+            return $updated->fresh(['client', 'pricingPackage']) ?? $updated;
         });
 
         $updated = $this->applyQuotationAcceptance->handle($updated->fresh(['client', 'pricingPackage']) ?? $updated);
         $this->clientPaymentNotice = $this->applyQuotationAcceptance->clientNotice;
+        $fresh = $updated->fresh(['client', 'pricingPackage']) ?? $updated;
+        $displayNumber = ResolveServiceRequest::displayNumber($fresh);
+        $this->notifyPaymentStage->handle(
+            $fresh,
+            null,
+            $this->salesDecisionMessage(
+                $fresh,
+                "✅ وافق الزبون على عرض السعر\n#{$displayNumber} — {$fresh->title}\n{$fresh->client?->name}",
+            ),
+        );
 
         return $updated->fresh(['client', 'invoices', 'pricingPackage']) ?? $updated;
     }

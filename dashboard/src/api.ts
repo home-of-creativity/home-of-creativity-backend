@@ -274,6 +274,18 @@ export type ServiceRequest = {
   receipt_reupload_reason?: string | null;
   can_renew?: boolean;
   paid_at?: string | null;
+  work_plan?: {
+    source?: string;
+    operations?: Array<{
+      department: string;
+      brief: string;
+      hours?: number;
+      priority?: number;
+      priority_label?: string;
+      employee_name?: string | null;
+      due_at?: string | null;
+    }>;
+  } | null;
   briefs?: Brief[];
   files?: RequestFile[];
   quotations?: Quotation[];

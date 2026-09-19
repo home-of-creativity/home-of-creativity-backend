@@ -8,6 +8,7 @@ use Database\Factories\EmployeeFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Employee extends Model
 {
@@ -64,6 +65,11 @@ class Employee extends Model
     public function isSales(): bool
     {
         return $this->profession === EmployeeProfession::Sales;
+    }
+
+    public function clickupTasks(): HasMany
+    {
+        return $this->hasMany(ClickUpTask::class);
     }
 
     public function isAssignedTo(ServiceRequest $request): bool

@@ -2,7 +2,6 @@
 
 namespace App\Actions;
 
-use App\Enums\RequestStatus;
 use App\Models\PaymentReminder;
 use App\Models\ServiceRequest;
 use App\Models\Subscription;
@@ -19,12 +18,8 @@ class RenewSubscription
 
     public function handle(ServiceRequest $request): ServiceRequest
     {
-        if (! $request->allows_renewal) {
-            throw ValidationException::withMessages(['renewal' => 'This request does not allow renewal.']);
-        }
-
-        if ($request->status === RequestStatus::Cancelled) {
-            throw ValidationException::withMessages(['renewal' => 'Cancelled requests cannot be renewed.']);
+        if (! $request->canRenew()) {
+            throw ValidationException::withMessages(['renewal' => 'Renewal is only available after the request is completed.']);
         }
 
         $period = $request->billing_period ?: 'monthly';

@@ -30,12 +30,12 @@ def run_application(
             webhook_url=webhook,
             secret_token=secret_token or None,
             allowed_updates=Update.ALL_TYPES,
-            drop_pending_updates=True,
+            drop_pending_updates=False,
             bootstrap_retries=5,
         )
         return
 
-    application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+    application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=False)
 
 
 def _telegram_proxy() -> str | None:

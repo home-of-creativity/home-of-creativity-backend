@@ -155,6 +155,8 @@ class BotFlowchartTest extends TestCase
             'billing_period' => 'monthly',
         ])->assertCreated()
             ->assertJsonPath('data.status', 'quotation_sent')
+            ->assertJsonPath('data.status_label', 'عرض سعر مرسل')
+            ->assertJsonPath('data.quotation_delivered', true)
             ->json('data');
 
         $manual = $this->clientBot()->postJson('/api/bot/telegram/requests', [
@@ -189,6 +191,8 @@ class BotFlowchartTest extends TestCase
             ->assertOk()
             ->json('data');
         $this->assertGreaterThanOrEqual(2, count($list));
+        $this->assertNotSame('', (string) ($list[0]['status_label'] ?? ''));
+        $this->assertNotSame($list[0]['status'], $list[0]['status_label']);
     }
 
     public function test_flowchart_from_catalog_quote_through_staff_and_client_complete(): void
@@ -210,6 +214,8 @@ class BotFlowchartTest extends TestCase
             'billing_period' => 'monthly',
         ])->assertCreated()
             ->assertJsonPath('data.status', 'quotation_sent')
+            ->assertJsonPath('data.status_label', 'عرض سعر مرسل')
+            ->assertJsonPath('data.quotation_delivered', true)
             ->json('data');
 
         $number = (string) $created['number'];
@@ -256,10 +262,12 @@ class BotFlowchartTest extends TestCase
 
         $persistGemini = new GeminiService;
         $gemini = Mockery::mock(GeminiService::class);
-        $gemini->shouldReceive('classify')->once()->andReturn([
+        $classified = [
             'work_type' => WorkType::Design,
             'briefs' => [['type' => 'design', 'brief' => 'Design the identity.']],
-        ]);
+        ];
+        $gemini->shouldReceive('classificationFromWorkPlan')->once()->andReturn($classified);
+        $gemini->shouldReceive('classify')->never();
         $gemini->shouldReceive('persistBriefs')->once()->andReturnUsing(
             fn (ServiceRequest $request, array $briefs): mixed => $persistGemini->persistBriefs($request, $briefs),
         );

@@ -3,18 +3,21 @@
 namespace App\Http\Controllers;
 
 use App\Actions\CompleteRequest;
+use App\Actions\ConfirmRequestPayment;
 use App\Actions\DispatchStatusWorkflow;
 use App\Actions\RecordDelivery;
 use App\Actions\RequestStaffJoin;
 use App\Actions\SendQuotation;
 use App\Actions\SyncClickUpFromStaff;
 use App\Enums\ClickUpSyncEvent;
+use App\Enums\PaymentMethod;
 use App\Enums\RequestStatus;
 use App\Http\Requests\StaffJoinRequest;
 use App\Http\Requests\StaffReplyRequest;
 use App\Http\Requests\StaffSendQuotationRequest;
 use App\Http\Resources\EmployeeResource;
 use App\Http\Resources\ServiceRequestResource;
+use App\Models\DriveDelivery;
 use App\Models\Employee;
 use App\Models\ServiceRequest;
 use App\Services\RequestStatusTransitionService;
@@ -285,11 +288,26 @@ class StaffBotController extends Controller
 
         $chatId = $updated->client?->telegram_user_id;
         if ($chatId && $telegram->configured('client')) {
-            $telegram->send(
-                (string) $chatId,
-                'تم تسليم العمل للطلب #'.ResolveServiceRequest::displayNumber($updated).".\n".($validated['notes'] ?? ''),
-                'client',
-            );
+            $ref = ResolveServiceRequest::displayNumber($updated);
+            $caption = 'تم تسليم العمل للطلب #'.$ref.".\n".($validated['notes'] ?? '');
+            $keyboard = DriveDelivery::clientReviewKeyboard($ref, $updated->status === RequestStatus::ReadyForReview);
+            if ($filePath) {
+                $telegram->sendFile(
+                    (string) $chatId,
+                    Storage::disk('local')->path($filePath),
+                    'application/octet-stream',
+                    $caption,
+                    'client',
+                    $keyboard,
+                );
+            } else {
+                $telegram->sendInlineKeyboard(
+                    (string) $chatId,
+                    $caption,
+                    $keyboard['inline_keyboard'],
+                    'client',
+                );
+            }
         }
 
         return response()->json([
@@ -382,6 +400,42 @@ class StaffBotController extends Controller
         return response()->json(['data' => $items, 'message' => 'ok']);
     }
 
+    public function confirmPayment(
+        Request $request,
+        ConfirmRequestPayment $confirmRequestPayment,
+        ResolveServiceRequest $resolveServiceRequest,
+    ): JsonResponse {
+        $employee = $this->approvedEmployee($request);
+        abort_unless($employee->isSales(), 403, 'Only sales staff can confirm payment.');
+
+        $validated = $request->validate([
+            'telegram_user_id' => ['required', 'string'],
+            'request_number' => ['required', 'string'],
+            'amount' => ['nullable', 'numeric', 'min:0.01'],
+        ]);
+
+        $serviceRequest = $resolveServiceRequest->byReference($validated['request_number']);
+        $amount = isset($validated['amount'])
+            ? (float) $validated['amount']
+            : $serviceRequest->expectedDue();
+
+        $updated = $confirmRequestPayment->handle(
+            $serviceRequest,
+            PaymentMethod::Receipt,
+            $amount,
+        );
+
+        return response()->json([
+            'data' => [
+                'confirmed' => true,
+                'request_number' => $updated->number,
+                'status' => $updated->status->value,
+                'amount' => $amount,
+            ],
+            'message' => 'Payment confirmed.',
+        ]);
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -436,9 +490,12 @@ class StaffBotController extends Controller
                 ['text' => '📎 رفع وصل الدفع', 'callback_data' => "receipt_hint:{$ref}"],
                 ['text' => '❌ إلغاء الطلب', 'callback_data' => "reqcancel:{$ref}"],
             ],
+            RequestStatus::InProgress, RequestStatus::RevisionRequested => $serviceRequest->allowsClientRevision()
+                ? [['text' => '🔁 تعديل الطلب بالكامل', 'callback_data' => "revision:{$ref}"]]
+                : null,
             RequestStatus::ReadyForReview => [
                 ['text' => '✅ اعتماد التسليم', 'callback_data' => "complete:{$ref}"],
-                ['text' => '🔁 طلب تعديل', 'callback_data' => "revision:{$ref}"],
+                ['text' => '🔁 تعديل الطلب بالكامل', 'callback_data' => "revision:{$ref}"],
             ],
             default => null,
         };
