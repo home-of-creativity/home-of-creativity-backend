@@ -210,6 +210,43 @@ class ServiceRequestTest extends TestCase
             ->assertJsonPath('data.gemini_status', 'pending');
     }
 
+    public function test_confirm_payment_stays_paid_when_gemini_is_blocked(): void
+    {
+        config([
+            'services.gemini.e2e_stub' => false,
+            'services.gemini.api_key' => 'blocked-key',
+            'services.google_translate.enabled' => false,
+        ]);
+        Http::fake([
+            'https://generativelanguage.googleapis.com/*' => Http::response([
+                'error' => [
+                    'code' => 403,
+                    'message' => 'Requests to this API generativelanguage.googleapis.com method google.ai.generativelanguage.v1beta.GenerativeService.GenerateContent are blocked.',
+                    'status' => 'PERMISSION_DENIED',
+                ],
+            ], 403),
+        ]);
+
+        $admin = User::factory()->create(['is_admin' => true]);
+        Sanctum::actingAs($admin);
+
+        $request = ServiceRequest::factory()->create([
+            'status' => RequestStatus::AwaitingPayment,
+            'quotation_amount' => 100,
+            'amount_total' => 100,
+        ]);
+
+        $this->postJson("/api/admin/requests/{$request->id}/confirm-payment", [
+            'payment_method' => 'cash',
+            'amount' => 100,
+        ])->assertOk()
+            ->assertJsonPath('data.status', 'payment_confirmed');
+
+        $request->refresh();
+        $this->assertSame(RequestStatus::PaymentConfirmed, $request->status);
+        $this->assertSame('failed', $request->gemini_status?->value);
+    }
+
     public function test_gemini_success_dispatches_payment_confirmed_outbox(): void
     {
         Http::fake($this->odooDocumentsHttpFake());

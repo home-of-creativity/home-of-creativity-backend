@@ -144,7 +144,15 @@ class ServiceRequestController extends Controller
             'gemini_error' => null,
         ])->save();
 
-        ClassifyWithGeminiJob::dispatch($serviceRequest->id);
+        try {
+            ClassifyWithGeminiJob::dispatch($serviceRequest->id);
+        } catch (\Throwable $exception) {
+            $serviceRequest->forceFill([
+                'gemini_status' => GeminiStatus::Failed,
+                'gemini_error' => $exception->getMessage(),
+                'gemini_processed_at' => now(),
+            ])->save();
+        }
 
         return ServiceRequestResource::make($serviceRequest->fresh(['client', 'briefs']))
             ->additional(['message' => 'Gemini retry queued.']);

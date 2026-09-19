@@ -140,7 +140,19 @@ class ConfirmRequestPayment
                     'gemini_status' => GeminiStatus::Pending,
                     'gemini_error' => null,
                 ])->save();
-                ClassifyWithGeminiJob::dispatch($updated->id)->afterCommit();
+                try {
+                    ClassifyWithGeminiJob::dispatch($updated->id)->afterCommit();
+                } catch (\Throwable $exception) {
+                    Log::warning('Gemini dispatch after payment failed.', [
+                        'request' => $updated->number,
+                        'error' => $exception->getMessage(),
+                    ]);
+                    $updated->forceFill([
+                        'gemini_status' => GeminiStatus::Failed,
+                        'gemini_error' => $exception->getMessage(),
+                        'gemini_processed_at' => now(),
+                    ])->save();
+                }
             }
         }
 

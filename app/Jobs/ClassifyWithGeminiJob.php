@@ -59,7 +59,7 @@ class ClassifyWithGeminiJob implements ShouldQueue
                 'error' => $exception->getMessage(),
             ]);
 
-            throw $exception;
+            return;
         }
 
         DB::transaction(function () use ($request, $result, $gemini, $transitions, $enqueueIntegrationEvent, $provisionClickUpTasks): void {
