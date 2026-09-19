@@ -18,6 +18,12 @@ class UpdateLandingReelRequest extends FormRequest
                 'is_published' => in_array($this->input('is_published'), [true, 1, '1', 'true', 'on'], true),
             ]);
         }
+
+        if ($this->has('remove_poster')) {
+            $this->merge([
+                'remove_poster' => in_array($this->input('remove_poster'), [true, 1, '1', 'true', 'on'], true),
+            ]);
+        }
     }
 
     /**
@@ -32,6 +38,7 @@ class UpdateLandingReelRequest extends FormRequest
             'is_published' => ['sometimes', 'boolean'],
             'video' => ['nullable', 'file', 'mimes:mp4,m4v,mov,webm,qt', 'max:524288'],
             'poster' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+            'remove_poster' => ['sometimes', 'boolean'],
         ];
     }
 }

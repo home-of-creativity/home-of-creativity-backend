@@ -318,6 +318,8 @@ export const copy = {
   tiktok: { ar: "تيك توك", en: "TikTok" },
   youtube: { ar: "يوتيوب", en: "YouTube" },
   coverImage: { ar: "صورة الغلاف", en: "Cover image" },
+  removeCoverImage: { ar: "حذف الصورة", en: "Remove image" },
+  coverImageRemoved: { ar: "تم حذف صورة الغلاف.", en: "Cover image removed." },
   contactTitle: { ar: "التواصل", en: "Contact" },
   contactLede: {
     ar: "إدارة أرقام الجوال وواتساب والعناوين وصفحات السوشال ميديا وQR شام كاش.",

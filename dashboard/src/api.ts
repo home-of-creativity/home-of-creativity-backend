@@ -857,6 +857,9 @@ export const api = {
   deleteLandingReel(id: number) {
     return request<Envelope<null>>(`/admin/reels/${id}`, { method: "DELETE" });
   },
+  deleteLandingReelPoster(id: number) {
+    return request<Envelope<LandingReel>>(`/admin/reels/${id}/poster`, { method: "DELETE" });
+  },
   deleteAllLandingReels() {
     return request<Envelope<{ deleted: number }>>("/admin/reels/bulk", { method: "DELETE" });
   },

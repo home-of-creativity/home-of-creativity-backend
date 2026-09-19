@@ -95,4 +95,61 @@ class LandingReelTest extends TestCase
         ])->assertUnprocessable()
             ->assertJsonValidationErrors(['video']);
     }
+
+    public function test_admin_can_delete_reel_poster(): void
+    {
+        Storage::fake('public');
+
+        $admin = User::factory()->create(['is_admin' => true]);
+        Sanctum::actingAs($admin);
+
+        $this->post('/api/admin/reels', [
+            'title_en' => 'Poster reel',
+            'title_ar' => 'ريل بغلاف',
+            'is_published' => true,
+            'video' => UploadedFile::fake()->create('poster.mp4', 400, 'video/mp4'),
+            'poster' => UploadedFile::fake()->image('cover.jpg'),
+        ])->assertCreated();
+
+        $reel = LandingReel::query()->first();
+        $this->assertNotNull($reel);
+        $this->assertNotNull($reel->poster_path);
+        Storage::disk('public')->assertExists($reel->poster_path);
+
+        $this->deleteJson("/api/admin/reels/{$reel->id}/poster")
+            ->assertOk()
+            ->assertJsonPath('data.poster_path', null)
+            ->assertJsonPath('data.poster_url', null);
+
+        $this->assertNull($reel->fresh()?->poster_path);
+        Storage::disk('public')->assertMissing((string) $reel->poster_path);
+    }
+
+    public function test_admin_can_clear_poster_on_update(): void
+    {
+        Storage::fake('public');
+
+        $admin = User::factory()->create(['is_admin' => true]);
+        Sanctum::actingAs($admin);
+
+        $this->post('/api/admin/reels', [
+            'title_en' => 'Update poster',
+            'title_ar' => 'تحديث الغلاف',
+            'video' => UploadedFile::fake()->create('keep.mp4', 400, 'video/mp4'),
+            'poster' => UploadedFile::fake()->image('keep.jpg'),
+        ])->assertCreated();
+
+        $reel = LandingReel::query()->first();
+        $this->assertNotNull($reel);
+
+        $this->post("/api/admin/reels/{$reel->id}", [
+            '_method' => 'PUT',
+            'title_en' => 'Update poster',
+            'title_ar' => 'تحديث الغلاف',
+            'remove_poster' => '1',
+        ])->assertOk()
+            ->assertJsonPath('data.poster_path', null);
+
+        $this->assertNull($reel->fresh()?->poster_path);
+    }
 }

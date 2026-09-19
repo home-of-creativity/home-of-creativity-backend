@@ -119,6 +119,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
     Route::post('reels', [AdminLandingReelController::class, 'store']);
     Route::delete('reels/bulk', [AdminLandingReelController::class, 'destroyAll']);
     Route::match(['put', 'post'], 'reels/{landing_reel}', [AdminLandingReelController::class, 'update']);
+    Route::delete('reels/{landing_reel}/poster', [AdminLandingReelController::class, 'destroyPoster']);
     Route::delete('reels/{landing_reel}', [AdminLandingReelController::class, 'destroy']);
     Route::get('pricing/categories', [AdminPricingCategoryController::class, 'index']);
     Route::post('pricing/categories', [AdminPricingCategoryController::class, 'store']);

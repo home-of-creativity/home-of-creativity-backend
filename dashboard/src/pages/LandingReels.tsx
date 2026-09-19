@@ -35,6 +35,20 @@ export function LandingReels({ locale, t }: { locale: Locale; t: (c: { ar: strin
     load();
   }, [page]);
 
+  async function removePoster(id: number) {
+    setError("");
+    try {
+      await api.deleteLandingReelPoster(id);
+      setNotice(t(copy.coverImageRemoved));
+      toast.success(t(copy.coverImageRemoved));
+      load();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t(copy.savePortfolioFailed);
+      setError(message);
+      toast.error(message);
+    }
+  }
+
   async function remove(id: number) {
     setError("");
     try {
@@ -118,6 +132,14 @@ export function LandingReels({ locale, t }: { locale: Locale; t: (c: { ar: strin
                     <Link className="btn btn-ghost" to={`/reels/${item.id}/edit`}>
                       {t(copy.edit)}
                     </Link>
+                    {item.poster_url ? (
+                      <ConfirmAction
+                        label={t(copy.removeCoverImage)}
+                        yesLabel={t(copy.delete)}
+                        noLabel={t(copy.cancel)}
+                        onConfirm={() => void removePoster(item.id)}
+                      />
+                    ) : null}
                     <ConfirmAction
                       label={t(copy.delete)}
                       yesLabel={t(copy.delete)}

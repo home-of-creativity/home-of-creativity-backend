@@ -43,7 +43,7 @@ class LandingReelController extends Controller
 
     public function update(UpdateLandingReelRequest $request, LandingReel $landingReel): LandingReelResource
     {
-        $data = $request->safe()->except(['video', 'poster']);
+        $data = $request->safe()->except(['video', 'poster', 'remove_poster']);
 
         if ($request->hasFile('video')) {
             $newPath = $request->file('video')->store('reels', 'public');
@@ -56,12 +56,24 @@ class LandingReelController extends Controller
                 Storage::disk('public')->delete($landingReel->poster_path);
             }
             $data['poster_path'] = $request->file('poster')->store('reels/posters', 'public');
+        } elseif ($request->boolean('remove_poster')) {
+            $this->deletePosterFile($landingReel);
+            $data['poster_path'] = null;
         }
 
         $landingReel->fill($data)->save();
 
         return LandingReelResource::make($landingReel->fresh())
             ->additional(['message' => 'Updated.']);
+    }
+
+    public function destroyPoster(LandingReel $landingReel): LandingReelResource
+    {
+        $this->deletePosterFile($landingReel);
+        $landingReel->forceFill(['poster_path' => null])->save();
+
+        return LandingReelResource::make($landingReel->fresh())
+            ->additional(['message' => 'Poster removed.']);
     }
 
     public function destroy(LandingReel $landingReel)
@@ -93,7 +105,11 @@ class LandingReelController extends Controller
     private function deleteFiles(LandingReel $reel): void
     {
         Storage::disk('public')->delete($reel->video_path);
+        $this->deletePosterFile($reel);
+    }
 
+    private function deletePosterFile(LandingReel $reel): void
+    {
         if ($reel->poster_path) {
             Storage::disk('public')->delete($reel->poster_path);
         }

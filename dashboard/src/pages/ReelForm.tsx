@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { z } from "zod";
+import { ConfirmAction } from "../components/ConfirmAction";
 import { FileDropzone } from "../components/FileDropzone";
 import { FormPage } from "../components/FormPage";
 import { FormSection } from "../components/FormSection";
@@ -26,6 +27,7 @@ export function ReelForm({ locale, t }: { locale: Locale; t: (c: { ar: string; e
   const [posterPreview, setPosterPreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(Boolean(editingId));
   const [saving, setSaving] = useState(false);
+  const [removingPoster, setRemovingPoster] = useState(false);
   const [error, setError] = useState("");
 
   const schema = useMemo(
@@ -75,6 +77,30 @@ export function ReelForm({ locale, t }: { locale: Locale; t: (c: { ar: string; e
       .finally(() => setLoading(false));
   }, [editingId, reset, t]);
 
+  async function clearPoster() {
+    setError("");
+    if (posterPreview) {
+      URL.revokeObjectURL(posterPreview);
+      setPoster(null);
+      setPosterPreview(null);
+      return;
+    }
+    if (editingId && currentPosterUrl) {
+      setRemovingPoster(true);
+      try {
+        await api.deleteLandingReelPoster(editingId);
+        setCurrentPosterUrl(null);
+        toast.success(t(copy.coverImageRemoved));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : t(copy.savePortfolioFailed);
+        setError(message);
+        toast.error(message);
+      } finally {
+        setRemovingPoster(false);
+      }
+    }
+  }
+
   async function onValid(values: { title_en: string; title_ar: string; sort_order: string; is_published: boolean }) {
     setError("");
     if (editingId === null && !video) {
@@ -92,6 +118,7 @@ export function ReelForm({ locale, t }: { locale: Locale; t: (c: { ar: string; e
     payload.set("is_published", values.is_published ? "1" : "0");
     if (video) payload.set("video", video);
     if (poster) payload.set("poster", poster);
+    else if (editingId && !currentPosterUrl) payload.set("remove_poster", "1");
 
     document.querySelectorAll("video").forEach((el) => el.pause());
 
@@ -189,6 +216,13 @@ export function ReelForm({ locale, t }: { locale: Locale; t: (c: { ar: string; e
             <div className="form-media-preview">
               <img src={posterPreview ?? currentPosterUrl ?? ""} alt="" className="form-media-preview-img project-thumb" />
               <p className="muted">{posterPreview ? t(copy.replaceImage) : t(copy.currentImage)}</p>
+              <ConfirmAction
+                label={t(copy.removeCoverImage)}
+                yesLabel={t(copy.delete)}
+                noLabel={t(copy.cancel)}
+                disabled={saving || removingPoster}
+                onConfirm={() => void clearPoster()}
+              />
             </div>
           ) : null}
         </FormSection>
