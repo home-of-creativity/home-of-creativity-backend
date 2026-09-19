@@ -18,6 +18,7 @@ Schedule::command('integration:process-outbox')->everyMinute()->withoutOverlappi
 // reaches the dashboard within about a minute even as the client list grows.
 Schedule::command('odoo:reconcile', ['--limit' => 500])->everyMinute()->withoutOverlapping();
 Schedule::command('ops:process-reminders')->everyMinute()->timezone('Asia/Damascus')->withoutOverlapping();
+Schedule::command('ops:process-bot-sla')->everyMinute()->timezone('Asia/Damascus')->withoutOverlapping();
 Schedule::command('ops:poll-drive', ['--limit' => 200])->everyMinute()->timezone('Asia/Damascus')->withoutOverlapping();
 Schedule::command('ops:clickup-due-alerts')->hourly()->timezone('Asia/Damascus')->withoutOverlapping();
 Schedule::command('seo:submit-sitemap')->dailyAt('06:15')->timezone('Asia/Damascus')->withoutOverlapping();

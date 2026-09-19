@@ -1,0 +1,22 @@
+{
+  "id": "CxOPvNpUiT2nrHUj",
+  "name": "HOC Drive to Client Bot",
+  "active": true,
+  "url": "https://prodesign.app.n8n.cloud/workflow/CxOPvNpUiT2nrHUj",
+  "capturedAt": "2026-09-19T16:00:00Z",
+  "settings": {
+    "availableInMCP": true
+  },
+  "activeVersionId": "c7eeb090-1fbe-4a84-b8c0-2dcee1225ae6",
+  "triggers": [
+    "Schedule: every 2 minutes (published) — POST /api/integrations/drive/poll",
+    "Google Drive fileCreated: present but disabled until a googleApi credential and Hoc Client folder ID are set in n8n"
+  ],
+  "action": "POST {HOC_API_URL}/api/integrations/drive/poll with X-N8N-Secret",
+  "laravel": "ops:poll-drive sends the file to the client Telegram bot (revision buttons, delivery rows). n8n does not send Telegram itself.",
+  "env": ["HOC_API_URL", "HOC_N8N_SECRET"],
+  "placeholders": [
+    "Google service account credential (same SA that reads Hoc Client)",
+    "Hoc Client folder ID (GOOGLE_DRIVE_PARENT_FOLDER_ID)"
+  ]
+}

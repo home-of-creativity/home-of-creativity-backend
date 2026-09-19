@@ -29,6 +29,23 @@ New request: CMS catalog (categories → subcategories or packages → billing p
 طلباتي sends one card per request with Arabic `status_label`, package, paid/remaining, and buttons (10 at a time, then **عرض الأقدم**). Drive files are the client delivery: each file has **تعديل هذه الصورة** and **تعديل الطلب بالكامل**; **اعتماد التسليم** appears after the folder is idle ~2 minutes (or staff deliver). Poll lists the request folder recursively, resolves Google shortcuts (Photos “add”), and also picks loose files sitting in the company folder (not the Hoc Client root). Replacing the same Drive file (new `modifiedTime`/hash) is resent. Revision taps keep intent even if the client is mid “طلب جديد”; the reason is not stolen as a new title, and API errors (e.g. no files yet) are shown in Arabic. Completed/cancelled folders are not polled. Support notifies sales. Photos become receipts only after **رفع وصل الدفع** or quotation approve, and the hint clears on nav. Catalog period taps are debounced (same package/period within 3 minutes returns the existing request). `ops:poll-drive` every minute over live folders (limit 200), or `ops:poll-drive --request={id}` / dashboard **تحديث الإرسال** for one package folder; default API `:8000`; polling keeps pending updates. The staff request page shows whether each Drive file reached the client bot. The **client bot must be running** for revision buttons; Drive send itself is Laravel → Telegram.  
 Quotation: approve or reject first; after reject the client picks غالي / تأخير / سبب مكتوب. Sales staff are notified with a private Telegram link (`tg://user?id=`) to the client who decided. Approving a quotation with a payable amount sends the **shared Sham Cash QR** plus 50%/full payment instructions with amounts in **USD**. If the quotation has no amount, the client gets an acknowledgment only (no QR and no payment instructions). That QR is not the client's proof-of-payment photo. The client then uploads their transfer proof. Sales receive the receipt (or the approval notice) with a **ClickUp work plan** (department, assignee, priority, hours) and an inline **تأكيد الدفع** button (`payok:{number}` → `POST /api/bot/staff/confirm-payment`). Staff can still confirm the received amount from the dashboard. The invoice PDF is sent after confirm. Package work plans are cached so a repeated catalog package assigns immediately without a second large AI review.
 
+## Bot SLA (`ops:process-bot-sla`)
+
+Laravel decides eligibility (every minute, Asia/Damascus, `ops_follow_ups` once-per-kind). Conversation stays in the Python bots — catalog, approve/reject, receipt upload, support chat, and reject reasons are **not** n8n canvases. n8n may retry a staff/client text via `POST /integrations/telegram/notify`, or kick Drive delivery via `POST /integrations/drive/poll` (published **HOC Drive to Client Bot**, every 2 minutes; Google Drive fileCreated stays disabled until a Google credential is attached; Laravel still sends the file to the client bot).
+
+| Gap | After | Who | What |
+| --- | --- | --- | --- |
+| Submitted, no quotation | 2h | Sales | Card: number, client, `tg://user?id=` |
+| `awaiting_payment`, no receipt | 12h then 24h | Client then sales | Client: reminder + Sham Cash QR; sales escalate |
+| Receipt uploaded, still unpaid | 3h | Sales | Re-send payok card with expected USD |
+| Payment confirmed | immediately | Client | «بدأ التنفيذ — القسم — المتوقع» (not cron) |
+| `revision_requested` / support unanswered | 1h | Production + sales / sales | Staff card |
+| Incomplete Telegram profile | 1 day | Client | One reminder (name/phone/company) |
+| Morning digest | 09:00 Damascus | Sales | Counts: awaiting quote, awaiting receipt, receipts to review, open revisions |
+| Quote / invoice / Drive Telegram send failed | on failure | Sales + admin ids | Once per artifact |
+
+Hours: `services.telegram.sla.*` / `BOT_SLA_*`. Tests: `tests/Feature/BotSlaAutomationTest.php`.
+
 ## Staff bot
 
 Join/register (`POST /api/bot/staff/join`), tasks, new requests (sales), reply templates, send quotation, deliver. New codes take the next free `EMP-%04d` from the highest numeric suffix (not latest `id`), inside a DB transaction. Cards show number, client, company, package or manual, status, assignee. Sales: **قيد التجهيز** (`in_progress` from `payment_confirmed`), **إكمال الطلب**, and the **تأكيد الدفع** button on the payment-stage card. Production: in-progress + deliver. HTTP errors from join show an Arabic retry, not a raw traceback.

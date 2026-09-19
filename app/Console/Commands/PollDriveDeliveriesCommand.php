@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Actions\AlertTelegramDeliveryFailure;
 use App\Actions\EnsureRequestDriveFolder;
 use App\Actions\NotifyEmployees;
 use App\Actions\OpenRequestForClientReview;
@@ -39,6 +40,7 @@ class PollDriveDeliveriesCommand extends Command
         OpenRequestForClientReview $openRequestForClientReview,
         RequestStatusTransitionService $transitions,
         NotifyEmployees $notifyEmployees,
+        AlertTelegramDeliveryFailure $alertTelegramDeliveryFailure,
     ): int {
         if (! $drive->configured()) {
             $error = $drive->configurationError() ?? 'Google Drive is not configured.';
@@ -72,7 +74,7 @@ class PollDriveDeliveriesCommand extends Command
 
             $sentThisRun = 0;
             foreach ($files as $file) {
-                if ($this->deliverFile($drive, $telegram, $notifyEmployees, $transitions, $request, $file)) {
+                if ($this->deliverFile($drive, $telegram, $notifyEmployees, $alertTelegramDeliveryFailure, $transitions, $request, $file)) {
                     $sentThisRun++;
                 }
             }
@@ -92,6 +94,7 @@ class PollDriveDeliveriesCommand extends Command
         GoogleDriveClient $drive,
         TelegramNotifier $telegram,
         NotifyEmployees $notifyEmployees,
+        AlertTelegramDeliveryFailure $alertTelegramDeliveryFailure,
         RequestStatusTransitionService $transitions,
         ServiceRequest $request,
         array $file,
@@ -200,6 +203,12 @@ class PollDriveDeliveriesCommand extends Command
                     'file' => $fileId,
                     'error' => $message,
                 ]);
+                $alertTelegramDeliveryFailure->handle(
+                    $request,
+                    'drive',
+                    $message,
+                    (string) ($file['name'] ?? $fileId),
+                );
                 if ($this->isPermanentTelegramFailure($message)) {
                     $this->markPermanentFailure($delivery, $request, $notifyEmployees, $file, $message);
                 }
@@ -283,11 +292,7 @@ class PollDriveDeliveriesCommand extends Command
             'fail_reason' => mb_substr($reason, 0, 255),
         ])->save();
 
-        $notifyEmployees->handle(
-            $request,
-            EmployeeProfession::Sales,
-            "تعذر إرسال ملف Drive للزبون\n{$request->number}\n".($file['name'] ?? $delivery->drive_file_id)."\n{$reason}",
-        );
+        // Sales/admin already get a once-per-file card from AlertTelegramDeliveryFailure.
     }
 
     private function isPermanentTelegramFailure(string $message): bool

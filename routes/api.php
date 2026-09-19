@@ -172,6 +172,7 @@ Route::prefix('integrations')->middleware(['shared.secret:services.n8n.webhook_s
     Route::post('clickup/tasks', [IntegrationController::class, 'tasks']);
     Route::post('clickup/mapping', [IntegrationController::class, 'mapping']);
     Route::post('telegram/notify', [IntegrationController::class, 'notify']);
+    Route::post('drive/poll', [IntegrationController::class, 'pollDrive']);
 });
 
 Route::prefix('bot/telegram')->middleware('shared.secret:services.telegram.bot_secret')->group(function () {

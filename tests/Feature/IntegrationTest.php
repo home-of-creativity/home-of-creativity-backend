@@ -227,6 +227,42 @@ class IntegrationTest extends TestCase
             ->assertJsonPath('data.chat_id', '6353798919');
     }
 
+    public function test_drive_poll_requires_secret(): void
+    {
+        $this->withHeaders(['X-N8N-Secret' => 'wrong'])
+            ->postJson('/api/integrations/drive/poll')
+            ->assertUnauthorized();
+    }
+
+    public function test_drive_poll_scopes_to_folder_id(): void
+    {
+        $number = $this->createTelegramRequest();
+        ServiceRequest::query()->where('number', $number)->update([
+            'google_drive_folder_id' => 'folder-req-1',
+        ]);
+
+        $this->withHeaders(['X-N8N-Secret' => 'change-me'])
+            ->postJson('/api/integrations/drive/poll', [
+                'drive_folder_id' => 'folder-req-1',
+                'drive_file_id' => 'file-99',
+                'drive_file_name' => 'logo.png',
+            ])->assertOk()
+            ->assertJsonPath('data.polled', true)
+            ->assertJsonPath('data.scoped', true)
+            ->assertJsonPath('data.request_number', $number)
+            ->assertJsonPath('data.drive_folder_id', 'folder-req-1');
+    }
+
+    public function test_drive_poll_without_match_scans_live_folders(): void
+    {
+        $this->withHeaders(['X-N8N-Secret' => 'change-me'])
+            ->postJson('/api/integrations/drive/poll', [])
+            ->assertOk()
+            ->assertJsonPath('data.polled', true)
+            ->assertJsonPath('data.scoped', false)
+            ->assertJsonPath('data.request_number', null);
+    }
+
     public function test_integrations_reject_a_bad_secret(): void
     {
         $number = $this->createTelegramRequest();

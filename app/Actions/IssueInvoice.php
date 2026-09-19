@@ -19,6 +19,7 @@ class IssueInvoice
     public function __construct(
         private TelegramNotifier $telegram,
         private OdooClient $odoo,
+        private AlertTelegramDeliveryFailure $alertTelegramDeliveryFailure,
     ) {}
 
     public function handle(
@@ -93,6 +94,9 @@ class IssueInvoice
                     'request' => $request->number,
                     'error' => $exception->getMessage(),
                 ]);
+                if ($this->telegram->configured('client')) {
+                    $this->alertTelegramDeliveryFailure->handle($request, 'invoice', $exception->getMessage());
+                }
             }
 
             return $invoice;

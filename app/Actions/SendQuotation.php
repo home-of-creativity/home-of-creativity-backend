@@ -26,6 +26,7 @@ class SendQuotation
         private TelegramNotifier $telegram,
         private RequestStatusTransitionService $transitions,
         private OdooClient $odoo,
+        private AlertTelegramDeliveryFailure $alertTelegramDeliveryFailure,
     ) {}
 
     /**
@@ -115,6 +116,9 @@ class SendQuotation
                     'request' => $request->number,
                     'error' => $exception->getMessage(),
                 ]);
+                if ($this->telegram->configured('client')) {
+                    $this->alertTelegramDeliveryFailure->handle($request, 'quotation', $exception->getMessage());
+                }
             }
 
             return $quotation->fresh() ?? $quotation;

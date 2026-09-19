@@ -60,6 +60,16 @@ return [
             explode(',', (string) env('TELEGRAM_ADMIN_IDS', '')),
         ))),
         'strict' => (bool) env('TELEGRAM_STRICT', false),
+        'sla' => [
+            'quote_waiting_hours' => (int) env('BOT_SLA_QUOTE_HOURS', 2),
+            'receipt_waiting_hours' => (int) env('BOT_SLA_RECEIPT_HOURS', 12),
+            'receipt_waiting_sales_hours' => (int) env('BOT_SLA_RECEIPT_SALES_HOURS', 24),
+            'receipt_unconfirmed_hours' => (int) env('BOT_SLA_RECEIPT_UNCONFIRMED_HOURS', 3),
+            'revision_stale_hours' => (int) env('BOT_SLA_REVISION_HOURS', 1),
+            'support_stale_hours' => (int) env('BOT_SLA_SUPPORT_HOURS', 1),
+            'profile_incomplete_hours' => (int) env('BOT_SLA_PROFILE_HOURS', 24),
+            'sales_digest_hour' => (int) env('BOT_SLA_DIGEST_HOUR', 9),
+        ],
     ],
 
     'google' => [

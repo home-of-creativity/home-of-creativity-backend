@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Actions\ApplyClickUpMapping;
 use App\Http\Requests\ClickUpMappingRequest;
 use App\Http\Requests\ClickUpTasksRequest;
+use App\Http\Requests\DrivePollRequest;
 use App\Http\Requests\OdooInvoiceRequest;
 use App\Http\Requests\OdooQuotationRequest;
 use App\Http\Requests\TelegramNotifyRequest;
@@ -13,7 +14,9 @@ use App\Models\ServiceRequest;
 use App\Services\ClickUpClient;
 use App\Services\OdooClient;
 use App\Services\TelegramNotifier;
+use App\Support\ResolveServiceRequest;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Log;
 
 class IntegrationController extends Controller
@@ -204,6 +207,53 @@ class IntegrationController extends Controller
         return response()->json([
             'data' => ['chat_id' => $chatId, 'sent' => true],
             'message' => 'Telegram message sent.',
+        ]);
+    }
+
+    public function pollDrive(DrivePollRequest $request, ResolveServiceRequest $resolveServiceRequest): JsonResponse
+    {
+        $number = trim((string) ($request->validated('request_number') ?? ''));
+        $folderId = trim((string) ($request->validated('drive_folder_id') ?? ''));
+
+        $serviceRequest = null;
+        if ($number !== '') {
+            try {
+                $serviceRequest = $resolveServiceRequest->byReference($number);
+            } catch (\Throwable) {
+                $serviceRequest = ServiceRequest::query()->where('number', $number)->first();
+            }
+        }
+
+        if ($serviceRequest === null && $folderId !== '') {
+            $serviceRequest = ServiceRequest::query()
+                ->where('google_drive_folder_id', $folderId)
+                ->orderByDesc('id')
+                ->first();
+        }
+
+        $arguments = ['--limit' => 200];
+        if ($serviceRequest !== null) {
+            $arguments['--request'] = (string) $serviceRequest->id;
+        }
+
+        Artisan::call('ops:poll-drive', $arguments);
+
+        Log::info('n8n Drive poll ran.', [
+            'request' => $serviceRequest?->number,
+            'drive_folder_id' => $folderId !== '' ? $folderId : $serviceRequest?->google_drive_folder_id,
+            'drive_file_id' => $request->validated('drive_file_id'),
+        ]);
+
+        return response()->json([
+            'data' => [
+                'polled' => true,
+                'scoped' => $serviceRequest !== null,
+                'request_number' => $serviceRequest?->number,
+                'drive_folder_id' => $serviceRequest?->google_drive_folder_id ?? ($folderId !== '' ? $folderId : null),
+            ],
+            'message' => $serviceRequest !== null
+                ? 'Drive folder polled for the client bot.'
+                : 'Live Drive folders polled for the client bot.',
         ]);
     }
 

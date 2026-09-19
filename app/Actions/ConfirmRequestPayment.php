@@ -5,7 +5,9 @@ namespace App\Actions;
 use App\Enums\GeminiStatus;
 use App\Enums\PaymentMethod;
 use App\Enums\RequestStatus;
+use App\Enums\WorkType;
 use App\Jobs\ClassifyWithGeminiJob;
+use App\Models\OpsFollowUp;
 use App\Models\PaymentReminder;
 use App\Models\ServiceRequest;
 use App\Services\OdooClient;
@@ -124,7 +126,7 @@ class ConfirmRequestPayment
             $this->markWon($updated);
         }
 
-        $this->notifyClientSuccess($updated);
+        $this->notifyClientSuccess($updated, $isFirst);
 
         try {
             $this->issueInvoice->handle($updated, $appliedAmount, 'received', false);
@@ -184,23 +186,62 @@ class ConfirmRequestPayment
         $request->forceFill(['odoo_won_at' => now()])->save();
     }
 
-    private function notifyClientSuccess(ServiceRequest $request): void
+    private function notifyClientSuccess(ServiceRequest $request, bool $isFirst): void
     {
         $chatId = $request->client?->telegram_user_id;
         if (! filled($chatId) || ! $this->telegram->configured('client')) {
             return;
         }
 
+        $text = 'عملية الدفع تم بنجاح سيتم العمل على متطلباتكم ويتم المراجعة بأقرب وقت';
+        if ($isFirst) {
+            $text .= "\n".$this->executionStartedLine($request);
+        }
+
         try {
-            $this->telegram->send(
-                (string) $chatId,
-                'عملية الدفع تم بنجاح سيتم العمل على متطلباتكم ويتم المراجعة بأقرب وقت',
-            );
+            $this->telegram->send((string) $chatId, $text);
+            if ($isFirst) {
+                OpsFollowUp::claim(OpsFollowUp::KIND_EXECUTION_STARTED, 'request:'.$request->id, $request);
+            }
         } catch (\Throwable $exception) {
             Log::warning('Payment success telegram failed.', [
                 'request' => $request->number,
                 'error' => $exception->getMessage(),
             ]);
         }
+    }
+
+    private function executionStartedLine(ServiceRequest $request): string
+    {
+        $operations = data_get($request->work_plan, 'operations', []);
+        $departments = [];
+        $hours = 0;
+        if (is_array($operations)) {
+            foreach ($operations as $operation) {
+                if (! is_array($operation)) {
+                    continue;
+                }
+                $department = trim((string) ($operation['department'] ?? ''));
+                if ($department !== '') {
+                    $label = NotifyPaymentStage::departmentLabel($department);
+                    if (! in_array($label, $departments, true)) {
+                        $departments[] = $label;
+                    }
+                }
+                $hours += (int) ($operation['hours'] ?? 0);
+            }
+        }
+
+        if ($departments === []) {
+            $departments[] = match ($request->work_type) {
+                WorkType::Content => 'محتوى',
+                WorkType::Both => 'تصميم ومحتوى',
+                default => 'تصميم',
+            };
+        }
+
+        $expected = $hours > 0 ? "خلال {$hours} ساعة" : 'بأقرب وقت';
+
+        return 'بدأ التنفيذ — '.implode('، ', $departments).' — المتوقع: '.$expected;
     }
 }

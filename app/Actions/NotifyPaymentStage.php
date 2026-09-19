@@ -76,7 +76,7 @@ class NotifyPaymentStage
         }
 
         foreach ($operations as $operation) {
-            $dept = $this->departmentLabel((string) ($operation['department'] ?? ''));
+            $dept = self::departmentLabel((string) ($operation['department'] ?? ''));
             $assignee = $operation['employee_name'] ?? 'غير مسند';
             $priority = $operation['priority_label'] ?? 'عادية';
             $hours = (int) ($operation['hours'] ?? 0);
@@ -116,7 +116,7 @@ class NotifyPaymentStage
         };
     }
 
-    private function departmentLabel(string $department): string
+    public static function departmentLabel(string $department): string
     {
         return match ($department) {
             'design' => 'تصميم',
