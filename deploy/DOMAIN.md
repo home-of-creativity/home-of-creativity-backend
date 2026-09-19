@@ -18,7 +18,7 @@ Disable any CDN/proxy on these records until TLS is issued (DNS-only / grey clou
 
 | Domain | Serves |
 |--------|--------|
-| `hoc.agency` | Marketing site + `/dashboard` + `/api` |
+| `hoc.agency` | Marketing site + `/dashboard` + `/api` (`/dashboard/assets/*.js` is 404 if missing, never `index.html`) |
 | `www.hoc.agency` | Redirect to `https://hoc.agency` |
 | `api.hoc.agency` | API only (`/api`, `/up`, `/storage`) |
 
