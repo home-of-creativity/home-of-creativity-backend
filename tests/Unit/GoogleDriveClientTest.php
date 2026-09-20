@@ -121,4 +121,41 @@ class GoogleDriveClientTest extends TestCase
         $this->assertSame('JPEG-BYTES', $body);
         Http::assertNotSent(fn (Request $http): bool => str_contains($http->url(), '/export'));
     }
+
+    public function test_is_under_parent_folder_accepts_hoc_client_tree_only(): void
+    {
+        config(['services.google.drive_parent_folder_id' => 'root-hoc']);
+
+        $auth = Mockery::mock(GoogleServiceAccount::class);
+        $auth->shouldReceive('configured')->andReturn(true);
+        $auth->shouldReceive('configurationError')->andReturn(null);
+        $auth->shouldReceive('accessToken')->andReturn('drive-token');
+
+        Http::fake(function (Request $request) {
+            if (str_contains($request->url(), '/files/company-folder')) {
+                return Http::response(['id' => 'company-folder', 'parents' => ['root-hoc']], 200);
+            }
+
+            if (str_contains($request->url(), '/files/other-folder')) {
+                return Http::response(['id' => 'other-folder', 'parents' => ['someone-else']], 200);
+            }
+
+            return Http::response(['id' => 'x', 'parents' => []], 200);
+        });
+
+        $drive = new GoogleDriveClient($auth);
+
+        $this->assertTrue($drive->isUnderParentFolder([
+            'id' => 'logo.png',
+            'parents' => ['root-hoc'],
+        ]));
+        $this->assertTrue($drive->isUnderParentFolder([
+            'id' => 'cover.png',
+            'parents' => ['company-folder'],
+        ]));
+        $this->assertFalse($drive->isUnderParentFolder([
+            'id' => 'random.png',
+            'parents' => ['other-folder'],
+        ]));
+    }
 }

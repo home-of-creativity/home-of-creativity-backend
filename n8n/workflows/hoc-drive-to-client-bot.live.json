@@ -3,22 +3,25 @@
   "name": "HOC Drive to Client Bot",
   "active": true,
   "url": "https://prodesign.app.n8n.cloud/workflow/CxOPvNpUiT2nrHUj",
-  "capturedAt": "2026-09-20T08:16:00Z",
+  "capturedAt": "2026-09-20T08:32:00Z",
   "settings": {
     "availableInMCP": true
   },
-  "activeVersionId": "9817334b-3c06-4ac5-bf20-78e03dd43bda",
+  "activeVersionId": "3e9b3850-6699-4e56-8857-37a1bc3a2176",
   "triggers": [
-    "Google Drive OAuth (Google Drive account) watches folder HOC Clients: fileCreated, fileUpdated, folderCreated",
-    "Webhook GET+POST /webhook/hoc-drive-file — GET health/poll kick; POST file id/name/parents → Laravel poll --file",
-    "Schedule: every minute — POST /api/integrations/drive/poll (covers files inside company subfolders; n8n cannot watch nested folders)"
+    "Google Drive OAuth watches ONLY folder HOC Clients: fileCreated, fileUpdated, folderCreated",
+    "Webhook GET+POST /webhook/hoc-drive-file — GET health/poll kick; POST file id under HOC Clients → Laravel poll --file"
   ],
-  "action": "POST {HOC_API_URL}/api/integrations/drive/poll with X-N8N-Secret. Folders send drive_folder_id only; files send drive_file_id.",
-  "laravel": "ops:poll-drive --file={id} sends that Drive file to the client Telegram bot. Google changes.watch hits POST /api/integrations/drive/changed so an upload does not wait for the dashboard refresh button.",
-  "env": ["HOC_API_URL", "HOC_N8N_SECRET"],
+  "action": "POST https://api.hoc.agency/api/integrations/drive/poll with X-N8N-Secret (no $env — n8n Cloud blocks env access). Folders outside HOC Clients are ignored. No every-minute scan of the whole Drive.",
+  "laravel": "ops:poll-drive --file={id} sends that file only when it is under GOOGLE_DRIVE_PARENT_FOLDER_ID (HOC Clients).",
   "webhook": "https://prodesign.app.n8n.cloud/webhook/hoc-drive-file",
   "google": {
     "credential": "Google Drive account",
     "folderName": "HOC Clients"
+  },
+  "verified": {
+    "manualExecutionId": "665",
+    "productionWebhookExecutionId": "666",
+    "status": "success"
   }
 }

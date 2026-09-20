@@ -118,6 +118,15 @@ class PollDriveDeliveriesCommand extends Command
             return false;
         }
 
+        if (! $drive->isUnderParentFolder($meta)) {
+            Log::info('Drive file is outside the Hoc Client folder.', [
+                'file' => $fileId,
+                'parents' => $meta['parents'] ?? [],
+            ]);
+
+            return false;
+        }
+
         $request = $this->requestForFile($drive, $ensureRequestDriveFolder, $meta);
         if ($request === null) {
             Log::info('Drive file has no matching request folder.', [
@@ -186,12 +195,11 @@ class PollDriveDeliveriesCommand extends Command
             return false;
         }
 
-        $delivery = DriveDelivery::query()->firstOrNew(
-            ['drive_file_id' => $fileId],
-            ['request_id' => $request->id],
-        );
+        $fileName = (string) ($file['name'] ?? '');
+        $delivery = DriveDelivery::matchIncoming($request->id, $fileId, $fileName);
+        $revising = $delivery->wasAlreadySent();
 
-        if ($delivery->failed_at !== null) {
+        if ($delivery->failed_at !== null && $delivery->drive_file_id === $fileId) {
             return false;
         }
 
@@ -237,11 +245,12 @@ class PollDriveDeliveriesCommand extends Command
 
         $delivery->forceFill([
             'request_id' => $request->id,
-            'name' => $file['name'],
+            'drive_file_id' => $fileId,
+            'name' => $fileName !== '' ? $fileName : $delivery->name,
             'mime_type' => $file['mimeType'],
             'content_hash' => $hash,
             'drive_modified_at' => $modifiedTime ? Carbon::parse($modifiedTime) : now(),
-            'sent_at' => null,
+            'client_approved_at' => $revising ? null : $delivery->client_approved_at,
             'failed_at' => null,
             'fail_reason' => null,
         ])->save();
@@ -269,7 +278,7 @@ class PollDriveDeliveriesCommand extends Command
                     (string) $chatId,
                     Storage::disk('local')->path($tmp),
                     (string) $file['mimeType'],
-                    'ملف جديد للطلب #'.$ref.': '.$file['name'],
+                    $delivery->clientSendCaption($ref),
                     'client',
                     $delivery->clientRevisionKeyboard($ref, $canComplete),
                 );
@@ -352,7 +361,7 @@ class PollDriveDeliveriesCommand extends Command
         $ref = ResolveServiceRequest::displayNumber($updated);
         $telegram->sendInlineKeyboard(
             (string) $chatId,
-            'اكتملت ملفات الطلب #'.$ref.".\nيمكنك اعتماد التسليم أو طلب تعديل.",
+            'اكتملت ملفات الطلب #'.$ref.".\nوافق على كل صورة، ثم اضغط اعتماد التسليم إذا اكتمل العمل.",
             DriveDelivery::clientReviewKeyboard($ref, true)['inline_keyboard'],
         );
     }

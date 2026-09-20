@@ -183,6 +183,47 @@ class GoogleDriveClient
         return $this->immediateParentId($token, $folderId);
     }
 
+    /**
+     * @param  array{id?: string, parents?: list<string>}  $file
+     */
+    public function isUnderParentFolder(array $file): bool
+    {
+        $root = $this->parentFolderId();
+        if ($root === '') {
+            return true;
+        }
+
+        $id = (string) ($file['id'] ?? '');
+        if ($id === $root) {
+            return true;
+        }
+
+        $parents = array_values(array_filter(array_map(strval(...), $file['parents'] ?? [])));
+        if (in_array($root, $parents, true)) {
+            return true;
+        }
+
+        $cursor = $parents[0] ?? $id;
+        for ($i = 0; $i < 8 && $cursor !== ''; $i++) {
+            if ($cursor === $root) {
+                return true;
+            }
+
+            $next = $this->parentId($cursor);
+            if (! filled($next)) {
+                return false;
+            }
+
+            if ($next === $root) {
+                return true;
+            }
+
+            $cursor = $next;
+        }
+
+        return false;
+    }
+
     public function startPageToken(): ?string
     {
         if (! $this->configured()) {

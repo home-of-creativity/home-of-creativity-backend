@@ -281,6 +281,18 @@ class IntegrationTest extends TestCase
             ->assertJsonPath('data.request_number', null);
     }
 
+    public function test_drive_poll_ignores_folder_outside_hoc_client(): void
+    {
+        config(['services.google.drive_parent_folder_id' => 'root-hoc']);
+
+        $this->withHeaders(['X-N8N-Secret' => 'change-me'])
+            ->postJson('/api/integrations/drive/poll', [
+                'drive_folder_id' => 'some-other-drive-folder',
+            ])->assertOk()
+            ->assertJsonPath('data.polled', false)
+            ->assertJsonPath('data.drive_folder_id', 'some-other-drive-folder');
+    }
+
     public function test_integrations_reject_a_bad_secret(): void
     {
         $number = $this->createTelegramRequest();

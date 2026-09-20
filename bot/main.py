@@ -1235,9 +1235,10 @@ async def begin_revision(query, context: ContextTypes.DEFAULT_TYPE, action: str,
         request_number, sep, delivery_id = number.rpartition(":")
         if not sep or not request_number:
             try:
-                await query.answer("تعذر قراءة ملف التعديل. افتح طلباتي وأعد المحاولة.", show_alert=True)
+                await query.answer()
             except Exception:
                 pass
+            await safe_callback_reply(query, "تعذر قراءة ملف التعديل. افتح طلباتي وأعد المحاولة.")
             return ConversationHandler.END
     prompt = (
         "ما التعديل المطلوب على هذه الصورة؟ اكتب السبب هنا."
@@ -1245,12 +1246,9 @@ async def begin_revision(query, context: ContextTypes.DEFAULT_TYPE, action: str,
         else "ما التعديل المطلوب على الطلب بالكامل؟ اكتب السبب هنا."
     )
     try:
-        await query.answer(prompt[:180], show_alert=True)
+        await query.answer()
     except Exception:
-        try:
-            await query.answer()
-        except Exception:
-            pass
+        pass
     context.user_data["revision_number"] = request_number
     if delivery_id:
         context.user_data["revision_delivery_id"] = delivery_id
@@ -1266,6 +1264,43 @@ async def revision_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return ConversationHandler.END
     action, number = parse_callback(query.data)
     return await begin_revision(query, context, action, number)
+
+
+async def approve_file_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if query is None or not query.data:
+        return
+    user = query.from_user
+    if user is None:
+        try:
+            await query.answer()
+        except Exception:
+            pass
+        await safe_callback_reply(query, "تعذر معرفة حسابك. أعد تشغيل البوت بـ /start.")
+        return
+    _, number = parse_callback(query.data)
+    request_number, sep, delivery_id = number.rpartition(":")
+    if not sep or not request_number:
+        try:
+            await query.answer()
+        except Exception:
+            pass
+        await safe_callback_reply(query, "تعذر قراءة ملف الموافقة. افتح طلباتي وأعد المحاولة.")
+        return
+    try:
+        await query.answer()
+    except Exception:
+        pass
+    async with httpx.AsyncClient(timeout=12) as client:
+        response = await client.post(
+            f"{API_URL}/bot/telegram/requests/{request_number}/approve-file",
+            headers=api_headers(),
+            json={"telegram_user_id": str(user.id), "drive_delivery_id": int(delivery_id)},
+        )
+    if response.status_code >= 400:
+        await safe_callback_reply(query, f"تعذر تسجيل الموافقة: {escape(api_error_text(response))}")
+        return
+    await safe_callback_reply(query, "تم تسجيل موافقتك على هذه الصورة. بعد الموافقة على كل الملفات اضغط اعتماد التسليم.")
 
 
 async def api_error_alert(query, response: httpx.Response) -> None:
@@ -1683,6 +1718,13 @@ def main() -> None:
         CallbackQueryHandler(
             revision_callback,
             pattern=r"^(revision|revfile):",
+        ),
+        group=-2,
+    )
+    application.add_handler(
+        CallbackQueryHandler(
+            approve_file_callback,
+            pattern=r"^okfile:",
         ),
         group=-2,
     )

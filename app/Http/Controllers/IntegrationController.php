@@ -234,6 +234,26 @@ class IntegrationController extends Controller
         }
 
         $fileId = trim((string) ($request->validated('drive_file_id') ?? ''));
+        $parentFolderId = trim((string) config('services.google.drive_parent_folder_id'), " \t\n\r\"'");
+        $insideHocClient = $folderId === '' || $parentFolderId === '' || $folderId === $parentFolderId || $serviceRequest !== null;
+
+        if ($fileId === '' && $serviceRequest === null && $folderId !== '' && ! $insideHocClient) {
+            Log::info('n8n Drive poll ignored a folder outside Hoc Client.', [
+                'drive_folder_id' => $folderId,
+            ]);
+
+            return response()->json([
+                'data' => [
+                    'polled' => false,
+                    'scoped' => false,
+                    'request_number' => null,
+                    'drive_folder_id' => $folderId,
+                    'drive_file_id' => null,
+                ],
+                'message' => 'Ignored Drive folder outside Hoc Client.',
+            ]);
+        }
+
         $arguments = ['--limit' => 200];
         if ($serviceRequest !== null) {
             $arguments['--request'] = (string) $serviceRequest->id;

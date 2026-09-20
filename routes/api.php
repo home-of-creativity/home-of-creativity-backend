@@ -195,6 +195,7 @@ Route::prefix('bot/telegram')->middleware('shared.secret:services.telegram.bot_s
     Route::post('requests/{service_request}/complete', [TelegramBotController::class, 'complete']);
     Route::post('requests/{service_request}/receipt', [TelegramBotController::class, 'receipt']);
     Route::post('requests/{service_request}/revision', [TelegramBotController::class, 'revision']);
+    Route::post('requests/{service_request}/approve-file', [TelegramBotController::class, 'approveFile']);
     Route::post('requests/{service_request}/renew', [TelegramBotController::class, 'renew']);
     Route::post('requests/{service_request}/decline-renewal', [TelegramBotController::class, 'declineRenewal']);
     Route::post('support', [TelegramBotController::class, 'support']);

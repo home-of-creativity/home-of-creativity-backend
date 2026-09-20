@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Actions\ApproveDriveDelivery;
 use App\Actions\ApproveQuotation;
 use App\Actions\CompleteRequest;
 use App\Actions\CreateCatalogRequest;
@@ -339,6 +340,37 @@ class TelegramBotController extends Controller
 
         return ServiceRequestResource::make($updated->fresh('client'))
             ->additional(['message' => 'Revision requested.']);
+    }
+
+    public function approveFile(Request $request, ServiceRequest $serviceRequest, ApproveDriveDelivery $approveDriveDelivery): JsonResponse
+    {
+        $this->assertClientOwns($request, $serviceRequest);
+
+        $validated = $request->validate([
+            'telegram_user_id' => ['required', 'string'],
+            'drive_delivery_id' => ['required', 'integer'],
+        ]);
+
+        $delivery = DriveDelivery::query()
+            ->where('id', $validated['drive_delivery_id'])
+            ->where('request_id', $serviceRequest->id)
+            ->first();
+        if ($delivery === null) {
+            throw ValidationException::withMessages([
+                'drive_delivery_id' => 'هذا الملف لا يتبع هذا الطلب.',
+            ]);
+        }
+
+        $approved = $approveDriveDelivery->handle($serviceRequest, $delivery);
+
+        return response()->json([
+            'data' => [
+                'approved' => true,
+                'drive_delivery_id' => $approved->id,
+                'client_approved_at' => $approved->client_approved_at?->toIso8601String(),
+            ],
+            'message' => 'File approved.',
+        ]);
     }
 
     public function acknowledge(Request $request, ServiceRequest $serviceRequest, NotifyEmployees $notifyEmployees): JsonResponse

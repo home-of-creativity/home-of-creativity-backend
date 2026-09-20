@@ -3,7 +3,6 @@
 namespace App\Actions;
 
 use App\Enums\ClickUpSyncEvent;
-use App\Enums\EmployeeProfession;
 use App\Enums\RequestStatus;
 use App\Enums\WorkflowEventType;
 use App\Models\DriveDelivery;
@@ -18,7 +17,7 @@ class RequestRevision
     public function __construct(
         private RequestStatusTransitionService $transitions,
         private EnqueueIntegrationEvent $enqueueIntegrationEvent,
-        private NotifyEmployees $notifyEmployees,
+        private NotifyStaffDriveFile $notifyStaffDriveFile,
     ) {}
 
     public function handle(ServiceRequest $request, string $reason, ?DriveDelivery $delivery = null): ServiceRequest
@@ -47,12 +46,6 @@ class RequestRevision
                 'status' => 'open',
             ]);
 
-            $this->notifyEmployees->handle(
-                $updated,
-                EmployeeProfession::Sales,
-                "طلب تعديل\n{$updated->number}\n{$updated->client?->name}: {$updated->title}\n\n{$comment}",
-            );
-
             $this->enqueueIntegrationEvent->handle(
                 $updated->fresh(['client']) ?? $updated,
                 WorkflowEventType::RevisionRequested,
@@ -66,6 +59,13 @@ class RequestRevision
 
             return $updated;
         });
+
+        $fresh = $updated->fresh(['client']) ?? $updated;
+        $this->notifyStaffDriveFile->handle(
+            $fresh,
+            "طلب تعديل\n{$fresh->number}\n{$fresh->client?->name}: {$fresh->title}\n\n{$comment}",
+            $delivery ?? $fresh->driveDeliveries()->whereNotNull('sent_at')->latest('id')->first(),
+        );
 
         app(SyncClickUpFromStaff::class)->handle($updated, ClickUpSyncEvent::Revision, null, $comment);
 

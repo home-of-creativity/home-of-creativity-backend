@@ -22,6 +22,8 @@ class DriveDeliveryResource extends JsonResource
             'status' => $this->clientDeliveryStatus(),
             'status_label' => $this->clientDeliveryLabelAr(),
             'sent_at' => $this->sent_at?->toIso8601String(),
+            'client_approved_at' => $this->client_approved_at?->toIso8601String(),
+            'client_approved' => $this->client_approved_at !== null,
             'failed_at' => $this->failed_at?->toIso8601String(),
             'fail_reason' => $this->fail_reason,
             'telegram_message_id' => $this->telegram_message_id,

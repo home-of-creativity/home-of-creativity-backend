@@ -14,6 +14,7 @@ class DriveDelivery extends Model
         'name',
         'mime_type',
         'sent_at',
+        'client_approved_at',
         'drive_modified_at',
         'content_hash',
         'telegram_message_id',
@@ -25,6 +26,7 @@ class DriveDelivery extends Model
     {
         return [
             'sent_at' => 'datetime',
+            'client_approved_at' => 'datetime',
             'drive_modified_at' => 'datetime',
             'failed_at' => 'datetime',
         ];
@@ -64,9 +66,16 @@ class DriveDelivery extends Model
     {
         $review = self::clientReviewKeyboard($requestRef, $canComplete);
 
+        $rows = [
+            [['text' => '✏️ تعديل هذه الصورة', 'callback_data' => 'revfile:'.$requestRef.':'.$this->id]],
+        ];
+        if ($this->client_approved_at === null) {
+            $rows[] = [['text' => '✅ أوافق على هذه الصورة', 'callback_data' => 'okfile:'.$requestRef.':'.$this->id]];
+        }
+
         return [
             'inline_keyboard' => [
-                [['text' => '✏️ تعديل هذه الصورة', 'callback_data' => 'revfile:'.$requestRef.':'.$this->id]],
+                ...$rows,
                 ...$review['inline_keyboard'],
             ],
         ];
@@ -85,6 +94,51 @@ class DriveDelivery extends Model
         }
 
         return ['inline_keyboard' => $rows];
+    }
+
+    public static function normalizedName(string $name): string
+    {
+        return mb_strtolower(trim(basename($name)));
+    }
+
+    public static function matchIncoming(int $requestId, string $fileId, string $name): self
+    {
+        $byId = static::query()->where('drive_file_id', $fileId)->first();
+        if ($byId instanceof self) {
+            return $byId;
+        }
+
+        $normalized = static::normalizedName($name);
+        if ($normalized !== '') {
+            $byName = static::query()
+                ->where('request_id', $requestId)
+                ->orderByDesc('id')
+                ->get()
+                ->first(fn (self $row): bool => static::normalizedName((string) $row->name) === $normalized);
+            if ($byName instanceof self) {
+                return $byName;
+            }
+        }
+
+        return new self([
+            'drive_file_id' => $fileId,
+            'request_id' => $requestId,
+        ]);
+    }
+
+    public function wasAlreadySent(): bool
+    {
+        return $this->exists && $this->sent_at !== null;
+    }
+
+    public function clientSendCaption(string $requestRef): string
+    {
+        $name = (string) ($this->name ?: 'ملف');
+        if ($this->wasAlreadySent()) {
+            return 'تم تعديل الملف «'.$name.'» للطلب #'.$requestRef." وأُرسل من جديد.\nإذا كانت جاهزة اضغط أوافق على هذه الصورة، أو اطلب تعديلاً.";
+        }
+
+        return 'ملف جديد للطلب #'.$requestRef.': '.$name."\nإذا كانت جاهزة اضغط أوافق على هذه الصورة، أو اطلب تعديلاً.";
     }
 
     /**

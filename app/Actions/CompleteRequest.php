@@ -5,10 +5,13 @@ namespace App\Actions;
 use App\Enums\ClickUpSyncEvent;
 use App\Enums\RequestStatus;
 use App\Enums\WorkflowEventType;
+use App\Models\DriveDelivery;
 use App\Models\Employee;
 use App\Models\ServiceRequest;
 use App\Services\RequestStatusTransitionService;
+use App\Support\ResolveServiceRequest;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class CompleteRequest
 {
@@ -17,10 +20,17 @@ class CompleteRequest
         private EnqueueIntegrationEvent $enqueueIntegrationEvent,
         private SyncClickUpFromStaff $syncClickUp,
         private ClearDriveDeliveryKeyboards $clearDriveDeliveryKeyboards,
+        private NotifyStaffDriveFile $notifyStaffDriveFile,
     ) {}
 
     public function handle(ServiceRequest $request, ?string $actor = 'admin', ?Employee $employee = null): ServiceRequest
     {
+        if ($actor !== 'client' && $this->hasUnapprovedSentFiles($request)) {
+            throw ValidationException::withMessages([
+                'status' => 'انتظر موافقة الزبون على الملفات المنجزة.',
+            ]);
+        }
+
         $updated = DB::transaction(function () use ($request, $actor): ServiceRequest {
             $updated = $this->transitions->transition(
                 $request,
@@ -37,9 +47,33 @@ class CompleteRequest
             return $updated;
         });
 
+        $fresh = $updated->fresh(['client']) ?? $updated;
+        if ($actor === 'client') {
+            DriveDelivery::query()
+                ->where('request_id', $fresh->id)
+                ->whereNotNull('sent_at')
+                ->whereNull('client_approved_at')
+                ->update(['client_approved_at' => now()]);
+
+            $ref = ResolveServiceRequest::displayNumber($fresh);
+            $this->notifyStaffDriveFile->handle(
+                $fresh,
+                "✅ وافق الزبون على تسليم الطلب\n#{$ref} — {$fresh->title}\n{$fresh->client?->name}",
+            );
+        }
+
         $this->syncClickUp->handle($updated, ClickUpSyncEvent::Completed, $employee);
-        $this->clearDriveDeliveryKeyboards->handle($updated->fresh('client') ?? $updated);
+        $this->clearDriveDeliveryKeyboards->handle($fresh);
 
         return $updated;
+    }
+
+    private function hasUnapprovedSentFiles(ServiceRequest $request): bool
+    {
+        return DriveDelivery::query()
+            ->where('request_id', $request->id)
+            ->whereNotNull('sent_at')
+            ->whereNull('client_approved_at')
+            ->exists();
     }
 }

@@ -986,8 +986,126 @@ class ClientOpsAutomationTest extends TestCase
 
         $keyboard = $delivery->clientRevisionKeyboard('12');
         $this->assertSame('revfile:12:'.$delivery->id, $keyboard['inline_keyboard'][0][0]['callback_data']);
-        $this->assertSame('revision:12', $keyboard['inline_keyboard'][1][0]['callback_data']);
-        $this->assertSame('complete:12', $keyboard['inline_keyboard'][2][0]['callback_data']);
+        $this->assertSame('okfile:12:'.$delivery->id, $keyboard['inline_keyboard'][1][0]['callback_data']);
+        $this->assertSame('revision:12', $keyboard['inline_keyboard'][2][0]['callback_data']);
+        $this->assertSame('complete:12', $keyboard['inline_keyboard'][3][0]['callback_data']);
+    }
+
+    public function test_revision_sends_the_image_and_reason_to_staff(): void
+    {
+        Storage::fake('local');
+        config(['services.telegram.staff_bot_token' => 'staff-token']);
+        Http::fake([
+            'https://api.telegram.org/*' => Http::response([
+                'ok' => true,
+                'result' => ['photo' => [['file_id' => 'staff-photo']]],
+            ], 200),
+        ]);
+
+        Employee::factory()->create([
+            'profession' => EmployeeProfession::Sales,
+            'status' => EmployeeStatus::Approved,
+            'telegram_user_id' => '555',
+        ]);
+        $client = Client::factory()->create(['telegram_user_id' => 'tg-rev-photo']);
+        $request = ServiceRequest::factory()->for($client)->create([
+            'status' => RequestStatus::InProgress,
+            'title' => 'شعار',
+        ]);
+        $delivery = DriveDelivery::query()->create([
+            'request_id' => $request->id,
+            'drive_file_id' => 'file-logo',
+            'name' => 'logo.png',
+            'mime_type' => 'image/png',
+            'sent_at' => now(),
+        ]);
+
+        $this->mock(GoogleDriveClient::class, function ($mock): void {
+            $mock->shouldReceive('configured')->andReturn(true);
+            $mock->shouldReceive('downloadFile')->with('file-logo')->andReturn('PNG');
+        });
+
+        $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
+            ->postJson("/api/bot/telegram/requests/{$request->number}/revision", [
+                'telegram_user_id' => 'tg-rev-photo',
+                'reason' => 'غطيّر اللون',
+                'drive_delivery_id' => $delivery->id,
+            ])
+            ->assertOk();
+
+        Http::assertSent(function (Request $httpRequest): bool {
+            $body = $httpRequest->body();
+
+            return str_contains($httpRequest->url(), 'botstaff-token/sendPhoto')
+                && str_contains($body, 'logo.png')
+                && str_contains($body, 'غطيّر اللون');
+        });
+    }
+
+    public function test_client_can_approve_a_delivered_file_and_staff_cannot_complete_before_that(): void
+    {
+        Storage::fake('local');
+        config(['services.telegram.staff_bot_token' => 'staff-token']);
+        Http::fake([
+            'https://api.telegram.org/*' => Http::response([
+                'ok' => true,
+                'result' => ['photo' => [['file_id' => 'staff-photo']]],
+            ], 200),
+        ]);
+
+        Employee::factory()->sales()->create([
+            'status' => EmployeeStatus::Approved,
+            'telegram_user_id' => '6350001',
+        ]);
+        $client = Client::factory()->create(['telegram_user_id' => 'tg-okfile']);
+        $request = ServiceRequest::factory()->for($client)->create([
+            'status' => RequestStatus::ReadyForReview,
+            'title' => 'هوية',
+        ]);
+        $delivery = DriveDelivery::query()->create([
+            'request_id' => $request->id,
+            'drive_file_id' => 'file-ok',
+            'name' => 'cover.png',
+            'mime_type' => 'image/png',
+            'sent_at' => now(),
+        ]);
+
+        $this->mock(GoogleDriveClient::class, function ($mock): void {
+            $mock->shouldReceive('configured')->andReturn(true);
+            $mock->shouldReceive('downloadFile')->with('file-ok')->andReturn('PNG');
+        });
+
+        $this->withHeaders(['X-Webhook-Secret' => 'change-me-staff'])
+            ->postJson('/api/bot/staff/complete', [
+                'telegram_user_id' => '6350001',
+                'request_number' => $request->number,
+            ])
+            ->assertUnprocessable();
+
+        $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
+            ->postJson("/api/bot/telegram/requests/{$request->number}/approve-file", [
+                'telegram_user_id' => 'tg-okfile',
+                'drive_delivery_id' => $delivery->id,
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.approved', true);
+
+        $this->assertNotNull($delivery->fresh()?->client_approved_at);
+        Http::assertSent(function (Request $httpRequest): bool {
+            $body = $httpRequest->body();
+
+            return str_contains($httpRequest->url(), 'botstaff-token/sendPhoto')
+                && str_contains($body, 'وافق الزبون على هذه الصورة')
+                && str_contains($body, 'cover.png');
+        });
+
+        $this->withHeaders(['X-Webhook-Secret' => 'change-me-staff'])
+            ->postJson('/api/bot/staff/complete', [
+                'telegram_user_id' => '6350001',
+                'request_number' => $request->number,
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'completed');
     }
 
     public function test_drive_file_opens_request_for_client_review(): void
@@ -1163,7 +1281,126 @@ class ClientOpsAutomationTest extends TestCase
         $delivery = DriveDelivery::query()->where('drive_file_id', 'file-same')->first();
         $this->assertNotNull($delivery?->sent_at);
         $this->assertSame(md5('NEW'), $delivery?->content_hash);
-        Http::assertSent(fn (Request $httpRequest): bool => str_contains($httpRequest->url(), 'botclient-token/sendPhoto'));
+        Http::assertSent(function (Request $httpRequest): bool {
+            $body = $httpRequest->body();
+
+            return str_contains($httpRequest->url(), 'botclient-token/sendPhoto')
+                && str_contains($body, 'تم تعديل الملف')
+                && str_contains($body, 'logo.png');
+        });
+    }
+
+    public function test_drive_upload_with_same_name_updates_previous_file_instead_of_creating_new(): void
+    {
+        Cache::flush();
+        Storage::fake('local');
+        config(['services.telegram.bot_token' => 'client-token']);
+        Http::fake([
+            'https://api.telegram.org/*' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 89, 'photo' => [['file_id' => 'tg-photo']]],
+            ], 200),
+        ]);
+
+        $client = Client::factory()->create(['telegram_user_id' => 'tg-drive-same-name']);
+        $request = ServiceRequest::factory()->for($client)->create([
+            'status' => RequestStatus::RevisionRequested,
+            'google_drive_folder_id' => 'folder-same-name',
+        ]);
+        $previous = DriveDelivery::query()->create([
+            'request_id' => $request->id,
+            'drive_file_id' => 'file-old',
+            'name' => 'Logo.PNG',
+            'mime_type' => 'image/png',
+            'content_hash' => md5('OLD'),
+            'drive_modified_at' => now()->subHour(),
+            'sent_at' => now()->subHour(),
+            'client_approved_at' => now()->subMinutes(30),
+        ]);
+
+        $this->mock(GoogleDriveClient::class, function ($mock): void {
+            $mock->shouldReceive('configured')->andReturn(true);
+            $mock->shouldReceive('listNewFiles')->andReturn([
+                [
+                    'id' => 'file-new-id',
+                    'name' => 'logo.png',
+                    'mimeType' => 'image/png',
+                    'modifiedTime' => now()->toIso8601String(),
+                    'md5Checksum' => md5('NEW'),
+                ],
+            ]);
+            $mock->shouldReceive('downloadFile')->with('file-new-id')->andReturn('NEW');
+        });
+
+        $this->artisan('ops:poll-drive')->assertSuccessful();
+
+        $this->assertSame(1, DriveDelivery::query()->where('request_id', $request->id)->count());
+        $updated = $previous->fresh();
+        $this->assertSame('file-new-id', $updated?->drive_file_id);
+        $this->assertSame('logo.png', $updated?->name);
+        $this->assertSame(md5('NEW'), $updated?->content_hash);
+        $this->assertNull($updated?->client_approved_at);
+        $this->assertNotNull($updated?->sent_at);
+        Http::assertSent(function (Request $httpRequest): bool {
+            $body = $httpRequest->body();
+
+            return str_contains($httpRequest->url(), 'botclient-token/sendPhoto')
+                && str_contains($body, 'تم تعديل الملف')
+                && str_contains($body, 'logo.png');
+        });
+    }
+
+    public function test_drive_upload_with_unknown_name_is_a_new_file(): void
+    {
+        Cache::flush();
+        Storage::fake('local');
+        config(['services.telegram.bot_token' => 'client-token']);
+        Http::fake([
+            'https://api.telegram.org/*' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 90, 'photo' => [['file_id' => 'tg-photo']]],
+            ], 200),
+        ]);
+
+        $client = Client::factory()->create(['telegram_user_id' => 'tg-drive-new-name']);
+        $request = ServiceRequest::factory()->for($client)->create([
+            'status' => RequestStatus::InProgress,
+            'google_drive_folder_id' => 'folder-new-name',
+        ]);
+        DriveDelivery::query()->create([
+            'request_id' => $request->id,
+            'drive_file_id' => 'file-logo',
+            'name' => 'logo.png',
+            'mime_type' => 'image/png',
+            'content_hash' => md5('LOGO'),
+            'sent_at' => now()->subHour(),
+        ]);
+
+        $this->mock(GoogleDriveClient::class, function ($mock): void {
+            $mock->shouldReceive('configured')->andReturn(true);
+            $mock->shouldReceive('listNewFiles')->andReturn([
+                [
+                    'id' => 'file-card',
+                    'name' => 'card.png',
+                    'mimeType' => 'image/png',
+                    'modifiedTime' => now()->toIso8601String(),
+                ],
+            ]);
+            $mock->shouldReceive('downloadFile')->with('file-card')->andReturn('CARD');
+        });
+
+        $this->artisan('ops:poll-drive')->assertSuccessful();
+
+        $this->assertSame(2, DriveDelivery::query()->where('request_id', $request->id)->count());
+        $this->assertNotNull(DriveDelivery::query()->where('drive_file_id', 'file-card')->value('sent_at'));
+        Http::assertSent(function (Request $httpRequest): bool {
+            $body = $httpRequest->body();
+
+            return str_contains($httpRequest->url(), 'botclient-token/sendPhoto')
+                && str_contains($body, 'ملف جديد')
+                && str_contains($body, 'card.png')
+                && ! str_contains($body, 'تم تعديل الملف');
+        });
     }
 
     public function test_drive_file_option_sends_that_file_immediately(): void
@@ -1192,6 +1429,7 @@ class ClientOpsAutomationTest extends TestCase
                 'mimeType' => 'image/png',
                 'parents' => ['folder-now'],
             ]);
+            $mock->shouldReceive('isUnderParentFolder')->andReturn(true);
             $mock->shouldReceive('listNewFiles')->never();
             $mock->shouldReceive('downloadFile')->with('file-now')->andReturn('PNG');
         });
@@ -1200,6 +1438,36 @@ class ClientOpsAutomationTest extends TestCase
 
         $this->assertNotNull(DriveDelivery::query()->where('drive_file_id', 'file-now')->value('sent_at'));
         Http::assertSent(fn (Request $httpRequest): bool => str_contains($httpRequest->url(), 'botclient-token/sendPhoto'));
+    }
+
+    public function test_drive_file_option_skips_files_outside_hoc_client(): void
+    {
+        Cache::flush();
+        config(['services.telegram.bot_token' => 'client-token']);
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true], 200)]);
+
+        $client = Client::factory()->create(['telegram_user_id' => 'tg-drive-skip']);
+        ServiceRequest::factory()->for($client)->create([
+            'status' => RequestStatus::InProgress,
+            'google_drive_folder_id' => 'folder-now',
+        ]);
+
+        $this->mock(GoogleDriveClient::class, function ($mock): void {
+            $mock->shouldReceive('configured')->andReturn(true);
+            $mock->shouldReceive('fileMeta')->with('file-other')->andReturn([
+                'id' => 'file-other',
+                'name' => 'other.png',
+                'mimeType' => 'image/png',
+                'parents' => ['unrelated-folder'],
+            ]);
+            $mock->shouldReceive('isUnderParentFolder')->andReturn(false);
+            $mock->shouldReceive('downloadFile')->never();
+        });
+
+        $this->artisan('ops:poll-drive', ['--file' => 'file-other'])->assertSuccessful();
+
+        $this->assertNull(DriveDelivery::query()->where('drive_file_id', 'file-other')->value('sent_at'));
+        Http::assertNothingSent();
     }
 
     public function test_drive_poll_skips_completed_folders(): void
