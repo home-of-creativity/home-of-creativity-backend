@@ -316,7 +316,15 @@ class IntegrationTest extends TestCase
         $this->mock(GoogleDriveClient::class, function ($mock): void {
             $mock->shouldReceive('configured')->andReturn(true);
             $mock->shouldReceive('configurationError')->andReturn(null);
-            $mock->shouldReceive('parentId')->with('task-folder')->andReturn('company-folder');
+            $mock->shouldReceive('parentId')->andReturnUsing(function (string $id): ?string {
+                return match ($id) {
+                    'task-folder' => 'package-folder',
+                    'package-folder' => 'company-folder',
+                    'company-folder' => 'root-hoc',
+                    default => null,
+                };
+            });
+            $mock->shouldReceive('isHocClientRootId')->andReturn(false);
             $mock->shouldReceive('listNewFiles')->andReturn([]);
         });
 
@@ -341,6 +349,7 @@ class IntegrationTest extends TestCase
                 'parents' => ['root-hoc'],
             ]);
             $mock->shouldReceive('isUnderParentFolder')->andReturn(true);
+            $mock->shouldReceive('isHocClientRootId')->andReturn(false);
             $mock->shouldReceive('listNewFiles')->andReturn([]);
         });
 
@@ -370,7 +379,9 @@ class IntegrationTest extends TestCase
                 ]],
             ]);
             $mock->shouldReceive('isUnderParentFolder')->andReturn(true);
+            $mock->shouldReceive('isDirectlyInHocClientRoot')->andReturn(false);
             $mock->shouldReceive('fileMeta')->andReturn(null);
+            $mock->shouldReceive('isHocClientRootId')->andReturn(false);
             $mock->shouldReceive('listNewFiles')->andReturn([]);
         });
 
@@ -379,6 +390,38 @@ class IntegrationTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.polled', true)
             ->assertJsonPath('data.drive_file_id', 'file-nested')
+            ->assertJsonPath('data.fallback', false);
+
+        $this->assertSame('page-2', OpsSetting::getValue('drive_watch_page_token'));
+    }
+
+    public function test_drive_change_webhook_skips_files_on_hoc_client_root(): void
+    {
+        OpsSetting::setValue('drive_watch_token', 'watch-token');
+        OpsSetting::setValue('drive_watch_page_token', 'page-1');
+
+        $this->mock(GoogleDriveClient::class, function ($mock): void {
+            $mock->shouldReceive('configured')->andReturn(true);
+            $mock->shouldReceive('configurationError')->andReturn(null);
+            $mock->shouldReceive('listChanges')->with('page-1')->andReturn([
+                'newPageToken' => 'page-2',
+                'files' => [[
+                    'id' => 'root-file',
+                    'name' => 'loose.png',
+                    'mimeType' => 'image/png',
+                    'parents' => ['root-hoc'],
+                ]],
+            ]);
+            $mock->shouldReceive('isUnderParentFolder')->andReturn(true);
+            $mock->shouldReceive('isDirectlyInHocClientRoot')->andReturn(true);
+            $mock->shouldReceive('isHocClientRootId')->andReturn(false);
+            $mock->shouldReceive('listNewFiles')->andReturn([]);
+        });
+
+        $this->withHeaders(['X-Goog-Channel-Token' => 'watch-token', 'X-Goog-Resource-State' => 'change'])
+            ->postJson('/api/integrations/drive/changed')
+            ->assertOk()
+            ->assertJsonPath('data.polled', false)
             ->assertJsonPath('data.fallback', false);
 
         $this->assertSame('page-2', OpsSetting::getValue('drive_watch_page_token'));

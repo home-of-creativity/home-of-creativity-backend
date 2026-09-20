@@ -135,14 +135,7 @@ class ConfirmRequestPayment
         }
 
         if (blank($updated->google_drive_folder_id)) {
-            try {
-                $updated = $this->ensureRequestDriveFolder->handle($updated);
-            } catch (\Throwable $exception) {
-                Log::warning('Drive folder after payment failed.', [
-                    'request' => $updated->number,
-                    'error' => $exception->getMessage(),
-                ]);
-            }
+            $updated = $this->ensureRequestDriveFolder->handleQuietly($updated);
         }
 
         if ($isFirst) {

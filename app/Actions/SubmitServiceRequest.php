@@ -21,6 +21,7 @@ class SubmitServiceRequest
         private NotifyEmployees $notifyEmployees,
         private StoreRequestAttachments $storeRequestAttachments,
         private ProvisionSalesClickUpTask $provisionSalesClickUpTask,
+        private EnsureRequestDriveFolder $ensureRequestDriveFolder,
     ) {}
 
     /**
@@ -33,7 +34,7 @@ class SubmitServiceRequest
      */
     public function handle(Client $client, array $data): ServiceRequest
     {
-        return DB::transaction(function () use ($client, $data): ServiceRequest {
+        $fresh = DB::transaction(function () use ($client, $data): ServiceRequest {
             $request = $client->requests()->create([
                 'number' => $this->generateRequestNumber->handle(),
                 'title' => $data['title'],
@@ -82,6 +83,8 @@ class SubmitServiceRequest
 
             return $fresh->fresh(['client', 'events', 'files', 'clickupTasks']) ?? $fresh;
         });
+
+        return $this->ensureRequestDriveFolder->handleQuietly($fresh);
     }
 
     private function notifySalesAttachments(ServiceRequest $request, string $displayNumber): void

@@ -332,6 +332,9 @@ class IntegrationController extends Controller
             ->whereNotNull('google_drive_folder_id')
             ->where('google_drive_folder_id', '!=', '')
             ->whereIn('status', [
+                RequestStatus::Submitted,
+                RequestStatus::QuotationSent,
+                RequestStatus::AwaitingPayment,
                 RequestStatus::PaymentConfirmed,
                 RequestStatus::InProgress,
                 RequestStatus::RevisionRequested,

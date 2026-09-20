@@ -950,6 +950,28 @@ class AdminDashboardTest extends TestCase
         $this->assertEquals(250.0, (float) $serviceRequest->fresh()->quotation_amount);
     }
 
+    public function test_admin_request_show_creates_missing_drive_folder_for_new_request(): void
+    {
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        $serviceRequest = ServiceRequest::factory()->create([
+            'status' => RequestStatus::Submitted,
+            'google_drive_folder_id' => null,
+            'title' => 'هوية',
+        ]);
+
+        $this->mock(GoogleDriveClient::class, function ($mock): void {
+            $mock->shouldReceive('configured')->andReturn(true);
+            $mock->shouldReceive('ensureFolderPath')->once()->andReturn('folder-new');
+        });
+
+        $this->getJson("/api/admin/requests/{$serviceRequest->id}")
+            ->assertOk()
+            ->assertJsonPath('data.google_drive_folder_id', 'folder-new');
+    }
+
     public function test_admin_request_show_creates_missing_drive_folder_when_paid(): void
     {
         $admin = User::factory()->create();
@@ -1114,6 +1136,7 @@ class AdminDashboardTest extends TestCase
         $this->mock(GoogleDriveClient::class, function ($mock): void {
             $mock->shouldReceive('configured')->andReturn(true);
             $mock->shouldReceive('configurationError')->andReturn(null);
+            $mock->shouldReceive('isHocClientRootId')->andReturn(false);
             $mock->shouldReceive('listNewFiles')->with('folder-poll-one')->andReturn([
                 ['id' => 'file-one', 'name' => 'pack.png', 'mimeType' => 'image/png'],
             ]);

@@ -159,6 +159,37 @@ class ClientOpsAutomationTest extends TestCase
         ]);
     }
 
+    public function test_catalog_request_creates_nested_drive_folder(): void
+    {
+        $package = $this->seedPublishedPackage();
+        $this->completeClient('tg-drive-tree');
+
+        $this->mock(GoogleDriveClient::class, function ($mock): void {
+            $mock->shouldReceive('configured')->andReturn(true);
+            $mock->shouldReceive('ensureFolderPath')
+                ->once()
+                ->withArgs(function (string $parent, array $segments): bool {
+                    return ($segments[0] ?? '') !== ''
+                        && ($segments[1] ?? '') === 'Startup — شهري'
+                        && str_contains((string) ($segments[2] ?? ''), 'Startup');
+                })
+                ->andReturn('folder-catalog');
+        });
+
+        $created = $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
+            ->postJson('/api/bot/telegram/catalog/requests', [
+                'telegram_user_id' => 'tg-drive-tree',
+                'package_id' => $package->id,
+                'billing_period' => 'monthly',
+            ])->assertCreated()
+            ->json('data');
+
+        $this->assertDatabaseHas('requests', [
+            'number' => $created['number'],
+            'google_drive_folder_id' => 'folder-catalog',
+        ]);
+    }
+
     public function test_catalog_quotation_sends_period_once_to_client(): void
     {
         $this->fakeOdooDocuments();
@@ -807,10 +838,11 @@ class ClientOpsAutomationTest extends TestCase
             $mock->shouldReceive('configured')->andReturn(true);
             $mock->shouldReceive('ensureFolderPath')
                 ->once()
-                ->withArgs(function (string $parent, string $company, string $task): bool {
-                    return $company === 'شركة النور'
-                        && ! str_contains($company, 'tg-flow')
-                        && str_contains($task, 'هوية بصرية');
+                ->withArgs(function (string $parent, array $segments): bool {
+                    return ($segments[0] ?? '') === 'شركة النور'
+                        && ! str_contains((string) $segments[0], 'tg-flow')
+                        && ($segments[1] ?? '') === 'طلب يدوي'
+                        && str_contains((string) ($segments[2] ?? ''), 'هوية بصرية');
                 })
                 ->andReturn('folder-company');
         });
@@ -818,6 +850,37 @@ class ClientOpsAutomationTest extends TestCase
         $updated = app(EnsureRequestDriveFolder::class)->handle($request);
 
         $this->assertSame('folder-company', $updated->google_drive_folder_id);
+    }
+
+    public function test_drive_folder_nests_company_package_and_request(): void
+    {
+        $package = $this->seedPublishedPackage();
+        $client = Client::factory()->create(['company_name' => 'شركة النور']);
+        $request = ServiceRequest::factory()->for($client)->create([
+            'title' => 'هوية بصرية',
+            'pricing_package_id' => $package->id,
+            'billing_period' => 'monthly',
+            'paid_at' => now()->setTimezone('Asia/Damascus')->setDate(2026, 9, 20)->setTime(12, 0),
+            'google_drive_folder_id' => null,
+        ]);
+
+        $this->mock(GoogleDriveClient::class, function ($mock) use ($request): void {
+            $mock->shouldReceive('configured')->andReturn(true);
+            $mock->shouldReceive('ensureFolderPath')
+                ->once()
+                ->withArgs(function (string $parent, array $segments) use ($request): bool {
+                    $ref = ResolveServiceRequest::displayNumber($request);
+
+                    return ($segments[0] ?? '') === 'شركة النور'
+                        && ($segments[1] ?? '') === 'Startup — شهري'
+                        && str_starts_with((string) ($segments[2] ?? ''), '#'.$ref.' هوية بصرية');
+                })
+                ->andReturn('folder-leaf');
+        });
+
+        $updated = app(EnsureRequestDriveFolder::class)->handle($request);
+
+        $this->assertSame('folder-leaf', $updated->google_drive_folder_id);
     }
 
     public function test_remaining_payment_creates_drive_folder_when_missing(): void
@@ -861,12 +924,89 @@ class ClientOpsAutomationTest extends TestCase
         $this->mock(GoogleDriveClient::class, function ($mock): void {
             $mock->shouldReceive('configured')->andReturn(true);
             $mock->shouldReceive('ensureFolderPath')->once()->andReturn('folder-poll');
+            $mock->shouldReceive('isHocClientRootId')->andReturn(false);
             $mock->shouldReceive('listNewFiles')->with('folder-poll')->andReturn([]);
         });
 
         $this->artisan('ops:poll-drive')->assertSuccessful();
 
         $this->assertSame('folder-poll', $request->fresh()?->google_drive_folder_id);
+    }
+
+    public function test_drive_poll_skips_files_dropped_in_hoc_client_root(): void
+    {
+        Cache::flush();
+        config(['services.google.drive_parent_folder_id' => 'root-hoc']);
+
+        $client = Client::factory()->create(['telegram_user_id' => 'tg-root']);
+        ServiceRequest::factory()->for($client)->create([
+            'status' => RequestStatus::InProgress,
+            'google_drive_folder_id' => 'req-folder',
+        ]);
+
+        $this->mock(GoogleDriveClient::class, function ($mock): void {
+            $mock->shouldReceive('configured')->andReturn(true);
+            $mock->shouldReceive('fileMeta')->with('root-file')->andReturn([
+                'id' => 'root-file',
+                'name' => 'loose.png',
+                'mimeType' => 'image/png',
+                'parents' => ['root-hoc'],
+            ]);
+            $mock->shouldReceive('isUnderParentFolder')->andReturn(true);
+            $mock->shouldReceive('isDirectlyInHocClientRoot')->andReturn(true);
+            $mock->shouldReceive('downloadFile')->never();
+        });
+
+        $this->artisan('ops:poll-drive', ['--file' => 'root-file'])->assertSuccessful();
+
+        $this->assertDatabaseMissing('drive_deliveries', ['drive_file_id' => 'root-file']);
+    }
+
+    public function test_drive_poll_does_not_resend_an_unchanged_file(): void
+    {
+        Cache::flush();
+        config(['services.telegram.bot_token' => 'client-token']);
+        Http::fake([
+            'https://api.telegram.org/*' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 77],
+            ], 200),
+        ]);
+
+        $client = Client::factory()->create(['telegram_user_id' => 'tg-once']);
+        $request = ServiceRequest::factory()->for($client)->create([
+            'status' => RequestStatus::InProgress,
+            'google_drive_folder_id' => 'folder-once',
+        ]);
+        $modified = now()->startOfSecond();
+        DriveDelivery::query()->create([
+            'request_id' => $request->id,
+            'drive_file_id' => 'file-once',
+            'name' => 'logo.png',
+            'mime_type' => 'image/png',
+            'content_hash' => md5('PNG'),
+            'drive_modified_at' => $modified,
+            'sent_at' => now()->subMinute(),
+        ]);
+
+        $this->mock(GoogleDriveClient::class, function ($mock) use ($modified): void {
+            $mock->shouldReceive('configured')->andReturn(true);
+            $mock->shouldReceive('isHocClientRootId')->andReturn(false);
+            $mock->shouldReceive('listNewFiles')->andReturn([
+                [
+                    'id' => 'file-once',
+                    'name' => 'logo.png',
+                    'mimeType' => 'image/png',
+                    'modifiedTime' => $modified->copy()->micro(750000)->toIso8601String(),
+                    'md5Checksum' => 'not-the-local-md5',
+                ],
+            ]);
+            $mock->shouldReceive('downloadFile')->never();
+        });
+
+        $this->artisan('ops:poll-drive')->assertSuccessful();
+
+        Http::assertNotSent(fn (Request $httpRequest): bool => str_contains($httpRequest->url(), 'api.telegram.org'));
     }
 
     public function test_drive_folder_ignores_telegram_placeholder_company(): void
@@ -884,8 +1024,8 @@ class ClientOpsAutomationTest extends TestCase
             $mock->shouldReceive('configured')->andReturn(true);
             $mock->shouldReceive('ensureFolderPath')
                 ->once()
-                ->withArgs(function (string $parent, string $company): bool {
-                    return $company === 'شركة' && ! str_contains($company, 'tg-flow');
+                ->withArgs(function (string $parent, array $segments): bool {
+                    return ($segments[0] ?? '') === 'شركة' && ! str_contains(implode('/', $segments), 'tg-flow');
                 })
                 ->andReturn('folder-generic');
         });
@@ -908,6 +1048,7 @@ class ClientOpsAutomationTest extends TestCase
 
         $this->mock(GoogleDriveClient::class, function ($mock): void {
             $mock->shouldReceive('configured')->andReturn(true);
+            $mock->shouldReceive('isHocClientRootId')->andReturn(false);
             $mock->shouldReceive('listNewFiles')->andReturn([
                 ['id' => 'file-1', 'name' => 'logo.png', 'mimeType' => 'image/png'],
             ]);
@@ -1129,6 +1270,7 @@ class ClientOpsAutomationTest extends TestCase
 
         $this->mock(GoogleDriveClient::class, function ($mock): void {
             $mock->shouldReceive('configured')->andReturn(true);
+            $mock->shouldReceive('isHocClientRootId')->andReturn(false);
             $mock->shouldReceive('listNewFiles')->andReturn([
                 ['id' => 'file-ready', 'name' => 'final.png', 'mimeType' => 'image/png'],
             ]);
@@ -1264,6 +1406,7 @@ class ClientOpsAutomationTest extends TestCase
 
         $this->mock(GoogleDriveClient::class, function ($mock): void {
             $mock->shouldReceive('configured')->andReturn(true);
+            $mock->shouldReceive('isHocClientRootId')->andReturn(false);
             $mock->shouldReceive('listNewFiles')->andReturn([
                 [
                     'id' => 'file-same',
@@ -1320,6 +1463,7 @@ class ClientOpsAutomationTest extends TestCase
 
         $this->mock(GoogleDriveClient::class, function ($mock): void {
             $mock->shouldReceive('configured')->andReturn(true);
+            $mock->shouldReceive('isHocClientRootId')->andReturn(false);
             $mock->shouldReceive('listNewFiles')->andReturn([
                 [
                     'id' => 'file-new-id',
@@ -1378,6 +1522,7 @@ class ClientOpsAutomationTest extends TestCase
 
         $this->mock(GoogleDriveClient::class, function ($mock): void {
             $mock->shouldReceive('configured')->andReturn(true);
+            $mock->shouldReceive('isHocClientRootId')->andReturn(false);
             $mock->shouldReceive('listNewFiles')->andReturn([
                 [
                     'id' => 'file-card',
@@ -1430,6 +1575,8 @@ class ClientOpsAutomationTest extends TestCase
                 'parents' => ['folder-now'],
             ]);
             $mock->shouldReceive('isUnderParentFolder')->andReturn(true);
+            $mock->shouldReceive('isDirectlyInHocClientRoot')->andReturn(false);
+            $mock->shouldReceive('isHocClientRootId')->andReturn(false);
             $mock->shouldReceive('listNewFiles')->never();
             $mock->shouldReceive('downloadFile')->with('file-now')->andReturn('PNG');
         });
@@ -1481,6 +1628,7 @@ class ClientOpsAutomationTest extends TestCase
 
         $this->mock(GoogleDriveClient::class, function ($mock): void {
             $mock->shouldReceive('configured')->andReturn(true);
+            $mock->shouldReceive('isHocClientRootId')->andReturn(false);
             $mock->shouldReceive('listNewFiles')->never();
         });
 

@@ -29,6 +29,8 @@ class PollDriveDeliveriesCommand extends Command
 
     private const MAX_FILE_BYTES = 20 * 1024 * 1024;
 
+    private const MAX_SEND_PER_REQUEST = 20;
+
     protected $signature = 'ops:poll-drive {--limit=200} {--request=} {--file=}';
 
     protected $description = 'Send new Google Drive files from request folders to the client bot.';
@@ -76,8 +78,18 @@ class PollDriveDeliveriesCommand extends Command
         }
 
         foreach ($requests as $request) {
+            $folderId = (string) $request->google_drive_folder_id;
+            if ($folderId === '' || $drive->isHocClientRootId($folderId)) {
+                Log::info('Drive poll skipped Hoc Client root folder.', [
+                    'request' => $request->number,
+                    'folder' => $folderId,
+                ]);
+
+                continue;
+            }
+
             try {
-                $files = $drive->listNewFiles((string) $request->google_drive_folder_id);
+                $files = $drive->listNewFiles($folderId);
             } catch (Throwable $exception) {
                 Log::warning('Drive poll list failed.', [
                     'request' => $request->number,
@@ -89,6 +101,15 @@ class PollDriveDeliveriesCommand extends Command
 
             $sentThisRun = 0;
             foreach ($files as $file) {
+                if ($sentThisRun >= self::MAX_SEND_PER_REQUEST) {
+                    Log::warning('Drive poll hit the per-request send cap.', [
+                        'request' => $request->number,
+                        'cap' => self::MAX_SEND_PER_REQUEST,
+                    ]);
+
+                    break;
+                }
+
                 if ($this->deliverFile($drive, $telegram, $notifyEmployees, $alertTelegramDeliveryFailure, $transitions, $request, $file)) {
                     $sentThisRun++;
                 }
@@ -120,6 +141,15 @@ class PollDriveDeliveriesCommand extends Command
 
         if (! $drive->isUnderParentFolder($meta)) {
             Log::info('Drive file is outside the Hoc Client folder.', [
+                'file' => $fileId,
+                'parents' => $meta['parents'] ?? [],
+            ]);
+
+            return false;
+        }
+
+        if ($drive->isDirectlyInHocClientRoot($meta)) {
+            Log::info('Drive file on the Hoc Client root was ignored.', [
                 'file' => $fileId,
                 'parents' => $meta['parents'] ?? [],
             ]);
@@ -409,12 +439,11 @@ class PollDriveDeliveriesCommand extends Command
     private function backfillMissingFolders(EnsureRequestDriveFolder $ensureRequestDriveFolder, int $limit): void
     {
         $requests = ServiceRequest::query()
-            ->with('client')
-            ->where(function ($query): void {
-                $query->whereNotNull('paid_at')
-                    ->orWhere('status', RequestStatus::PaymentConfirmed)
-                    ->orWhere('amount_paid', '>', 0);
-            })
+            ->with(['client', 'pricingPackage'])
+            ->whereNotIn('status', [
+                RequestStatus::Completed,
+                RequestStatus::Cancelled,
+            ])
             ->where(function ($query): void {
                 $query->whereNull('google_drive_folder_id')
                     ->orWhere('google_drive_folder_id', '');
@@ -424,14 +453,7 @@ class PollDriveDeliveriesCommand extends Command
             ->get();
 
         foreach ($requests as $request) {
-            try {
-                $ensureRequestDriveFolder->handle($request);
-            } catch (Throwable $exception) {
-                Log::warning('Drive folder backfill failed.', [
-                    'request' => $request->number,
-                    'error' => $exception->getMessage(),
-                ]);
-            }
+            $ensureRequestDriveFolder->handleQuietly($request);
         }
     }
 
@@ -483,6 +505,9 @@ class PollDriveDeliveriesCommand extends Command
             ->whereNotNull('google_drive_folder_id')
             ->where('google_drive_folder_id', '!=', '')
             ->whereIn('status', [
+                RequestStatus::Submitted,
+                RequestStatus::QuotationSent,
+                RequestStatus::AwaitingPayment,
                 RequestStatus::PaymentConfirmed,
                 RequestStatus::InProgress,
                 RequestStatus::RevisionRequested,

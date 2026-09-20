@@ -8,6 +8,8 @@ use App\Enums\PaymentMethod;
 use App\Enums\RequestSource;
 use App\Enums\RequestStatus;
 use App\Enums\WorkType;
+use App\Support\BillingPeriod;
+use App\Support\ResolveServiceRequest;
 use Database\Factories\ServiceRequestFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -128,6 +130,51 @@ class ServiceRequest extends Model
         $id = $this->google_drive_folder_id ?: config('services.google.drive_parent_folder_id');
 
         return filled($id) ? 'https://drive.google.com/drive/folders/'.$id : null;
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function driveFolderSegments(): array
+    {
+        $this->loadMissing(['client', 'pricingPackage']);
+
+        return [
+            $this->client?->driveCompanyFolderName() ?? 'شركة',
+            $this->drivePackageFolderName(),
+            $this->driveRequestFolderName(),
+        ];
+    }
+
+    public function drivePackageFolderName(): string
+    {
+        $this->loadMissing('pricingPackage');
+        $package = $this->pricingPackage;
+        if ($package === null) {
+            return 'طلب يدوي';
+        }
+
+        $name = trim((string) ($package->name_ar ?: $package->name_en ?: $package->slug));
+        if ($name === '') {
+            $name = 'باقة';
+        }
+
+        $period = trim((string) ($this->billing_period ?? ''));
+        if ($period === '') {
+            return $name;
+        }
+
+        return $name.' — '.BillingPeriod::labelAr($period);
+    }
+
+    public function driveRequestFolderName(): string
+    {
+        $stamp = $this->paid_at ?? $this->created_at ?? now();
+        $folderDate = $stamp->timezone((string) config('app.timezone'))->format('Y-m-d');
+        $ref = ResolveServiceRequest::displayNumber($this);
+        $title = trim((string) $this->title);
+
+        return trim('#'.$ref.($title !== '' ? ' '.$title : '').' '.$folderDate);
     }
 
     public function hasRemainingBalance(): bool

@@ -41,30 +41,32 @@ class ProcessDriveChangeNotification
                         continue;
                     }
 
+                    if ($this->drive->isDirectlyInHocClientRoot($file)) {
+                        continue;
+                    }
+
                     $ids[] = $file['id'];
                 }
             }
         }
 
         $ids = array_values(array_unique($ids));
-        if ($ids !== []) {
-            foreach ($ids as $id) {
-                Artisan::call('ops:poll-drive', ['--file' => $id]);
-            }
-
+        if ($ids === []) {
             return [
-                'polled' => true,
-                'drive_file_ids' => $ids,
+                'polled' => false,
+                'drive_file_ids' => [],
                 'fallback' => false,
             ];
         }
 
-        Artisan::call('ops:poll-drive', ['--limit' => 200]);
+        foreach ($ids as $id) {
+            Artisan::call('ops:poll-drive', ['--file' => $id]);
+        }
 
         return [
             'polled' => true,
-            'drive_file_ids' => [],
-            'fallback' => true,
+            'drive_file_ids' => $ids,
+            'fallback' => false,
         ];
     }
 }

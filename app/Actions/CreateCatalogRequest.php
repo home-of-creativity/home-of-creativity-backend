@@ -24,6 +24,7 @@ class CreateCatalogRequest
         private SendQuotation $sendQuotation,
         private NotifyEmployees $notifyEmployees,
         private ProvisionSalesClickUpTask $provisionSalesClickUpTask,
+        private EnsureRequestDriveFolder $ensureRequestDriveFolder,
     ) {}
 
     public function handle(Client $client, PricingPackage $package, ?string $billingPeriod = null): ServiceRequest
@@ -111,6 +112,10 @@ class CreateCatalogRequest
             'client:catalog',
         );
         $this->quotationDelivered = $this->sendQuotation->deliveredToClient;
+
+        $serviceRequest = $this->ensureRequestDriveFolder->handleQuietly(
+            $serviceRequest->fresh(['client', 'pricingPackage']) ?? $serviceRequest,
+        );
 
         return $serviceRequest->fresh(['client', 'pricingPackage', 'quotations']) ?? $serviceRequest;
     }

@@ -3,25 +3,25 @@
   "name": "HOC Drive to Client Bot",
   "active": true,
   "url": "https://prodesign.app.n8n.cloud/workflow/CxOPvNpUiT2nrHUj",
-  "capturedAt": "2026-09-20T08:32:00Z",
+  "capturedAt": "2026-09-20T12:10:00Z",
   "settings": {
     "availableInMCP": true
   },
-  "activeVersionId": "3e9b3850-6699-4e56-8857-37a1bc3a2176",
-  "triggers": [
-    "Google Drive OAuth watches ONLY folder HOC Clients: fileCreated, fileUpdated, folderCreated",
-    "Webhook GET+POST /webhook/hoc-drive-file — GET health/poll kick; POST file id under HOC Clients → Laravel poll --file"
+  "activeVersionId": "fb6cfb91-e418-4e27-af8e-b15b7b5f51db",
+  "disabledNodes": [
+    "New File In Hoc Client",
+    "Updated File In HOC Clients",
+    "New Folder In HOC Clients"
   ],
-  "action": "POST https://api.hoc.agency/api/integrations/drive/poll with X-N8N-Secret (no $env — n8n Cloud blocks env access). Folders outside HOC Clients are ignored. No every-minute scan of the whole Drive.",
-  "laravel": "ops:poll-drive --file={id} sends that file only when it is under GOOGLE_DRIVE_PARENT_FOLDER_ID (HOC Clients).",
+  "triggers": [
+    "Google Drive OAuth triggers disabled to stop resending every file in HOC Clients",
+    "Webhook GET+POST /webhook/hoc-drive-file remains for a manual kick"
+  ],
+  "action": "POST https://api.hoc.agency/api/integrations/drive/poll with X-N8N-Secret (no $env). Nested request-folder uploads send via Laravel Google changes.watch. Files sitting on the HOC Clients root are ignored. Already-sent files are not resent unless the file actually changed.",
+  "laravel": "ops:poll-drive sends a file once; same Drive modified second is not a revision. Root folders are skipped.",
   "webhook": "https://prodesign.app.n8n.cloud/webhook/hoc-drive-file",
   "google": {
     "credential": "Google Drive account",
     "folderName": "HOC Clients"
-  },
-  "verified": {
-    "manualExecutionId": "665",
-    "productionWebhookExecutionId": "666",
-    "status": "success"
   }
 }

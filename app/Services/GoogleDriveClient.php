@@ -38,7 +38,7 @@ class GoogleDriveClient
         return null;
     }
 
-    public function ensureFolderPath(string $parentId, string $company, string $taskFolderName): ?string
+    public function ensureFolderPath(string $parentId, array $segments): ?string
     {
         $this->lastError = null;
 
@@ -58,24 +58,28 @@ class GoogleDriveClient
                 return null;
             }
 
-            $companyFolderId = $this->findOrCreateFolder(
-                $token,
-                $context['id'],
-                $this->safeName($company),
-                $context['driveId'],
-            );
-            if ($companyFolderId === null) {
-                return null;
+            $cursor = $context['id'];
+            $created = false;
+            foreach ($segments as $segment) {
+                $raw = trim((string) $segment);
+                if ($raw === '') {
+                    continue;
+                }
+
+                $next = $this->findOrCreateFolder($token, $cursor, $this->safeName($raw), $context['driveId']);
+                if ($next === null) {
+                    return null;
+                }
+
+                $cursor = $next;
+                $created = true;
             }
 
-            $taskFolderId = $this->findOrCreateFolder(
-                $token,
-                $companyFolderId,
-                $this->safeName($taskFolderName),
-                $context['driveId'],
-            );
+            if (! $created) {
+                return $this->fail('Google Drive folder path is empty.');
+            }
 
-            return $taskFolderId ?? $companyFolderId;
+            return $cursor;
         } catch (Throwable $exception) {
             return $this->fail('Google Drive ensureFolderPath failed: '.$exception->getMessage());
         }
@@ -98,12 +102,6 @@ class GoogleDriveClient
         try {
             $seen = [];
             $this->collectDownloadableFiles($token, $folderId, 0, true, $seen);
-
-            $parentId = $this->immediateParentId($token, $folderId);
-            $root = $this->parentFolderId();
-            if (filled($parentId) && $parentId !== $folderId && $parentId !== $root) {
-                $this->collectDownloadableFiles($token, $parentId, 0, false, $seen);
-            }
 
             return array_values($seen);
         } catch (Throwable $exception) {
@@ -222,6 +220,30 @@ class GoogleDriveClient
         }
 
         return false;
+    }
+
+    /**
+     * Files dropped directly in HOC Clients are never a request delivery.
+     *
+     * @param  array{id?: string, parents?: list<string>}  $file
+     */
+    public function isDirectlyInHocClientRoot(array $file): bool
+    {
+        $root = $this->parentFolderId();
+        if ($root === '') {
+            return false;
+        }
+
+        $parents = array_values(array_filter(array_map(strval(...), $file['parents'] ?? [])));
+
+        return in_array($root, $parents, true);
+    }
+
+    public function isHocClientRootId(string $folderId): bool
+    {
+        $root = $this->parentFolderId();
+
+        return $root !== '' && $folderId === $root;
     }
 
     public function startPageToken(): ?string

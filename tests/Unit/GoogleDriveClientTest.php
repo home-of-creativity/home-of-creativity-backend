@@ -11,7 +11,7 @@ use Tests\TestCase;
 
 class GoogleDriveClientTest extends TestCase
 {
-    public function test_list_new_files_resolves_shortcuts_subfolders_and_company_parent(): void
+    public function test_list_new_files_resolves_shortcuts_and_subfolders_inside_the_request_folder(): void
     {
         config(['services.google.drive_parent_folder_id' => 'root-hoc']);
 
@@ -75,7 +75,7 @@ class GoogleDriveClientTest extends TestCase
         $this->assertContains('target-photo', $ids);
         $this->assertNotContains('shortcut-1', $ids);
         $this->assertContains('nested-png', $ids);
-        $this->assertContains('loose-jpg', $ids);
+        $this->assertNotContains('loose-jpg', $ids);
     }
 
     public function test_download_file_follows_shortcut_instead_of_exporting_pdf(): void
@@ -157,6 +157,16 @@ class GoogleDriveClientTest extends TestCase
             'id' => 'random.png',
             'parents' => ['other-folder'],
         ]));
+        $this->assertTrue($drive->isDirectlyInHocClientRoot([
+            'id' => 'loose.png',
+            'parents' => ['root-hoc'],
+        ]));
+        $this->assertFalse($drive->isDirectlyInHocClientRoot([
+            'id' => 'cover.png',
+            'parents' => ['company-folder'],
+        ]));
+        $this->assertTrue($drive->isHocClientRootId('root-hoc'));
+        $this->assertFalse($drive->isHocClientRootId('company-folder'));
     }
 
     public function test_list_changes_returns_files_and_the_new_page_token(): void

@@ -154,21 +154,34 @@ class DriveDelivery extends Model
             return true;
         }
 
-        if ($localHash !== null && $this->content_hash && ! hash_equals((string) $this->content_hash, $localHash)) {
-            return true;
+        if ($localHash !== null && $this->content_hash) {
+            return ! hash_equals((string) $this->content_hash, $localHash);
         }
 
-        if ($remoteHash !== null && $this->content_hash && ! hash_equals((string) $this->content_hash, $remoteHash)) {
-            return true;
+        if ($this->sameSecond($modifiedTime)) {
+            return false;
         }
 
         if ($modifiedTime !== null) {
-            $remote = Carbon::parse($modifiedTime);
-            if ($this->drive_modified_at === null || $remote->gt($this->drive_modified_at)) {
+            $remote = Carbon::parse($modifiedTime)->utc()->startOfSecond();
+            $stored = $this->drive_modified_at?->copy()->utc()->startOfSecond();
+            if ($stored === null || $remote->gt($stored)) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    private function sameSecond(?string $modifiedTime): bool
+    {
+        if ($modifiedTime === null || $this->drive_modified_at === null) {
+            return false;
+        }
+
+        $remote = Carbon::parse($modifiedTime)->utc()->startOfSecond();
+        $stored = $this->drive_modified_at->copy()->utc()->startOfSecond();
+
+        return $remote->equalTo($stored);
     }
 }

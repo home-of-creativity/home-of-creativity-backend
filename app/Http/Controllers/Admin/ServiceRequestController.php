@@ -30,7 +30,6 @@ use App\Support\ShamCashQr;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Artisan;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -66,17 +65,8 @@ class ServiceRequestController extends Controller
         $serviceRequest = $hydrateServiceRequestFromOdoo->handle($serviceRequest);
 
         if (blank($serviceRequest->google_drive_folder_id)
-            && ($serviceRequest->paid_at
-                || $serviceRequest->status === RequestStatus::PaymentConfirmed
-                || (float) $serviceRequest->amount_paid > 0)) {
-            try {
-                $serviceRequest = $ensureRequestDriveFolder->handle($serviceRequest);
-            } catch (\Throwable $exception) {
-                Log::warning('Drive folder on request show failed.', [
-                    'request' => $serviceRequest->number,
-                    'error' => $exception->getMessage(),
-                ]);
-            }
+            && ! in_array($serviceRequest->status, [RequestStatus::Completed, RequestStatus::Cancelled], true)) {
+            $serviceRequest = $ensureRequestDriveFolder->handleQuietly($serviceRequest);
         }
 
         $serviceRequest->load([
