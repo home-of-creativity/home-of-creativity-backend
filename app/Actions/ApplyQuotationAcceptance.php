@@ -69,7 +69,7 @@ class ApplyQuotationAcceptance
             ]);
             $this->notifyClient(
                 $request,
-                "تمت الموافقة على عرض السعر للطلب #{$displayNumber}. سيصلك المبلغ المطلوب وخطوات التحويل من الفريق.",
+                "سيصلك المبلغ المطلوب وخطوات التحويل من الفريق للطلب #{$displayNumber}.",
                 withQr: false,
             );
 

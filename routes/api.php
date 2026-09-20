@@ -175,6 +175,9 @@ Route::prefix('integrations')->middleware(['shared.secret:services.n8n.webhook_s
     Route::post('drive/poll', [IntegrationController::class, 'pollDrive']);
 });
 
+Route::post('integrations/drive/changed', [IntegrationController::class, 'driveChanged'])
+    ->middleware('throttle:60,1');
+
 Route::prefix('bot/telegram')->middleware('shared.secret:services.telegram.bot_secret')->group(function () {
     Route::post('link', [TelegramBotController::class, 'link']);
     Route::get('me', [TelegramBotController::class, 'me']);

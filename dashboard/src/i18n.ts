@@ -229,7 +229,7 @@ export const copy = {
   driveSent: { ar: "وصل للعميل", en: "Reached the client" },
   drivePending: { ar: "لم يصل بعد", en: "Not delivered yet" },
   driveFailed: { ar: "فشل الإرسال", en: "Send failed" },
-  driveNone: { ar: "لا يوجد ملف مُرصود بعد. ارفع في المجلد ثم اضغط تحديث الإرسال.", en: "No Drive files tracked yet. Upload to the folder, then refresh delivery." },
+  driveNone: { ar: "لا يوجد ملف مُرصود بعد. ارفع في مجلد الطلب فيُرسل للعميل تلقائياً.", en: "No Drive files tracked yet. Upload to the request folder and it is sent to the client automatically." },
   paymentPlan: { ar: "خطة الدفع", en: "Payment plan" },
   firstPaymentAmount: { ar: "كمية الدفعة الأولى", en: "First payment amount" },
   quotationTotal: { ar: "إجمالي العرض", en: "Quotation total" },

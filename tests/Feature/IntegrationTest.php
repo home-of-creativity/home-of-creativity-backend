@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Client;
+use App\Models\OpsSetting;
 use App\Models\ServiceRequest;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
@@ -250,7 +251,24 @@ class IntegrationTest extends TestCase
             ->assertJsonPath('data.polled', true)
             ->assertJsonPath('data.scoped', true)
             ->assertJsonPath('data.request_number', $number)
-            ->assertJsonPath('data.drive_folder_id', 'folder-req-1');
+            ->assertJsonPath('data.drive_folder_id', 'folder-req-1')
+            ->assertJsonPath('data.drive_file_id', 'file-99');
+    }
+
+    public function test_drive_change_webhook_requires_watch_token(): void
+    {
+        $this->postJson('/api/integrations/drive/changed')->assertUnauthorized();
+    }
+
+    public function test_drive_change_webhook_polls_on_file_notification(): void
+    {
+        OpsSetting::setValue('drive_watch_token', 'watch-token');
+
+        $this->withHeaders(['X-Goog-Channel-Token' => 'watch-token', 'X-Goog-Resource-State' => 'change'])
+            ->postJson('/api/integrations/drive/changed', ['drive_file_id' => 'file-new'])
+            ->assertOk()
+            ->assertJsonPath('data.polled', true)
+            ->assertJsonPath('data.drive_file_id', 'file-new');
     }
 
     public function test_drive_poll_without_match_scans_live_folders(): void

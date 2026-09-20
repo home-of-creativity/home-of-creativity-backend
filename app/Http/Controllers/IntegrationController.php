@@ -10,12 +10,14 @@ use App\Http\Requests\OdooInvoiceRequest;
 use App\Http\Requests\OdooQuotationRequest;
 use App\Http\Requests\TelegramNotifyRequest;
 use App\Http\Resources\ServiceRequestResource;
+use App\Models\OpsSetting;
 use App\Models\ServiceRequest;
 use App\Services\ClickUpClient;
 use App\Services\OdooClient;
 use App\Services\TelegramNotifier;
 use App\Support\ResolveServiceRequest;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Log;
 
@@ -231,9 +233,13 @@ class IntegrationController extends Controller
                 ->first();
         }
 
+        $fileId = trim((string) ($request->validated('drive_file_id') ?? ''));
         $arguments = ['--limit' => 200];
         if ($serviceRequest !== null) {
             $arguments['--request'] = (string) $serviceRequest->id;
+        }
+        if ($fileId !== '') {
+            $arguments['--file'] = $fileId;
         }
 
         Artisan::call('ops:poll-drive', $arguments);
@@ -241,19 +247,50 @@ class IntegrationController extends Controller
         Log::info('n8n Drive poll ran.', [
             'request' => $serviceRequest?->number,
             'drive_folder_id' => $folderId !== '' ? $folderId : $serviceRequest?->google_drive_folder_id,
-            'drive_file_id' => $request->validated('drive_file_id'),
+            'drive_file_id' => $fileId !== '' ? $fileId : null,
         ]);
 
         return response()->json([
             'data' => [
                 'polled' => true,
-                'scoped' => $serviceRequest !== null,
+                'scoped' => $serviceRequest !== null || $fileId !== '',
                 'request_number' => $serviceRequest?->number,
                 'drive_folder_id' => $serviceRequest?->google_drive_folder_id ?? ($folderId !== '' ? $folderId : null),
+                'drive_file_id' => $fileId !== '' ? $fileId : null,
             ],
-            'message' => $serviceRequest !== null
-                ? 'Drive folder polled for the client bot.'
+            'message' => $serviceRequest !== null || $fileId !== ''
+                ? 'Drive file sent to the client bot.'
                 : 'Live Drive folders polled for the client bot.',
+        ]);
+    }
+
+    public function driveChanged(Request $request): JsonResponse
+    {
+        $expected = (string) (OpsSetting::getValue('drive_watch_token') ?: config('services.google.drive_watch_token'));
+        $provided = (string) $request->header('X-Goog-Channel-Token', '');
+        if ($expected === '' || ! hash_equals($expected, $provided)) {
+            abort(401, 'Invalid Drive watch token.');
+        }
+
+        $state = strtolower((string) $request->header('X-Goog-Resource-State', 'change'));
+        if ($state === 'sync') {
+            return response()->json([
+                'data' => ['ignored' => true],
+                'message' => 'Drive watch sync acknowledged.',
+            ]);
+        }
+
+        $fileId = trim((string) ($request->input('drive_file_id') ?? $request->input('id') ?? ''));
+        $arguments = ['--limit' => 200];
+        if ($fileId !== '') {
+            $arguments['--file'] = $fileId;
+        }
+
+        Artisan::call('ops:poll-drive', $arguments);
+
+        return response()->json([
+            'data' => ['polled' => true, 'drive_file_id' => $fileId !== '' ? $fileId : null],
+            'message' => 'Drive change polled for the client bot.',
         ]);
     }
 

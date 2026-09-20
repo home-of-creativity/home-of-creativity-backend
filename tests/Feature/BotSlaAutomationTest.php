@@ -11,6 +11,7 @@ use App\Jobs\ClassifyWithGeminiJob;
 use App\Models\Client;
 use App\Models\Employee;
 use App\Models\OpsFollowUp;
+use App\Models\PaymentReminder;
 use App\Models\RequestFile;
 use App\Models\Revision;
 use App\Models\ServiceRequest;
@@ -104,6 +105,61 @@ class BotSlaAutomationTest extends TestCase
                 && str_contains($this->telegramText($http), 'وافق ولم يرفع وصلاً');
         });
         $this->assertSame(1, OpsFollowUp::query()->where('kind', OpsFollowUp::KIND_RECEIPT_WAITING_SALES)->count());
+    }
+
+    public function test_fully_paid_request_skips_receipt_and_remaining_reminders(): void
+    {
+        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true], 200)]);
+
+        $client = Client::factory()->create([
+            'telegram_user_id' => '10021',
+            'company_name' => 'شركة',
+        ]);
+        $paid = [
+            'status' => RequestStatus::AwaitingPayment,
+            'quotation_amount' => 200,
+            'amount_total' => 200,
+            'amount_paid' => 200,
+            'amount_remaining' => 80,
+            'paid_at' => now(),
+            'updated_at' => now()->subHours(13),
+        ];
+        ServiceRequest::factory()->for($client)->create($paid + ['title' => 'فاتورة بلا وصل']);
+        $request = ServiceRequest::factory()->for($client)->create($paid + ['title' => 'فاتورة مكتملة']);
+        $receipt = RequestFile::query()->create([
+            'request_id' => $request->id,
+            'kind' => 'payment_receipt',
+            'original_name' => 'paid.jpg',
+            'path' => 'receipts/paid.jpg',
+        ]);
+        RequestFile::query()->whereKey($receipt->id)->update([
+            'created_at' => now()->subHours(4),
+            'updated_at' => now()->subHours(4),
+        ]);
+
+        $reminder = PaymentReminder::query()->create([
+            'request_id' => $request->id,
+            'kind' => PaymentReminder::KIND_REMAINING,
+            'due_at' => now()->subMinute(),
+            'send_count' => 0,
+        ]);
+
+        $this->artisan('ops:process-bot-sla')->assertSuccessful();
+        $this->artisan('ops:process-reminders')->assertSuccessful();
+
+        Http::assertNotSent(function (Request $http): bool {
+            $text = $this->telegramText($http);
+
+            return str_contains($text, 'تذكير برفع وصل التحويل')
+                || str_contains($text, 'وافق ولم يرفع وصلاً')
+                || str_contains($text, 'وصل مرفوع بلا تأكيد')
+                || str_contains($text, 'تذكير بسداد المتبقي');
+        });
+        $this->assertSame(0, OpsFollowUp::query()->whereIn('kind', [
+            OpsFollowUp::KIND_RECEIPT_WAITING,
+            OpsFollowUp::KIND_RECEIPT_UNCONFIRMED,
+        ])->count());
+        $this->assertNotNull($reminder->fresh()?->completed_at);
     }
 
     public function test_uploaded_receipt_without_confirm_resends_sales_card(): void

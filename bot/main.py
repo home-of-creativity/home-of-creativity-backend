@@ -6,7 +6,7 @@ from pathlib import Path
 
 import httpx
 from dotenv import load_dotenv
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, Update
+from telegram import ForceReply, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, Update
 from telegram.error import BadRequest, NetworkError, TimedOut
 from telegram.ext import (
     Application,
@@ -123,7 +123,7 @@ def main_keyboard() -> ReplyKeyboardMarkup:
 
 def default_sham_cash_caption(number: str) -> str:
     return (
-        f"تمت الموافقة على عرض السعر للطلب #{escape(number)}.\n"
+        f"تعليمات الدفع للطلب #{escape(number)}.\n"
         "حوّل عبر شام كاش باستخدام الرمز، ثم أرسل إثبات التحويل كصورة أو PDF."
     )
 
@@ -144,10 +144,7 @@ async def send_sham_cash_qr(query, number: str, response) -> None:
         caption = (
             default_sham_cash_caption(number)
             if qr_available
-            else (
-                f"تمت الموافقة على عرض السعر للطلب #{escape(number)}.\n"
-                "سيصلك المبلغ المطلوب وخطوات التحويل من الفريق."
-            )
+            else f"سيصلك المبلغ المطلوب وخطوات التحويل من الفريق للطلب #{escape(number)}."
         )
     delivered = bool(payload.get("delivered"))
     encoded = payload.get("content_base64")
@@ -182,14 +179,6 @@ async def send_sham_cash_qr(query, number: str, response) -> None:
             caption=caption,
             reply_markup=main_keyboard(),
         )
-        return
-
-    if delivered and qr_available:
-        caption = (
-            f"تمت الموافقة على عرض السعر للطلب #{escape(number)}.\n"
-            "رمز شام كاش للتحويل أعلاه. بعد التحويل أرسل إثبات الدفع كصورة أو PDF."
-        )
-        await query.message.reply_text(caption, reply_markup=main_keyboard())
         return
 
     if delivered:
@@ -416,12 +405,15 @@ def period_is_subscription(period: str) -> bool:
     return period in {"monthly", "quarterly", "semiannual", "yearly"}
 
 
+def previous_markup() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton("السابق", callback_data="back")]])
+
+
 def catalog_footer_rows(scope: str, parent: int, has_more: bool, next_offset: int) -> list[list[InlineKeyboardButton]]:
     rows: list[list[InlineKeyboardButton]] = []
     if has_more:
         rows.append([InlineKeyboardButton("عرض المزيد", callback_data=f"more:{scope}:{parent}:{next_offset}")])
-    if scope != "root":
-        rows.append([InlineKeyboardButton("رجوع", callback_data="back")])
+    rows.append([InlineKeyboardButton("السابق", callback_data="back")])
     rows.append([InlineKeyboardButton("طلب يدوي", callback_data="cman")])
     return rows
 
@@ -504,21 +496,26 @@ async def consume_pending_followup(update: Update, context: ContextTypes.DEFAULT
     return False
 
 
-async def safe_callback_reply(query, text: str) -> None:
+async def safe_callback_reply(query, text: str, *, force_reply: bool = False) -> None:
+    chat_id = None
+    if query.from_user is not None:
+        chat_id = query.from_user.id
     message = query.message
+    if chat_id is None and message is not None and getattr(message, "chat", None) is not None:
+        chat_id = message.chat.id
+    if chat_id is None:
+        return
+    kwargs: dict = {"text": text, "reply_markup": ForceReply(selective=True) if force_reply else main_keyboard()}
     try:
-        if message is not None and hasattr(message, "reply_text"):
-            await message.reply_text(text)
-            return
+        await query.get_bot().send_message(chat_id=chat_id, **kwargs)
+        return
     except Exception:
         pass
-    chat_id = None
-    if message is not None and getattr(message, "chat", None) is not None:
-        chat_id = message.chat.id
-    elif query.from_user is not None:
-        chat_id = query.from_user.id
-    if chat_id is not None:
-        await query.get_bot().send_message(chat_id=chat_id, text=text)
+    try:
+        if message is not None and hasattr(message, "reply_text"):
+            await message.reply_text(text, reply_markup=kwargs["reply_markup"])
+    except Exception:
+        pass
 
 
 def api_error_text(response: httpx.Response) -> str:
@@ -760,24 +757,52 @@ async def show_catalog(
     )
 
 
+async def exit_catalog(message, context: ContextTypes.DEFAULT_TYPE) -> None:
+    context.user_data["catalog_stack"] = []
+    try:
+        await message.delete()
+    except Exception:
+        try:
+            await message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+    chat_id = getattr(message, "chat_id", None) or getattr(getattr(message, "chat", None), "id", None)
+    if chat_id is None:
+        return
+    await message.get_bot().send_message(
+        chat_id=chat_id,
+        text="تم الرجوع للقائمة الرئيسية.",
+        reply_markup=main_keyboard(),
+    )
+
+
 async def show_catalog_back(message, context: ContextTypes.DEFAULT_TYPE, telegram_id: int) -> None:
+    composing = context.user_data.pop("composing_request", None)
+    context.user_data.pop("title", None)
+    context.user_data.pop("attachments", None)
+    context.user_data.pop("description", None)
     stack = context.user_data.get("catalog_stack") or []
     if stack:
         stack.pop()
         context.user_data["catalog_stack"] = stack
-    prev = stack[-1] if stack else None
-    if prev is None:
+        prev = stack[-1] if stack else None
+        if prev is None:
+            await show_catalog(message, context, telegram_id, replace=True)
+            return
+        kind = str(prev.get("kind") or "")
+        item_id = int(prev.get("id") or 0)
+        if kind == "cat":
+            await show_catalog(message, context, telegram_id, category_id=item_id, parent=item_id, replace=True)
+            return
+        if kind == "sub":
+            await show_catalog(message, context, telegram_id, subcategory_id=item_id, parent=item_id, replace=True)
+            return
         await show_catalog(message, context, telegram_id, replace=True)
         return
-    kind = str(prev.get("kind") or "")
-    item_id = int(prev.get("id") or 0)
-    if kind == "cat":
-        await show_catalog(message, context, telegram_id, category_id=item_id, parent=item_id, replace=True)
+    if composing:
+        await show_catalog(message, context, telegram_id, replace=True)
         return
-    if kind == "sub":
-        await show_catalog(message, context, telegram_id, subcategory_id=item_id, parent=item_id, replace=True)
-        return
-    await show_catalog(message, context, telegram_id, replace=True)
+    await exit_catalog(message, context)
 
 
 async def create_catalog_request(
@@ -867,7 +892,7 @@ async def begin_manual_request(message, context: ContextTypes.DEFAULT_TYPE, *, r
     context.user_data["description"] = ""
     context.user_data.pop("submitting", None)
     context.user_data.pop("attachment_status_message_id", None)
-    await send_catalog_view(message, "ما عنوان الطلب؟", None, replace=replace)
+    await send_catalog_view(message, "ما عنوان الطلب؟", previous_markup(), replace=replace)
     return WAITING_TITLE
 
 
@@ -878,6 +903,16 @@ async def new_request(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         return ConversationHandler.END
     context.user_data["catalog_stack"] = []
     await show_catalog(update.message, context, update.effective_user.id)
+    return ConversationHandler.END
+
+
+async def manual_catalog_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if query is not None:
+        try:
+            await query.answer()
+        except Exception:
+            pass
     return ConversationHandler.END
 
 
@@ -1193,6 +1228,46 @@ def parse_callback(data: str) -> tuple[str, str]:
     return action, ref
 
 
+async def begin_revision(query, context: ContextTypes.DEFAULT_TYPE, action: str, number: str) -> int:
+    request_number = number
+    delivery_id = None
+    if action == "revfile":
+        request_number, sep, delivery_id = number.rpartition(":")
+        if not sep or not request_number:
+            try:
+                await query.answer("تعذر قراءة ملف التعديل. افتح طلباتي وأعد المحاولة.", show_alert=True)
+            except Exception:
+                pass
+            return ConversationHandler.END
+    prompt = (
+        "ما التعديل المطلوب على هذه الصورة؟ اكتب السبب هنا."
+        if delivery_id
+        else "ما التعديل المطلوب على الطلب بالكامل؟ اكتب السبب هنا."
+    )
+    try:
+        await query.answer(prompt[:180], show_alert=True)
+    except Exception:
+        try:
+            await query.answer()
+        except Exception:
+            pass
+    context.user_data["revision_number"] = request_number
+    if delivery_id:
+        context.user_data["revision_delivery_id"] = delivery_id
+    else:
+        context.user_data.pop("revision_delivery_id", None)
+    await safe_callback_reply(query, prompt, force_reply=True)
+    return WAITING_REVISION_REASON
+
+
+async def revision_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if query is None or not query.data:
+        return ConversationHandler.END
+    action, number = parse_callback(query.data)
+    return await begin_revision(query, context, action, number)
+
+
 async def api_error_alert(query, response: httpx.Response) -> None:
     await query.answer(api_error_text(response)[:200], show_alert=True)
 
@@ -1262,24 +1337,6 @@ async def client_request_action(update: Update, context: ContextTypes.DEFAULT_TY
                 )
             else:
                 await api_error_alert(query, response)
-            return
-
-        if action == "revision":
-            await query.answer()
-            context.user_data["revision_number"] = number
-            context.user_data.pop("revision_delivery_id", None)
-            await safe_callback_reply(query, "ما التعديل المطلوب على الطلب بالكامل؟ اكتب السبب هنا.")
-            return
-
-        if action == "revfile":
-            request_number, sep, delivery_id = number.rpartition(":")
-            if not sep:
-                await query.answer("تعذر قراءة ملف التعديل.", show_alert=True)
-                return
-            await query.answer()
-            context.user_data["revision_number"] = request_number
-            context.user_data["revision_delivery_id"] = delivery_id
-            await safe_callback_reply(query, "ما التعديل المطلوب على هذه الصورة؟ اكتب السبب هنا.")
             return
 
         if action == "receipt_hint":
@@ -1402,10 +1459,10 @@ async def quotation_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             return
 
 
-async def capture_revision_reason(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def capture_revision_reason(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user = update.effective_user
     if user is None or update.message is None or not update.message.text:
-        return
+        return ConversationHandler.END
 
     number = context.user_data.pop("revision_number", None)
     delivery_id = context.user_data.pop("revision_delivery_id", None)
@@ -1413,7 +1470,7 @@ async def capture_revision_reason(update: Update, context: ContextTypes.DEFAULT_
         if delivery_id:
             context.user_data["revision_delivery_id"] = delivery_id
             await update.message.reply_text("تعذر معرفة رقم الطلب. افتح طلباتي ثم اضغط تعديل الطلب بالكامل.")
-        return
+        return ConversationHandler.END
 
     payload = {
         "telegram_user_id": str(user.id),
@@ -1436,13 +1493,14 @@ async def capture_revision_reason(update: Update, context: ContextTypes.DEFAULT_
                 f"تعذر تسجيل طلب التعديل: {escape(api_error_text(response))}",
                 reply_markup=main_keyboard(),
             )
-            return
+            return ConversationHandler.END
 
     scope = "على الصورة" if delivery_id else "على الطلب بالكامل"
     await update.message.reply_text(
         f"تم تسجيل طلب التعديل {scope} للطلب #{escape(str(number))}.",
         reply_markup=main_keyboard(),
     )
+    return ConversationHandler.END
 
 
 async def capture_reject_reason(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1598,6 +1656,12 @@ async def route_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if isinstance(update, Update) and update.callback_query is not None:
+        try:
+            await update.callback_query.answer("تعذر تنفيذ الزر. أعد المحاولة أو افتح طلباتي.", show_alert=True)
+        except Exception:
+            pass
+        return
     message = update.effective_message if isinstance(update, Update) else None
     await notify_api_failure(message)
 
@@ -1617,6 +1681,13 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(
         CallbackQueryHandler(
+            revision_callback,
+            pattern=r"^(revision|revfile):",
+        ),
+        group=-2,
+    )
+    application.add_handler(
+        CallbackQueryHandler(
             catalog_action,
             pattern=r"^(cat|sub|pkg|per|more:|back)",
         ),
@@ -1625,7 +1696,7 @@ def main() -> None:
     application.add_handler(
         CallbackQueryHandler(
             client_request_action,
-            pattern=r"^(reqack|reqcancel|complete|revision|revfile|receipt_hint|more_reqs):",
+            pattern=r"^(reqack|reqcancel|complete|receipt_hint|more_reqs):",
         ),
         group=-1,
     )
@@ -1649,13 +1720,19 @@ def main() -> None:
                 CallbackQueryHandler(manual_from_catalog, pattern=r"^cman$"),
             ],
             states={
-                WAITING_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, capture_title)],
+                WAITING_TITLE: [
+                    CallbackQueryHandler(manual_catalog_back, pattern=r"^back$"),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, capture_title),
+                ],
                 WAITING_BODY: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, capture_body),
                     MessageHandler(
                         filters.PHOTO | filters.Document.ALL | filters.VOICE | filters.AUDIO,
                         capture_body,
                     ),
+                ],
+                WAITING_REVISION_REASON: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, capture_revision_reason),
                 ],
                 WAITING_SUPPORT: [MessageHandler(filters.TEXT & ~filters.COMMAND, capture_support)],
             },

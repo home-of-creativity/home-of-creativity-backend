@@ -3,18 +3,20 @@
   "name": "HOC Drive to Client Bot",
   "active": true,
   "url": "https://prodesign.app.n8n.cloud/workflow/CxOPvNpUiT2nrHUj",
-  "capturedAt": "2026-09-19T16:00:00Z",
+  "capturedAt": "2026-09-20T08:00:00Z",
   "settings": {
     "availableInMCP": true
   },
-  "activeVersionId": "c7eeb090-1fbe-4a84-b8c0-2dcee1225ae6",
+  "activeVersionId": "2c387539-fd95-47cb-93ad-2d105fa88880",
   "triggers": [
-    "Schedule: every 2 minutes (published) — POST /api/integrations/drive/poll",
-    "Google Drive fileCreated: present but disabled until a googleApi credential and Hoc Client folder ID are set in n8n"
+    "Webhook GET+POST /webhook/hoc-drive-file — GET health/poll kick; POST file id/name/parents → Laravel poll --file",
+    "Schedule: every minute — POST /api/integrations/drive/poll",
+    "Google Drive fileCreated: present but disabled until a googleApi credential is attached"
   ],
-  "action": "POST {HOC_API_URL}/api/integrations/drive/poll with X-N8N-Secret",
-  "laravel": "ops:poll-drive sends the file to the client Telegram bot (revision buttons, delivery rows). n8n does not send Telegram itself.",
+  "action": "POST {HOC_API_URL}/api/integrations/drive/poll with X-N8N-Secret and drive_file_id when known",
+  "laravel": "ops:poll-drive --file={id} sends that Drive file to the client Telegram bot immediately. Google changes.watch hits POST /api/integrations/drive/changed so an upload does not wait for the dashboard refresh button.",
   "env": ["HOC_API_URL", "HOC_N8N_SECRET"],
+  "webhook": "https://prodesign.app.n8n.cloud/webhook/hoc-drive-file",
   "placeholders": [
     "Google service account credential (same SA that reads Hoc Client)",
     "Hoc Client folder ID (GOOGLE_DRIVE_PARENT_FOLDER_ID)"

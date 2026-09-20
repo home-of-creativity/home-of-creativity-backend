@@ -350,8 +350,11 @@ class ClientOpsAutomationTest extends TestCase
 
         $partial = $request->fresh() ?? $request;
         $partial->forceFill([
+            'status' => RequestStatus::PaymentConfirmed,
             'allows_renewal' => true,
             'payment_plan' => 'partial',
+            'amount_total' => 400,
+            'amount_paid' => 200,
             'amount_remaining' => 200,
             'subscription_starts_at' => now()->subDays(10),
             'subscription_ends_at' => now()->addDays(10),
@@ -1160,6 +1163,42 @@ class ClientOpsAutomationTest extends TestCase
         $delivery = DriveDelivery::query()->where('drive_file_id', 'file-same')->first();
         $this->assertNotNull($delivery?->sent_at);
         $this->assertSame(md5('NEW'), $delivery?->content_hash);
+        Http::assertSent(fn (Request $httpRequest): bool => str_contains($httpRequest->url(), 'botclient-token/sendPhoto'));
+    }
+
+    public function test_drive_file_option_sends_that_file_immediately(): void
+    {
+        Cache::flush();
+        Storage::fake('local');
+        config(['services.telegram.bot_token' => 'client-token']);
+        Http::fake([
+            'https://api.telegram.org/*' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 91, 'photo' => [['file_id' => 'tg-photo']]],
+            ], 200),
+        ]);
+
+        $client = Client::factory()->create(['telegram_user_id' => 'tg-drive-now']);
+        ServiceRequest::factory()->for($client)->create([
+            'status' => RequestStatus::InProgress,
+            'google_drive_folder_id' => 'folder-now',
+        ]);
+
+        $this->mock(GoogleDriveClient::class, function ($mock): void {
+            $mock->shouldReceive('configured')->andReturn(true);
+            $mock->shouldReceive('fileMeta')->with('file-now')->andReturn([
+                'id' => 'file-now',
+                'name' => 'cover.png',
+                'mimeType' => 'image/png',
+                'parents' => ['folder-now'],
+            ]);
+            $mock->shouldReceive('listNewFiles')->never();
+            $mock->shouldReceive('downloadFile')->with('file-now')->andReturn('PNG');
+        });
+
+        $this->artisan('ops:poll-drive', ['--file' => 'file-now'])->assertSuccessful();
+
+        $this->assertNotNull(DriveDelivery::query()->where('drive_file_id', 'file-now')->value('sent_at'));
         Http::assertSent(fn (Request $httpRequest): bool => str_contains($httpRequest->url(), 'botclient-token/sendPhoto'));
     }
 

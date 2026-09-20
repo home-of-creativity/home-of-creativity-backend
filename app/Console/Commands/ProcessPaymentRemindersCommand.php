@@ -39,7 +39,8 @@ class ProcessPaymentRemindersCommand extends Command
                 continue;
             }
 
-            if ($reminder->kind === PaymentReminder::KIND_REMAINING && ! $request->hasRemainingBalance()) {
+            if ($reminder->kind === PaymentReminder::KIND_REMAINING
+                && ($request->isFullyPaid() || ! $request->hasRemainingBalance())) {
                 $reminder->forceFill(['completed_at' => now()])->save();
 
                 continue;

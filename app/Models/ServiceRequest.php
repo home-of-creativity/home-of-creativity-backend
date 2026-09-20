@@ -142,6 +142,15 @@ class ServiceRequest extends Model
         return $total > 0 && (float) ($this->amount_paid ?? 0) + 0.009 >= $total;
     }
 
+    public function needsPaymentCollection(): bool
+    {
+        if (in_array($this->status, [RequestStatus::Completed, RequestStatus::Cancelled], true)) {
+            return false;
+        }
+
+        return ! $this->isFullyPaid();
+    }
+
     public function paidPercent(): float
     {
         $total = (float) ($this->amount_total ?? $this->quotation_amount ?? 0);

@@ -42,6 +42,7 @@ return [
     'n8n' => [
         'webhook_url' => env('N8N_WEBHOOK_URL'),
         'webhook_secret' => env('N8N_WEBHOOK_SECRET'),
+        'drive_webhook_url' => env('N8N_DRIVE_WEBHOOK_URL'),
         'timeout' => (int) env('N8N_TIMEOUT', 12),
     ],
 
@@ -75,6 +76,7 @@ return [
     'google' => [
         'credentials_json' => env('GOOGLE_CREDENTIALS_JSON', env('GOOGLE_SERVICE_ACCOUNT_JSON', env('GOOGLE_APPLICATION_CREDENTIALS'))),
         'drive_parent_folder_id' => env('GOOGLE_DRIVE_PARENT_FOLDER_ID'),
+        'drive_watch_token' => env('GOOGLE_DRIVE_WATCH_TOKEN'),
         'calendar_id' => env('GOOGLE_CALENDAR_ID', 'primary'),
         'search_site_url' => env('GOOGLE_SEARCH_SITE_URL', 'https://hoc.agency/'),
         'search_sitemap_url' => env('GOOGLE_SEARCH_SITEMAP_URL', 'https://hoc.agency/sitemap.xml'),

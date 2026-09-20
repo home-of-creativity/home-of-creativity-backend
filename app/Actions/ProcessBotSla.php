@@ -163,7 +163,8 @@ class ProcessBotSla
             ->filter(function (ServiceRequest $request) use ($cutoff): bool {
                 $receipt = $request->files->first();
 
-                return $receipt instanceof RequestFile
+                return $request->needsPaymentCollection()
+                    && $receipt instanceof RequestFile
                     && $receipt->created_at !== null
                     && $receipt->created_at->lte($cutoff);
             })
@@ -341,10 +342,14 @@ class ProcessBotSla
         $receiptWaiting = ServiceRequest::query()
             ->where('status', RequestStatus::AwaitingPayment)
             ->whereDoesntHave('files', fn ($query) => $query->where('kind', 'payment_receipt'))
+            ->get()
+            ->filter(fn (ServiceRequest $request): bool => $request->needsPaymentCollection())
             ->count();
         $receiptsToReview = ServiceRequest::query()
             ->where('status', RequestStatus::AwaitingPayment)
             ->whereHas('files', fn ($query) => $query->where('kind', 'payment_receipt'))
+            ->get()
+            ->filter(fn (ServiceRequest $request): bool => $request->needsPaymentCollection())
             ->count();
         $openRevisions = ServiceRequest::query()->where('status', RequestStatus::RevisionRequested)->count();
 
@@ -375,7 +380,8 @@ class ProcessBotSla
             ->orderBy('id')
             ->limit($limit * 3)
             ->get()
-            ->filter(fn (ServiceRequest $request): bool => $this->enteredStatusAt($request, RequestStatus::AwaitingPayment)->lte($cutoff))
+            ->filter(fn (ServiceRequest $request): bool => $request->needsPaymentCollection()
+                && $this->enteredStatusAt($request, RequestStatus::AwaitingPayment)->lte($cutoff))
             ->take($limit)
             ->all();
     }

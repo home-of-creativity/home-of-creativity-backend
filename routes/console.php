@@ -20,5 +20,6 @@ Schedule::command('odoo:reconcile', ['--limit' => 500])->everyMinute()->withoutO
 Schedule::command('ops:process-reminders')->everyMinute()->timezone('Asia/Damascus')->withoutOverlapping();
 Schedule::command('ops:process-bot-sla')->everyMinute()->timezone('Asia/Damascus')->withoutOverlapping();
 Schedule::command('ops:poll-drive', ['--limit' => 200])->everyMinute()->timezone('Asia/Damascus')->withoutOverlapping();
+Schedule::command('ops:renew-drive-watch')->hourly()->timezone('Asia/Damascus')->withoutOverlapping();
 Schedule::command('ops:clickup-due-alerts')->hourly()->timezone('Asia/Damascus')->withoutOverlapping();
 Schedule::command('seo:submit-sitemap')->dailyAt('06:15')->timezone('Asia/Damascus')->withoutOverlapping();

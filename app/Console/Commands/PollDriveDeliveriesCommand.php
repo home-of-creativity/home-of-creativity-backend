@@ -29,7 +29,7 @@ class PollDriveDeliveriesCommand extends Command
 
     private const MAX_FILE_BYTES = 20 * 1024 * 1024;
 
-    protected $signature = 'ops:poll-drive {--limit=200} {--request=}';
+    protected $signature = 'ops:poll-drive {--limit=200} {--request=} {--file=}';
 
     protected $description = 'Send new Google Drive files from request folders to the client bot.';
 
@@ -52,6 +52,21 @@ class PollDriveDeliveriesCommand extends Command
         }
 
         $limit = max(1, (int) $this->option('limit'));
+        $fileId = trim((string) $this->option('file'));
+        if ($fileId !== '') {
+            $this->deliverNamedFile(
+                $drive,
+                $telegram,
+                $ensureRequestDriveFolder,
+                $notifyEmployees,
+                $alertTelegramDeliveryFailure,
+                $transitions,
+                $fileId,
+            );
+
+            return self::SUCCESS;
+        }
+
         $target = $this->targetedRequest($ensureRequestDriveFolder);
         if ($target !== null) {
             $requests = $target;
@@ -85,6 +100,73 @@ class PollDriveDeliveriesCommand extends Command
         }
 
         return self::SUCCESS;
+    }
+
+    private function deliverNamedFile(
+        GoogleDriveClient $drive,
+        TelegramNotifier $telegram,
+        EnsureRequestDriveFolder $ensureRequestDriveFolder,
+        NotifyEmployees $notifyEmployees,
+        AlertTelegramDeliveryFailure $alertTelegramDeliveryFailure,
+        RequestStatusTransitionService $transitions,
+        string $fileId,
+    ): bool {
+        $meta = $drive->fileMeta($fileId);
+        if ($meta === null) {
+            Log::warning('Drive poll skipped missing file.', ['file' => $fileId]);
+
+            return false;
+        }
+
+        $request = $this->requestForFile($drive, $ensureRequestDriveFolder, $meta);
+        if ($request === null) {
+            Log::info('Drive file has no matching request folder.', [
+                'file' => $fileId,
+                'parents' => $meta['parents'] ?? [],
+            ]);
+
+            return false;
+        }
+
+        return $this->deliverFile(
+            $drive,
+            $telegram,
+            $notifyEmployees,
+            $alertTelegramDeliveryFailure,
+            $transitions,
+            $request,
+            $meta,
+        );
+    }
+
+    /**
+     * @param  array{id: string, name: string, mimeType: string, modifiedTime?: ?string, md5Checksum?: ?string, size?: ?int, parents?: list<string>}  $file
+     */
+    private function requestForFile(
+        GoogleDriveClient $drive,
+        EnsureRequestDriveFolder $ensureRequestDriveFolder,
+        array $file,
+    ): ?ServiceRequest {
+        $target = $this->targetedRequest($ensureRequestDriveFolder);
+        if ($target !== null && $target->isNotEmpty()) {
+            return $target->first();
+        }
+
+        $cursor = (string) (($file['parents'][0] ?? ''));
+        for ($i = 0; $i < 6 && $cursor !== ''; $i++) {
+            $match = ServiceRequest::query()
+                ->with('client')
+                ->where('google_drive_folder_id', $cursor)
+                ->orderByDesc('id')
+                ->first();
+            if ($match instanceof ServiceRequest) {
+                return $match;
+            }
+
+            $cursor = (string) ($drive->parentId($cursor) ?? '');
+        }
+
+        return null;
     }
 
     /**

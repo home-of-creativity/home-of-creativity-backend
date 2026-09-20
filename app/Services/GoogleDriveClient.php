@@ -115,6 +115,172 @@ class GoogleDriveClient
         }
     }
 
+    /**
+     * @return array{id: string, name: string, mimeType: string, modifiedTime: ?string, md5Checksum: ?string, size: ?int, parents: list<string>}|null
+     */
+    public function fileMeta(string $fileId): ?array
+    {
+        if (! $this->configured() || $fileId === '') {
+            return null;
+        }
+
+        $token = $this->auth->accessToken();
+        if ($token === null) {
+            return null;
+        }
+
+        try {
+            $response = Http::withToken($token)
+                ->timeout(15)
+                ->connectTimeout(5)
+                ->acceptJson()
+                ->get(self::API.'/files/'.$fileId, [
+                    'fields' => 'id,name,mimeType,modifiedTime,md5Checksum,size,parents,shortcutDetails',
+                    'supportsAllDrives' => 'true',
+                ]);
+
+            if (! $response->successful()) {
+                Log::warning('Google Drive fileMeta failed.', [
+                    'file_id' => $fileId,
+                    'status' => $response->status(),
+                ]);
+
+                return null;
+            }
+
+            $normalized = $this->normalizeListedFile($response->json() ?? []);
+            if ($normalized === null) {
+                return null;
+            }
+
+            $parents = $response->json('parents');
+            $normalized['parents'] = is_array($parents)
+                ? array_values(array_filter(array_map(strval(...), $parents)))
+                : [];
+
+            return $normalized;
+        } catch (Throwable $exception) {
+            Log::warning('Google Drive fileMeta exception.', [
+                'file_id' => $fileId,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
+    public function parentId(string $folderId): ?string
+    {
+        if (! $this->configured() || $folderId === '') {
+            return null;
+        }
+
+        $token = $this->auth->accessToken();
+        if ($token === null) {
+            return null;
+        }
+
+        return $this->immediateParentId($token, $folderId);
+    }
+
+    public function startPageToken(): ?string
+    {
+        if (! $this->configured()) {
+            return null;
+        }
+
+        $token = $this->auth->accessToken();
+        if ($token === null) {
+            return null;
+        }
+
+        $response = Http::withToken($token)
+            ->timeout(15)
+            ->connectTimeout(5)
+            ->acceptJson()
+            ->get(self::API.'/changes/startPageToken', [
+                'supportsAllDrives' => 'true',
+            ]);
+
+        if (! $response->successful()) {
+            return $this->fail($this->googleErrorMessage($response, 'Drive startPageToken failed.'));
+        }
+
+        $pageToken = $response->json('startPageToken');
+
+        return filled($pageToken) ? (string) $pageToken : null;
+    }
+
+    /**
+     * @return array{id: string, resourceId: string, expiration: ?string}|null
+     */
+    public function watchChanges(string $pageToken, string $address, string $channelId, string $channelToken): ?array
+    {
+        if (! $this->configured() || $pageToken === '' || $address === '') {
+            return null;
+        }
+
+        $token = $this->auth->accessToken();
+        if ($token === null) {
+            return null;
+        }
+
+        $response = Http::withToken($token)
+            ->timeout(20)
+            ->connectTimeout(5)
+            ->acceptJson()
+            ->asJson()
+            ->post(self::API.'/changes/watch?'.http_build_query([
+                'pageToken' => $pageToken,
+                'supportsAllDrives' => 'true',
+                'includeItemsFromAllDrives' => 'true',
+            ]), [
+                'id' => $channelId,
+                'type' => 'web_hook',
+                'address' => $address,
+                'token' => $channelToken,
+                'expiration' => (string) (now()->addHours(20)->timestamp * 1000),
+            ]);
+
+        if (! $response->successful()) {
+            return $this->fail($this->googleErrorMessage($response, 'Drive changes.watch failed.'));
+        }
+
+        $id = $response->json('id');
+        $resourceId = $response->json('resourceId');
+        if (! filled($id) || ! filled($resourceId)) {
+            return $this->fail('Drive watch response missing channel ids.');
+        }
+
+        return [
+            'id' => (string) $id,
+            'resourceId' => (string) $resourceId,
+            'expiration' => filled($response->json('expiration')) ? (string) $response->json('expiration') : null,
+        ];
+    }
+
+    public function stopChannel(string $channelId, string $resourceId): void
+    {
+        if (! $this->configured() || $channelId === '' || $resourceId === '') {
+            return;
+        }
+
+        $token = $this->auth->accessToken();
+        if ($token === null) {
+            return;
+        }
+
+        Http::withToken($token)
+            ->timeout(15)
+            ->connectTimeout(5)
+            ->acceptJson()
+            ->asJson()
+            ->post(self::API.'/channels/stop', [
+                'id' => $channelId,
+                'resourceId' => $resourceId,
+            ]);
+    }
+
     public function downloadFile(string $fileId): ?string
     {
         if (! $this->configured() || $fileId === '') {

@@ -23,7 +23,7 @@ class SchedulePaymentReminders
 
         $duration = max($starts->diffInSeconds($ends), 1);
 
-        if ($request->hasRemainingBalance() && $request->payment_plan === 'partial') {
+        if ($request->needsPaymentCollection() && $request->hasRemainingBalance() && $request->payment_plan === 'partial') {
             $this->ensureReminder(
                 $request,
                 PaymentReminder::KIND_REMAINING,
