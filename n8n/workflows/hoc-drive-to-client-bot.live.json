@@ -3,22 +3,22 @@
   "name": "HOC Drive to Client Bot",
   "active": true,
   "url": "https://prodesign.app.n8n.cloud/workflow/CxOPvNpUiT2nrHUj",
-  "capturedAt": "2026-09-20T08:00:00Z",
+  "capturedAt": "2026-09-20T08:16:00Z",
   "settings": {
     "availableInMCP": true
   },
-  "activeVersionId": "2c387539-fd95-47cb-93ad-2d105fa88880",
+  "activeVersionId": "9817334b-3c06-4ac5-bf20-78e03dd43bda",
   "triggers": [
+    "Google Drive OAuth (Google Drive account) watches folder HOC Clients: fileCreated, fileUpdated, folderCreated",
     "Webhook GET+POST /webhook/hoc-drive-file — GET health/poll kick; POST file id/name/parents → Laravel poll --file",
-    "Schedule: every minute — POST /api/integrations/drive/poll",
-    "Google Drive fileCreated: present but disabled until a googleApi credential is attached"
+    "Schedule: every minute — POST /api/integrations/drive/poll (covers files inside company subfolders; n8n cannot watch nested folders)"
   ],
-  "action": "POST {HOC_API_URL}/api/integrations/drive/poll with X-N8N-Secret and drive_file_id when known",
-  "laravel": "ops:poll-drive --file={id} sends that Drive file to the client Telegram bot immediately. Google changes.watch hits POST /api/integrations/drive/changed so an upload does not wait for the dashboard refresh button.",
+  "action": "POST {HOC_API_URL}/api/integrations/drive/poll with X-N8N-Secret. Folders send drive_folder_id only; files send drive_file_id.",
+  "laravel": "ops:poll-drive --file={id} sends that Drive file to the client Telegram bot. Google changes.watch hits POST /api/integrations/drive/changed so an upload does not wait for the dashboard refresh button.",
   "env": ["HOC_API_URL", "HOC_N8N_SECRET"],
   "webhook": "https://prodesign.app.n8n.cloud/webhook/hoc-drive-file",
-  "placeholders": [
-    "Google service account credential (same SA that reads Hoc Client)",
-    "Hoc Client folder ID (GOOGLE_DRIVE_PARENT_FOLDER_ID)"
-  ]
+  "google": {
+    "credential": "Google Drive account",
+    "folderName": "HOC Clients"
+  }
 }

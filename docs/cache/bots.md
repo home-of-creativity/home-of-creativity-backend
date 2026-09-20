@@ -31,7 +31,7 @@ Quotation: approve or reject first; after reject the client picks غالي / ت�
 
 ## Bot SLA (`ops:process-bot-sla`)
 
-Laravel decides eligibility (every minute, Asia/Damascus, `ops_follow_ups` once-per-kind). Conversation stays in the Python bots — catalog, approve/reject, receipt upload, support chat, and reject reasons are **not** n8n canvases. n8n may retry a staff/client text via `POST /integrations/telegram/notify`, or kick Drive delivery via `POST /integrations/drive/poll` (published **HOC Drive to Client Bot**: webhook `hoc-drive-file`, every-minute backup; Google Drive fileCreated stays disabled until a Google credential is attached; Laravel still sends the file to the client bot).
+Laravel decides eligibility (every minute, Asia/Damascus, `ops_follow_ups` once-per-kind). Conversation stays in the Python bots — catalog, approve/reject, receipt upload, support chat, and reject reasons are **not** n8n canvases. n8n may retry a staff/client text via `POST /integrations/telegram/notify`, or kick Drive delivery via `POST /integrations/drive/poll` (published **HOC Drive to Client Bot**: OAuth **Google Drive account** watches **HOC Clients** for fileCreated / fileUpdated / folderCreated, plus webhook `hoc-drive-file` and an every-minute backup for files inside company subfolders; Laravel still sends the file to the client bot).
 
 | Gap | After | Who | What |
 | --- | --- | --- | --- |
