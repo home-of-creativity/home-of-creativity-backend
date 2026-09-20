@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Actions\ApplyClickUpMapping;
+use App\Actions\ProcessDriveChangeNotification;
+use App\Enums\RequestStatus;
 use App\Http\Requests\ClickUpMappingRequest;
 use App\Http\Requests\ClickUpTasksRequest;
 use App\Http\Requests\DrivePollRequest;
@@ -13,6 +15,7 @@ use App\Http\Resources\ServiceRequestResource;
 use App\Models\OpsSetting;
 use App\Models\ServiceRequest;
 use App\Services\ClickUpClient;
+use App\Services\GoogleDriveClient;
 use App\Services\OdooClient;
 use App\Services\TelegramNotifier;
 use App\Support\ResolveServiceRequest;
@@ -212,7 +215,7 @@ class IntegrationController extends Controller
         ]);
     }
 
-    public function pollDrive(DrivePollRequest $request, ResolveServiceRequest $resolveServiceRequest): JsonResponse
+    public function pollDrive(DrivePollRequest $request, ResolveServiceRequest $resolveServiceRequest, GoogleDriveClient $drive): JsonResponse
     {
         $number = trim((string) ($request->validated('request_number') ?? ''));
         $folderId = trim((string) ($request->validated('drive_folder_id') ?? ''));
@@ -233,9 +236,18 @@ class IntegrationController extends Controller
                 ->first();
         }
 
+        if ($serviceRequest === null && $folderId !== '') {
+            $serviceRequest = $this->requestInsideDriveFolder($drive, $folderId);
+        }
+
         $fileId = trim((string) ($request->validated('drive_file_id') ?? ''));
         $parentFolderId = trim((string) config('services.google.drive_parent_folder_id'), " \t\n\r\"'");
         $insideHocClient = $folderId === '' || $parentFolderId === '' || $folderId === $parentFolderId || $serviceRequest !== null;
+
+        if (! $insideHocClient && $folderId !== '' && $fileId === '') {
+            $meta = $drive->fileMeta($folderId);
+            $insideHocClient = is_array($meta) && $drive->isUnderParentFolder($meta);
+        }
 
         if ($fileId === '' && $serviceRequest === null && $folderId !== '' && ! $insideHocClient) {
             Log::info('n8n Drive poll ignored a folder outside Hoc Client.', [
@@ -284,7 +296,7 @@ class IntegrationController extends Controller
         ]);
     }
 
-    public function driveChanged(Request $request): JsonResponse
+    public function driveChanged(Request $request, ProcessDriveChangeNotification $processDriveChangeNotification): JsonResponse
     {
         $expected = (string) (OpsSetting::getValue('drive_watch_token') ?: config('services.google.drive_watch_token'));
         $provided = (string) $request->header('X-Goog-Channel-Token', '');
@@ -301,17 +313,46 @@ class IntegrationController extends Controller
         }
 
         $fileId = trim((string) ($request->input('drive_file_id') ?? $request->input('id') ?? ''));
-        $arguments = ['--limit' => 200];
-        if ($fileId !== '') {
-            $arguments['--file'] = $fileId;
-        }
-
-        Artisan::call('ops:poll-drive', $arguments);
+        $result = $processDriveChangeNotification->handle($fileId !== '' ? $fileId : null);
 
         return response()->json([
-            'data' => ['polled' => true, 'drive_file_id' => $fileId !== '' ? $fileId : null],
+            'data' => [
+                'polled' => $result['polled'],
+                'drive_file_id' => $result['drive_file_ids'][0] ?? null,
+                'drive_file_ids' => $result['drive_file_ids'],
+                'fallback' => $result['fallback'],
+            ],
             'message' => 'Drive change polled for the client bot.',
         ]);
+    }
+
+    private function requestInsideDriveFolder(GoogleDriveClient $drive, string $folderId): ?ServiceRequest
+    {
+        $candidates = ServiceRequest::query()
+            ->whereNotNull('google_drive_folder_id')
+            ->where('google_drive_folder_id', '!=', '')
+            ->whereIn('status', [
+                RequestStatus::PaymentConfirmed,
+                RequestStatus::InProgress,
+                RequestStatus::RevisionRequested,
+                RequestStatus::ReadyForReview,
+            ])
+            ->orderByDesc('id')
+            ->limit(200)
+            ->get();
+
+        foreach ($candidates as $candidate) {
+            $cursor = (string) $candidate->google_drive_folder_id;
+            for ($i = 0; $i < 8 && $cursor !== ''; $i++) {
+                if ($cursor === $folderId) {
+                    return $candidate;
+                }
+
+                $cursor = (string) ($drive->parentId($cursor) ?? '');
+            }
+        }
+
+        return null;
     }
 
     private function placeholder(string $number, string $service): JsonResponse

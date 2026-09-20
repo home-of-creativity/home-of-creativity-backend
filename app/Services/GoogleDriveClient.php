@@ -322,6 +322,82 @@ class GoogleDriveClient
             ]);
     }
 
+    /**
+     * @return array{newPageToken: string, files: list<array{id: string, name: string, mimeType: string, parents: list<string>}>}|null
+     */
+    public function listChanges(string $pageToken): ?array
+    {
+        if (! $this->configured() || $pageToken === '') {
+            return null;
+        }
+
+        $token = $this->auth->accessToken();
+        if ($token === null) {
+            return null;
+        }
+
+        $files = [];
+        $cursor = $pageToken;
+        $newPageToken = $pageToken;
+
+        for ($page = 0; $page < 5 && $cursor !== ''; $page++) {
+            $response = Http::withToken($token)
+                ->timeout(20)
+                ->connectTimeout(5)
+                ->acceptJson()
+                ->get(self::API.'/changes', [
+                    'pageToken' => $cursor,
+                    'pageSize' => 100,
+                    'supportsAllDrives' => 'true',
+                    'includeItemsFromAllDrives' => 'true',
+                    'fields' => 'nextPageToken,newStartPageToken,changes(removed,fileId,file(id,name,mimeType,parents,trashed))',
+                ]);
+
+            if (! $response->successful()) {
+                return $this->fail($this->googleErrorMessage($response, 'Drive changes.list failed.'));
+            }
+
+            foreach ($response->json('changes') ?? [] as $change) {
+                if (! is_array($change) || ($change['removed'] ?? false) === true) {
+                    continue;
+                }
+
+                $file = is_array($change['file'] ?? null) ? $change['file'] : [];
+                if (($file['trashed'] ?? false) === true) {
+                    continue;
+                }
+
+                $id = (string) ($file['id'] ?? $change['fileId'] ?? '');
+                if ($id === '') {
+                    continue;
+                }
+
+                $parents = $file['parents'] ?? [];
+                $files[] = [
+                    'id' => $id,
+                    'name' => (string) ($file['name'] ?? ''),
+                    'mimeType' => (string) ($file['mimeType'] ?? ''),
+                    'parents' => is_array($parents)
+                        ? array_values(array_filter(array_map(strval(...), $parents)))
+                        : [],
+                ];
+            }
+
+            $next = $response->json('nextPageToken');
+            $start = $response->json('newStartPageToken');
+            if (filled($start)) {
+                $newPageToken = (string) $start;
+            }
+
+            $cursor = filled($next) ? (string) $next : '';
+        }
+
+        return [
+            'newPageToken' => $newPageToken,
+            'files' => $files,
+        ];
+    }
+
     public function downloadFile(string $fileId): ?string
     {
         if (! $this->configured() || $fileId === '') {

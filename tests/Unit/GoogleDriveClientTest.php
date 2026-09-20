@@ -158,4 +158,38 @@ class GoogleDriveClientTest extends TestCase
             'parents' => ['other-folder'],
         ]));
     }
+
+    public function test_list_changes_returns_files_and_the_new_page_token(): void
+    {
+        $auth = Mockery::mock(GoogleServiceAccount::class);
+        $auth->shouldReceive('configured')->andReturn(true);
+        $auth->shouldReceive('configurationError')->andReturn(null);
+        $auth->shouldReceive('accessToken')->andReturn('drive-token');
+        config(['services.google.drive_parent_folder_id' => 'root-hoc']);
+
+        Http::fake([
+            'https://www.googleapis.com/drive/v3/changes*' => Http::response([
+                'newStartPageToken' => 'page-9',
+                'changes' => [
+                    ['removed' => true, 'fileId' => 'gone'],
+                    [
+                        'fileId' => 'file-1',
+                        'file' => [
+                            'id' => 'file-1',
+                            'name' => 'logo.png',
+                            'mimeType' => 'image/png',
+                            'parents' => ['task-folder'],
+                            'trashed' => false,
+                        ],
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $listed = (new GoogleDriveClient($auth))->listChanges('page-1');
+
+        $this->assertSame('page-9', $listed['newPageToken'] ?? null);
+        $this->assertSame('file-1', $listed['files'][0]['id'] ?? null);
+        $this->assertSame(['task-folder'], $listed['files'][0]['parents'] ?? null);
+    }
 }
