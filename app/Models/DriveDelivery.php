@@ -157,6 +157,12 @@ class DriveDelivery extends Model
             return ! hash_equals((string) $this->content_hash, $localHash);
         }
 
+        // First hash snapshot after a file was already delivered: record it,
+        // do not treat the missing column as a content change.
+        if ($localHash !== null && ! $this->content_hash) {
+            return false;
+        }
+
         if ($this->sameSecond($modifiedTime)) {
             return false;
         }
@@ -164,7 +170,10 @@ class DriveDelivery extends Model
         if ($modifiedTime !== null) {
             $remote = Carbon::parse($modifiedTime)->utc()->startOfSecond();
             $stored = $this->drive_modified_at?->copy()->utc()->startOfSecond();
-            if ($stored === null || $remote->gt($stored)) {
+            if ($stored === null) {
+                return false;
+            }
+            if ($remote->gt($stored)) {
                 return true;
             }
         }

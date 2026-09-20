@@ -235,8 +235,17 @@ class PollDriveDeliveriesCommand extends Command
 
         $remoteHash = filled($file['md5Checksum'] ?? null) ? (string) $file['md5Checksum'] : null;
         $modifiedTime = filled($file['modifiedTime'] ?? null) ? (string) $file['modifiedTime'] : null;
+        $driveIdChanged = $delivery->exists
+            && filled($delivery->drive_file_id)
+            && $delivery->drive_file_id !== $fileId;
 
-        if ($delivery->exists && ! $delivery->needsResend($modifiedTime, $remoteHash, null)) {
+        if ($delivery->exists && ! $driveIdChanged && ! $delivery->needsResend($modifiedTime, $remoteHash, null)) {
+            if ($delivery->drive_modified_at === null && $modifiedTime) {
+                $delivery->forceFill([
+                    'drive_modified_at' => Carbon::parse($modifiedTime),
+                ])->save();
+            }
+
             return false;
         }
 
@@ -270,6 +279,13 @@ class PollDriveDeliveriesCommand extends Command
 
         $hash = md5($binary);
         if ($delivery->exists && ! $delivery->needsResend($modifiedTime, $remoteHash, $hash)) {
+            $delivery->forceFill([
+                'drive_file_id' => $fileId,
+                'name' => $fileName !== '' ? $fileName : $delivery->name,
+                'content_hash' => $delivery->content_hash ?: $hash,
+                'drive_modified_at' => $modifiedTime ? Carbon::parse($modifiedTime) : ($delivery->drive_modified_at ?? now()),
+            ])->save();
+
             return false;
         }
 

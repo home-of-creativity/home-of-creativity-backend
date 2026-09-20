@@ -1009,6 +1009,56 @@ class ClientOpsAutomationTest extends TestCase
         Http::assertNotSent(fn (Request $httpRequest): bool => str_contains($httpRequest->url(), 'api.telegram.org'));
     }
 
+    public function test_drive_poll_does_not_resend_already_sent_files_missing_version_columns(): void
+    {
+        Cache::flush();
+        Storage::fake('local');
+        config(['services.telegram.bot_token' => 'client-token']);
+        Http::fake([
+            'https://api.telegram.org/*' => Http::response([
+                'ok' => true,
+                'result' => ['message_id' => 78],
+            ], 200),
+        ]);
+
+        $client = Client::factory()->create(['telegram_user_id' => 'tg-legacy-hash']);
+        $request = ServiceRequest::factory()->for($client)->create([
+            'status' => RequestStatus::InProgress,
+            'google_drive_folder_id' => 'folder-legacy',
+        ]);
+        DriveDelivery::query()->create([
+            'request_id' => $request->id,
+            'drive_file_id' => 'file-legacy',
+            'name' => 'logo.png',
+            'mime_type' => 'image/png',
+            'content_hash' => null,
+            'drive_modified_at' => null,
+            'sent_at' => now()->subMinute(),
+        ]);
+
+        $this->mock(GoogleDriveClient::class, function ($mock): void {
+            $mock->shouldReceive('configured')->andReturn(true);
+            $mock->shouldReceive('isHocClientRootId')->andReturn(false);
+            $mock->shouldReceive('listNewFiles')->andReturn([
+                [
+                    'id' => 'file-legacy',
+                    'name' => 'logo.png',
+                    'mimeType' => 'image/png',
+                    'modifiedTime' => now()->toIso8601String(),
+                    'md5Checksum' => 'google-md5',
+                ],
+            ]);
+            $mock->shouldReceive('downloadFile')->never();
+        });
+
+        $this->artisan('ops:poll-drive')->assertSuccessful();
+
+        $delivery = DriveDelivery::query()->where('drive_file_id', 'file-legacy')->first();
+        $this->assertNotNull($delivery?->sent_at);
+        $this->assertNotNull($delivery?->drive_modified_at);
+        Http::assertNotSent(fn (Request $httpRequest): bool => str_contains($httpRequest->url(), 'sendPhoto') || str_contains($httpRequest->url(), 'sendDocument'));
+    }
+
     public function test_drive_folder_ignores_telegram_placeholder_company(): void
     {
         $client = Client::factory()->create([
