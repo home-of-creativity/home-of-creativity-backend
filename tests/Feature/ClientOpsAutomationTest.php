@@ -1126,10 +1126,15 @@ class ClientOpsAutomationTest extends TestCase
         );
 
         $keyboard = $delivery->clientRevisionKeyboard('12');
+        $this->assertCount(1, $keyboard['inline_keyboard']);
         $this->assertSame('revfile:12:'.$delivery->id, $keyboard['inline_keyboard'][0][0]['callback_data']);
-        $this->assertSame('okfile:12:'.$delivery->id, $keyboard['inline_keyboard'][1][0]['callback_data']);
-        $this->assertSame('revision:12', $keyboard['inline_keyboard'][2][0]['callback_data']);
-        $this->assertSame('complete:12', $keyboard['inline_keyboard'][3][0]['callback_data']);
+        $this->assertSame('okfile:12:'.$delivery->id, $keyboard['inline_keyboard'][0][1]['callback_data']);
+        $this->assertSame('✏️ تعديل', $keyboard['inline_keyboard'][0][0]['text']);
+        $this->assertSame('✅ موافقة', $keyboard['inline_keyboard'][0][1]['text']);
+        $this->assertSame(
+            [['text' => '✅ اعتماد التسليم', 'callback_data' => 'complete:12']],
+            $delivery::clientReviewKeyboard('12')['inline_keyboard'][0],
+        );
     }
 
     public function test_revision_sends_the_image_and_reason_to_staff(): void
@@ -1229,7 +1234,9 @@ class ClientOpsAutomationTest extends TestCase
                 'drive_delivery_id' => $delivery->id,
             ])
             ->assertOk()
-            ->assertJsonPath('data.approved', true);
+            ->assertJsonPath('data.approved', true)
+            ->assertJsonPath('data.remaining_unapproved', 0)
+            ->assertJsonPath('data.can_complete', true);
 
         $this->assertNotNull($delivery->fresh()?->client_approved_at);
         Http::assertSent(function (Request $httpRequest): bool {
@@ -1247,6 +1254,33 @@ class ClientOpsAutomationTest extends TestCase
             ])
             ->assertOk()
             ->assertJsonPath('data.status', 'completed');
+    }
+
+    public function test_approving_the_last_drive_file_opens_review(): void
+    {
+        Http::fake();
+        $client = Client::factory()->create(['telegram_user_id' => 'tg-okfile-last']);
+        $request = ServiceRequest::factory()->for($client)->create([
+            'status' => RequestStatus::InProgress,
+            'title' => 'هوية',
+        ]);
+        $delivery = DriveDelivery::query()->create([
+            'request_id' => $request->id,
+            'drive_file_id' => 'file-last',
+            'name' => 'final.png',
+            'mime_type' => 'image/png',
+            'sent_at' => now(),
+        ]);
+
+        $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
+            ->postJson("/api/bot/telegram/requests/{$request->number}/approve-file", [
+                'telegram_user_id' => 'tg-okfile-last',
+                'drive_delivery_id' => $delivery->id,
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.can_complete', true);
+
+        $this->assertSame(RequestStatus::ReadyForReview, $request->fresh()?->status);
     }
 
     public function test_drive_file_opens_request_for_client_review(): void

@@ -62,23 +62,21 @@ class DriveDelivery extends Model
     /**
      * @return array{inline_keyboard: list<list<array{text: string, callback_data: string}>>}
      */
-    public function clientRevisionKeyboard(string $requestRef, bool $canComplete = true): array
+    public function clientRevisionKeyboard(string $requestRef, bool $canComplete = false): array
     {
-        $review = self::clientReviewKeyboard($requestRef, $canComplete);
-
-        $rows = [
-            [['text' => '✏️ تعديل هذه الصورة', 'callback_data' => 'revfile:'.$requestRef.':'.$this->id]],
+        $row = [
+            ['text' => '✏️ تعديل', 'callback_data' => 'revfile:'.$requestRef.':'.$this->id],
         ];
         if ($this->client_approved_at === null) {
-            $rows[] = [['text' => '✅ أوافق على هذه الصورة', 'callback_data' => 'okfile:'.$requestRef.':'.$this->id]];
+            $row[] = ['text' => '✅ موافقة', 'callback_data' => 'okfile:'.$requestRef.':'.$this->id];
         }
 
-        return [
-            'inline_keyboard' => [
-                ...$rows,
-                ...$review['inline_keyboard'],
-            ],
-        ];
+        $rows = [$row];
+        if ($canComplete) {
+            $rows[] = [['text' => '✅ اعتماد التسليم', 'callback_data' => 'complete:'.$requestRef]];
+        }
+
+        return ['inline_keyboard' => $rows];
     }
 
     /**
@@ -86,14 +84,15 @@ class DriveDelivery extends Model
      */
     public static function clientReviewKeyboard(string $requestRef, bool $canComplete = true): array
     {
-        $rows = [
-            [['text' => '🔁 تعديل الطلب بالكامل', 'callback_data' => 'revision:'.$requestRef]],
-        ];
-        if ($canComplete) {
-            $rows[] = [['text' => '✅ اعتماد التسليم', 'callback_data' => 'complete:'.$requestRef]];
+        if (! $canComplete) {
+            return ['inline_keyboard' => []];
         }
 
-        return ['inline_keyboard' => $rows];
+        return [
+            'inline_keyboard' => [
+                [['text' => '✅ اعتماد التسليم', 'callback_data' => 'complete:'.$requestRef]],
+            ],
+        ];
     }
 
     public static function normalizedName(string $name): string
@@ -135,10 +134,10 @@ class DriveDelivery extends Model
     {
         $name = (string) ($this->name ?: 'ملف');
         if ($this->wasAlreadySent()) {
-            return 'تم تعديل الملف «'.$name.'» للطلب #'.$requestRef." وأُرسل من جديد.\nإذا كانت جاهزة اضغط أوافق على هذه الصورة، أو اطلب تعديلاً.";
+            return 'تم تعديل الملف «'.$name.'» للطلب #'.$requestRef." وأُرسل من جديد.\nإذا كانت جاهزة اضغط موافقة، أو اطلب تعديلاً.";
         }
 
-        return 'ملف جديد للطلب #'.$requestRef.': '.$name."\nإذا كانت جاهزة اضغط أوافق على هذه الصورة، أو اطلب تعديلاً.";
+        return 'ملف جديد للطلب #'.$requestRef.': '.$name."\nإذا كانت جاهزة اضغط موافقة، أو اطلب تعديلاً.";
     }
 
     /**

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import httpx
 from dotenv import load_dotenv
-from telegram import ForceReply, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, Update
 from telegram.error import BadRequest, NetworkError, TimedOut
 from telegram.ext import (
     Application,
@@ -43,6 +43,7 @@ BOT_SECRET = os.environ.get("TELEGRAM_BOT_SECRET", "")
 BTN_NEW = "🆕 طلب جديد"
 BTN_MY = "📋 طلباتي"
 BTN_SUPPORT = "💬 دعم"
+SUPPORT_PHONE = "0947823488"
 BTN_SUBMIT = "✅ تم الإرسال"
 NAV_BUTTONS = {BTN_NEW, BTN_MY, BTN_SUPPORT}
 MAX_ATTACHMENTS = 5
@@ -496,7 +497,7 @@ async def consume_pending_followup(update: Update, context: ContextTypes.DEFAULT
     return False
 
 
-async def safe_callback_reply(query, text: str, *, force_reply: bool = False) -> None:
+async def safe_callback_reply(query, text: str, markup=None) -> None:
     chat_id = None
     if query.from_user is not None:
         chat_id = query.from_user.id
@@ -505,15 +506,15 @@ async def safe_callback_reply(query, text: str, *, force_reply: bool = False) ->
         chat_id = message.chat.id
     if chat_id is None:
         return
-    kwargs: dict = {"text": text, "reply_markup": ForceReply(selective=True) if force_reply else main_keyboard()}
+    reply_markup = markup if markup is not None else main_keyboard()
     try:
-        await query.get_bot().send_message(chat_id=chat_id, **kwargs)
+        await query.get_bot().send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
         return
     except Exception:
         pass
     try:
         if message is not None and hasattr(message, "reply_text"):
-            await message.reply_text(text, reply_markup=kwargs["reply_markup"])
+            await message.reply_text(text, reply_markup=reply_markup)
     except Exception:
         pass
 
@@ -1107,8 +1108,6 @@ async def list_requests(update: Update, context: ContextTypes.DEFAULT_TYPE, offs
 
         rows: list[list[InlineKeyboardButton]] = []
         request_ref = str(item.get("display_number") or item["number"])
-        if item.get("can_revise"):
-            rows.append([InlineKeyboardButton("🔁 تعديل الطلب بالكامل", callback_data=f"revision:{request_ref}")])
         if item.get("can_complete"):
             rows.append([InlineKeyboardButton("✅ اعتماد التسليم", callback_data=f"complete:{request_ref}")])
         if item.get("receipt_reupload_required") or item.get("accepts_receipt"):
@@ -1190,36 +1189,13 @@ async def capture_edit_body(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def support_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if update.message is None:
+    message = update.message or (update.callback_query.message if update.callback_query else None)
+    if message is None:
         return ConversationHandler.END
-    await update.message.reply_text("اكتب رسالة الدعم. يمكنك ذكر رقم الطلب في النص.")
-    return WAITING_SUPPORT
-
-
-async def capture_support(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    routed = await maybe_route_nav(update, context)
-    if routed is not None:
-        return routed
-    if await consume_pending_followup(update, context):
-        return ConversationHandler.END
-    user = update.effective_user
-    if user is None or update.message is None or not update.message.text:
-        return ConversationHandler.END
-
-    async with httpx.AsyncClient(timeout=12) as client:
-        response = await client.post(
-            f"{API_URL}/bot/telegram/support",
-            headers=api_headers(),
-            json={
-                "telegram_user_id": str(user.id),
-                "message": update.message.text.strip(),
-            },
-        )
-        if response.status_code >= 400:
-            await notify_api_failure(update.message)
-            return ConversationHandler.END
-
-    await update.message.reply_text("تم إرسال رسالة الدعم.", reply_markup=main_keyboard())
+    await message.reply_text(
+        f"رقم الدعم: {SUPPORT_PHONE}",
+        reply_markup=main_keyboard(),
+    )
     return ConversationHandler.END
 
 
@@ -1240,11 +1216,6 @@ async def begin_revision(query, context: ContextTypes.DEFAULT_TYPE, action: str,
                 pass
             await safe_callback_reply(query, "تعذر قراءة ملف التعديل. افتح طلباتي وأعد المحاولة.")
             return ConversationHandler.END
-    prompt = (
-        "ما التعديل المطلوب على هذه الصورة؟ اكتب السبب هنا."
-        if delivery_id
-        else "ما التعديل المطلوب على الطلب بالكامل؟ اكتب السبب هنا."
-    )
     try:
         await query.answer()
     except Exception:
@@ -1254,8 +1225,8 @@ async def begin_revision(query, context: ContextTypes.DEFAULT_TYPE, action: str,
         context.user_data["revision_delivery_id"] = delivery_id
     else:
         context.user_data.pop("revision_delivery_id", None)
-    await safe_callback_reply(query, prompt, force_reply=True)
-    return WAITING_REVISION_REASON
+    await safe_callback_reply(query, "ما هي التعديلات المطلوبة")
+    return ConversationHandler.END
 
 
 async def revision_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1266,6 +1237,16 @@ async def revision_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     return await begin_revision(query, context, action, number)
 
 
+def file_action_markup(request_number: str, delivery_id: str, *, approved: bool = False, can_complete: bool = False) -> InlineKeyboardMarkup:
+    row = [InlineKeyboardButton("✏️ تعديل", callback_data=f"revfile:{request_number}:{delivery_id}")]
+    if not approved:
+        row.append(InlineKeyboardButton("✅ موافقة", callback_data=f"okfile:{request_number}:{delivery_id}"))
+    rows = [row]
+    if can_complete:
+        rows.append([InlineKeyboardButton("✅ اعتماد التسليم", callback_data=f"complete:{request_number}")])
+    return InlineKeyboardMarkup(rows)
+
+
 async def approve_file_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if query is None or not query.data:
@@ -1273,34 +1254,55 @@ async def approve_file_callback(update: Update, context: ContextTypes.DEFAULT_TY
     user = query.from_user
     if user is None:
         try:
-            await query.answer()
+            await query.answer("تعذر معرفة حسابك. أعد /start.", show_alert=True)
         except Exception:
             pass
-        await safe_callback_reply(query, "تعذر معرفة حسابك. أعد تشغيل البوت بـ /start.")
         return
     _, number = parse_callback(query.data)
     request_number, sep, delivery_id = number.rpartition(":")
     if not sep or not request_number:
         try:
-            await query.answer()
+            await query.answer("تعذر قراءة ملف الموافقة. افتح طلباتي.", show_alert=True)
         except Exception:
             pass
-        await safe_callback_reply(query, "تعذر قراءة ملف الموافقة. افتح طلباتي وأعد المحاولة.")
         return
     try:
-        await query.answer()
+        await query.answer("جاري تسجيل الموافقة…")
     except Exception:
         pass
-    async with httpx.AsyncClient(timeout=12) as client:
-        response = await client.post(
-            f"{API_URL}/bot/telegram/requests/{request_number}/approve-file",
-            headers=api_headers(),
-            json={"telegram_user_id": str(user.id), "drive_delivery_id": int(delivery_id)},
-        )
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            response = await client.post(
+                f"{API_URL}/bot/telegram/requests/{request_number}/approve-file",
+                headers=api_headers(),
+                json={"telegram_user_id": str(user.id), "drive_delivery_id": int(delivery_id)},
+            )
+    except (httpx.TimeoutException, httpx.RequestError):
+        await safe_callback_reply(query, "تعذر تسجيل الموافقة. أعد الضغط على موافقة بعد لحظات.")
+        return
     if response.status_code >= 400:
         await safe_callback_reply(query, f"تعذر تسجيل الموافقة: {escape(api_error_text(response))}")
         return
-    await safe_callback_reply(query, "تم تسجيل موافقتك على هذه الصورة. بعد الموافقة على كل الملفات اضغط اعتماد التسليم.")
+    payload = response.json().get("data") or {}
+    can_complete = bool(payload.get("can_complete"))
+    remaining = payload.get("remaining_unapproved")
+    try:
+        await query.edit_message_reply_markup(
+            reply_markup=file_action_markup(request_number, delivery_id, approved=True, can_complete=can_complete),
+        )
+    except Exception:
+        pass
+    if can_complete:
+        await safe_callback_reply(
+            query,
+            "تم اعتماد كل الملفات. إذا اكتمل العمل اضغط اعتماد التسليم.",
+            InlineKeyboardMarkup(
+                [[InlineKeyboardButton("✅ اعتماد التسليم", callback_data=f"complete:{request_number}")]]
+            ),
+        )
+        return
+    leftover = f" بقي {remaining} ملف بانتظار موافقتك." if isinstance(remaining, int) and remaining > 0 else ""
+    await safe_callback_reply(query, f"تم اعتماد هذه الصورة.{leftover}")
 
 
 async def api_error_alert(query, response: httpx.Response) -> None:
@@ -1504,7 +1506,7 @@ async def capture_revision_reason(update: Update, context: ContextTypes.DEFAULT_
     if not number:
         if delivery_id:
             context.user_data["revision_delivery_id"] = delivery_id
-            await update.message.reply_text("تعذر معرفة رقم الطلب. افتح طلباتي ثم اضغط تعديل الطلب بالكامل.")
+            await update.message.reply_text("تعذر معرفة رقم الطلب. افتح الصورة ثم اضغط تعديل.")
         return ConversationHandler.END
 
     payload = {
@@ -1530,9 +1532,8 @@ async def capture_revision_reason(update: Update, context: ContextTypes.DEFAULT_
             )
             return ConversationHandler.END
 
-    scope = "على الصورة" if delivery_id else "على الطلب بالكامل"
     await update.message.reply_text(
-        f"تم تسجيل طلب التعديل {scope} للطلب #{escape(str(number))}.",
+        f"تم تسجيل طلب التعديل للطلب #{escape(str(number))}.",
         reply_markup=main_keyboard(),
     )
     return ConversationHandler.END
@@ -1776,7 +1777,6 @@ def main() -> None:
                 WAITING_REVISION_REASON: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, capture_revision_reason),
                 ],
-                WAITING_SUPPORT: [MessageHandler(filters.TEXT & ~filters.COMMAND, capture_support)],
             },
             fallbacks=[CommandHandler("cancel", cancel)],
         )

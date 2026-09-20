@@ -4445,9 +4445,39 @@ html[dir="rtl"] .breadcrumb-sep {
 }
 
 .donut-stat-svg {
-  width: 7.5rem;
-  height: 7.5rem;
+  width: 10.5rem;
+  height: 10.5rem;
   flex-shrink: 0;
+  overflow: visible;
+}
+
+.donut-stat-slice {
+  cursor: pointer;
+  pointer-events: stroke;
+}
+
+.donut-stat-tip {
+  position: absolute;
+  inset-inline-start: 50%;
+  top: 0.35rem;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--brand-line);
+  border-radius: 12px;
+  background: var(--tint-base);
+  color: var(--brand-ink);
+  font-size: 0.78rem;
+  box-shadow: 0 8px 24px rgba(20, 12, 40, 0.12);
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.donut-stat-tip strong {
+  color: var(--brand-ink);
 }
 
 .donut-stat-chart {

@@ -302,7 +302,6 @@ class PollDriveDeliveriesCommand extends Command
             try {
                 $fresh = $request->fresh() ?? $request;
                 $ref = ResolveServiceRequest::displayNumber($fresh);
-                $canComplete = $fresh->status === RequestStatus::ReadyForReview;
                 $telegram->lastMessageId = null;
                 $telegram->sendFile(
                     (string) $chatId,
@@ -310,7 +309,7 @@ class PollDriveDeliveriesCommand extends Command
                     (string) $file['mimeType'],
                     $delivery->clientSendCaption($ref),
                     'client',
-                    $delivery->clientRevisionKeyboard($ref, $canComplete),
+                    $delivery->clientRevisionKeyboard($ref),
                 );
                 $sent = true;
                 $delivery->forceFill([
@@ -391,7 +390,7 @@ class PollDriveDeliveriesCommand extends Command
         $ref = ResolveServiceRequest::displayNumber($updated);
         $telegram->sendInlineKeyboard(
             (string) $chatId,
-            'اكتملت ملفات الطلب #'.$ref.".\nوافق على كل صورة، ثم اضغط اعتماد التسليم إذا اكتمل العمل.",
+            'اكتملت ملفات الطلب #'.$ref.".\nإذا اكتمل العمل اضغط اعتماد التسليم.",
             DriveDelivery::clientReviewKeyboard($ref, true)['inline_keyboard'],
         );
     }

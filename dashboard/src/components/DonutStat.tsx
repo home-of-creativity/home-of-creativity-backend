@@ -1,6 +1,15 @@
-import { Cell, Pie, PieChart, Tooltip } from "recharts";
+import { useState } from "react";
 
 export type DonutSlice = { key: string; value: number; color: string; label: string };
+
+const RADIUS = 15.9155;
+const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
+const GAP = 1.15;
+
+function visibleSlices(slices: DonutSlice[], total: number) {
+  if (total <= 0) return [];
+  return slices.filter((slice) => slice.value > 0);
+}
 
 export function DonutStat({
   slices,
@@ -13,48 +22,56 @@ export function DonutStat({
   centerLabel?: string;
   emptyLabel?: string;
 }) {
-  const data = slices.filter((slice) => slice.value > 0);
+  const data = visibleSlices(slices, total);
+  const [tip, setTip] = useState<DonutSlice | null>(null);
+  const gap = data.length > 1 ? GAP : 0;
+  let offset = 0;
 
   return (
     <div className="donut-stat">
       <div className="donut-stat-chart" role="img" aria-label={centerLabel ?? ""}>
         {total > 0 ? (
-          <PieChart width={168} height={168}>
-            <Pie
-              data={data}
-              dataKey="value"
-              nameKey="label"
-              cx="50%"
-              cy="50%"
-              innerRadius={54}
-              outerRadius={78}
-              paddingAngle={data.length > 1 ? 3 : 0}
-              stroke="none"
-              isAnimationActive
-              animationDuration={600}
-            >
-              {data.map((slice) => (
-                <Cell key={slice.key} fill={slice.color} />
-              ))}
-            </Pie>
-            <Tooltip
-              formatter={(value, _name, item) => [value ?? 0, item?.payload?.label ?? ""]}
-              contentStyle={{
-                borderRadius: 12,
-                border: "1px solid var(--brand-line)",
-                fontSize: 13,
-                boxShadow: "0 8px 24px rgba(20, 12, 40, 0.12)",
-              }}
-            />
-          </PieChart>
+          <svg viewBox="0 0 36 36" className="donut-stat-svg" aria-hidden="true">
+            <circle cx="18" cy="18" r={RADIUS} fill="none" stroke="var(--brand-line)" strokeWidth="4" pointerEvents="none" />
+            {data.map((slice) => {
+              const length = Math.max((slice.value / total) * CIRCUMFERENCE - gap, 0.01);
+              const dashOffset = offset;
+              offset += (slice.value / total) * CIRCUMFERENCE;
+              return (
+                <circle
+                  key={slice.key}
+                  className="donut-stat-slice"
+                  cx="18"
+                  cy="18"
+                  r={RADIUS}
+                  fill="none"
+                  stroke={slice.color}
+                  strokeWidth="4"
+                  strokeDasharray={`${length} ${CIRCUMFERENCE}`}
+                  strokeDashoffset={-dashOffset}
+                  transform="rotate(-90 18 18)"
+                  onMouseEnter={() => setTip(slice)}
+                  onMouseLeave={() => setTip(null)}
+                >
+                  <title>{`${slice.label} ${slice.value}`}</title>
+                </circle>
+              );
+            })}
+          </svg>
         ) : (
           <svg viewBox="0 0 36 36" className="donut-stat-svg" aria-hidden="true">
-            <circle cx="18" cy="18" r="15.9155" fill="none" stroke="var(--brand-line)" strokeWidth="4" />
+            <circle cx="18" cy="18" r={RADIUS} fill="none" stroke="var(--brand-line)" strokeWidth="4" />
           </svg>
         )}
         <span className="donut-stat-total" aria-hidden="true">
           {total}
         </span>
+        {tip ? (
+          <p className="donut-stat-tip" role="tooltip">
+            <span>{tip.label}</span>
+            <strong>{tip.value}</strong>
+          </p>
+        ) : null}
       </div>
       <div className="donut-stat-legend">
         {total === 0 && emptyLabel ? <p className="muted">{emptyLabel}</p> : null}

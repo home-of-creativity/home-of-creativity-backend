@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { DonutStat } from "../components/DonutStat";
 import { LoadingLottie } from "../components/LoadingLottie";
@@ -57,15 +57,22 @@ export function Overview({ t }: { locale: Locale; t: (c: { ar: string; en: strin
 
   useLiveStamp(requestsStamp, load);
 
-  if (!data) return <LoadingLottie variant="page" label={t(copy.loading)} />;
+  const statusTotal = useMemo(
+    () => Object.values(data?.by_status ?? {}).reduce((sum, value) => sum + value, 0),
+    [data?.by_status],
+  );
+  const slices = useMemo(
+    () =>
+      Object.entries(data?.by_status ?? {}).map(([status, value]) => ({
+        key: status,
+        value,
+        color: TONE_COLOR[statusTone(status)],
+        label: t(statuses[status] ?? { ar: status, en: status }),
+      })),
+    [data?.by_status, t],
+  );
 
-  const statusTotal = Object.values(data.by_status).reduce((sum, value) => sum + value, 0);
-  const slices = Object.entries(data.by_status).map(([status, value]) => ({
-    key: status,
-    value,
-    color: TONE_COLOR[statusTone(status)],
-    label: t(statuses[status] ?? { ar: status, en: status }),
-  }));
+  if (!data) return <LoadingLottie variant="page" label={t(copy.loading)} />;
 
   return (
     <>

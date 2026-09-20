@@ -490,12 +490,8 @@ class StaffBotController extends Controller
                 ['text' => '📎 رفع وصل الدفع', 'callback_data' => "receipt_hint:{$ref}"],
                 ['text' => '❌ إلغاء الطلب', 'callback_data' => "reqcancel:{$ref}"],
             ],
-            RequestStatus::InProgress, RequestStatus::RevisionRequested => $serviceRequest->allowsClientRevision()
-                ? [['text' => '🔁 تعديل الطلب بالكامل', 'callback_data' => "revision:{$ref}"]]
-                : null,
             RequestStatus::ReadyForReview => [
                 ['text' => '✅ اعتماد التسليم', 'callback_data' => "complete:{$ref}"],
-                ['text' => '🔁 تعديل الطلب بالكامل', 'callback_data' => "revision:{$ref}"],
             ],
             default => null,
         };

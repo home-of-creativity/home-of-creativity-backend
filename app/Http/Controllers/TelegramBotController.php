@@ -362,12 +362,15 @@ class TelegramBotController extends Controller
         }
 
         $approved = $approveDriveDelivery->handle($serviceRequest, $delivery);
+        $fresh = $serviceRequest->fresh() ?? $serviceRequest;
 
         return response()->json([
             'data' => [
                 'approved' => true,
                 'drive_delivery_id' => $approved->id,
                 'client_approved_at' => $approved->client_approved_at?->toIso8601String(),
+                'remaining_unapproved' => $approveDriveDelivery->remainingUnapproved($fresh),
+                'can_complete' => $approveDriveDelivery->canComplete($fresh),
             ],
             'message' => 'File approved.',
         ]);
