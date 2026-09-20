@@ -55,9 +55,6 @@ done
 echo "Running migrations..."
 "${COMPOSE[@]}" exec -T hoc-api php artisan migrate --force
 
-echo "Running database seeders..."
-"${COMPOSE[@]}" exec -T hoc-api php artisan db:seed --force
-
 "${COMPOSE[@]}" exec -T hoc-api php artisan config:cache
 "${COMPOSE[@]}" exec -T hoc-api php artisan route:cache
 "${COMPOSE[@]}" exec -T hoc-api php artisan view:cache || true
