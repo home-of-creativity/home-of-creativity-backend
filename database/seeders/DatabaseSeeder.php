@@ -130,6 +130,8 @@ class DatabaseSeeder extends Seeder
         $this->call(PricingSeeder::class);
         $this->call(ContactSeeder::class);
         $this->call(ArticleSeeder::class);
+
+        $this->call(LegalPageSeeder::class);
         $this->syncSocialAccounts($admin->id);
     }
 

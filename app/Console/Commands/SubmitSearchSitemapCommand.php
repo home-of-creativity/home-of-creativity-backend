@@ -72,6 +72,8 @@ class SubmitSearchSitemapCommand extends Command
                 $origin.'/pricing/',
                 $origin.'/social/',
                 $origin.'/locations/',
+                $origin.'/privacy/',
+                $origin.'/terms/',
                 $sitemap,
             ],
         ];
