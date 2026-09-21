@@ -15,6 +15,8 @@ import { Contact } from "./pages/Contact";
 import { ContactChannelForm } from "./pages/ContactChannelForm";
 import { EmployeeForm } from "./pages/EmployeeForm";
 import { Employees } from "./pages/Employees";
+import { Legal } from "./pages/Legal";
+import { ProfilePdf } from "./pages/ProfilePdf";
 import { Login } from "./pages/Login";
 import { Overview } from "./pages/Overview";
 import { Pricing } from "./pages/Pricing";
@@ -45,6 +47,7 @@ import {
   IconContact,
   IconEmployees,
   IconLanguage,
+  IconLegal,
   IconLogout,
   IconOverview,
   IconPricing,
@@ -112,6 +115,9 @@ function Shell({
     { id: "categories", label: t(copy.portfolioTabCategories), to: "/categories", icon: <IconCategories aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
     { id: "pricing", label: t(copy.pricingTitle), to: "/pricing", icon: <IconPricing aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
     { id: "contact", label: t(copy.contactTitle), to: "/contact", icon: <IconContact aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
+    { id: "profile-pdf", label: t(copy.navProfilePdf), to: "/profile-pdf", icon: <IconLegal aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
+    { id: "privacy", label: t(copy.legalPrivacyTitle), to: "/privacy", icon: <IconLegal aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
+    { id: "terms", label: t(copy.legalTermsTitle), to: "/terms", icon: <IconLegal aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
     { id: "sham-cash", label: t(copy.navPayments), to: "/payments", icon: <IconQr aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
     { id: "add-employee", label: t(copy.addEmployee), to: "/employees/new", icon: <IconEmployees aria-hidden width={18} height={18} />, group: t(copy.commandGroupActions) },
     { id: "add-client", label: t(copy.addClient), to: "/clients/new", icon: <IconClients aria-hidden width={18} height={18} />, group: t(copy.commandGroupActions) },
@@ -215,6 +221,18 @@ function Shell({
           <NavLink to="/contact">
             <IconContact aria-hidden />
             <span>{t(copy.contactTitle)}</span>
+          </NavLink>
+          <NavLink to="/profile-pdf">
+            <IconLegal aria-hidden />
+            <span>{t(copy.navProfilePdf)}</span>
+          </NavLink>
+          <NavLink to="/privacy">
+            <IconLegal aria-hidden />
+            <span>{t(copy.legalPrivacyTitle)}</span>
+          </NavLink>
+          <NavLink to="/terms">
+            <IconLegal aria-hidden />
+            <span>{t(copy.legalTermsTitle)}</span>
           </NavLink>
         </nav>
         <div className="sidebar-foot">
@@ -372,6 +390,10 @@ export function App() {
           <Route path="/contact" element={<Contact locale={locale} t={t} />} />
           <Route path="/contact/new" element={<ContactChannelForm locale={locale} t={t} />} />
           <Route path="/contact/:id/edit" element={<ContactChannelForm locale={locale} t={t} />} />
+          <Route path="/legal" element={<Navigate to="/privacy" replace />} />
+          <Route path="/profile-pdf" element={<ProfilePdf locale={locale} t={t} />} />
+          <Route path="/privacy" element={<Legal locale={locale} t={t} slug="privacy" />} />
+          <Route path="/terms" element={<Legal locale={locale} t={t} slug="terms" />} />
           <Route path="/social" element={<SocialWorkspace locale={locale} t={t} />}>
             <Route index element={<SocialHome locale={locale} t={t} />} />
             <Route path="links" element={<SocialLinks locale={locale} t={t} />} />

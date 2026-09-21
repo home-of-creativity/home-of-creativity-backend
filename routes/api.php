@@ -4,6 +4,7 @@ use App\Http\Controllers\Admin\ClientController as AdminClientController;
 use App\Http\Controllers\Admin\ContactChannelController as AdminContactChannelController;
 use App\Http\Controllers\Admin\EmployeeController as AdminEmployeeController;
 use App\Http\Controllers\Admin\LandingReelController as AdminLandingReelController;
+use App\Http\Controllers\Admin\LegalPageController as AdminLegalPageController;
 use App\Http\Controllers\Admin\LiveController;
 use App\Http\Controllers\Admin\OdooController as AdminOdooController;
 use App\Http\Controllers\Admin\OverviewController;
@@ -12,6 +13,7 @@ use App\Http\Controllers\Admin\PortfolioProjectController as AdminPortfolioProje
 use App\Http\Controllers\Admin\PricingCategoryController as AdminPricingCategoryController;
 use App\Http\Controllers\Admin\PricingPackageController as AdminPricingPackageController;
 use App\Http\Controllers\Admin\PricingSubcategoryController as AdminPricingSubcategoryController;
+use App\Http\Controllers\Admin\ProfilePdfController as AdminProfilePdfController;
 use App\Http\Controllers\Admin\ServiceRequestController as AdminServiceRequestController;
 use App\Http\Controllers\Admin\ShowcaseClientController as AdminShowcaseClientController;
 use App\Http\Controllers\Admin\SocialAccountController as AdminSocialAccountController;
@@ -23,10 +25,12 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\IntegrationController;
 use App\Http\Controllers\LandingReelController;
+use App\Http\Controllers\LegalPageController;
 use App\Http\Controllers\LinkedInOAuthController;
 use App\Http\Controllers\N8nWebhookController;
 use App\Http\Controllers\PortfolioController;
 use App\Http\Controllers\PricingController;
+use App\Http\Controllers\ProfilePdfController;
 use App\Http\Controllers\ServiceRequestController;
 use App\Http\Controllers\SocialFeedController;
 use App\Http\Controllers\StaffBotController;
@@ -53,6 +57,10 @@ Route::get('portfolio/projects/{portfolio_project}', [PortfolioController::class
 Route::get('social/instagram-feed', [SocialFeedController::class, 'instagram']);
 Route::get('social/facebook-feed', [SocialFeedController::class, 'facebook']);
 Route::get('reels', [LandingReelController::class, 'index']);
+Route::get('legal', [LegalPageController::class, 'index']);
+Route::get('legal/{legal_page:slug}', [LegalPageController::class, 'show']);
+Route::get('profile-pdf', [ProfilePdfController::class, 'show']);
+Route::get('profile-pdf/file', [ProfilePdfController::class, 'file']);
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('requests', ServiceRequestController::class)
@@ -63,6 +71,9 @@ Route::middleware('auth:sanctum')->group(function () {
 Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::get('overview', OverviewController::class);
     Route::get('live', LiveController::class);
+    Route::get('legal', [AdminLegalPageController::class, 'index']);
+    Route::get('legal/{legal_page:slug}', [AdminLegalPageController::class, 'show']);
+    Route::put('legal/{legal_page:slug}', [AdminLegalPageController::class, 'update']);
     Route::get('contact', [AdminContactChannelController::class, 'index']);
     Route::post('contact', [AdminContactChannelController::class, 'store']);
     Route::put('contact/{contact_channel}', [AdminContactChannelController::class, 'update']);
@@ -96,6 +107,9 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
     Route::get('ops-settings', [AdminServiceRequestController::class, 'opsSettings']);
     Route::get('ops-settings/sham-cash-qr', [AdminServiceRequestController::class, 'shamCashQrPreview']);
     Route::post('ops-settings/sham-cash-qr', [AdminServiceRequestController::class, 'uploadShamCashQr']);
+    Route::get('ops-settings/profile-pdf', [AdminProfilePdfController::class, 'show']);
+    Route::post('ops-settings/profile-pdf', [AdminProfilePdfController::class, 'store']);
+    Route::delete('ops-settings/profile-pdf', [AdminProfilePdfController::class, 'destroy']);
     Route::get('ops-settings/social-profile', [AdminServiceRequestController::class, 'socialProfile']);
     Route::put('ops-settings/social-profile', [AdminServiceRequestController::class, 'updateSocialProfile']);
     Route::get('requests/{service_request}/files/{file}/receipt', [AdminServiceRequestController::class, 'receipt']);

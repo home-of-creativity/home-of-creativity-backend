@@ -81,6 +81,16 @@ export function IconCategories(props: IconProps) {
   );
 }
 
+export function IconLegal(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M6 3.5h8.5L18.5 8v12a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z" />
+      <path d="M14.5 3.5V8H18" />
+      <path d="M8.5 12.2h7M8.5 15.2h5.2M8.5 18.2h3.6" />
+    </svg>
+  );
+}
+
 export function IconContact(props: IconProps) {
   return (
     <svg {...base} {...props}>

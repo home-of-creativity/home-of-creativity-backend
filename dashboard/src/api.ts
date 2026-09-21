@@ -33,6 +33,12 @@ export type OpsSettings = {
   sham_cash_qr_updated_at?: string | null;
 };
 
+export type ProfilePdf = {
+  url: string | null;
+  name: string | null;
+  updated_at: string | null;
+};
+
 export type SocialLinktreeProfile = {
   display_name: string;
   bio: string;
@@ -440,6 +446,22 @@ export type PricingPackage = {
   subcategory?: PricingSubcategory;
 };
 
+export type LegalSection = {
+  id?: string;
+  heading_ar: string;
+  heading_en: string;
+  html_ar: string;
+  html_en: string;
+};
+
+export type LegalPage = {
+  slug: "privacy" | "terms" | string;
+  title_ar: string;
+  title_en: string;
+  sections: LegalSection[];
+  updated_at?: string | null;
+};
+
 export type ContactChannel = {
   id: number;
   kind: "mobile" | "whatsapp" | "social" | "location";
@@ -701,6 +723,17 @@ export const api = {
     const form = new FormData();
     form.append("file", file);
     return submitForm<Envelope<OpsSettings>>("/admin/ops-settings/sham-cash-qr", "POST", form);
+  },
+  profilePdf() {
+    return request<Envelope<ProfilePdf>>("/admin/ops-settings/profile-pdf");
+  },
+  uploadProfilePdf(file: File) {
+    const form = new FormData();
+    form.append("file", file);
+    return submitForm<Envelope<ProfilePdf>>("/admin/ops-settings/profile-pdf", "POST", form);
+  },
+  deleteProfilePdf() {
+    return request<Envelope<ProfilePdf>>("/admin/ops-settings/profile-pdf", { method: "DELETE" });
   },
   socialProfile() {
     return request<Envelope<SocialLinktreeProfile>>("/admin/ops-settings/social-profile");
@@ -1013,6 +1046,18 @@ export const api = {
     return request<{ data: PricingPackage[] }>(`/admin/pricing/packages/${id}/move`, {
       method: "POST",
       body: JSON.stringify({ direction }),
+    });
+  },
+  legalPages() {
+    return request<{ data: LegalPage[] }>("/admin/legal");
+  },
+  legalPage(slug: string) {
+    return request<Envelope<LegalPage>>(`/admin/legal/${slug}`);
+  },
+  updateLegalPage(slug: string, payload: { title_ar: string; title_en: string; sections: LegalSection[] }) {
+    return request<Envelope<LegalPage>>(`/admin/legal/${slug}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
     });
   },
   contactChannels() {
