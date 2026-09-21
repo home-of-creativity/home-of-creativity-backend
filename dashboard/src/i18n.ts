@@ -623,6 +623,29 @@ export const copy = {
   socialMessage: { ar: "رسالة", en: "Message" },
   socialReplied: { ar: "تم الرد", en: "Replied" },
   socialOpen: { ar: "مفتوح", en: "Open" },
+  articlesTitle: { ar: "المقالات", en: "Articles" },
+  articlesLede: {
+    ar: "أضف مقالات الموقع بصيغة HTML، مثل «فوائد وسائل التواصل الاجتماعي». يمكنك إضافة مقال جديد كل شهر.",
+    en: "Publish website articles written in HTML, e.g. “Advantages of social media.” Add a new article every month.",
+  },
+  addArticle: { ar: "إضافة مقال", en: "Add article" },
+  saveArticle: { ar: "حفظ المقال", en: "Save article" },
+  articleContent: { ar: "محتوى المقال", en: "Article content" },
+  articleExcerptEn: { ar: "المقتطف (EN)", en: "Excerpt (EN)" },
+  articleExcerptAr: { ar: "المقتطف (AR)", en: "Excerpt (AR)" },
+  articleBodyEn: { ar: "المحتوى HTML (EN)", en: "Body HTML (EN)" },
+  articleBodyAr: { ar: "المحتوى HTML (AR)", en: "Body HTML (AR)" },
+  articleBodyHint: {
+    ar: "يمكنك استخدام وسوم HTML مثل <h2> و<p> و<ul> و<strong>.",
+    en: "You can use HTML tags like <h2>, <p>, <ul>, and <strong>.",
+  },
+  articleSlugHint: {
+    ar: "اتركه فارغاً لتوليده تلقائياً من العنوان.",
+    en: "Leave blank to generate it automatically from the title.",
+  },
+  articlePublishedAt: { ar: "تاريخ النشر", en: "Publish date" },
+  articleDate: { ar: "التاريخ", en: "Date" },
+  articlePreview: { ar: "معاينة", en: "Preview" },
 } satisfies Record<string, Copy>;
 
 export const socialPlacements: Record<string, Copy> = {

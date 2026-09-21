@@ -483,6 +483,34 @@ export type LandingReel = {
   is_published: boolean;
 };
 
+export type Article = {
+  id: number;
+  slug: string;
+  title_en: string;
+  title_ar: string;
+  excerpt_en: string | null;
+  excerpt_ar: string | null;
+  body_en: string;
+  body_ar: string;
+  sort_order: number;
+  is_published: boolean;
+  published_at: string | null;
+  created_at?: string | null;
+};
+
+export type ArticlePayload = {
+  slug?: string | null;
+  title_en: string;
+  title_ar: string;
+  excerpt_en?: string | null;
+  excerpt_ar?: string | null;
+  body_en: string;
+  body_ar: string;
+  sort_order?: number;
+  is_published?: boolean;
+  published_at?: string | null;
+};
+
 export type PageMeta = {
   current_page: number;
   last_page: number;
@@ -886,6 +914,30 @@ export const api = {
   },
   deleteAllLandingReels() {
     return request<Envelope<{ deleted: number }>>("/admin/reels/bulk", { method: "DELETE" });
+  },
+  articles(page = 1) {
+    return request<Paginated<Article>>(`/admin/articles${queryString({ page })}`);
+  },
+  article(id: number) {
+    return request<Envelope<Article>>(`/admin/articles/${id}`);
+  },
+  createArticle(payload: ArticlePayload) {
+    return request<Envelope<Article>>("/admin/articles", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  updateArticle(id: number, payload: Partial<ArticlePayload>) {
+    return request<Envelope<Article>>(`/admin/articles/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+  deleteArticle(id: number) {
+    return request<Envelope<null>>(`/admin/articles/${id}`, { method: "DELETE" });
+  },
+  deleteAllArticles() {
+    return request<Envelope<{ deleted: number }>>("/admin/articles/bulk", { method: "DELETE" });
   },
   pricingCategories() {
     return request<{ data: PricingCategory[] }>("/admin/pricing/categories");

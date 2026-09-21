@@ -5898,3 +5898,36 @@ html[dir="rtl"] .placement-tile-toggle[data-state="checked"] .placement-tile-tog
     animation-iteration-count: 1 !important;
   }
 }
+
+/* Articles CMS: HTML editor + live preview */
+.field-mono {
+  font-family: ui-monospace, "SFMono-Regular", "Menlo", "Consolas", monospace;
+  font-size: 0.85rem;
+  line-height: 1.55;
+  white-space: pre;
+  tab-size: 2;
+}
+
+.article-preview {
+  border: 1px dashed var(--brand-line);
+  border-radius: 0.9rem;
+  background: var(--brand-surface);
+  color: var(--brand-ink);
+  padding: 1rem 1.25rem;
+  min-height: 4rem;
+  overflow-wrap: anywhere;
+}
+
+.article-preview :is(h1, h2, h3) {
+  margin: 0.6rem 0 0.4rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.article-preview h2 { font-size: 1.25rem; }
+.article-preview h3 { font-size: 1.08rem; }
+.article-preview p { margin: 0.5rem 0; }
+.article-preview ul,
+.article-preview ol { margin: 0.5rem 1.35rem; }
+.article-preview li { margin: 0.2rem 0; }
+.article-preview a { color: var(--brand-orange); text-decoration: underline; }

@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Admin\ArticleController as AdminArticleController;
 use App\Http\Controllers\Admin\ClientController as AdminClientController;
 use App\Http\Controllers\Admin\ContactChannelController as AdminContactChannelController;
 use App\Http\Controllers\Admin\EmployeeController as AdminEmployeeController;
@@ -19,6 +20,7 @@ use App\Http\Controllers\Admin\SocialInboxController as AdminSocialInboxControll
 use App\Http\Controllers\Admin\SocialPostController as AdminSocialPostController;
 use App\Http\Controllers\Admin\SocialStaffController as AdminSocialStaffController;
 use App\Http\Controllers\AdminBotController;
+use App\Http\Controllers\ArticleController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\IntegrationController;
@@ -53,6 +55,8 @@ Route::get('portfolio/projects/{portfolio_project}', [PortfolioController::class
 Route::get('social/instagram-feed', [SocialFeedController::class, 'instagram']);
 Route::get('social/facebook-feed', [SocialFeedController::class, 'facebook']);
 Route::get('reels', [LandingReelController::class, 'index']);
+Route::get('articles', [ArticleController::class, 'index']);
+Route::get('articles/{article:slug}', [ArticleController::class, 'show']);
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('requests', ServiceRequestController::class)
@@ -122,6 +126,12 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
     Route::match(['put', 'post'], 'reels/{landing_reel}', [AdminLandingReelController::class, 'update']);
     Route::delete('reels/{landing_reel}/poster', [AdminLandingReelController::class, 'destroyPoster']);
     Route::delete('reels/{landing_reel}', [AdminLandingReelController::class, 'destroy']);
+    Route::get('articles', [AdminArticleController::class, 'index']);
+    Route::post('articles', [AdminArticleController::class, 'store']);
+    Route::delete('articles/bulk', [AdminArticleController::class, 'destroyAll']);
+    Route::get('articles/{article}', [AdminArticleController::class, 'show']);
+    Route::put('articles/{article}', [AdminArticleController::class, 'update']);
+    Route::delete('articles/{article}', [AdminArticleController::class, 'destroy']);
     Route::get('pricing/categories', [AdminPricingCategoryController::class, 'index']);
     Route::post('pricing/categories', [AdminPricingCategoryController::class, 'store']);
     Route::delete('pricing/categories/bulk', [AdminPricingCategoryController::class, 'destroyAll']);
