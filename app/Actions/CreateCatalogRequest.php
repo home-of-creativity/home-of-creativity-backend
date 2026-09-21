@@ -3,7 +3,6 @@
 namespace App\Actions;
 
 use App\Enums\EmployeeProfession;
-use App\Enums\RequestSource;
 use App\Enums\RequestStatus;
 use App\Models\Client;
 use App\Models\PricingPackage;
@@ -82,7 +81,7 @@ class CreateCatalogRequest
                 'title' => $title,
                 'description' => $description,
                 'status' => RequestStatus::Submitted,
-                'source' => RequestSource::Telegram,
+                'source' => $client->requestSource(),
             ]);
 
             RequestStatusHistory::query()->create([

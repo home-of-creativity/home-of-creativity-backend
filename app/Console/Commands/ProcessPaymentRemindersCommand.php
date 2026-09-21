@@ -62,7 +62,7 @@ class ProcessPaymentRemindersCommand extends Command
             $this->ensureCalendarEvent($calendar, $reminder, $request);
 
             $chatId = $request->client?->telegram_user_id;
-            if (! filled($chatId) || ! $telegram->configured('client')) {
+            if (! $telegram->canReachClient($chatId)) {
                 continue;
             }
 

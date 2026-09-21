@@ -87,7 +87,7 @@ class ProcessBotSla
 
         foreach ($this->awaitingPaymentWithoutReceipt($hours, $limit) as $request) {
             $chatId = $request->client?->telegram_user_id;
-            if (! filled($chatId) || ! $this->telegram->configured('client')) {
+            if (! $this->telegram->canReachClient($chatId)) {
                 continue;
             }
             if (! $this->claim($request, OpsFollowUp::KIND_RECEIPT_WAITING, 'request:'.$request->id)) {
@@ -301,7 +301,7 @@ class ProcessBotSla
                 continue;
             }
             $chatId = $client->telegram_user_id;
-            if (! filled($chatId) || ! $this->telegram->configured('client')) {
+            if (! $this->telegram->canReachClient($chatId)) {
                 continue;
             }
             if (! OpsFollowUp::claim(OpsFollowUp::KIND_PROFILE_INCOMPLETE, 'client:'.$client->id, $client)) {

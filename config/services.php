@@ -153,6 +153,14 @@ return [
         'app_secret' => trim((string) env('FACEBOOK_APP_SECRET', '')),
     ],
 
+    'whatsapp' => [
+        'token' => env('WHATSAPP_TOKEN'),
+        'phone_number_id' => env('WHATSAPP_PHONE_NUMBER_ID'),
+        'verify_token' => env('WHATSAPP_VERIFY_TOKEN'),
+        'app_secret' => env('WHATSAPP_APP_SECRET'),
+        'graph_base' => env('WHATSAPP_GRAPH_URL', env('META_GRAPH_URL', 'https://graph.facebook.com/v21.0')),
+    ],
+
     'threads' => [
         'access_token' => trim((string) env('THREADS_ACCESS_TOKEN', '')),
         'app_id' => trim((string) env('THREADS_APP_ID', '')),

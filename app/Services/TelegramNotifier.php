@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Client;
 use App\Models\ServiceRequest;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
@@ -13,13 +14,30 @@ class TelegramNotifier
 {
     public ?int $lastMessageId = null;
 
-    public function configured(string $bot = 'client'): bool
+    public function __construct(private WhatsAppCloudClient $whatsApp) {}
+
+    public function configured(string $bot = 'client', mixed $chatId = null): bool
     {
+        if (Client::isWhatsAppKey($chatId)) {
+            return $this->whatsApp->configured();
+        }
+
         return filled($this->token($bot));
+    }
+
+    public function canReachClient(mixed $chatId): bool
+    {
+        return filled($chatId) && $this->configured('client', $chatId);
     }
 
     public function send(string $chatId, string $text, string $bot = 'client'): void
     {
+        if (Client::isWhatsAppKey($chatId)) {
+            $this->whatsApp->sendText(Client::whatsappPhoneFromKey($chatId), $text);
+
+            return;
+        }
+
         $token = $this->token($bot);
         if ($token === '') {
             throw new RuntimeException('Telegram bot is not configured.');
@@ -44,6 +62,10 @@ class TelegramNotifier
      */
     public function sendDocument(string $chatId, string $absolutePath, ?string $caption = null, string $bot = 'client', ?array $replyMarkup = null): ?string
     {
+        if (Client::isWhatsAppKey($chatId)) {
+            return $this->sendWhatsAppFile($chatId, $absolutePath, $caption, $replyMarkup, asImage: false);
+        }
+
         $token = $this->token($bot);
         if ($token === '') {
             throw new RuntimeException('Telegram bot is not configured.');
@@ -82,6 +104,10 @@ class TelegramNotifier
      */
     public function sendPhoto(string $chatId, string $absolutePath, ?string $caption = null, string $bot = 'client', ?array $replyMarkup = null): ?string
     {
+        if (Client::isWhatsAppKey($chatId)) {
+            return $this->sendWhatsAppFile($chatId, $absolutePath, $caption, $replyMarkup, asImage: true);
+        }
+
         $token = $this->token($bot);
         if ($token === '') {
             throw new RuntimeException('Telegram bot is not configured.');
@@ -147,6 +173,10 @@ class TelegramNotifier
      */
     public function editReplyMarkup(string $chatId, int $messageId, ?array $replyMarkup = null, string $bot = 'client'): void
     {
+        if (Client::isWhatsAppKey($chatId)) {
+            return;
+        }
+
         $token = $this->token($bot);
         if ($token === '') {
             return;
@@ -197,8 +227,17 @@ class TelegramNotifier
         return $this->sendFile($chatId, $absolute, $mime, $caption, $bot);
     }
 
+    /**
+     * @param  list<array{text: string, callback_data: string}>  $buttons
+     */
     public function sendInlineActions(string $chatId, string $text, array $buttons, string $bot = 'client'): void
     {
+        if (Client::isWhatsAppKey($chatId)) {
+            $this->sendWhatsAppInteractive(Client::whatsappPhoneFromKey($chatId), $text, $buttons);
+
+            return;
+        }
+
         $token = $this->token($bot);
         if ($token === '') {
             throw new RuntimeException('Telegram bot is not configured.');
@@ -226,6 +265,16 @@ class TelegramNotifier
      */
     public function sendInlineKeyboard(string $chatId, string $text, array $rows, string $bot = 'client'): void
     {
+        if (Client::isWhatsAppKey($chatId)) {
+            $this->sendWhatsAppInteractive(
+                Client::whatsappPhoneFromKey($chatId),
+                $text,
+                $this->flattenButtons($rows),
+            );
+
+            return;
+        }
+
         $token = $this->token($bot);
         if ($token === '') {
             throw new RuntimeException('Telegram bot is not configured.');
@@ -246,6 +295,76 @@ class TelegramNotifier
         if (! $response->successful() || $response->json('ok') !== true) {
             throw new RuntimeException('Telegram did not accept the inline message.');
         }
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $replyMarkup
+     */
+    private function sendWhatsAppFile(string $chatId, string $absolutePath, ?string $caption, ?array $replyMarkup, bool $asImage): ?string
+    {
+        $phone = Client::whatsappPhoneFromKey($chatId);
+        $id = $asImage
+            ? $this->whatsApp->sendImage($phone, $absolutePath, $caption)
+            : $this->whatsApp->sendDocument($phone, $absolutePath, $caption, basename($absolutePath));
+
+        $rows = [];
+        if (is_array($replyMarkup)) {
+            $rows = $replyMarkup['inline_keyboard'] ?? (array_is_list($replyMarkup) ? $replyMarkup : []);
+        }
+        $buttons = $this->flattenButtons(is_array($rows) ? $rows : []);
+        if ($buttons !== []) {
+            $this->sendWhatsAppInteractive($phone, 'اختر إجراء:', $buttons);
+        }
+
+        $this->lastMessageId = null;
+
+        return $id;
+    }
+
+    /**
+     * @param  list<array{text: string, callback_data: string}>  $buttons
+     */
+    private function sendWhatsAppInteractive(string $phone, string $text, array $buttons): void
+    {
+        if ($buttons === []) {
+            $this->whatsApp->sendText($phone, $text);
+
+            return;
+        }
+
+        if (count($buttons) <= 3) {
+            $this->whatsApp->sendReplyButtons($phone, $text, $buttons);
+
+            return;
+        }
+
+        $this->whatsApp->sendList($phone, $text, $buttons);
+    }
+
+    /**
+     * @param  list<list<array{text: string, callback_data: string}>>|list<array{text: string, callback_data: string}>  $rows
+     * @return list<array{text: string, callback_data: string}>
+     */
+    private function flattenButtons(array $rows): array
+    {
+        $buttons = [];
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            if (isset($row['callback_data'])) {
+                $buttons[] = $row;
+
+                continue;
+            }
+            foreach ($row as $button) {
+                if (is_array($button) && isset($button['callback_data'])) {
+                    $buttons[] = $button;
+                }
+            }
+        }
+
+        return $buttons;
     }
 
     /**

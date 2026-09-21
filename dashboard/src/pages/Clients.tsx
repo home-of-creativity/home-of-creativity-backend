@@ -281,11 +281,17 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                       <td dir="ltr">{item.phone ?? "—"}</td>
                       <td dir="ltr">
                         {item.telegram_url ? (
-                          <a className="source source-telegram" href={item.telegram_url} rel="noreferrer">
-                            {t(copy.contactTelegram)}
+                          <a
+                            className={item.channel === "whatsapp" ? "source source-whatsapp" : "source source-telegram"}
+                            href={item.telegram_url}
+                            rel="noreferrer"
+                          >
+                            {t(item.channel === "whatsapp" ? copy.contactWhatsapp : copy.contactTelegram)}
                           </a>
                         ) : item.telegram_user_id ? (
-                          <span className="source source-telegram">{item.telegram_user_id}</span>
+                          <span className={item.channel === "whatsapp" ? "source source-whatsapp" : "source source-telegram"}>
+                            {item.telegram_user_id}
+                          </span>
                         ) : (
                           "—"
                         )}

@@ -94,7 +94,7 @@ class ApplyQuotationAcceptance
         $delivered = false;
         $chatId = $request->client?->telegram_user_id;
 
-        if (filled($chatId) && $this->telegram->configured('client')) {
+        if ($this->telegram->canReachClient($chatId)) {
             try {
                 if (filled($qrPath)) {
                     $this->telegram->sendPaymentQr((string) $chatId, $caption, $qrPath);

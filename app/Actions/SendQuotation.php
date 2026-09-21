@@ -116,7 +116,7 @@ class SendQuotation
                     'request' => $request->number,
                     'error' => $exception->getMessage(),
                 ]);
-                if ($this->telegram->configured('client')) {
+                if ($this->telegram->canReachClient($chatId)) {
                     $this->alertTelegramDeliveryFailure->handle($request, 'quotation', $exception->getMessage());
                 }
             }

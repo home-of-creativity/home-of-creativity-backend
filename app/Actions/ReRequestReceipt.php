@@ -39,7 +39,7 @@ class ReRequestReceipt
 
         $displayNumber = ResolveServiceRequest::displayNumber($request);
         $chatId = $request->client?->telegram_user_id;
-        if (filled($chatId) && $this->telegram->configured('client')) {
+        if ($this->telegram->canReachClient($chatId)) {
             $this->telegram->send(
                 (string) $chatId,
                 "نحتاج إعادة إرسال وصل الدفع للطلب #{$displayNumber}.\nالسبب: {$reason}\nأرسل صورة أو PDF للوصل.",

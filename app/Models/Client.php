@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\RequestSource;
 use App\Enums\RequestStatus;
 use App\Support\ClientProfileValue;
 use Database\Factories\ClientFactory;
@@ -16,6 +17,8 @@ class Client extends Model
 {
     /** @use HasFactory<ClientFactory> */
     use HasFactory, SoftDeletes;
+
+    public const WHATSAPP_PREFIX = 'wa:';
 
     protected $fillable = [
         'user_id',
@@ -68,10 +71,52 @@ class Client extends Model
             ?? 'شركة';
     }
 
+    public static function isWhatsAppKey(mixed $key): bool
+    {
+        return is_string($key) && str_starts_with($key, self::WHATSAPP_PREFIX);
+    }
+
+    public static function normalizeWhatsAppPhone(string $phone): string
+    {
+        return preg_replace('/\D+/', '', $phone) ?? '';
+    }
+
+    public static function whatsappKey(string $phone): string
+    {
+        return self::WHATSAPP_PREFIX.self::normalizeWhatsAppPhone($phone);
+    }
+
+    public static function whatsappPhoneFromKey(mixed $key): string
+    {
+        if (! self::isWhatsAppKey($key)) {
+            return '';
+        }
+
+        return substr((string) $key, strlen(self::WHATSAPP_PREFIX));
+    }
+
+    public function isWhatsApp(): bool
+    {
+        return self::isWhatsAppKey($this->telegram_user_id);
+    }
+
+    public function requestSource(): RequestSource
+    {
+        return $this->isWhatsApp() ? RequestSource::WhatsApp : RequestSource::Telegram;
+    }
+
     public function telegramPrivateUrl(): ?string
     {
         $id = trim((string) ($this->telegram_user_id ?? ''));
-        if ($id === '' || ! ctype_digit($id)) {
+        if ($id === '') {
+            return null;
+        }
+        if (self::isWhatsAppKey($id)) {
+            $phone = self::whatsappPhoneFromKey($id);
+
+            return $phone !== '' && ctype_digit($phone) ? 'https://wa.me/'.$phone : null;
+        }
+        if (! ctype_digit($id)) {
             return null;
         }
 

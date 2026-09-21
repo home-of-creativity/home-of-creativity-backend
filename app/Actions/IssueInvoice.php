@@ -94,7 +94,7 @@ class IssueInvoice
                     'request' => $request->number,
                     'error' => $exception->getMessage(),
                 ]);
-                if ($this->telegram->configured('client')) {
+                if ($this->telegram->canReachClient($request->client?->telegram_user_id)) {
                     $this->alertTelegramDeliveryFailure->handle($request, 'invoice', $exception->getMessage());
                 }
             }

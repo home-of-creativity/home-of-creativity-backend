@@ -14,7 +14,7 @@ class ClearDriveDeliveryKeyboards
     public function handle(ServiceRequest $request): void
     {
         $chatId = $request->client?->telegram_user_id;
-        if (! filled($chatId) || ! $this->telegram->configured('client')) {
+        if (! $this->telegram->canReachClient($chatId)) {
             return;
         }
 

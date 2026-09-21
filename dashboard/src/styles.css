@@ -1092,6 +1092,11 @@ td[colspan] {
   color: #0d6f9a;
 }
 
+.source-whatsapp {
+  background: color-mix(in srgb, #25d366 18%, var(--tint-base));
+  color: #0f7a3e;
+}
+
 .table-link {
   color: var(--brand-purple);
   font-weight: 600;

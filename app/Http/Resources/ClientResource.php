@@ -35,6 +35,7 @@ class ClientResource extends JsonResource
             'locale' => $this->locale,
             'telegram_user_id' => $this->telegram_user_id,
             'telegram_url' => $this->telegramPrivateUrl(),
+            'channel' => $this->isWhatsApp() ? 'whatsapp' : (filled($this->telegram_user_id) ? 'telegram' : null),
             'odoo_partner_id' => $this->odoo_partner_id,
             'odoo_lead_id' => $this->odoo_lead_id,
             'odoo_stage_name' => $this->odoo_stage_name,

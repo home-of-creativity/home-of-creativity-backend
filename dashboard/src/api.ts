@@ -170,6 +170,7 @@ export type Client = {
   phone: string | null;
   telegram_user_id: string | null;
   telegram_url?: string | null;
+  channel?: "telegram" | "whatsapp" | null;
   odoo_partner_id?: string | null;
   odoo_lead_id?: string | null;
   odoo_stage_name?: string | null;

@@ -2,6 +2,7 @@
 
 use App\Http\Middleware\EnsureAdmin;
 use App\Http\Middleware\VerifySharedSecret;
+use App\Http\Middleware\VerifyWhatsAppSignature;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -17,6 +18,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->trustProxies(at: '*');
         $middleware->alias([
             'shared.secret' => VerifySharedSecret::class,
+            'whatsapp.signature' => VerifyWhatsAppSignature::class,
             'admin' => EnsureAdmin::class,
         ]);
     })

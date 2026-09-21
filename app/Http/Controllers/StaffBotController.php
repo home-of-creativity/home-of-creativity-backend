@@ -89,9 +89,9 @@ class StaffBotController extends Controller
             ]);
         }
 
-        if (! $telegram->configured('client')) {
+        if (! $telegram->canReachClient($chatId)) {
             throw ValidationException::withMessages([
-                'text' => 'The client Telegram bot is not configured.',
+                'text' => 'The client bot is not configured.',
             ]);
         }
 
@@ -287,7 +287,7 @@ class StaffBotController extends Controller
         );
 
         $chatId = $updated->client?->telegram_user_id;
-        if ($chatId && $telegram->configured('client')) {
+        if ($telegram->canReachClient($chatId)) {
             $ref = ResolveServiceRequest::displayNumber($updated);
             $caption = 'تم تسليم العمل للطلب #'.$ref.".\n".($validated['notes'] ?? '');
             $keyboard = DriveDelivery::clientReviewKeyboard($ref, $updated->status === RequestStatus::ReadyForReview);

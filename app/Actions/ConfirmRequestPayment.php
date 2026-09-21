@@ -182,7 +182,7 @@ class ConfirmRequestPayment
     private function notifyClientSuccess(ServiceRequest $request, bool $isFirst): void
     {
         $chatId = $request->client?->telegram_user_id;
-        if (! filled($chatId) || ! $this->telegram->configured('client')) {
+        if (! $this->telegram->canReachClient($chatId)) {
             return;
         }
 

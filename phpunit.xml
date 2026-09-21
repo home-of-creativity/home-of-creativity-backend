@@ -48,6 +48,10 @@
         <env name="TELEGRAM_ADMIN_BOT_SECRET" value="change-me-admin"/>
         <env name="TELEGRAM_ADMIN_IDS" value=""/>
         <env name="TELEGRAM_STAFF_CHAT_ID" value=""/>
+        <env name="WHATSAPP_TOKEN" value=""/>
+        <env name="WHATSAPP_PHONE_NUMBER_ID" value=""/>
+        <env name="WHATSAPP_VERIFY_TOKEN" value="change-me-wa"/>
+        <env name="WHATSAPP_APP_SECRET" value="change-me-wa-secret"/>
         <env name="ODOO_ENABLED" value="false"/>
         <env name="ODOO_USE_JSON2" value="false"/>
         <env name="ODOO_URL" value=""/>

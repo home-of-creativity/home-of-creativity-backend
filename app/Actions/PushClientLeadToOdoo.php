@@ -62,6 +62,12 @@ class PushClientLeadToOdoo
                     $tagIds[] = $tagId;
                 }
             }
+            if ($client->isWhatsApp()) {
+                $whatsAppTagId = $this->odoo->ensureCrmTagId('واتساب');
+                if ($whatsAppTagId) {
+                    $tagIds[] = $whatsAppTagId;
+                }
+            }
 
             $leadId = $this->odoo->findCrmLead($this->leadName($client), $client->company_name)
                 ?? $this->odoo->findCrmLeadByContact($client->phone, $client->email, $client->name);
@@ -84,7 +90,7 @@ class PushClientLeadToOdoo
                 'mobile' => $client->phone,
                 'email_from' => $client->email,
                 'partner_id' => filled($client->odoo_partner_id) ? (int) $client->odoo_partner_id : null,
-                'description' => 'Lead from Home of Creativity'
+                'description' => ($client->isWhatsApp() ? 'Lead from Home of Creativity (WhatsApp)' : 'Lead from Home of Creativity')
                     .($industry ? "\nالنشاط: {$industry}" : ''),
                 'tag_ids' => $tagIds !== [] ? $tagIds : null,
             ]);
@@ -127,10 +133,18 @@ class PushClientLeadToOdoo
             ], fn (mixed $value): bool => $value !== null && $value !== '');
 
             $telegramTagId = $this->odoo->ensureCrmTagId('تلغرام');
+            $tagCommands = [];
             if ($telegramTagId) {
-                // Add-only command: keeps the تلغرام classification always
-                // present without removing tags a staff member added in Odoo.
-                $values['tag_ids'] = [[4, $telegramTagId]];
+                $tagCommands[] = [4, $telegramTagId];
+            }
+            if ($client->isWhatsApp()) {
+                $whatsAppTagId = $this->odoo->ensureCrmTagId('واتساب');
+                if ($whatsAppTagId) {
+                    $tagCommands[] = [4, $whatsAppTagId];
+                }
+            }
+            if ($tagCommands !== []) {
+                $values['tag_ids'] = $tagCommands;
             }
 
             $this->odoo->writeRecord('crm.lead', (string) $client->odoo_lead_id, $values);

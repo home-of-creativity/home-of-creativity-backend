@@ -176,6 +176,7 @@ export const copy = {
   receipts: { ar: "وصولات الزبون", en: "Client receipts" },
   quotationDecision: { ar: "قرار العرض", en: "Quotation decision" },
   contactTelegram: { ar: "تواصل خاص عبر تيليجرام", en: "Private Telegram chat" },
+  contactWhatsapp: { ar: "تواصل خاص عبر واتساب", en: "Private WhatsApp chat" },
   openDriveFolder: { ar: "فتح المجلد", en: "Open folder" },
   createDriveFolder: { ar: "إنشاء مجلد Drive", en: "Create Drive folder" },
   creatingDriveFolder: { ar: "جاري إنشاء المجلد…", en: "Creating folder…" },
@@ -734,6 +735,7 @@ export const statuses: Record<string, Copy> = {
 
 export const sources: Record<string, Copy> = {
   telegram: { ar: "تيليجرام", en: "Telegram" },
+  whatsapp: { ar: "واتساب", en: "WhatsApp" },
   website: { ar: "الموقع", en: "Website" },
 };
 

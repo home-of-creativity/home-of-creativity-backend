@@ -38,6 +38,7 @@ use App\Http\Controllers\SocialFeedController;
 use App\Http\Controllers\StaffBotController;
 use App\Http\Controllers\TelegramBotController;
 use App\Http\Controllers\ThreadsOAuthController;
+use App\Http\Controllers\WhatsAppWebhookController;
 use App\Models\LegalPage;
 use Illuminate\Support\Facades\Route;
 
@@ -225,6 +226,12 @@ Route::prefix('bot/telegram')->middleware('shared.secret:services.telegram.bot_s
     Route::post('requests/{service_request}/renew', [TelegramBotController::class, 'renew']);
     Route::post('requests/{service_request}/decline-renewal', [TelegramBotController::class, 'declineRenewal']);
     Route::post('support', [TelegramBotController::class, 'support']);
+});
+
+Route::prefix('bot/whatsapp')->group(function () {
+    Route::get('webhook', [WhatsAppWebhookController::class, 'verify']);
+    Route::post('webhook', [WhatsAppWebhookController::class, 'incoming'])
+        ->middleware(['whatsapp.signature', 'throttle:120,1']);
 });
 
 Route::prefix('bot/staff')->middleware('shared.secret:services.telegram.staff_bot_secret')->group(function () {

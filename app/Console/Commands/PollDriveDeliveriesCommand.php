@@ -304,14 +304,14 @@ class PollDriveDeliveriesCommand extends Command
         $sent = false;
         $chatId = $request->client?->telegram_user_id;
         $tmp = null;
-        if (! filled($chatId) || ! $telegram->configured('client')) {
+        if (! $telegram->canReachClient($chatId)) {
             $this->alertStaffOnce(
                 $notifyEmployees,
                 'ملف Drive جاهز للطلب '.$request->number.' لكن بوت الزبون غير مربوط أو توكن التلجرام غير مضبوط، لذلك لم تُرسل الصورة.',
                 'ops:poll-drive:no-tg:'.$request->number,
             );
         }
-        if (filled($chatId) && $telegram->configured('client')) {
+        if ($telegram->canReachClient($chatId)) {
             $safeName = preg_replace('/[^A-Za-z0-9._-]+/', '_', basename((string) $file['name'])) ?: 'file';
             $tmp = 'drive-deliveries/'.$fileId.'-'.$safeName;
             Storage::disk('local')->put($tmp, $binary);
@@ -399,7 +399,7 @@ class PollDriveDeliveriesCommand extends Command
 
         $updated = $openRequestForClientReview->handle($request);
         $chatId = $updated->client?->telegram_user_id;
-        if (! filled($chatId) || ! $telegram->configured('client')) {
+        if (! $telegram->canReachClient($chatId)) {
             return;
         }
 

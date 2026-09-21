@@ -317,7 +317,7 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
             <dd dir="ltr">
               {item.client?.telegram_url ? (
                 <a href={item.client.telegram_url} rel="noreferrer">
-                  {t(copy.contactTelegram)}
+                  {t(item.client.channel === "whatsapp" ? copy.contactWhatsapp : copy.contactTelegram)}
                 </a>
               ) : (
                 item.client?.telegram_user_id ?? "—"
@@ -494,7 +494,7 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
                         <>
                           {" · "}
                           <a href={item.client.telegram_url} rel="noreferrer">
-                            {t(copy.contactTelegram)}
+                            {t(item.client.channel === "whatsapp" ? copy.contactWhatsapp : copy.contactTelegram)}
                           </a>
                         </>
                       ) : null}

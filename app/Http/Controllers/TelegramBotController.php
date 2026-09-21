@@ -20,7 +20,6 @@ use App\Actions\SubmitServiceRequest;
 use App\Actions\SyncClickUpFromStaff;
 use App\Enums\ClickUpSyncEvent;
 use App\Enums\EmployeeProfession;
-use App\Enums\RequestSource;
 use App\Enums\RequestStatus;
 use App\Http\Requests\TelegramLinkRequest;
 use App\Http\Requests\TelegramSubmitRequest;
@@ -135,7 +134,7 @@ class TelegramBotController extends Controller
         $serviceRequest = $submitServiceRequest->handle($client, [
             'title' => $request->validated('title'),
             'description' => trim((string) ($request->validated('description') ?? '')) ?: 'انظر المرفقات.',
-            'source' => RequestSource::Telegram,
+            'source' => $client->requestSource(),
             'attachments' => $request->validated('attachments') ?? [],
         ]);
 
