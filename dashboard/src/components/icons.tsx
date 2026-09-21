@@ -154,6 +154,16 @@ export function IconQr(props: IconProps) {
   );
 }
 
+export function IconArticles(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M5 4.5h9a2 2 0 0 1 2 2V19a1 1 0 0 0 1 1H7.5A2.5 2.5 0 0 1 5 17.5Z" />
+      <path d="M16 7.5h1.5a2 2 0 0 1 2 2v8a2.5 2.5 0 0 1-2.5 2.5" />
+      <path d="M8 8.5h5M8 11.5h5M8 14.5h3" />
+    </svg>
+  );
+}
+
 export function IconClose(props: IconProps) {
   return (
     <svg {...base} {...props}>

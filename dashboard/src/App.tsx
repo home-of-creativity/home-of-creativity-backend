@@ -19,6 +19,8 @@ import { Legal } from "./pages/Legal";
 import { ProfilePdf } from "./pages/ProfilePdf";
 import { Login } from "./pages/Login";
 import { Overview } from "./pages/Overview";
+import { Articles } from "./pages/Articles";
+import { ArticleForm } from "./pages/ArticleForm";
 import { Pricing } from "./pages/Pricing";
 import { PricingCategoryForm } from "./pages/pricing/PricingCategoryForm";
 import { PricingPackageForm } from "./pages/pricing/PricingPackageForm";
@@ -49,6 +51,7 @@ import {
   IconLanguage,
   IconLegal,
   IconLogout,
+  IconArticles,
   IconOverview,
   IconPricing,
   IconProjects,
@@ -112,6 +115,7 @@ function Shell({
     { id: "social-links", label: t(copy.socialBioLinks), to: "/social/links", icon: <IconSocial aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
     { id: "projects", label: t(copy.portfolioTabProjects), to: "/projects", icon: <IconProjects aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
     { id: "reels", label: t(copy.reelsTitle), to: "/reels", icon: <IconReels aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
+    { id: "articles", label: t(copy.articlesTitle), to: "/articles", icon: <IconArticles aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
     { id: "categories", label: t(copy.portfolioTabCategories), to: "/categories", icon: <IconCategories aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
     { id: "pricing", label: t(copy.pricingTitle), to: "/pricing", icon: <IconPricing aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
     { id: "contact", label: t(copy.contactTitle), to: "/contact", icon: <IconContact aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
@@ -122,6 +126,7 @@ function Shell({
     { id: "add-employee", label: t(copy.addEmployee), to: "/employees/new", icon: <IconEmployees aria-hidden width={18} height={18} />, group: t(copy.commandGroupActions) },
     { id: "add-client", label: t(copy.addClient), to: "/clients/new", icon: <IconClients aria-hidden width={18} height={18} />, group: t(copy.commandGroupActions) },
     { id: "add-reel", label: t(copy.addReel), to: "/reels/new", icon: <IconReels aria-hidden width={18} height={18} />, group: t(copy.commandGroupActions) },
+    { id: "add-article", label: t(copy.addArticle), to: "/articles/new", icon: <IconArticles aria-hidden width={18} height={18} />, group: t(copy.commandGroupActions) },
     { id: "compose-post", label: t(copy.socialCompose), to: "/social", icon: <IconSocial aria-hidden width={18} height={18} />, group: t(copy.commandGroupActions) },
   ];
 
@@ -209,6 +214,10 @@ function Shell({
           <NavLink to="/reels">
             <IconReels aria-hidden />
             <span>{t(copy.reelsTitle)}</span>
+          </NavLink>
+          <NavLink to="/articles">
+            <IconArticles aria-hidden />
+            <span>{t(copy.articlesTitle)}</span>
           </NavLink>
           <NavLink to="/categories">
             <IconCategories aria-hidden />
@@ -435,6 +444,9 @@ export function App() {
               </Suspense>
             }
           />
+          <Route path="/articles" element={<Articles locale={locale} t={t} />} />
+          <Route path="/articles/new" element={<ArticleForm locale={locale} t={t} />} />
+          <Route path="/articles/:id/edit" element={<ArticleForm locale={locale} t={t} />} />
           <Route path="/categories" element={<PortfolioCategories locale={locale} t={t} />} />
           <Route path="/categories/new" element={<PortfolioCategoryForm locale={locale} t={t} />} />
           <Route path="/categories/:id/edit" element={<PortfolioCategoryForm locale={locale} t={t} />} />
