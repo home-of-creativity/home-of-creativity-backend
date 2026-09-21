@@ -74,6 +74,8 @@ class SubmitSearchSitemapCommand extends Command
                 $origin.'/locations/',
                 $origin.'/privacy/',
                 $origin.'/terms/',
+                $origin.'/llms.txt',
+                $origin.'/llms-full.txt',
                 $sitemap,
             ],
         ];

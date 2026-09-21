@@ -5,7 +5,7 @@
 (hoc_api_routes) {
 	handle /api* {
 		root * /var/www/hoc/public
-		encode gzip
+		encode zstd gzip
 		request_body {
 			max_size 512MB
 		}
@@ -19,7 +19,7 @@
 
 	handle /auth* {
 		root * /var/www/hoc/public
-		encode gzip
+		encode zstd gzip
 		php_fastcgi hoc-api:9000 {
 			dial_timeout 10s
 			read_timeout 10m
@@ -36,6 +36,7 @@
 	handle /storage* {
 		root * /var/www/hoc/storage/app/public
 		uri strip_prefix /storage
+		encode zstd gzip
 		header {
 			Accept-Ranges bytes
 			Cache-Control "public, max-age=86400"
@@ -70,7 +71,7 @@
 
 	handle_path /dashboard* {
 		root * /var/www/hoc/dashboard/dist
-		encode gzip
+		encode zstd gzip
 
 		@dashboardStatic path *.js *.css *.mjs *.map *.woff *.woff2 *.ttf *.png *.jpg *.jpeg *.webp *.avif *.svg *.ico *.json *.txt *.webmanifest
 		handle @dashboardStatic {
@@ -83,18 +84,26 @@
 		file_server
 	}
 
+	handle /sitemap.xml {
+		root * /var/www/design
+		encode zstd gzip
+		header Content-Type "application/xml; charset=utf-8"
+		file_server
+	}
+
 	@siteAsset {
 		path *.css *.js *.mjs *.map *.woff *.woff2 *.ttf *.png *.jpg *.jpeg *.webp *.avif *.svg *.ico *.txt *.xml *.webmanifest
 		not path /dashboard /dashboard/*
 	}
 	handle @siteAsset {
 		root * /var/www/design
+		encode zstd gzip
 		file_server
 	}
 
 	handle {
 		root * /var/www/design
-		encode gzip
+		encode zstd gzip
 		try_files {path} {path}/ {path}/index.html /index.html
 		file_server
 	}
@@ -105,6 +114,9 @@
 }
 
 www.hoc.agency {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	}
 	redir https://hoc.agency{uri} permanent
 }
 
@@ -114,6 +126,15 @@ api.hoc.agency {
 		X-Content-Type-Options nosniff
 		Referrer-Policy strict-origin-when-cross-origin
 	}
+
+	handle /robots.txt {
+		header Content-Type "text/plain; charset=utf-8"
+		respond <<EOF
+User-agent: *
+Disallow: /
+EOF 200
+	}
+
 	import hoc_api_routes
 }
 

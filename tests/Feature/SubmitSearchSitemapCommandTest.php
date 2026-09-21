@@ -24,6 +24,8 @@ class SubmitSearchSitemapCommandTest extends TestCase
             && in_array('https://hoc.agency/social/', $request['urlList'], true)
             && in_array('https://hoc.agency/locations/', $request['urlList'], true)
             && in_array('https://hoc.agency/privacy/', $request['urlList'], true)
-            && in_array('https://hoc.agency/terms/', $request['urlList'], true));
+            && in_array('https://hoc.agency/terms/', $request['urlList'], true)
+            && in_array('https://hoc.agency/llms.txt', $request['urlList'], true)
+            && in_array('https://hoc.agency/llms-full.txt', $request['urlList'], true));
     }
 }
