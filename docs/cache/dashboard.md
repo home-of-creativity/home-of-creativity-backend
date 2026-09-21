@@ -24,7 +24,7 @@ Demo: `admin@example.com` / `password`.
 | `/clients` | Clients + logos + live Odoo quotations/invoices — GET lists SQL immediately (no full CRM import). Up to 3 complete Telegram clients missing a lead are created on Odoo team+stage **تلغرام** during that GET. Tabs poll every 30s; **no CRM import/sync button** (Excel import remains). Telegram clients appear after name/phone/company and are pushed to Odoo CRM on that last field. Delete hides the row (soft delete + unlink Odoo); if the same Telegram user messages the bot again they are restored with their requests. |
 | `/contact` | Contact channels (numbers, social, addresses) plus **Sham Cash QR** on its own tab (same studio as `/payments`) |
 | `/privacy` `/terms` | Privacy policy and terms CMS — same layout as articles: bilingual titles, side-by-side HTML editors with the large formatting toolbar, and live preview. No seeder; empty scaffold until staff save. Stored as one HTML body per locale (single `content` section). |
-| `/profile-pdf` | Company profile PDF: preview, upload/replace, delete. The published file appears as **الملف التعريفي / Profile** in the marketing navbar. |
+| `/profile-pdf` | Company profile PDF: preview, upload/replace, delete. The published file appears as **الملف التعريفي / Profile** in the marketing footer and navbar. |
 | `/payments` | Client Sham Cash QR studio: Telegram-style preview, upload/replace, 4-step payment path |
 | `/pricing` | Pricing CMS — every category `requires_full_payment` + `allows_renewal` badges; package partial-pay inherit/true/false |
 | `/projects` `/categories` | Portfolio |

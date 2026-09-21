@@ -343,7 +343,7 @@ export const copy = {
   },
   profilePdfPreview: { ar: "معاينة الملف", en: "PDF preview" },
   profilePdfManage: { ar: "إدارة الملف", en: "Manage PDF" },
-  profilePdfMissing: { ar: "لا يوجد ملف بعد. ارفع PDF ليظهر في شريط الموقع.", en: "No PDF yet. Upload one to show it in the navbar." },
+  profilePdfMissing: { ar: "لا يوجد ملف بعد. ارفع PDF ليظهر في تذييل الموقع وشريط التنقل.", en: "No PDF yet. Upload one to show it in the footer and navbar." },
   profilePdfOpen: { ar: "فتح الملف", en: "Open PDF" },
   profilePdfSaved: { ar: "تم حفظ الملف التعريفي.", en: "Company profile PDF saved." },
   uploadPdf: { ar: "رفع PDF", en: "Upload PDF" },
