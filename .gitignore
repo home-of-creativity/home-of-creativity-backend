@@ -13,6 +13,9 @@
 /.zed
 /auth.json
 /node_modules
+/bot/.venv
+/bot/__pycache__
+/dashboard/dist
 /public/build
 /public/hot
 /public/storage
