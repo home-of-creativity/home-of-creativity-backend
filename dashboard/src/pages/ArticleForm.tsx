@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
+import { Controller } from "react-hook-form";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { z } from "zod";
 import { FormPage } from "../components/FormPage";
 import { FormSection } from "../components/FormSection";
+import { HtmlEditorField } from "../components/HtmlEditorField";
 import { LoadingLottie } from "../components/LoadingLottie";
 import { useZodForm } from "../lib/useZodForm";
 import { api, type ArticlePayload } from "../api";
@@ -39,6 +41,7 @@ export function ArticleForm({ locale, t }: { locale: Locale; t: (c: { ar: string
     handleSubmit,
     reset,
     watch,
+    control,
     formState: { errors },
   } = useZodForm(schema, {
     defaultValues: {
@@ -150,31 +153,39 @@ export function ArticleForm({ locale, t }: { locale: Locale; t: (c: { ar: string
         </label>
       </FormSection>
 
-      <FormSection title={t(copy.articleBodyEn)}>
-        <label className="field-label">
-          {t(copy.articleBodyEn)}
-          <textarea
-            className={errors.body_en ? "field has-error field-mono" : "field field-mono"}
-            rows={10}
-            dir="ltr"
-            placeholder="<h2>Advantages of social media</h2>"
-            {...register("body_en")}
-          />
-          {errors.body_en ? <p className="field-error">{errors.body_en.message}</p> : null}
-          <small className="muted">{t(copy.articleBodyHint)}</small>
-        </label>
-        <label className="field-label">
-          {t(copy.articleBodyAr)}
-          <textarea
-            className={errors.body_ar ? "field has-error field-mono" : "field field-mono"}
-            rows={10}
-            dir="rtl"
-            placeholder="<h2>فوائد وسائل التواصل الاجتماعي</h2>"
-            {...register("body_ar")}
-          />
-          {errors.body_ar ? <p className="field-error">{errors.body_ar.message}</p> : null}
-          <small className="muted">{t(copy.articleBodyHint)}</small>
-        </label>
+      <FormSection title={t(copy.articleBodyEn)} span>
+        <Controller
+          name="body_en"
+          control={control}
+          render={({ field }) => (
+            <HtmlEditorField
+              label={t(copy.articleBodyEn)}
+              value={field.value}
+              onChange={field.onChange}
+              dir="ltr"
+              placeholder="<h2>Advantages of social media</h2>"
+              hint={t(copy.articleBodyHint)}
+              error={errors.body_en?.message}
+              toolbarLabel={t(copy.htmlEditorToolbar)}
+            />
+          )}
+        />
+        <Controller
+          name="body_ar"
+          control={control}
+          render={({ field }) => (
+            <HtmlEditorField
+              label={t(copy.articleBodyAr)}
+              value={field.value}
+              onChange={field.onChange}
+              dir="rtl"
+              placeholder="<h2>فوائد وسائل التواصل الاجتماعي</h2>"
+              hint={t(copy.articleBodyHint)}
+              error={errors.body_ar?.message}
+              toolbarLabel={t(copy.htmlEditorToolbar)}
+            />
+          )}
+        />
       </FormSection>
 
       <FormSection title={t(copy.articlePreview)}>

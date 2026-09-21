@@ -350,13 +350,13 @@ export const copy = {
   replacePdf: { ar: "استبدال PDF", en: "Replace PDF" },
   legalPrivacyTitle: { ar: "سياسة الخصوصية", en: "Privacy Policy" },
   legalPrivacyLede: {
-    ar: "عدّل أقسام سياسة الخصوصية بوسوم HTML. تظهر على صفحة الخصوصية في الموقع.",
-    en: "Edit privacy sections with HTML tags. They appear on the website privacy page.",
+    ar: "حرّر محتوى سياسة الخصوصية بالعربية والإنجليزية. يظهر على صفحة الخصوصية في الموقع بعد الحفظ.",
+    en: "Edit the privacy policy in Arabic and English. It appears on the website after you save.",
   },
   legalTermsTitle: { ar: "شروط الاستخدام", en: "Terms of Use" },
   legalTermsLede: {
-    ar: "عدّل أقسام الشروط والأحكام بوسوم HTML. تظهر على صفحة الشروط في الموقع.",
-    en: "Edit terms and conditions sections with HTML tags. They appear on the website terms page.",
+    ar: "حرّر شروط الاستخدام بالعربية والإنجليزية. تظهر على صفحة الشروط في الموقع بعد الحفظ.",
+    en: "Edit the terms of use in Arabic and English. They appear on the website after you save.",
   },
   legalTitleAr: { ar: "العنوان (AR)", en: "Title (AR)" },
   legalTitleEn: { ar: "العنوان (EN)", en: "Title (EN)" },
@@ -368,10 +368,9 @@ export const copy = {
   legalAddSection: { ar: "إضافة قسم", en: "Add section" },
   legalInsertTag: { ar: "إدراج وسم", en: "Insert tag" },
   legalSave: { ar: "حفظ الصفحة", en: "Save page" },
-  legalEmpty: { ar: "لا توجد صفحات قانونية. شغّل seeder ثم حدّث.", en: "No legal pages yet. Run the seeder, then refresh." },
   legalTagsHint: {
-    ar: "مسموح: section, h2, p, ul, li, a, strong, em. الصق HTML أو استخدم الأزرار.",
-    en: "Allowed: section, h2, p, ul, li, a, strong, em. Paste HTML or use the buttons.",
+    ar: "استخدم أزرار التنسيق أو الصق HTML. استخدم h2 داخل المحتوى للعناوين الفرعية.",
+    en: "Use the formatting buttons or paste HTML. Use h2 inside the body for subheadings.",
   },
   contactTitle: { ar: "التواصل", en: "Contact" },
   contactLede: {
@@ -678,9 +677,10 @@ export const copy = {
   articleBodyEn: { ar: "المحتوى HTML (EN)", en: "Body HTML (EN)" },
   articleBodyAr: { ar: "المحتوى HTML (AR)", en: "Body HTML (AR)" },
   articleBodyHint: {
-    ar: "يمكنك استخدام وسوم HTML مثل <h2> و<p> و<ul> و<strong>.",
-    en: "You can use HTML tags like <h2>, <p>, <ul>, and <strong>.",
+    ar: "حدّد النص ثم اضغط الزر لإدراج الوسم، أو الصق HTML مباشرة.",
+    en: "Select text, tap a tag button to wrap it, or paste HTML directly.",
   },
+  htmlEditorToolbar: { ar: "أدوات تنسيق HTML", en: "HTML formatting tools" },
   articleSlugHint: {
     ar: "اتركه فارغاً لتوليده تلقائياً من العنوان.",
     en: "Leave blank to generate it automatically from the title.",

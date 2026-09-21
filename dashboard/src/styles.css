@@ -5999,6 +5999,116 @@ html[dir="rtl"] .placement-tile-toggle[data-state="checked"] .placement-tile-tog
   }
 }
 
+/* Shared HTML editor toolbar (articles, legal, …) */
+.html-editor-field {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.html-editor-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--brand-line);
+  border-radius: 0.85rem;
+  background: var(--brand-surface);
+}
+
+.html-editor-toolbar-sep {
+  width: 1px;
+  align-self: stretch;
+  min-height: 2.4rem;
+  margin-inline: 0.15rem;
+  background: var(--brand-line);
+}
+
+.html-editor-btn {
+  min-width: 2.85rem;
+  min-height: 2.85rem;
+  padding: 0.45rem 0.75rem;
+  border: 1px solid var(--brand-line);
+  border-radius: 0.65rem;
+  background: #fff;
+  color: var(--brand-ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.html-editor-btn:hover:not(:disabled) {
+  border-color: var(--brand-purple);
+  color: var(--brand-purple);
+}
+
+.html-editor-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.html-editor-btn.is-active {
+  border-color: var(--brand-purple);
+  background: color-mix(in srgb, var(--brand-purple) 12%, #fff);
+  color: var(--brand-purple);
+}
+
+.html-editor-btn-wide {
+  min-width: 5.5rem;
+  font-family: inherit;
+  font-size: 0.88rem;
+}
+
+.html-editor-preview-label {
+  font-size: 0.82rem;
+  color: var(--brand-muted);
+}
+
+.html-editor-preview {
+  min-height: 4rem;
+  padding: 0.95rem 1.1rem;
+  border: 1px dashed var(--brand-line);
+  border-radius: 0.9rem;
+  background: var(--brand-surface);
+}
+
+.html-editor-preview :is(h1, h2, h3) {
+  margin: 0.55rem 0 0.35rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.html-editor-preview h1 { font-size: 1.45rem; }
+.html-editor-preview h2 { font-size: 1.25rem; }
+.html-editor-preview h3 { font-size: 1.08rem; }
+.html-editor-preview p,
+.html-editor-preview ul,
+.html-editor-preview ol,
+.html-editor-preview blockquote,
+.html-editor-preview pre {
+  margin: 0.55rem 0;
+}
+
+.html-editor-preview blockquote {
+  padding-inline-start: 0.85rem;
+  border-inline-start: 3px solid var(--brand-line);
+  color: var(--brand-muted);
+}
+
+.html-editor-preview pre {
+  padding: 0.75rem;
+  border-radius: 0.65rem;
+  background: color-mix(in srgb, var(--brand-ink) 6%, #fff);
+  overflow-x: auto;
+}
+
+.html-editor-preview a {
+  color: var(--brand-purple);
+  text-decoration: underline;
+}
+
 /* Articles CMS: HTML editor + live preview */
 .field-mono {
   font-family: ui-monospace, "SFMono-Regular", "Menlo", "Consolas", monospace;

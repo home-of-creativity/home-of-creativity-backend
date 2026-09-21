@@ -4,7 +4,6 @@ namespace Tests\Feature;
 
 use App\Models\LegalPage;
 use App\Models\User;
-use App\Support\LegalDefaults;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -63,7 +62,8 @@ class LegalPageTest extends TestCase
             ]],
         ])->assertOk()
             ->assertJsonPath('data.title_en', 'Updated Privacy Policy')
-            ->assertJsonPath('data.sections.0.id', 'how-we-use');
+            ->assertJsonPath('data.sections.0.id', 'how-we-use')
+            ->assertJsonPath('data.sections.0.heading_en', 'How we use');
 
         $page->refresh();
         $htmlEn = (string) $page->sections[0]['html_en'];
@@ -90,11 +90,40 @@ class LegalPageTest extends TestCase
         $this->getJson('/api/legal/cookies')->assertNotFound();
     }
 
-    public function test_defaults_include_privacy_and_terms_sections(): void
+    public function test_admin_show_scaffolds_missing_page(): void
     {
-        $pages = LegalDefaults::pages();
-        $this->assertSame(['privacy', 'terms'], array_column($pages, 'slug'));
-        $this->assertNotEmpty($pages[0]['sections']);
-        $this->assertNotEmpty($pages[1]['sections']);
+        Sanctum::actingAs(User::factory()->create(['is_admin' => true]));
+
+        $this->getJson('/api/admin/legal/privacy')
+            ->assertOk()
+            ->assertJsonPath('data.slug', 'privacy')
+            ->assertJsonPath('data.sections.0.id', 'content')
+            ->assertJsonPath('data.sections.0.html_en', '');
+    }
+
+    public function test_admin_can_create_legal_page_without_seeder(): void
+    {
+        Sanctum::actingAs(User::factory()->create(['is_admin' => true]));
+
+        $this->putJson('/api/admin/legal/terms', [
+            'title_ar' => 'شروط الاستخدام',
+            'title_en' => 'Terms of Use',
+            'sections' => [[
+                'heading_ar' => '',
+                'heading_en' => '',
+                'html_ar' => '<p>نص عربي</p>',
+                'html_en' => '<p>English text</p>',
+            ]],
+        ])->assertOk()
+            ->assertJsonPath('data.slug', 'terms');
+
+        $this->assertDatabaseHas('legal_pages', ['slug' => 'terms']);
+    }
+
+    public function test_scaffold_defaults_exist_for_reference_copy(): void
+    {
+        $privacy = LegalPage::scaffold('privacy');
+        $this->assertSame('privacy', $privacy['slug']);
+        $this->assertSame('', $privacy['sections'][0]['html_en']);
     }
 }

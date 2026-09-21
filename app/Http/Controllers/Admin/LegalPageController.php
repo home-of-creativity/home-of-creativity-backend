@@ -17,22 +17,32 @@ class LegalPageController extends Controller
         )->additional(['message' => 'ok']);
     }
 
-    public function show(LegalPage $legalPage)
+    public function show(string $slug)
     {
-        return LegalPageResource::make($legalPage)
+        abort_unless(in_array($slug, LegalPage::SLUGS, true), 404);
+
+        $page = LegalPage::query()->where('slug', $slug)->first()
+            ?? new LegalPage(LegalPage::scaffold($slug));
+
+        return LegalPageResource::make($page)
             ->additional(['message' => 'ok']);
     }
 
-    public function update(UpdateLegalPageRequest $request, LegalPage $legalPage): LegalPageResource
+    public function update(UpdateLegalPageRequest $request, string $slug): LegalPageResource
     {
-        $data = $request->validated();
-        $legalPage->fill([
-            'title_ar' => $data['title_ar'],
-            'title_en' => $data['title_en'],
-            'sections' => LegalHtml::cleanSections($data['sections']),
-        ])->save();
+        abort_unless(in_array($slug, LegalPage::SLUGS, true), 404);
 
-        return LegalPageResource::make($legalPage->fresh())
+        $data = $request->validated();
+        $page = LegalPage::query()->updateOrCreate(
+            ['slug' => $slug],
+            [
+                'title_ar' => $data['title_ar'],
+                'title_en' => $data['title_en'],
+                'sections' => LegalHtml::cleanSections($data['sections']),
+            ],
+        );
+
+        return LegalPageResource::make($page->fresh())
             ->additional(['message' => 'Updated.']);
     }
 }

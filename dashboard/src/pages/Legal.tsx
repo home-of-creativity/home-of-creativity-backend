@@ -1,97 +1,15 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Controller } from "react-hook-form";
 import { toast } from "sonner";
+import { z } from "zod";
+import { FormPage } from "../components/FormPage";
 import { FormSection } from "../components/FormSection";
+import { HtmlEditorField } from "../components/HtmlEditorField";
 import { LoadingLottie } from "../components/LoadingLottie";
-import { PageHeader } from "../components/PageHeader";
-import { api, type LegalPage, type LegalSection } from "../api";
+import { useZodForm } from "../lib/useZodForm";
+import { emptyLegalPage, expandLegalSections, flattenLegalBody } from "../lib/legalForm";
+import { api } from "../api";
 import { copy, type Locale } from "../i18n";
-
-const HTML_TAGS: Array<{ label: string; open: string; close: string }> = [
-  { label: "section", open: "<section>", close: "</section>" },
-  { label: "h2", open: "<h2>", close: "</h2>" },
-  { label: "h3", open: "<h3>", close: "</h3>" },
-  { label: "p", open: "<p>", close: "</p>" },
-  { label: "ul", open: "<ul>\n", close: "\n</ul>" },
-  { label: "li", open: "<li>", close: "</li>" },
-  { label: "a", open: '<a href="https://">', close: "</a>" },
-  { label: "strong", open: "<strong>", close: "</strong>" },
-  { label: "em", open: "<em>", close: "</em>" },
-  { label: "br", open: "<br>", close: "" },
-];
-
-function emptySection(): LegalSection {
-  return {
-    heading_ar: "",
-    heading_en: "",
-    html_ar: "<p></p>",
-    html_en: "<p></p>",
-  };
-}
-
-function insertAroundSelection(el: HTMLTextAreaElement, open: string, close: string) {
-  const start = el.selectionStart;
-  const end = el.selectionEnd;
-  const selected = el.value.slice(start, end) || (close ? "…" : "");
-  const next = `${el.value.slice(0, start)}${open}${selected}${close}${el.value.slice(end)}`;
-  const caret = start + open.length + selected.length + close.length;
-  return { next, caret };
-}
-
-function HtmlField({
-  label,
-  value,
-  onChange,
-  dir,
-  insertLabel,
-  previewLabel,
-}: {
-  label: string;
-  value: string;
-  onChange: (next: string) => void;
-  dir: "rtl" | "ltr";
-  insertLabel: string;
-  previewLabel: string;
-}) {
-  const ref = useRef<HTMLTextAreaElement>(null);
-
-  function insert(open: string, close: string) {
-    const el = ref.current;
-    if (!el) {
-      onChange(`${open}${close ? "…" : ""}${close}`);
-      return;
-    }
-    const { next, caret } = insertAroundSelection(el, open, close);
-    onChange(next);
-    requestAnimationFrame(() => {
-      el.focus();
-      el.setSelectionRange(caret, caret);
-    });
-  }
-
-  return (
-    <label className="field-label field-span legal-html-field">
-      <span>{label}</span>
-      <div className="legal-tag-bar" role="toolbar" aria-label={insertLabel}>
-        {HTML_TAGS.map((tag) => (
-          <button key={tag.label} type="button" className="legal-tag" onClick={() => insert(tag.open, tag.close)}>
-            {tag.label}
-          </button>
-        ))}
-      </div>
-      <textarea
-        ref={ref}
-        className="field legal-html-input"
-        dir={dir}
-        rows={10}
-        spellCheck={false}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      />
-      <span className="legal-preview-label">{previewLabel}</span>
-      <div className="legal-html-preview" dir={dir} dangerouslySetInnerHTML={{ __html: value }} />
-    </label>
-  );
-}
 
 export function Legal({
   locale,
@@ -103,42 +21,37 @@ export function Legal({
   slug: "privacy" | "terms";
 }) {
   const isTerms = slug === "terms";
-  const title = t(isTerms ? copy.legalTermsTitle : copy.legalPrivacyTitle);
-  const lede = t(isTerms ? copy.legalTermsLede : copy.legalPrivacyLede);
-  const [page, setPage] = useState<LegalPage | null>(null);
+  const pageTitle = t(isTerms ? copy.legalTermsTitle : copy.legalPrivacyTitle);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  function patch(next: Partial<LegalPage>) {
-    setPage((prev) => (prev ? { ...prev, ...next } : prev));
-  }
+  const schema = useMemo(
+    () =>
+      z.object({
+        title_en: z.string().trim().min(1, t(copy.fieldRequired)),
+        title_ar: z.string().trim().min(1, t(copy.fieldRequired)),
+        body_en: z.string().trim().min(1, t(copy.fieldRequired)),
+        body_ar: z.string().trim().min(1, t(copy.fieldRequired)),
+      }),
+    [t],
+  );
 
-  function patchSection(index: number, next: Partial<LegalSection>) {
-    setPage((prev) => {
-      if (!prev) return prev;
-      return { ...prev, sections: prev.sections.map((section, i) => (i === index ? { ...section, ...next } : section)) };
-    });
-  }
-
-  function moveSection(index: number, direction: -1 | 1) {
-    setPage((prev) => {
-      if (!prev) return prev;
-      const target = index + direction;
-      if (target < 0 || target >= prev.sections.length) return prev;
-      const sections = [...prev.sections];
-      const [row] = sections.splice(index, 1);
-      sections.splice(target, 0, row);
-      return { ...prev, sections };
-    });
-  }
-
-  function removeSection(index: number) {
-    setPage((prev) => {
-      if (!prev || prev.sections.length < 2) return prev;
-      return { ...prev, sections: prev.sections.filter((_, i) => i !== index) };
-    });
-  }
+  const {
+    register,
+    handleSubmit,
+    reset,
+    watch,
+    control,
+    formState: { errors },
+  } = useZodForm(schema, {
+    defaultValues: {
+      title_en: emptyLegalPage(slug).title_en,
+      title_ar: emptyLegalPage(slug).title_ar,
+      body_en: "",
+      body_ar: "",
+    },
+  });
 
   useEffect(() => {
     let active = true;
@@ -147,10 +60,17 @@ export function Legal({
     api
       .legalPage(slug)
       .then((res) => {
-        if (active) setPage(res.data);
+        if (!active) return;
+        const page = res.data;
+        reset({
+          title_en: page.title_en,
+          title_ar: page.title_ar,
+          body_en: flattenLegalBody(page.sections, "en"),
+          body_ar: flattenLegalBody(page.sections, "ar"),
+        });
       })
       .catch(() => {
-        if (active) setPage(null);
+        if (active) setError(t(copy.savePortfolioFailed));
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -158,25 +78,19 @@ export function Legal({
     return () => {
       active = false;
     };
-  }, [slug]);
+  }, [reset, slug, t]);
 
-  async function onSubmit(event: FormEvent) {
-    event.preventDefault();
-    if (!page) return;
-    setBusy(true);
+  const previewBody = watch(locale === "ar" ? "body_ar" : "body_en");
+
+  async function onValid(values: z.infer<typeof schema>) {
     setError("");
+    setBusy(true);
     try {
-      const res = await api.updateLegalPage(slug, {
-        title_ar: page.title_ar,
-        title_en: page.title_en,
-        sections: page.sections.map((section) => ({
-          heading_ar: section.heading_ar,
-          heading_en: section.heading_en,
-          html_ar: section.html_ar,
-          html_en: section.html_en,
-        })),
+      await api.updateLegalPage(slug, {
+        title_en: values.title_en.trim(),
+        title_ar: values.title_ar.trim(),
+        sections: expandLegalSections(values.body_en, values.body_ar),
       });
-      setPage(res.data);
       toast.success(t(copy.saveSuccess));
     } catch (err) {
       const message = err instanceof Error ? err.message : t(copy.savePortfolioFailed);
@@ -187,97 +101,77 @@ export function Legal({
     }
   }
 
+  if (loading) return <LoadingLottie variant="page" label={t(copy.loading)} />;
+
   return (
-    <>
-      <PageHeader eyebrow={t(copy.brandMark)} title={title} lede={lede} />
+    <FormPage
+      eyebrow={t(copy.brandMark)}
+      title={pageTitle}
+      backTo="/"
+      backLabel={t(copy.overview)}
+      onSubmit={handleSubmit(onValid)}
+      submitLabel={t(copy.legalSave)}
+      cancelLabel={t(copy.cancel)}
+      error={error}
+      busy={busy}
+      wide
+    >
+      <FormSection title={t(copy.articleContent)}>
+        <label className="field-label">
+          {t(copy.titleEn)}
+          <input className={errors.title_en ? "field has-error" : "field"} dir="ltr" {...register("title_en")} />
+          {errors.title_en ? <p className="field-error">{errors.title_en.message}</p> : null}
+        </label>
+        <label className="field-label">
+          {t(copy.titleAr)}
+          <input className={errors.title_ar ? "field has-error" : "field"} dir="rtl" {...register("title_ar")} />
+          {errors.title_ar ? <p className="field-error">{errors.title_ar.message}</p> : null}
+        </label>
+        <p className="form-section-desc field-span">{t(copy.legalTagsHint)}</p>
+      </FormSection>
 
-      {loading ? <LoadingLottie variant="page" label={t(copy.loading)} /> : null}
-      {!loading && !page ? <p className="notice">{t(copy.legalEmpty)}</p> : null}
+      <FormSection title={t(copy.articleBodyEn)} span>
+        <Controller
+          name="body_en"
+          control={control}
+          render={({ field }) => (
+            <HtmlEditorField
+              label={t(copy.articleBodyEn)}
+              value={field.value}
+              onChange={field.onChange}
+              dir="ltr"
+              placeholder="<h2>Privacy policy</h2>"
+              hint={t(copy.articleBodyHint)}
+              error={errors.body_en?.message}
+              toolbarLabel={t(copy.htmlEditorToolbar)}
+            />
+          )}
+        />
+        <Controller
+          name="body_ar"
+          control={control}
+          render={({ field }) => (
+            <HtmlEditorField
+              label={t(copy.articleBodyAr)}
+              value={field.value}
+              onChange={field.onChange}
+              dir="rtl"
+              placeholder="<h2>سياسة الخصوصية</h2>"
+              hint={t(copy.articleBodyHint)}
+              error={errors.body_ar?.message}
+              toolbarLabel={t(copy.htmlEditorToolbar)}
+            />
+          )}
+        />
+      </FormSection>
 
-      {page ? (
-        <form className="form-page is-wide legal-page" onSubmit={onSubmit}>
-          {error ? (
-            <p className="error" role="alert">
-              {error}
-            </p>
-          ) : null}
-          <div className="form-page-actions legal-page-actions">
-            <button type="submit" className="btn btn-primary" disabled={busy}>
-              {t(copy.legalSave)}
-            </button>
-          </div>
-
-          <FormSection title={locale === "ar" ? page.title_ar : page.title_en} span>
-            <label className="field-label">
-              {t(copy.legalTitleAr)}
-              <input className="field" dir="rtl" value={page.title_ar} onChange={(event) => patch({ title_ar: event.target.value })} />
-            </label>
-            <label className="field-label">
-              {t(copy.legalTitleEn)}
-              <input className="field" dir="ltr" value={page.title_en} onChange={(event) => patch({ title_en: event.target.value })} />
-            </label>
-            <p className="form-section-desc field-span">{t(copy.legalTagsHint)}</p>
-          </FormSection>
-
-          {page.sections.map((section, index) => (
-            <FormSection
-              key={`${section.heading_en}-${index}`}
-              title={`${index + 1}. ${locale === "ar" ? section.heading_ar || section.heading_en : section.heading_en || section.heading_ar}`}
-              span
-            >
-              <div className="legal-section-toolbar field-span">
-                <button type="button" className="btn btn-ghost" disabled={index === 0} onClick={() => moveSection(index, -1)}>
-                  {t(copy.moveUp)}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  disabled={index === page.sections.length - 1}
-                  onClick={() => moveSection(index, 1)}
-                >
-                  {t(copy.moveDown)}
-                </button>
-                <button type="button" className="btn btn-ghost" disabled={page.sections.length < 2} onClick={() => removeSection(index)}>
-                  {t(copy.delete)}
-                </button>
-              </div>
-              <label className="field-label">
-                {t(copy.legalHeadingAr)}
-                <input className="field" dir="rtl" value={section.heading_ar} onChange={(event) => patchSection(index, { heading_ar: event.target.value })} />
-              </label>
-              <label className="field-label">
-                {t(copy.legalHeadingEn)}
-                <input className="field" dir="ltr" value={section.heading_en} onChange={(event) => patchSection(index, { heading_en: event.target.value })} />
-              </label>
-              <HtmlField
-                label={t(copy.legalHtmlAr)}
-                value={section.html_ar}
-                dir="rtl"
-                insertLabel={t(copy.legalInsertTag)}
-                previewLabel={t(copy.legalPreview)}
-                onChange={(html_ar) => patchSection(index, { html_ar })}
-              />
-              <HtmlField
-                label={t(copy.legalHtmlEn)}
-                value={section.html_en}
-                dir="ltr"
-                insertLabel={t(copy.legalInsertTag)}
-                previewLabel={t(copy.legalPreview)}
-                onChange={(html_en) => patchSection(index, { html_en })}
-              />
-            </FormSection>
-          ))}
-
-          <div className="legal-page-actions">
-            <button type="button" className="btn btn-ghost" onClick={() => patch({ sections: [...page.sections, emptySection()] })}>
-              {t(copy.legalAddSection)}
-            </button>
-            <button type="submit" className="btn btn-primary" disabled={busy}>
-              {t(copy.legalSave)}
-            </button>
-          </div>
-        </form>
-      ) : null}
-    </>
+      <FormSection title={t(copy.articlePreview)}>
+        <div
+          className="article-preview field-span"
+          dir={locale === "ar" ? "rtl" : "ltr"}
+          dangerouslySetInnerHTML={{ __html: previewBody || "" }}
+        />
+      </FormSection>
+    </FormPage>
   );
 }

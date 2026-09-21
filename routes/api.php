@@ -38,6 +38,7 @@ use App\Http\Controllers\SocialFeedController;
 use App\Http\Controllers\StaffBotController;
 use App\Http\Controllers\TelegramBotController;
 use App\Http\Controllers\ThreadsOAuthController;
+use App\Models\LegalPage;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('auth')->group(function () {
@@ -77,8 +78,8 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
     Route::get('overview', OverviewController::class);
     Route::get('live', LiveController::class);
     Route::get('legal', [AdminLegalPageController::class, 'index']);
-    Route::get('legal/{legal_page:slug}', [AdminLegalPageController::class, 'show']);
-    Route::put('legal/{legal_page:slug}', [AdminLegalPageController::class, 'update']);
+    Route::get('legal/{slug}', [AdminLegalPageController::class, 'show'])->whereIn('slug', LegalPage::SLUGS);
+    Route::put('legal/{slug}', [AdminLegalPageController::class, 'update'])->whereIn('slug', LegalPage::SLUGS);
     Route::get('contact', [AdminContactChannelController::class, 'index']);
     Route::post('contact', [AdminContactChannelController::class, 'store']);
     Route::put('contact/{contact_channel}', [AdminContactChannelController::class, 'update']);
