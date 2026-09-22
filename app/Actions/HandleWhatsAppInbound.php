@@ -14,6 +14,7 @@ use App\Services\RequestStatusTransitionService;
 use App\Services\TelegramNotifier;
 use App\Services\WhatsAppCloudClient;
 use App\Support\BillingPeriod;
+use App\Support\ClientChannelGate;
 use App\Support\ClientProfileValue;
 use App\Support\PricingCatalog;
 use App\Support\ResolveServiceRequest;
@@ -121,6 +122,13 @@ class HandleWhatsAppInbound
             return;
         }
 
+        if (! ClientChannelGate::whatsappEnabled()) {
+            $this->whatsApp->markRead($wamid);
+            $this->replyPausedOnce($phone);
+
+            return;
+        }
+
         $this->whatsApp->markRead($wamid);
 
         $chatId = Client::whatsappKey($phone);
@@ -217,6 +225,22 @@ class HandleWhatsAppInbound
                 'error' => $exception->getMessage(),
             ]);
             $this->safeSend($chatId, 'تعذر تنفيذ الطلب. حاول مرة أخرى أو اضغط الدعم.');
+        }
+    }
+
+    private function replyPausedOnce(string $phone): void
+    {
+        if (! Cache::add('hoc:wa-paused-notice:'.$phone, 1, now()->addMinutes(30))) {
+            return;
+        }
+
+        try {
+            $this->whatsApp->sendText($phone, ClientChannelGate::WHATSAPP_PAUSED_MESSAGE);
+        } catch (Throwable $exception) {
+            Log::info('WhatsApp pause notice skipped.', [
+                'phone' => $phone,
+                'error' => $exception->getMessage(),
+            ]);
         }
     }
 

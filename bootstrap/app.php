@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\EnsureAdmin;
+use App\Http\Middleware\EnsureClientTelegramEnabled;
 use App\Http\Middleware\VerifySharedSecret;
 use App\Http\Middleware\VerifyWhatsAppSignature;
 use Illuminate\Foundation\Application;
@@ -19,6 +20,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'shared.secret' => VerifySharedSecret::class,
             'whatsapp.signature' => VerifyWhatsAppSignature::class,
+            'telegram.client' => EnsureClientTelegramEnabled::class,
             'admin' => EnsureAdmin::class,
         ]);
     })

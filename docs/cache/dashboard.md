@@ -26,6 +26,7 @@ Demo: `admin@example.com` / `password`.
 | `/privacy` `/terms` | Privacy policy and terms CMS — same layout as articles: bilingual titles, side-by-side HTML editors with the large formatting toolbar, and live preview. No seeder; empty scaffold until staff save. Stored as one HTML body per locale (single `content` section). |
 | `/profile-pdf` | Company profile PDF: preview, upload/replace, delete. The published file appears as **الملف التعريفي / Profile** in the marketing footer and navbar. |
 | `/payments` | Client Sham Cash QR studio: Telegram-style preview, upload/replace, 4-step payment path |
+| `/channels` | Pause/resume **client** Telegram and WhatsApp independently (`GET /admin/ops-settings` + `PUT /admin/ops-settings/client-channels`). Staff/admin bots stay up. Pausing asks for confirm. |
 | `/pricing` | Pricing CMS — every category `requires_full_payment` + `allows_renewal` badges; package partial-pay inherit/true/false |
 | `/projects` `/categories` | Portfolio |
 | `/reels` | Landing reels CMS — upload/replace/publish/sort; cover image can be removed (`DELETE /admin/reels/{id}/poster` or `remove_poster` on update); empty until staff add clips |

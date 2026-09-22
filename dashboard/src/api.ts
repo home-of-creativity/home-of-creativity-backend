@@ -31,6 +31,13 @@ export type User = {
 export type OpsSettings = {
   sham_cash_qr: boolean;
   sham_cash_qr_updated_at?: string | null;
+  telegram_enabled: boolean;
+  whatsapp_enabled: boolean;
+};
+
+export type ClientChannels = {
+  telegram_enabled: boolean;
+  whatsapp_enabled: boolean;
 };
 
 export type ProfilePdf = {
@@ -769,6 +776,12 @@ export const api = {
   },
   updateSocialProfile(payload: SocialLinktreeProfile) {
     return request<Envelope<SocialLinktreeProfile>>("/admin/ops-settings/social-profile", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+  updateClientChannels(payload: ClientChannels) {
+    return request<Envelope<ClientChannels>>("/admin/ops-settings/client-channels", {
       method: "PUT",
       body: JSON.stringify(payload),
     });

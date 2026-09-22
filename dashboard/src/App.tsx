@@ -9,6 +9,7 @@ import { applyLocale, applyTheme, copy, readLocale, readTheme, type Copy, type L
 import { Moon, Search, Sun } from "lucide-react";
 import { BrandLockup } from "./components/BrandLockup";
 import { CommandPalette, type CommandItem } from "./components/CommandPalette";
+import { ClientChannelsPage } from "./pages/ClientChannels";
 import { ClientForm } from "./pages/ClientForm";
 import { Clients } from "./pages/Clients";
 import { Contact } from "./pages/Contact";
@@ -52,6 +53,7 @@ import {
   IconLegal,
   IconLogout,
   IconArticles,
+  IconChannels,
   IconOverview,
   IconPricing,
   IconProjects,
@@ -123,6 +125,7 @@ function Shell({
     { id: "privacy", label: t(copy.legalPrivacyTitle), to: "/privacy", icon: <IconLegal aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
     { id: "terms", label: t(copy.legalTermsTitle), to: "/terms", icon: <IconLegal aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
     { id: "sham-cash", label: t(copy.navPayments), to: "/payments", icon: <IconQr aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
+    { id: "channels", label: t(copy.navChannels), to: "/channels", icon: <IconChannels aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
     { id: "add-employee", label: t(copy.addEmployee), to: "/employees/new", icon: <IconEmployees aria-hidden width={18} height={18} />, group: t(copy.commandGroupActions) },
     { id: "add-client", label: t(copy.addClient), to: "/clients/new", icon: <IconClients aria-hidden width={18} height={18} />, group: t(copy.commandGroupActions) },
     { id: "add-reel", label: t(copy.addReel), to: "/reels/new", icon: <IconReels aria-hidden width={18} height={18} />, group: t(copy.commandGroupActions) },
@@ -205,6 +208,10 @@ function Shell({
           <NavLink to="/payments">
             <IconQr aria-hidden />
             <span>{t(copy.navPayments)}</span>
+          </NavLink>
+          <NavLink to="/channels">
+            <IconChannels aria-hidden />
+            <span>{t(copy.navChannels)}</span>
           </NavLink>
           <p className="nav-group-label">{t(copy.navSite)}</p>
           <NavLink to="/projects">
@@ -416,6 +423,7 @@ export function App() {
             <Route path="accounts/:id/edit" element={<SocialAccountForm locale={locale} t={t} />} />
           </Route>
           <Route path="/payments" element={<Payments locale={locale} t={t} />} />
+          <Route path="/channels" element={<ClientChannelsPage locale={locale} t={t} />} />
           <Route path="/client-logos" element={<Navigate to="/clients?tab=logos" replace />} />
           <Route path="/projects" element={<PortfolioProjects locale={locale} t={t} />} />
           <Route path="/projects/new" element={<PortfolioProjectForm locale={locale} t={t} />} />

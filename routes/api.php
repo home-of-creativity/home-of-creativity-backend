@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Admin\ArticleController as AdminArticleController;
+use App\Http\Controllers\Admin\ClientChannelController as AdminClientChannelController;
 use App\Http\Controllers\Admin\ClientController as AdminClientController;
 use App\Http\Controllers\Admin\ContactChannelController as AdminContactChannelController;
 use App\Http\Controllers\Admin\EmployeeController as AdminEmployeeController;
@@ -119,6 +120,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
     Route::delete('ops-settings/profile-pdf', [AdminProfilePdfController::class, 'destroy']);
     Route::get('ops-settings/social-profile', [AdminServiceRequestController::class, 'socialProfile']);
     Route::put('ops-settings/social-profile', [AdminServiceRequestController::class, 'updateSocialProfile']);
+    Route::put('ops-settings/client-channels', [AdminClientChannelController::class, 'update']);
     Route::get('requests/{service_request}/files/{file}/receipt', [AdminServiceRequestController::class, 'receipt']);
     Route::post('integration-events/{integrationEvent}/retry', [AdminServiceRequestController::class, 'retryIntegrationEvent']);
     Route::get('portfolio/categories', [AdminPortfolioCategoryController::class, 'index']);
@@ -205,7 +207,7 @@ Route::prefix('integrations')->middleware(['shared.secret:services.n8n.webhook_s
 Route::post('integrations/drive/changed', [IntegrationController::class, 'driveChanged'])
     ->middleware('throttle:60,1');
 
-Route::prefix('bot/telegram')->middleware('shared.secret:services.telegram.bot_secret')->group(function () {
+Route::prefix('bot/telegram')->middleware(['shared.secret:services.telegram.bot_secret', 'telegram.client'])->group(function () {
     Route::post('link', [TelegramBotController::class, 'link']);
     Route::get('me', [TelegramBotController::class, 'me']);
     Route::post('profile', [TelegramBotController::class, 'updateProfile']);

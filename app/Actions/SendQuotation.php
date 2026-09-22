@@ -99,7 +99,7 @@ class SendQuotation
                         $quotation->forceFill(['telegram_file_id' => $fileId])->save();
                         $this->deliveredToClient = true;
                     }
-                } elseif ($chatId) {
+                } elseif ($chatId && $this->telegram->canReachClient($chatId)) {
                     $this->telegram->sendInlineKeyboard(
                         (string) $chatId,
                         $caption,

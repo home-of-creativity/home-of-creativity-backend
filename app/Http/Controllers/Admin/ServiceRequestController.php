@@ -26,6 +26,7 @@ use App\Models\OpsSetting;
 use App\Models\RequestFile;
 use App\Models\ServiceRequest;
 use App\Services\RequestStatusTransitionService;
+use App\Support\ClientChannelGate;
 use App\Support\ShamCashQr;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -293,14 +294,14 @@ class ServiceRequestController extends Controller
     }
 
     /**
-     * @return array{sham_cash_qr: bool, sham_cash_qr_updated_at: string|null}
+     * @return array{sham_cash_qr: bool, sham_cash_qr_updated_at: string|null, telegram_enabled: bool, whatsapp_enabled: bool}
      */
     private function opsSettingsPayload(): array
     {
-        return [
+        return array_merge([
             'sham_cash_qr' => ShamCashQr::relativePath() !== null,
             'sham_cash_qr_updated_at' => OpsSetting::getValue('sham_cash_qr_updated_at'),
-        ];
+        ], ClientChannelGate::payload());
     }
 
     /**

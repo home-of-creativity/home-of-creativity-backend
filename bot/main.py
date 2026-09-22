@@ -1,5 +1,6 @@
 import base64
 import os
+import sys
 from html import escape
 from io import BytesIO
 from pathlib import Path
@@ -574,8 +575,14 @@ async def ask_profile_field(message, context: ContextTypes.DEFAULT_TYPE, field: 
 async def notify_api_failure(message) -> None:
     if message is None:
         return
+    text = "تعذر الاتصال بالخادم حالياً. أعد المحاولة بعد ثوانٍ."
+    err = sys.exc_info()[1]
+    if isinstance(err, httpx.HTTPStatusError) and err.response is not None and err.response.status_code == 503:
+        detail = api_error_text(err.response)
+        if detail:
+            text = detail
     await message.reply_text(
-        "تعذر الاتصال بالخادم حالياً. أعد المحاولة بعد ثوانٍ.",
+        text,
         reply_markup=main_keyboard(),
     )
 

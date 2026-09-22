@@ -5741,6 +5741,48 @@ html[dir="rtl"] .placement-tile-toggle[data-state="checked"] .placement-tile-tog
   width: 100%;
 }
 
+.channel-studio {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+  align-items: start;
+  width: 100%;
+}
+
+.channel-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.channel-card-head .form-title {
+  margin: 0;
+}
+
+.channel-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.channel-status.is-on {
+  background: color-mix(in srgb, var(--brand-orange) 18%, var(--tint-base));
+  color: var(--brand-orange);
+}
+
+.channel-status.is-off {
+  background: color-mix(in srgb, var(--brand-ink) 10%, transparent);
+  color: var(--brand-muted);
+}
+
+.channel-card.is-paused {
+  opacity: 0.92;
+}
+
 .pdf-preview {
   width: 100%;
   min-height: 36rem;
@@ -5889,6 +5931,7 @@ html[dir="rtl"] .placement-tile-toggle[data-state="checked"] .placement-tile-tog
   .lt-admin,
   .qr-studio,
   .pdf-studio,
+  .channel-studio,
   .social-accounts-layout {
     grid-template-columns: 1fr 1fr;
   }
@@ -5899,6 +5942,7 @@ html[dir="rtl"] .placement-tile-toggle[data-state="checked"] .placement-tile-tog
   .lt-admin,
   .qr-studio,
   .pdf-studio,
+  .channel-studio,
   .studio-platform-grid,
   .social-accounts-layout,
   .social-inbox-list {

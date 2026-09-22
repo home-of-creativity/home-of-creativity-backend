@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Client;
 use App\Models\ServiceRequest;
+use App\Support\ClientChannelGate;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -27,11 +28,17 @@ class TelegramNotifier
 
     public function canReachClient(mixed $chatId): bool
     {
-        return filled($chatId) && $this->configured('client', $chatId);
+        return filled($chatId)
+            && ClientChannelGate::enabledForChatId($chatId)
+            && $this->configured('client', $chatId);
     }
 
     public function send(string $chatId, string $text, string $bot = 'client'): void
     {
+        if ($this->clientDeliveryBlocked($chatId, $bot)) {
+            return;
+        }
+
         if (Client::isWhatsAppKey($chatId)) {
             $this->whatsApp->sendText(Client::whatsappPhoneFromKey($chatId), $text);
 
@@ -62,6 +69,10 @@ class TelegramNotifier
      */
     public function sendDocument(string $chatId, string $absolutePath, ?string $caption = null, string $bot = 'client', ?array $replyMarkup = null): ?string
     {
+        if ($this->clientDeliveryBlocked($chatId, $bot)) {
+            return null;
+        }
+
         if (Client::isWhatsAppKey($chatId)) {
             return $this->sendWhatsAppFile($chatId, $absolutePath, $caption, $replyMarkup, asImage: false);
         }
@@ -104,6 +115,10 @@ class TelegramNotifier
      */
     public function sendPhoto(string $chatId, string $absolutePath, ?string $caption = null, string $bot = 'client', ?array $replyMarkup = null): ?string
     {
+        if ($this->clientDeliveryBlocked($chatId, $bot)) {
+            return null;
+        }
+
         if (Client::isWhatsAppKey($chatId)) {
             return $this->sendWhatsAppFile($chatId, $absolutePath, $caption, $replyMarkup, asImage: true);
         }
@@ -153,6 +168,10 @@ class TelegramNotifier
      */
     public function sendFile(string $chatId, string $absolutePath, string $mimeType, ?string $caption = null, string $bot = 'client', ?array $replyMarkup = null): ?string
     {
+        if ($this->clientDeliveryBlocked($chatId, $bot)) {
+            return null;
+        }
+
         $mime = strtolower($mimeType);
         $isHeic = str_contains($mime, 'heic') || str_contains($mime, 'heif');
         if (str_starts_with($mime, 'image/') && ! $isHeic) {
@@ -173,7 +192,7 @@ class TelegramNotifier
      */
     public function editReplyMarkup(string $chatId, int $messageId, ?array $replyMarkup = null, string $bot = 'client'): void
     {
-        if (Client::isWhatsAppKey($chatId)) {
+        if ($this->clientDeliveryBlocked($chatId, $bot) || Client::isWhatsAppKey($chatId)) {
             return;
         }
 
@@ -232,6 +251,10 @@ class TelegramNotifier
      */
     public function sendInlineActions(string $chatId, string $text, array $buttons, string $bot = 'client'): void
     {
+        if ($this->clientDeliveryBlocked($chatId, $bot)) {
+            return;
+        }
+
         if (Client::isWhatsAppKey($chatId)) {
             $this->sendWhatsAppInteractive(Client::whatsappPhoneFromKey($chatId), $text, $buttons);
 
@@ -265,6 +288,10 @@ class TelegramNotifier
      */
     public function sendInlineKeyboard(string $chatId, string $text, array $rows, string $bot = 'client'): void
     {
+        if ($this->clientDeliveryBlocked($chatId, $bot)) {
+            return;
+        }
+
         if (Client::isWhatsAppKey($chatId)) {
             $this->sendWhatsAppInteractive(
                 Client::whatsappPhoneFromKey($chatId),
@@ -382,6 +409,11 @@ class TelegramNotifier
         $description = $response->json('description');
 
         return is_string($description) && $description !== '' ? $description : $fallback;
+    }
+
+    private function clientDeliveryBlocked(mixed $chatId, string $bot): bool
+    {
+        return $bot === 'client' && ! ClientChannelGate::enabledForChatId($chatId);
     }
 
     private function token(string $bot): string

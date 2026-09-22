@@ -18,7 +18,7 @@ python admin.py
 
 Loads parent `.env` + local. API base `HOC_API_URL`. Secrets: `TELEGRAM_BOT_TOKEN` / `TELEGRAM_BOT_SECRET`, staff equivalents, `TELEGRAM_ADMIN_BOT_TOKEN` / `TELEGRAM_ADMIN_BOT_SECRET`, allowlist `TELEGRAM_ADMIN_IDS`. Optional `TELEGRAM_PROXY`.
 
-HTTP: client → `/api/bot/telegram/*`, staff → `/api/bot/staff/*`, admin → `/api/bot/admin/*`, header `X-Webhook-Secret`. WhatsApp Cloud API (client bot only) → `GET|POST /api/bot/whatsapp/webhook` (Meta hub.verify_token + `X-Hub-Signature-256`). No extra Python process: Laravel owns the WhatsApp conversation and reuses the same `/api/bot/telegram` actions (profile, catalog, quotes, receipts, Drive). Clients are stored as `telegram_user_id = wa:{digits}` so outbound SLA/quotes/Drive already route through `TelegramNotifier` to Graph. Staff «تواصل خاص» becomes `https://wa.me/{phone}`. Odoo stays on sales team/stage **تلغرام** plus CRM tag **واتساب**.
+HTTP: client → `/api/bot/telegram/*`, staff → `/api/bot/staff/*`, admin → `/api/bot/admin/*`, header `X-Webhook-Secret`. WhatsApp Cloud API (client bot only) → `GET|POST /api/bot/whatsapp/webhook` (Meta hub.verify_token + `X-Hub-Signature-256`). Dashboard **قنوات البوت** (`/channels`) stores `client_telegram_enabled` / `client_whatsapp_enabled` in `ops_settings` (default on). Telegram pause returns `503` `channel_paused` on `/bot/telegram/*` (Python shows the Arabic message). WhatsApp pause still verifies the webhook, skips conversation, and replies once per 30 minutes. Outbound `TelegramNotifier` skips the paused channel (`canReachClient` false). Staff/admin bots are not gated.
 
 Reply Keyboard flows stay; Inline buttons expand them (catalog, quotation reject reasons, renewal).
 
@@ -58,7 +58,7 @@ Allowlisted Telegram IDs only (`TELEGRAM_ADMIN_IDS`; `/api/bot/admin/me` is 403 
 
 ## Flowchart tests
 
-`tests/Feature/BotFlowchartTest.php` covers the bot API contract: webhook secrets (401), client profile stairs (phone then company), catalog/manual/edit/cancel/support, quote reject → staff requote → pay → staff in-progress → deliver → revision → client complete, staff join pending until dashboard approve, admin allowlist + guest email + assign-in-department, staff delete then `/me`/`/link` restore with the same requests. Run with `php artisan test --filter=BotFlowchartTest`. WhatsApp Cloud API verify/HMAC/link/menu: `tests/Feature/WhatsAppClientBotTest.php`.
+`tests/Feature/BotFlowchartTest.php` covers the bot API contract: webhook secrets (401), client profile stairs (phone then company), catalog/manual/edit/cancel/support, quote reject → staff requote → pay → staff in-progress → deliver → revision → client complete, staff join pending until dashboard approve, admin allowlist + guest email + assign-in-department, staff delete then `/me`/`/link` restore with the same requests. Run with `php artisan test --filter=BotFlowchartTest`. WhatsApp Cloud API verify/HMAC/link/menu: `tests/Feature/WhatsAppClientBotTest.php`. Dashboard pause: `tests/Feature/ClientChannelPauseTest.php`.
 
 ## Do not assume
 
