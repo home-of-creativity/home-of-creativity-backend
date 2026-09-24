@@ -2,7 +2,7 @@
 
 use App\Http\Controllers\Admin\ArticleController as AdminArticleController;
 use App\Http\Controllers\Admin\ClientChannelController as AdminClientChannelController;
-use App\Http\Controllers\Admin\ClientController as AdminClientController;
+use App\Http\Controllers\Admin\ClientReportController as AdminClientReportController;
 use App\Http\Controllers\Admin\ContactChannelController as AdminContactChannelController;
 use App\Http\Controllers\Admin\EmployeeController as AdminEmployeeController;
 use App\Http\Controllers\Admin\LandingReelController as AdminLandingReelController;
@@ -110,12 +110,22 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::post('clients', [AdminClientController::class, 'store']);
         Route::put('clients/{client}', [AdminClientController::class, 'update']);
         Route::delete('clients/{client}', [AdminClientController::class, 'destroy']);
+        Route::put('clients/{client}/drive-folder', [AdminClientController::class, 'driveFolder']);
         Route::get('odoo/status', [AdminOdooController::class, 'status']);
         Route::post('odoo/sync-partners', [AdminOdooController::class, 'syncPartners']);
         Route::post('odoo/import-crm-clients', [AdminOdooController::class, 'importCrmClients']);
         Route::post('odoo/import-crm-clients/excel', [AdminOdooController::class, 'importCrmClientsExcel']);
         Route::get('odoo/quotations', [AdminOdooController::class, 'quotations']);
         Route::get('odoo/invoices', [AdminOdooController::class, 'invoices']);
+    });
+
+    Route::middleware('crud:ops.reports')->group(function () {
+        Route::get('reports', [AdminClientReportController::class, 'clients']);
+        Route::get('clients/{client}/reports', [AdminClientReportController::class, 'index']);
+        Route::post('clients/{client}/reports', [AdminClientReportController::class, 'store']);
+        Route::get('reports/{client_report}', [AdminClientReportController::class, 'show']);
+        Route::match(['put', 'post'], 'reports/{client_report}', [AdminClientReportController::class, 'update']);
+        Route::delete('reports/{client_report}', [AdminClientReportController::class, 'destroy']);
     });
 
     Route::middleware('crud:ops.employees')->group(function () {

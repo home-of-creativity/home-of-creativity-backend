@@ -13,6 +13,15 @@ class UpdateRoleRequest extends FormRequest
         return (bool) $this->user()?->is_admin;
     }
 
+    protected function prepareForValidation(): void
+    {
+        if (is_array($this->input('abilities'))) {
+            $this->merge([
+                'abilities' => StaffAbility::expand($this->input('abilities')),
+            ]);
+        }
+    }
+
     /**
      * @return array<string, mixed>
      */

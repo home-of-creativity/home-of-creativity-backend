@@ -742,6 +742,59 @@ class GoogleDriveClient
         return filled($id) ? (string) $id : $this->fail('Google Drive created a folder without an id.');
     }
 
+    /**
+     * @return array{id: string, url: string}|null
+     */
+    public function uploadFile(string $folderId, string $name, string $contents, string $mime): ?array
+    {
+        $this->lastError = null;
+        if ($error = $this->configurationError()) {
+            return $this->fail($error);
+        }
+        if ($folderId === '' || $contents === '') {
+            return $this->fail('Google Drive upload is missing a folder or a file.');
+        }
+
+        $token = $this->auth->accessToken();
+        if ($token === null) {
+            return $this->fail('Google service account could not get an access token. Check the private key.');
+        }
+
+        $boundary = 'hoc_'.bin2hex(random_bytes(8));
+        $meta = json_encode([
+            'name' => $this->safeName($name),
+            'parents' => [$folderId],
+        ], JSON_UNESCAPED_UNICODE);
+        $body = "--{$boundary}\r\n"
+            ."Content-Type: application/json; charset=UTF-8\r\n\r\n"
+            .$meta."\r\n"
+            ."--{$boundary}\r\n"
+            ."Content-Type: {$mime}\r\n\r\n"
+            .$contents."\r\n"
+            ."--{$boundary}--";
+
+        $created = Http::withToken($token)
+            ->withBody($body, 'multipart/related; boundary='.$boundary)
+            ->timeout(60)
+            ->post('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,webViewLink');
+
+        if (! $created->successful()) {
+            return $this->fail($this->googleErrorMessage($created, 'Google Drive rejected the file upload.'));
+        }
+
+        $id = $created->json('id');
+        if (! filled($id)) {
+            return $this->fail('Google Drive uploaded a file without an id.');
+        }
+
+        $link = $created->json('webViewLink');
+
+        return [
+            'id' => (string) $id,
+            'url' => is_string($link) && $link !== '' ? $link : 'https://drive.google.com/file/d/'.$id.'/view',
+        ];
+    }
+
     private function parentFolderId(): string
     {
         return trim((string) config('services.google.drive_parent_folder_id'), " \t\n\r\"'");

@@ -7,6 +7,7 @@ enum StaffAbility: string
     case OpsOverview = 'ops.overview';
     case OpsRequests = 'ops.requests';
     case OpsClients = 'ops.clients';
+    case OpsReports = 'ops.reports';
     case OpsEmployees = 'ops.employees';
     case OpsPayments = 'ops.payments';
     case OpsChannels = 'ops.channels';
@@ -31,6 +32,7 @@ enum StaffAbility: string
         return [
             self::OpsRequests->value,
             self::OpsClients->value,
+            self::OpsReports->value,
             self::OpsEmployees->value,
             self::SiteProjects->value,
             self::SiteCategories->value,
@@ -75,6 +77,30 @@ enum StaffAbility: string
         }
 
         return $values;
+    }
+
+    /**
+     * @param  list<string>  $abilities
+     * @return list<string>
+     */
+    public static function expand(array $abilities): array
+    {
+        $expanded = [];
+        foreach ($abilities as $ability) {
+            if (! is_string($ability) || $ability === '') {
+                continue;
+            }
+            if (in_array($ability, self::crudResources(), true)) {
+                foreach (self::crudActions() as $action) {
+                    $expanded[] = $ability.'.'.$action;
+                }
+
+                continue;
+            }
+            $expanded[] = $ability;
+        }
+
+        return array_values(array_unique($expanded));
     }
 
     /** @return list<string> */

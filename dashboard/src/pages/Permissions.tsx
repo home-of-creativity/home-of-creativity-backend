@@ -17,6 +17,7 @@ const abilityLabels: Record<StaffModule, { ar: string; en: string }> = {
   "ops.overview": { ar: "نظرة عامة", en: "Overview" },
   "ops.requests": { ar: "الطلبات", en: "Requests" },
   "ops.clients": { ar: "العملاء", en: "Clients" },
+  "ops.reports": { ar: "التقارير", en: "Reports" },
   "ops.employees": { ar: "الموظفون", en: "Employees" },
   "ops.payments": { ar: "المدفوعات", en: "Payments" },
   "ops.channels": { ar: "قنوات البوت", en: "Bot channels" },
@@ -52,6 +53,29 @@ type Draft = {
   name: string;
   abilities: string[];
 };
+
+const crudBases = [
+  "ops.requests",
+  "ops.clients",
+  "ops.reports",
+  "ops.employees",
+  "site.projects",
+  "site.categories",
+  "site.reels",
+  "site.articles",
+  "site.pricing",
+  "site.contact",
+];
+
+function expandAbilities(abilities: string[]) {
+  const next: string[] = [];
+  for (const ability of abilities) {
+    if (crudBases.includes(ability)) {
+      for (const action of ["view", "create", "update", "delete"] as const) next.push(`${ability}.${action}`);
+    } else next.push(ability);
+  }
+  return [...new Set(next)];
+}
 
 const emptyDraft: Draft = { id: null, name: "", abilities: [] };
 
@@ -129,7 +153,7 @@ export function Permissions({ t }: { locale: Locale; t: (c: { ar: string; en: st
     setBusy(true);
     setError("");
     try {
-      const body = { name: draft.name.trim(), abilities: draft.abilities as StaffAbility[] };
+      const body = { name: draft.name.trim(), abilities: expandAbilities(draft.abilities) as StaffAbility[] };
       if (draft.id) await api.updateRole(draft.id, body);
       else await api.createRole(body);
       await load();
@@ -288,7 +312,7 @@ export function Permissions({ t }: { locale: Locale; t: (c: { ar: string; en: st
           <ul className="plain-list">
             {roles.map((role) => (
               <li key={role.id}>
-                <button type="button" className="btn btn-ghost" onClick={() => setDraft({ id: role.id, name: role.name, abilities: role.abilities })}>
+                <button type="button" className="btn btn-ghost" onClick={() => setDraft({ id: role.id, name: role.name, abilities: expandAbilities(role.abilities) })}>
                   {role.name}
                 </button>
                 <small> · {role.users_count ?? 0}</small>

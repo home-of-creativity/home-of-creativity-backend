@@ -2,12 +2,14 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Actions\AssignClientDriveFolder;
 use App\Actions\DeleteClient;
 use App\Actions\PushClientLeadToOdoo;
 use App\Actions\PushClientToOdoo;
 use App\Actions\StoreClient;
 use App\Actions\UpdateClient;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\AssignClientDriveFolderRequest;
 use App\Http\Requests\PaginatedIndexRequest;
 use App\Http\Requests\StoreClientRequest;
 use App\Http\Requests\UpdateClientRequest;
@@ -90,5 +92,16 @@ class ClientController extends Controller
             'data' => null,
             'message' => 'Client deleted from dashboard and Odoo.',
         ]);
+    }
+
+    public function driveFolder(
+        AssignClientDriveFolderRequest $request,
+        Client $client,
+        AssignClientDriveFolder $assign,
+    ): ClientResource {
+        $updated = $assign->handle($client, $request->validated('mode'), $request->validated('folder'));
+
+        return ClientResource::make($updated)
+            ->additional(['message' => 'Drive folder saved.']);
     }
 }

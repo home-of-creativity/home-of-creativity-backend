@@ -25,6 +25,7 @@ export type StaffModule =
   | "ops.overview"
   | "ops.requests"
   | "ops.clients"
+  | "ops.reports"
   | "ops.employees"
   | "ops.payments"
   | "ops.channels"
@@ -43,7 +44,7 @@ export type StaffModule =
   | "social.accounts"
   | "social.links";
 
-export type StaffAbility = StaffModule | `${Extract<StaffModule, "ops.requests" | "ops.clients" | "ops.employees" | "site.projects" | "site.categories" | "site.reels" | "site.articles" | "site.pricing" | "site.contact">}.${CrudAction}`;
+export type StaffAbility = StaffModule | `${Extract<StaffModule, "ops.requests" | "ops.clients" | "ops.reports" | "ops.employees" | "site.projects" | "site.categories" | "site.reels" | "site.articles" | "site.pricing" | "site.contact">}.${CrudAction}`;
 
 const crudActions: CrudAction[] = ["view", "create", "update", "delete"];
 
@@ -268,6 +269,31 @@ export type Client = {
   odoo_lead_url?: string | null;
   odoo_live?: { stage?: string | null; name?: string | null } | null;
   requests_count?: number;
+  reports_count?: number;
+  google_drive_folder_id?: string | null;
+  google_drive_folder_url?: string | null;
+};
+
+export type ClientReportAttachment = {
+  id: number;
+  name: string;
+  size: number;
+  url: string | null;
+  drive_url: string | null;
+};
+
+export type ClientReport = {
+  id: number;
+  client_id: number;
+  title: string;
+  header: string | null;
+  footer: string | null;
+  body: string;
+  cover_url: string | null;
+  drive_file_id: string | null;
+  drive_url: string | null;
+  attachments?: ClientReportAttachment[];
+  created_at?: string | null;
 };
 
 export type OdooQuotation = {
@@ -879,6 +905,28 @@ export const api = {
   },
   clients(page = 1, search?: string) {
     return request<Paginated<Client>>(`/admin/clients${queryString({ page, search: search || undefined })}`);
+  },
+  reportClients(page = 1) {
+    return request<Paginated<Client>>(`/admin/reports${queryString({ page })}`);
+  },
+  clientReports(clientId: number) {
+    return request<{ data: ClientReport[]; client: Client; message?: string }>(`/admin/clients/${clientId}/reports`);
+  },
+  clientReport(id: number) {
+    return request<Envelope<ClientReport>>(`/admin/reports/${id}`);
+  },
+  saveClientReport(clientId: number, form: FormData, reportId?: number) {
+    const path = reportId ? `/admin/reports/${reportId}` : `/admin/clients/${clientId}/reports`;
+    return request<Envelope<ClientReport>>(path, { method: "POST", body: form });
+  },
+  deleteClientReport(id: number) {
+    return request<Envelope<null>>(`/admin/reports/${id}`, { method: "DELETE" });
+  },
+  assignClientDriveFolder(clientId: number, body: { mode: "existing" | "create"; folder?: string }) {
+    return request<Envelope<Client>>(`/admin/clients/${clientId}/drive-folder`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
   },
   createClient(payload: { name: string; email?: string; phone?: string; telegram_user_id?: string; company_name?: string }) {
     return request<Envelope<Client>>("/admin/clients", {

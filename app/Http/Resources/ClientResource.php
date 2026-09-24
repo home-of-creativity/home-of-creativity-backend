@@ -49,6 +49,9 @@ class ClientResource extends JsonResource
                 : null,
             'odoo_live' => is_array($live) ? $live : null,
             'requests_count' => $this->whenCounted('requests'),
+            'reports_count' => $this->whenCounted('reports'),
+            'google_drive_folder_id' => $this->google_drive_folder_id,
+            'google_drive_folder_url' => $this->googleDriveFolderUrl(),
             'created_at' => $this->created_at?->toIso8601String(),
         ];
     }

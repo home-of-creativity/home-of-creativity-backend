@@ -149,4 +149,25 @@ class StaffAccessTest extends TestCase
         $this->getJson('/api/admin/portfolio/categories')->assertOk();
         $this->postJson('/api/admin/portfolio/categories', [])->assertForbidden();
     }
+
+    public function test_legacy_section_ability_expands_when_the_role_is_saved(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $role = Role::query()->create([
+            'name' => 'عملاء',
+            'abilities' => ['ops.clients', 'ops.payments'],
+        ]);
+        Sanctum::actingAs($admin);
+
+        $this->putJson("/api/admin/roles/{$role->id}", [
+            'name' => 'عملاء',
+            'abilities' => ['ops.clients', 'ops.payments'],
+        ])->assertOk();
+
+        $role->refresh();
+        $this->assertContains('ops.clients.view', $role->abilities);
+        $this->assertContains('ops.clients.delete', $role->abilities);
+        $this->assertNotContains('ops.clients', $role->abilities);
+        $this->assertContains('ops.payments', $role->abilities);
+    }
 }

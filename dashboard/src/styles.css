@@ -1858,6 +1858,55 @@ html[dir="rtl"] .back-link span {
   background: color-mix(in srgb, var(--brand-purple) 8%, transparent);
 }
 
+.form-grid .field-span {
+  grid-column: 1 / -1;
+}
+
+.report-editor {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.report-toolbar .btn {
+  min-height: 2.2rem;
+}
+
+.report-sheet {
+  min-height: 18rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid color-mix(in srgb, var(--brand-muted) 35%, transparent);
+  border-radius: 1rem;
+  background: #fff;
+  line-height: 1.7;
+}
+
+.report-sheet:focus {
+  outline: 2px solid var(--brand-orange, #e07020);
+}
+
+.report-sheet table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.report-sheet td {
+  border: 1px solid color-mix(in srgb, var(--brand-muted) 40%, transparent);
+  min-width: 4rem;
+  padding: 0.35rem;
+}
+
+.report-drop {
+  padding: 0.9rem 1rem;
+  border: 1px dashed color-mix(in srgb, var(--brand-purple) 40%, transparent);
+  border-radius: 1rem;
+}
+
+.report-cover-preview {
+  max-width: 12rem;
+  margin-top: 0.5rem;
+  border-radius: 0.6rem;
+}
+
 .row-actions {
   display: flex;
   flex-wrap: wrap;

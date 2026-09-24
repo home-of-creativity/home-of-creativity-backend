@@ -32,6 +32,7 @@ class Client extends Model
         'odoo_partner_id',
         'odoo_lead_id',
         'odoo_stage_name',
+        'google_drive_folder_id',
     ];
 
     public function user(): BelongsTo
@@ -42,6 +43,18 @@ class Client extends Model
     public function requests(): HasMany
     {
         return $this->hasMany(ServiceRequest::class);
+    }
+
+    public function reports(): HasMany
+    {
+        return $this->hasMany(ClientReport::class);
+    }
+
+    public function googleDriveFolderUrl(): ?string
+    {
+        return filled($this->google_drive_folder_id)
+            ? 'https://drive.google.com/drive/folders/'.$this->google_drive_folder_id
+            : null;
     }
 
     public static function findForTelegram(?string $telegramUserId): ?self

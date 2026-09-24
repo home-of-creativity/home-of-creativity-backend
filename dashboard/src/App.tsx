@@ -12,6 +12,9 @@ import { CommandPalette, type CommandItem } from "./components/CommandPalette";
 import { ClientChannelsPage } from "./pages/ClientChannels";
 import { ClientForm } from "./pages/ClientForm";
 import { Clients } from "./pages/Clients";
+import { ClientReports } from "./pages/ClientReports";
+import { Reports } from "./pages/Reports";
+import { ReportForm } from "./pages/ReportForm";
 import { Contact } from "./pages/Contact";
 import { ContactChannelForm } from "./pages/ContactChannelForm";
 import { EmployeeForm } from "./pages/EmployeeForm";
@@ -206,6 +209,12 @@ function Shell({
           <NavLink to="/clients">
             <IconClients aria-hidden />
             <span>{t(copy.clients)}</span>
+          </NavLink>
+          ) : null}
+          {canAbility(user, "ops.reports.view") ? (
+          <NavLink to="/reports">
+            <IconClients aria-hidden />
+            <span>{t(copy.reportsTitle)}</span>
           </NavLink>
           ) : null}
           {canAbility(user, "social.content") || canAbility(user, "social.approve") || canAbility(user, "social.engage") || canAbility(user, "social.messages") || canAbility(user, "social.accounts") || canAbility(user, "social.links") ? (
@@ -444,6 +453,10 @@ export function App() {
           <Route path="/clients" element={<Clients locale={locale} t={t} />} />
           <Route path="/clients/new" element={<ClientForm locale={locale} t={t} />} />
           <Route path="/clients/:id/edit" element={<ClientForm locale={locale} t={t} />} />
+          <Route path="/reports" element={<Reports locale={locale} t={t} />} />
+          <Route path="/reports/clients/:id" element={<ClientReports locale={locale} t={t} />} />
+          <Route path="/reports/clients/:clientId/new" element={<ReportForm locale={locale} t={t} />} />
+          <Route path="/reports/:reportId/edit" element={<ReportForm locale={locale} t={t} />} />
           <Route path="/clients/logos/new" element={<ClientLogoForm locale={locale} t={t} />} />
           <Route path="/clients/logos/:id/edit" element={<ClientLogoForm locale={locale} t={t} />} />
           <Route path="/contact" element={<Contact locale={locale} t={t} />} />
@@ -563,6 +576,7 @@ function pathAllowed(user: User | null, pathname: string) {
   if (pathname === "/permissions") return user.is_admin;
   if (user.is_admin && !user.role) return true;
   const verb = pathname.includes("/new") ? "create" : pathname.includes("/edit") ? "update" : "view";
+  if (pathname.startsWith("/reports")) return canAbility(user, `ops.reports.${verb}`);
   if (pathname.startsWith("/requests")) return canAbility(user, `ops.requests.${verb}`);
   if (pathname.startsWith("/employees")) return canAbility(user, `ops.employees.${verb}`);
   if (pathname.startsWith("/clients")) return canAbility(user, `ops.clients.${verb}`);
@@ -584,6 +598,6 @@ function pathAllowed(user: User | null, pathname: string) {
 }
 
 function homeFor(user: User) {
-  const candidates = ["/", "/requests", "/employees", "/clients", "/social", "/payments", "/channels", "/projects", "/reels", "/articles", "/categories", "/pricing", "/contact", "/profile-pdf", "/privacy", "/permissions"];
+  const candidates = ["/", "/requests", "/employees", "/clients", "/reports", "/social", "/payments", "/channels", "/projects", "/reels", "/articles", "/categories", "/pricing", "/contact", "/profile-pdf", "/privacy", "/permissions"];
   return candidates.find((path) => pathAllowed(user, path)) ?? "/";
 }
