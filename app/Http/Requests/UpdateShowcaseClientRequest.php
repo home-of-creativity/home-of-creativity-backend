@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Support\ShowcaseLogoRules;
 use Illuminate\Foundation\Http\FormRequest;
 
 class UpdateShowcaseClientRequest extends FormRequest
@@ -34,7 +35,7 @@ class UpdateShowcaseClientRequest extends FormRequest
             'website_url' => ['nullable', 'url', 'max:255'],
             'sort_order' => ['sometimes', 'integer', 'min:0', 'max:9999'],
             'is_published' => ['sometimes', 'boolean'],
-            'logo' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp,svg', 'max:2048'],
+            'logo' => ShowcaseLogoRules::file(),
         ];
     }
 }

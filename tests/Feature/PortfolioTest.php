@@ -51,6 +51,31 @@ class PortfolioTest extends TestCase
         Storage::disk('public')->assertExists($client->logo_path);
     }
 
+    public function test_admin_can_create_showcase_client_with_svg_logo(): void
+    {
+        Storage::fake('public');
+
+        $admin = User::factory()->create(['is_admin' => true]);
+        Sanctum::actingAs($admin);
+
+        $svg = UploadedFile::fake()->createWithContent(
+            'mark.svg',
+            '<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>',
+        );
+
+        $this->post('/api/admin/portfolio/clients', [
+            'name' => 'SVG Mark',
+            'is_published' => true,
+            'logo' => $svg,
+        ])->assertCreated()
+            ->assertJsonPath('data.name', 'SVG Mark');
+
+        $client = ShowcaseClient::query()->where('name', 'SVG Mark')->first();
+        $this->assertNotNull($client?->logo_path);
+        $this->assertStringEndsWith('.svg', $client->logo_path);
+        Storage::disk('public')->assertExists($client->logo_path);
+    }
+
     public function test_admin_can_create_portfolio_project(): void
     {
         Storage::fake('public');

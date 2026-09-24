@@ -7,7 +7,9 @@ use App\Http\Requests\StoreShowcaseClientRequest;
 use App\Http\Requests\UpdateShowcaseClientRequest;
 use App\Http\Resources\ShowcaseClientResource;
 use App\Models\ShowcaseClient;
+use App\Support\SvgLogoSanitizer;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 
 class ShowcaseClientController extends Controller
@@ -29,7 +31,7 @@ class ShowcaseClientController extends Controller
         $data['is_published'] = $data['is_published'] ?? true;
 
         if ($request->hasFile('logo')) {
-            $data['logo_path'] = $request->file('logo')->store('portfolio/clients', 'public');
+            $data['logo_path'] = $this->storeLogo($request->file('logo'));
         }
 
         $client = ShowcaseClient::query()->create($data);
@@ -48,7 +50,7 @@ class ShowcaseClientController extends Controller
             if ($showcaseClient->logo_path) {
                 Storage::disk('public')->delete($showcaseClient->logo_path);
             }
-            $data['logo_path'] = $request->file('logo')->store('portfolio/clients', 'public');
+            $data['logo_path'] = $this->storeLogo($request->file('logo'));
         }
 
         $showcaseClient->fill($data)->save();
@@ -86,5 +88,13 @@ class ShowcaseClientController extends Controller
             'data' => ['deleted' => $count],
             'message' => 'All clients deleted.',
         ]);
+    }
+
+    private function storeLogo(UploadedFile $file): string
+    {
+        $path = $file->store('portfolio/clients', 'public');
+        SvgLogoSanitizer::cleanPath(Storage::disk('public')->path($path));
+
+        return $path;
     }
 }
