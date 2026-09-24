@@ -61,6 +61,7 @@ services:
       - hoc_dashboard_node_modules:/app/node_modules
     environment:
       VITE_API_URL: ${APP_URL:-https://hoc.agency}/api
+      VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
     profiles:
       - tools
     command: sh -c "npm install && npm run build"
