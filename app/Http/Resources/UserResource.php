@@ -14,6 +14,8 @@ class UserResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
+        $this->resource->loadMissing('role');
+
         return [
             'id' => $this->id,
             'name' => $this->name,
@@ -21,8 +23,14 @@ class UserResource extends JsonResource
             'phone' => $this->phone,
             'locale' => $this->locale,
             'is_admin' => (bool) $this->is_admin,
+            'role' => $this->role_id ? [
+                'id' => $this->role_id,
+                'name' => $this->role?->name,
+            ] : null,
+            'abilities' => $this->abilities(),
             'social_permissions' => $this->social_permissions,
             'social_abilities' => $this->socialAbilities(),
+            'sees_all_social_pages' => $this->seesAllSocialPages(),
             'created_at' => $this->created_at?->toIso8601String(),
         ];
     }

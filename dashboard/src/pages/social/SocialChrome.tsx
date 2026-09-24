@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { NavLink } from "react-router-dom";
-import { canSocial, type SocialAbility, type User } from "../../api";
+import { canAbility, type User } from "../../api";
 import { PageHeader } from "../../components/PageHeader";
 import { copy, type Copy, type Locale } from "../../i18n";
 import { pageChannelSummary, platformLabel } from "./helpers";
@@ -17,18 +17,18 @@ type Props = {
   children: ReactNode;
 };
 
-const tabs: { to: string; end?: boolean; label: Copy; ability: SocialAbility }[] = [
-  { to: "/social", end: true, label: copy.socialHome, ability: "create" },
-  { to: "/social/links", label: copy.socialBioLinks, ability: "create" },
-  { to: "/social/design", label: copy.socialDesign, ability: "create" },
-  { to: "/social/calendar", label: copy.socialCalendar, ability: "create" },
-  { to: "/social/inbox", label: copy.socialInbox, ability: "engage" },
-  { to: "/social/accounts", label: copy.socialAccounts, ability: "accounts" },
+const tabs: { to: string; end?: boolean; label: Copy; allow: (user: User | null) => boolean }[] = [
+  { to: "/social", end: true, label: copy.socialHome, allow: (user) => canAbility(user, "social.content") || canAbility(user, "social.approve") },
+  { to: "/social/links", label: copy.socialBioLinks, allow: (user) => canAbility(user, "social.links") },
+  { to: "/social/design", label: copy.socialDesign, allow: (user) => canAbility(user, "social.links") },
+  { to: "/social/calendar", label: copy.socialCalendar, allow: (user) => canAbility(user, "social.content") || canAbility(user, "social.approve") },
+  { to: "/social/inbox", label: copy.socialInbox, allow: (user) => canAbility(user, "social.engage") || canAbility(user, "social.messages") },
+  { to: "/social/accounts", label: copy.socialAccounts, allow: (user) => canAbility(user, "social.accounts") },
 ];
 
 export function SocialChrome({ t, user, title, lede, actions, immersive, children }: Props) {
   const { selectedAccount, selectedPage, pages, openPicker, loading } = useSocialWorkspace();
-  const visible = tabs.filter((tab) => canSocial(user, tab.ability) || (tab.ability === "create" && canSocial(user, "approve")));
+  const visible = tabs.filter((tab) => tab.allow(user));
   const pageLabel = selectedPage?.name ?? selectedAccount?.name ?? null;
   const pageSummary = selectedPage ? pageChannelSummary(selectedPage, t) : selectedAccount ? platformLabel(selectedAccount.platform, t) : "";
 

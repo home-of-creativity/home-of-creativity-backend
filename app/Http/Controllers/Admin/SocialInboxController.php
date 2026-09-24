@@ -2,15 +2,16 @@
 
 namespace App\Http\Controllers\Admin;
 
-use App\Enums\SocialAbility;
 use App\Enums\SocialActivityAction;
 use App\Enums\SocialInboxKind;
+use App\Enums\StaffAbility;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\ReplySocialInboxRequest;
 use App\Http\Resources\SocialInboxItemResource;
 use App\Models\SocialInboxItem;
 use App\Services\SocialActivityLogger;
 use App\Services\SocialInboxSync;
+use App\Services\SocialPageAccess;
 use App\Services\SocialPublisher;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -21,11 +22,15 @@ class SocialInboxController extends Controller
         private SocialActivityLogger $logger,
         private SocialPublisher $publisher,
         private SocialInboxSync $inboxSync,
+        private SocialPageAccess $pages,
     ) {}
 
     public function index(Request $request)
     {
-        abort_unless($request->user()?->canSocial(SocialAbility::Engage), 403);
+        $user = $request->user();
+        $canComments = $user?->canAbility(StaffAbility::SocialEngage) ?? false;
+        $canMessages = $user?->canAbility(StaffAbility::SocialMessages) ?? false;
+        abort_unless($canComments || $canMessages, 403);
 
         $request->validate([
             'kind' => ['sometimes', 'nullable', Rule::in(SocialInboxKind::values())],
@@ -37,7 +42,21 @@ class SocialInboxController extends Controller
         $items = SocialInboxItem::query()
             ->with(['account:id,platform,name', 'replies.user:id,name', 'sourcePost:id,body,placement'])
             ->when($request->filled('kind'), fn ($q) => $q->where('kind', $request->string('kind')))
+            ->when(! $canComments, fn ($q) => $q->where('kind', SocialInboxKind::Message))
+            ->when(! $canMessages, fn ($q) => $q->where('kind', SocialInboxKind::Comment))
             ->when($request->filled('account_id'), fn ($q) => $q->where('social_account_id', $request->integer('account_id')))
+            ->when(true, function ($q) use ($user) {
+                $allowed = $user ? $this->pages->allowedAccountIds($user) : [];
+                if ($allowed === null) {
+                    return;
+                }
+                if ($allowed === []) {
+                    $q->whereRaw('0 = 1');
+
+                    return;
+                }
+                $q->whereIn('social_account_id', $allowed);
+            })
             ->latest('occurred_at')
             ->latest('id')
             ->paginate(30);
@@ -91,7 +110,11 @@ class SocialInboxController extends Controller
 
     public function sync()
     {
-        abort_unless(request()->user()?->canSocial(SocialAbility::Engage), 403);
+        abort_unless(
+            request()->user()?->canAbility(StaffAbility::SocialEngage)
+            || request()->user()?->canAbility(StaffAbility::SocialMessages),
+            403,
+        );
 
         $imported = $this->inboxSync->syncAll();
 

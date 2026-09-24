@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Enums\SocialAbility;
 use App\Enums\SocialAccountStatus;
 use App\Enums\SocialActivityAction;
+use App\Enums\StaffAbility;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreSocialAccountRequest;
 use App\Http\Requests\UpdateSocialAccountRequest;
@@ -13,6 +14,7 @@ use App\Models\SocialAccount;
 use App\Services\LinkedInGraph;
 use App\Services\SocialAccountSync;
 use App\Services\SocialActivityLogger;
+use App\Services\SocialPageAccess;
 use App\Services\ThreadsGraph;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Cache;
@@ -22,13 +24,20 @@ class SocialAccountController extends Controller
     public function __construct(
         private SocialActivityLogger $logger,
         private SocialAccountSync $sync,
+        private SocialPageAccess $pages,
     ) {}
 
     public function index()
     {
-        abort_unless(request()->user()?->canSocial(SocialAbility::Accounts)
-            || request()->user()?->canSocial(SocialAbility::Create)
-            || request()->user()?->canSocial(SocialAbility::Engage), 403);
+        $user = request()->user();
+        abort_unless(
+            $user?->canAbility(StaffAbility::SocialAccounts)
+            || $user?->canAbility(StaffAbility::SocialContent)
+            || $user?->canAbility(StaffAbility::SocialEngage)
+            || $user?->canAbility(StaffAbility::SocialMessages)
+            || $user?->canAbility(StaffAbility::SocialApprove),
+            403,
+        );
 
         $connectedBy = request()->user()?->id;
 
@@ -48,16 +57,24 @@ class SocialAccountController extends Controller
             $this->sync->lastError = $this->sync->lastError ?: 'facebook_sync_failed';
         }
 
+        $accounts = SocialAccount::query()
+            ->with('connector:id,name')
+            ->whereIn('connection_status', [
+                SocialAccountStatus::Connected,
+                SocialAccountStatus::Error,
+            ])
+            ->orderBy('platform')
+            ->orderBy('name');
+
+        $allowed = $user ? $this->pages->allowedAccountIds($user) : [];
+        if ($allowed === []) {
+            $accounts->whereRaw('0 = 1');
+        } elseif (is_array($allowed)) {
+            $accounts->whereIn('id', $allowed);
+        }
+
         return SocialAccountResource::collection(
-            SocialAccount::query()
-                ->with('connector:id,name')
-                ->whereIn('connection_status', [
-                    SocialAccountStatus::Connected,
-                    SocialAccountStatus::Error,
-                ])
-                ->orderBy('platform')
-                ->orderBy('name')
-                ->get()
+            $accounts->get()
         )->additional([
             'message' => 'ok',
             'facebook_configured' => $this->sync->configured(),
@@ -118,6 +135,7 @@ class SocialAccountController extends Controller
 
     public function update(UpdateSocialAccountRequest $request, SocialAccount $socialAccount): SocialAccountResource
     {
+        $this->pages->assertAccounts($request->user(), [$socialAccount->id]);
         $data = $request->safe()->except(['access_token', 'refresh_token']);
 
         if ($request->filled('access_token')) {
@@ -141,6 +159,7 @@ class SocialAccountController extends Controller
     public function toggle(SocialAccount $socialAccount): SocialAccountResource
     {
         abort_unless(request()->user()?->canSocial(SocialAbility::Accounts), 403);
+        $this->pages->assertAccounts(request()->user(), [$socialAccount->id]);
 
         $socialAccount->forceFill([
             'is_active' => ! $socialAccount->is_active,
@@ -157,6 +176,7 @@ class SocialAccountController extends Controller
     public function destroy(SocialAccount $socialAccount)
     {
         abort_unless(request()->user()?->canSocial(SocialAbility::Accounts), 403);
+        $this->pages->assertAccounts(request()->user(), [$socialAccount->id]);
 
         $socialAccount->forceFill([
             'is_active' => false,

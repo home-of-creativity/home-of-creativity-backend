@@ -3,8 +3,12 @@
 namespace App\Models;
 
 use App\Enums\SocialAbility;
+use App\Enums\StaffAbility;
+use App\Services\SocialPageAccess;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -23,6 +27,7 @@ class User extends Authenticatable
         'locale',
         'password',
         'social_permissions',
+        'role_id',
     ];
 
     protected $hidden = [
@@ -45,19 +50,76 @@ class User extends Authenticatable
         return $this->hasOne(Client::class);
     }
 
-    public function canSocial(SocialAbility|string $ability): bool
+    public function role(): BelongsTo
     {
+        return $this->belongsTo(Role::class);
+    }
+
+    public function employee(): HasOne
+    {
+        return $this->hasOne(Employee::class);
+    }
+
+    public function pageGrants(): HasMany
+    {
+        return $this->hasMany(StaffPageGrant::class);
+    }
+
+    public function canEnterDashboard(): bool
+    {
+        return $this->is_admin || $this->role_id !== null;
+    }
+
+    public function seesAllSocialPages(): bool
+    {
+        return $this->is_admin && $this->role_id === null;
+    }
+
+    public function canAbility(StaffAbility|string $ability): bool
+    {
+        $ability = $ability instanceof StaffAbility ? $ability->value : $ability;
+
+        if ($this->role_id !== null) {
+            $this->loadMissing('role');
+
+            return $this->role?->allows($ability) ?? false;
+        }
+
         if (! $this->is_admin) {
             return false;
         }
 
-        $ability = $ability instanceof SocialAbility ? $ability->value : $ability;
-
-        if ($this->social_permissions === null) {
+        if (! str_starts_with($ability, 'social.')) {
             return true;
         }
 
-        return in_array($ability, $this->social_permissions, true);
+        return in_array($ability, StaffAbility::fromLegacySocial($this->social_permissions), true);
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function abilities(): array
+    {
+        return array_values(array_filter(
+            StaffAbility::values(),
+            fn (string $ability): bool => $this->canAbility($ability),
+        ));
+    }
+
+    public function canSocial(SocialAbility|string $ability): bool
+    {
+        $ability = $ability instanceof SocialAbility ? $ability->value : $ability;
+
+        $mapped = match ($ability) {
+            SocialAbility::Accounts->value => StaffAbility::SocialAccounts,
+            SocialAbility::Create->value => StaffAbility::SocialContent,
+            SocialAbility::Approve->value => StaffAbility::SocialApprove,
+            SocialAbility::Engage->value => StaffAbility::SocialEngage,
+            default => $ability,
+        };
+
+        return $this->canAbility($mapped);
     }
 
     /**
@@ -65,16 +127,25 @@ class User extends Authenticatable
      */
     public function socialAbilities(): array
     {
-        if (! $this->is_admin) {
-            return [];
+        $legacy = [];
+        if ($this->canAbility(StaffAbility::SocialAccounts)) {
+            $legacy[] = SocialAbility::Accounts->value;
+        }
+        if ($this->canAbility(StaffAbility::SocialContent)) {
+            $legacy[] = SocialAbility::Create->value;
+        }
+        if ($this->canAbility(StaffAbility::SocialApprove)) {
+            $legacy[] = SocialAbility::Approve->value;
+        }
+        if ($this->canAbility(StaffAbility::SocialEngage) || $this->canAbility(StaffAbility::SocialMessages)) {
+            $legacy[] = SocialAbility::Engage->value;
         }
 
-        $all = SocialAbility::values();
+        return $legacy;
+    }
 
-        if ($this->social_permissions === null) {
-            return $all;
-        }
-
-        return array_values(array_intersect($all, $this->social_permissions));
+    public function canAccessSocialAccount(int $accountId): bool
+    {
+        return app(SocialPageAccess::class)->allowsAccount($this, $accountId);
     }
 }

@@ -16,12 +16,14 @@ use App\Http\Controllers\Admin\PricingCategoryController as AdminPricingCategory
 use App\Http\Controllers\Admin\PricingPackageController as AdminPricingPackageController;
 use App\Http\Controllers\Admin\PricingSubcategoryController as AdminPricingSubcategoryController;
 use App\Http\Controllers\Admin\ProfilePdfController as AdminProfilePdfController;
+use App\Http\Controllers\Admin\RoleController;
 use App\Http\Controllers\Admin\ServiceRequestController as AdminServiceRequestController;
 use App\Http\Controllers\Admin\ShowcaseClientController as AdminShowcaseClientController;
 use App\Http\Controllers\Admin\SocialAccountController as AdminSocialAccountController;
 use App\Http\Controllers\Admin\SocialInboxController as AdminSocialInboxController;
 use App\Http\Controllers\Admin\SocialPostController as AdminSocialPostController;
 use App\Http\Controllers\Admin\SocialStaffController as AdminSocialStaffController;
+use App\Http\Controllers\Admin\StaffAccessController;
 use App\Http\Controllers\AdminBotController;
 use App\Http\Controllers\ArticleController;
 use App\Http\Controllers\AuthController;
@@ -77,107 +79,168 @@ Route::middleware('auth:sanctum')->group(function () {
 });
 
 Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function () {
-    Route::get('overview', OverviewController::class);
     Route::get('live', LiveController::class);
-    Route::get('legal', [AdminLegalPageController::class, 'index']);
-    Route::get('legal/{slug}', [AdminLegalPageController::class, 'show'])->whereIn('slug', LegalPage::SLUGS);
-    Route::put('legal/{slug}', [AdminLegalPageController::class, 'update'])->whereIn('slug', LegalPage::SLUGS);
-    Route::get('contact', [AdminContactChannelController::class, 'index']);
-    Route::post('contact', [AdminContactChannelController::class, 'store']);
-    Route::put('contact/{contact_channel}', [AdminContactChannelController::class, 'update']);
-    Route::post('contact/{contact_channel}/move', [AdminContactChannelController::class, 'move']);
-    Route::delete('contact/{contact_channel}', [AdminContactChannelController::class, 'destroy']);
-    Route::get('clients', [AdminClientController::class, 'index']);
-    Route::post('clients', [AdminClientController::class, 'store']);
-    Route::put('clients/{client}', [AdminClientController::class, 'update']);
-    Route::delete('clients/{client}', [AdminClientController::class, 'destroy']);
-    Route::get('odoo/status', [AdminOdooController::class, 'status']);
-    Route::post('odoo/sync-partners', [AdminOdooController::class, 'syncPartners']);
-    Route::post('odoo/import-crm-clients', [AdminOdooController::class, 'importCrmClients']);
-    Route::post('odoo/import-crm-clients/excel', [AdminOdooController::class, 'importCrmClientsExcel']);
-    Route::post('odoo/sync-employees', [AdminOdooController::class, 'syncEmployees']);
-    Route::get('odoo/quotations', [AdminOdooController::class, 'quotations']);
-    Route::get('odoo/invoices', [AdminOdooController::class, 'invoices']);
-    Route::get('clickup/members', [AdminEmployeeController::class, 'clickupMembers']);
-    Route::apiResource('employees', AdminEmployeeController::class);
-    Route::post('employees/{employee}/approve', [AdminEmployeeController::class, 'approve']);
-    Route::post('employees/{employee}/reject', [AdminEmployeeController::class, 'reject']);
-    Route::get('requests', [AdminServiceRequestController::class, 'index']);
-    Route::get('requests/{service_request}', [AdminServiceRequestController::class, 'show']);
-    Route::patch('requests/{service_request}', [AdminServiceRequestController::class, 'update']);
-    Route::post('requests/{service_request}/quotation', [AdminServiceRequestController::class, 'sendQuotation']);
-    Route::post('requests/{service_request}/confirm-payment', [AdminServiceRequestController::class, 'confirmPayment']);
-    Route::post('requests/{service_request}/retry-gemini', [AdminServiceRequestController::class, 'retryGemini']);
-    Route::post('requests/{service_request}/ensure-drive-folder', [AdminServiceRequestController::class, 'ensureDriveFolder']);
-    Route::post('requests/{service_request}/poll-drive', [AdminServiceRequestController::class, 'pollDrive']);
-    Route::post('requests/{service_request}/re-request-receipt', [AdminServiceRequestController::class, 'reRequestReceipt']);
-    Route::post('requests/{service_request}/renew', [AdminServiceRequestController::class, 'renew']);
-    Route::get('ops-settings', [AdminServiceRequestController::class, 'opsSettings']);
-    Route::get('ops-settings/sham-cash-qr', [AdminServiceRequestController::class, 'shamCashQrPreview']);
-    Route::post('ops-settings/sham-cash-qr', [AdminServiceRequestController::class, 'uploadShamCashQr']);
-    Route::get('ops-settings/profile-pdf', [AdminProfilePdfController::class, 'show']);
-    Route::post('ops-settings/profile-pdf', [AdminProfilePdfController::class, 'store']);
-    Route::delete('ops-settings/profile-pdf', [AdminProfilePdfController::class, 'destroy']);
-    Route::get('ops-settings/social-profile', [AdminServiceRequestController::class, 'socialProfile']);
-    Route::put('ops-settings/social-profile', [AdminServiceRequestController::class, 'updateSocialProfile']);
-    Route::put('ops-settings/client-channels', [AdminClientChannelController::class, 'update']);
-    Route::get('requests/{service_request}/files/{file}/receipt', [AdminServiceRequestController::class, 'receipt']);
-    Route::post('integration-events/{integrationEvent}/retry', [AdminServiceRequestController::class, 'retryIntegrationEvent']);
-    Route::get('portfolio/categories', [AdminPortfolioCategoryController::class, 'index']);
-    Route::post('portfolio/categories', [AdminPortfolioCategoryController::class, 'store']);
-    Route::delete('portfolio/categories/bulk', [AdminPortfolioCategoryController::class, 'destroyAll']);
-    Route::put('portfolio/categories/{portfolio_category}', [AdminPortfolioCategoryController::class, 'update']);
-    Route::post('portfolio/categories/{portfolio_category}/move', [AdminPortfolioCategoryController::class, 'move']);
-    Route::delete('portfolio/categories/{portfolio_category}', [AdminPortfolioCategoryController::class, 'destroy']);
-    Route::get('portfolio/clients', [AdminShowcaseClientController::class, 'index']);
-    Route::post('portfolio/clients', [AdminShowcaseClientController::class, 'store']);
-    Route::delete('portfolio/clients/bulk', [AdminShowcaseClientController::class, 'destroyAll']);
-    Route::put('portfolio/clients/{showcase_client}', [AdminShowcaseClientController::class, 'update']);
-    Route::delete('portfolio/clients/{showcase_client}', [AdminShowcaseClientController::class, 'destroy']);
-    Route::get('portfolio/projects', [AdminPortfolioProjectController::class, 'index']);
-    Route::post('portfolio/projects', [AdminPortfolioProjectController::class, 'store']);
-    Route::delete('portfolio/projects/bulk', [AdminPortfolioProjectController::class, 'destroyAll']);
-    Route::put('portfolio/projects/{portfolio_project}', [AdminPortfolioProjectController::class, 'update']);
-    Route::delete('portfolio/projects/{portfolio_project}', [AdminPortfolioProjectController::class, 'destroy']);
-    Route::get('reels', [AdminLandingReelController::class, 'index']);
-    Route::post('reels', [AdminLandingReelController::class, 'store']);
-    Route::delete('reels/bulk', [AdminLandingReelController::class, 'destroyAll']);
-    Route::match(['put', 'post'], 'reels/{landing_reel}', [AdminLandingReelController::class, 'update']);
-    Route::delete('reels/{landing_reel}/poster', [AdminLandingReelController::class, 'destroyPoster']);
-    Route::delete('reels/{landing_reel}', [AdminLandingReelController::class, 'destroy']);
-    Route::get('articles', [AdminArticleController::class, 'index']);
-    Route::post('articles', [AdminArticleController::class, 'store']);
-    Route::delete('articles/bulk', [AdminArticleController::class, 'destroyAll']);
-    Route::get('articles/{article}', [AdminArticleController::class, 'show']);
-    Route::put('articles/{article}', [AdminArticleController::class, 'update']);
-    Route::delete('articles/{article}', [AdminArticleController::class, 'destroy']);
-    Route::get('pricing/categories', [AdminPricingCategoryController::class, 'index']);
-    Route::post('pricing/categories', [AdminPricingCategoryController::class, 'store']);
-    Route::delete('pricing/categories/bulk', [AdminPricingCategoryController::class, 'destroyAll']);
-    Route::put('pricing/categories/{pricing_category}', [AdminPricingCategoryController::class, 'update']);
-    Route::post('pricing/categories/{pricing_category}/move', [AdminPricingCategoryController::class, 'move']);
-    Route::delete('pricing/categories/{pricing_category}', [AdminPricingCategoryController::class, 'destroy']);
-    Route::get('pricing/subcategories', [AdminPricingSubcategoryController::class, 'index']);
-    Route::post('pricing/subcategories', [AdminPricingSubcategoryController::class, 'store']);
-    Route::delete('pricing/subcategories/bulk', [AdminPricingSubcategoryController::class, 'destroyAll']);
-    Route::put('pricing/subcategories/{pricing_subcategory}', [AdminPricingSubcategoryController::class, 'update']);
-    Route::post('pricing/subcategories/{pricing_subcategory}/move', [AdminPricingSubcategoryController::class, 'move']);
-    Route::delete('pricing/subcategories/{pricing_subcategory}', [AdminPricingSubcategoryController::class, 'destroy']);
-    Route::get('pricing/packages', [AdminPricingPackageController::class, 'index']);
-    Route::post('pricing/packages', [AdminPricingPackageController::class, 'store']);
-    Route::delete('pricing/packages/bulk', [AdminPricingPackageController::class, 'destroyAll']);
-    Route::put('pricing/packages/{pricing_package}', [AdminPricingPackageController::class, 'update']);
-    Route::post('pricing/packages/{pricing_package}/move', [AdminPricingPackageController::class, 'move']);
-    Route::delete('pricing/packages/{pricing_package}', [AdminPricingPackageController::class, 'destroy']);
-    Route::get('social/threads/connect', [ThreadsOAuthController::class, 'redirect'])
-        ->middleware('throttle:10,1');
-    Route::get('social/linkedin/connect', [LinkedInOAuthController::class, 'redirect'])
-        ->middleware('throttle:10,1');
+    Route::get('roles', [RoleController::class, 'index']);
+    Route::post('roles', [RoleController::class, 'store']);
+    Route::put('roles/{role}', [RoleController::class, 'update']);
+    Route::delete('roles/{role}', [RoleController::class, 'destroy']);
+    Route::get('staff-access', [StaffAccessController::class, 'index']);
+    Route::put('staff-access/{employee}', [StaffAccessController::class, 'update']);
+
+    Route::middleware('ability:ops.overview')->group(function () {
+        Route::get('overview', OverviewController::class);
+    });
+
+    Route::middleware('ability:site.legal')->group(function () {
+        Route::get('legal', [AdminLegalPageController::class, 'index']);
+        Route::get('legal/{slug}', [AdminLegalPageController::class, 'show'])->whereIn('slug', LegalPage::SLUGS);
+        Route::put('legal/{slug}', [AdminLegalPageController::class, 'update'])->whereIn('slug', LegalPage::SLUGS);
+    });
+
+    Route::middleware('ability:site.contact')->group(function () {
+        Route::get('contact', [AdminContactChannelController::class, 'index']);
+        Route::post('contact', [AdminContactChannelController::class, 'store']);
+        Route::put('contact/{contact_channel}', [AdminContactChannelController::class, 'update']);
+        Route::post('contact/{contact_channel}/move', [AdminContactChannelController::class, 'move']);
+        Route::delete('contact/{contact_channel}', [AdminContactChannelController::class, 'destroy']);
+    });
+
+    Route::middleware('ability:ops.clients')->group(function () {
+        Route::get('clients', [AdminClientController::class, 'index']);
+        Route::post('clients', [AdminClientController::class, 'store']);
+        Route::put('clients/{client}', [AdminClientController::class, 'update']);
+        Route::delete('clients/{client}', [AdminClientController::class, 'destroy']);
+        Route::get('odoo/status', [AdminOdooController::class, 'status']);
+        Route::post('odoo/sync-partners', [AdminOdooController::class, 'syncPartners']);
+        Route::post('odoo/import-crm-clients', [AdminOdooController::class, 'importCrmClients']);
+        Route::post('odoo/import-crm-clients/excel', [AdminOdooController::class, 'importCrmClientsExcel']);
+        Route::get('odoo/quotations', [AdminOdooController::class, 'quotations']);
+        Route::get('odoo/invoices', [AdminOdooController::class, 'invoices']);
+    });
+
+    Route::middleware('ability:ops.employees')->group(function () {
+        Route::post('odoo/sync-employees', [AdminOdooController::class, 'syncEmployees']);
+        Route::get('clickup/members', [AdminEmployeeController::class, 'clickupMembers']);
+        Route::apiResource('employees', AdminEmployeeController::class);
+        Route::post('employees/{employee}/approve', [AdminEmployeeController::class, 'approve']);
+        Route::post('employees/{employee}/reject', [AdminEmployeeController::class, 'reject']);
+    });
+
+    Route::middleware('ability:ops.requests')->group(function () {
+        Route::get('requests', [AdminServiceRequestController::class, 'index']);
+        Route::get('requests/{service_request}', [AdminServiceRequestController::class, 'show']);
+        Route::patch('requests/{service_request}', [AdminServiceRequestController::class, 'update']);
+        Route::post('requests/{service_request}/quotation', [AdminServiceRequestController::class, 'sendQuotation']);
+        Route::post('requests/{service_request}/confirm-payment', [AdminServiceRequestController::class, 'confirmPayment']);
+        Route::post('requests/{service_request}/retry-gemini', [AdminServiceRequestController::class, 'retryGemini']);
+        Route::post('requests/{service_request}/ensure-drive-folder', [AdminServiceRequestController::class, 'ensureDriveFolder']);
+        Route::post('requests/{service_request}/poll-drive', [AdminServiceRequestController::class, 'pollDrive']);
+        Route::post('requests/{service_request}/re-request-receipt', [AdminServiceRequestController::class, 'reRequestReceipt']);
+        Route::post('requests/{service_request}/renew', [AdminServiceRequestController::class, 'renew']);
+        Route::get('requests/{service_request}/files/{file}/receipt', [AdminServiceRequestController::class, 'receipt']);
+        Route::post('integration-events/{integrationEvent}/retry', [AdminServiceRequestController::class, 'retryIntegrationEvent']);
+    });
+
+    Route::middleware('ability:ops.payments,ops.channels')->group(function () {
+        Route::get('ops-settings', [AdminServiceRequestController::class, 'opsSettings']);
+    });
+
+    Route::middleware('ability:ops.payments')->group(function () {
+        Route::get('ops-settings/sham-cash-qr', [AdminServiceRequestController::class, 'shamCashQrPreview']);
+        Route::post('ops-settings/sham-cash-qr', [AdminServiceRequestController::class, 'uploadShamCashQr']);
+    });
+
+    Route::middleware('ability:site.profile_pdf')->group(function () {
+        Route::get('ops-settings/profile-pdf', [AdminProfilePdfController::class, 'show']);
+        Route::post('ops-settings/profile-pdf', [AdminProfilePdfController::class, 'store']);
+        Route::delete('ops-settings/profile-pdf', [AdminProfilePdfController::class, 'destroy']);
+    });
+
+    Route::middleware('ability:social.links')->group(function () {
+        Route::get('ops-settings/social-profile', [AdminServiceRequestController::class, 'socialProfile']);
+        Route::put('ops-settings/social-profile', [AdminServiceRequestController::class, 'updateSocialProfile']);
+    });
+
+    Route::middleware('ability:ops.channels')->group(function () {
+        Route::put('ops-settings/client-channels', [AdminClientChannelController::class, 'update']);
+    });
+
+    Route::middleware('ability:site.categories')->group(function () {
+        Route::get('portfolio/categories', [AdminPortfolioCategoryController::class, 'index']);
+        Route::post('portfolio/categories', [AdminPortfolioCategoryController::class, 'store']);
+        Route::delete('portfolio/categories/bulk', [AdminPortfolioCategoryController::class, 'destroyAll']);
+        Route::put('portfolio/categories/{portfolio_category}', [AdminPortfolioCategoryController::class, 'update']);
+        Route::post('portfolio/categories/{portfolio_category}/move', [AdminPortfolioCategoryController::class, 'move']);
+        Route::delete('portfolio/categories/{portfolio_category}', [AdminPortfolioCategoryController::class, 'destroy']);
+    });
+
+    Route::middleware('ability:ops.clients,site.projects')->group(function () {
+        Route::get('portfolio/clients', [AdminShowcaseClientController::class, 'index']);
+        Route::post('portfolio/clients', [AdminShowcaseClientController::class, 'store']);
+        Route::delete('portfolio/clients/bulk', [AdminShowcaseClientController::class, 'destroyAll']);
+        Route::put('portfolio/clients/{showcase_client}', [AdminShowcaseClientController::class, 'update']);
+        Route::delete('portfolio/clients/{showcase_client}', [AdminShowcaseClientController::class, 'destroy']);
+    });
+
+    Route::middleware('ability:site.projects')->group(function () {
+        Route::get('portfolio/projects', [AdminPortfolioProjectController::class, 'index']);
+        Route::post('portfolio/projects', [AdminPortfolioProjectController::class, 'store']);
+        Route::delete('portfolio/projects/bulk', [AdminPortfolioProjectController::class, 'destroyAll']);
+        Route::put('portfolio/projects/{portfolio_project}', [AdminPortfolioProjectController::class, 'update']);
+        Route::delete('portfolio/projects/{portfolio_project}', [AdminPortfolioProjectController::class, 'destroy']);
+    });
+
+    Route::middleware('ability:site.reels')->group(function () {
+        Route::get('reels', [AdminLandingReelController::class, 'index']);
+        Route::post('reels', [AdminLandingReelController::class, 'store']);
+        Route::delete('reels/bulk', [AdminLandingReelController::class, 'destroyAll']);
+        Route::match(['put', 'post'], 'reels/{landing_reel}', [AdminLandingReelController::class, 'update']);
+        Route::delete('reels/{landing_reel}/poster', [AdminLandingReelController::class, 'destroyPoster']);
+        Route::delete('reels/{landing_reel}', [AdminLandingReelController::class, 'destroy']);
+    });
+
+    Route::middleware('ability:site.articles')->group(function () {
+        Route::get('articles', [AdminArticleController::class, 'index']);
+        Route::post('articles', [AdminArticleController::class, 'store']);
+        Route::delete('articles/bulk', [AdminArticleController::class, 'destroyAll']);
+        Route::get('articles/{article}', [AdminArticleController::class, 'show']);
+        Route::put('articles/{article}', [AdminArticleController::class, 'update']);
+        Route::delete('articles/{article}', [AdminArticleController::class, 'destroy']);
+    });
+
+    Route::middleware('ability:site.pricing')->group(function () {
+        Route::get('pricing/categories', [AdminPricingCategoryController::class, 'index']);
+        Route::post('pricing/categories', [AdminPricingCategoryController::class, 'store']);
+        Route::delete('pricing/categories/bulk', [AdminPricingCategoryController::class, 'destroyAll']);
+        Route::put('pricing/categories/{pricing_category}', [AdminPricingCategoryController::class, 'update']);
+        Route::post('pricing/categories/{pricing_category}/move', [AdminPricingCategoryController::class, 'move']);
+        Route::delete('pricing/categories/{pricing_category}', [AdminPricingCategoryController::class, 'destroy']);
+        Route::get('pricing/subcategories', [AdminPricingSubcategoryController::class, 'index']);
+        Route::post('pricing/subcategories', [AdminPricingSubcategoryController::class, 'store']);
+        Route::delete('pricing/subcategories/bulk', [AdminPricingSubcategoryController::class, 'destroyAll']);
+        Route::put('pricing/subcategories/{pricing_subcategory}', [AdminPricingSubcategoryController::class, 'update']);
+        Route::post('pricing/subcategories/{pricing_subcategory}/move', [AdminPricingSubcategoryController::class, 'move']);
+        Route::delete('pricing/subcategories/{pricing_subcategory}', [AdminPricingSubcategoryController::class, 'destroy']);
+        Route::get('pricing/packages', [AdminPricingPackageController::class, 'index']);
+        Route::post('pricing/packages', [AdminPricingPackageController::class, 'store']);
+        Route::delete('pricing/packages/bulk', [AdminPricingPackageController::class, 'destroyAll']);
+        Route::put('pricing/packages/{pricing_package}', [AdminPricingPackageController::class, 'update']);
+        Route::post('pricing/packages/{pricing_package}/move', [AdminPricingPackageController::class, 'move']);
+        Route::delete('pricing/packages/{pricing_package}', [AdminPricingPackageController::class, 'destroy']);
+    });
+
+    Route::middleware('ability:social.accounts')->group(function () {
+        Route::get('social/threads/connect', [ThreadsOAuthController::class, 'redirect'])
+            ->middleware('throttle:10,1');
+        Route::get('social/linkedin/connect', [LinkedInOAuthController::class, 'redirect'])
+            ->middleware('throttle:10,1');
+        Route::post('social/accounts', [AdminSocialAccountController::class, 'store']);
+        Route::put('social/accounts/{social_account}', [AdminSocialAccountController::class, 'update']);
+        Route::post('social/accounts/{social_account}/toggle', [AdminSocialAccountController::class, 'toggle']);
+        Route::delete('social/accounts/{social_account}', [AdminSocialAccountController::class, 'destroy']);
+    });
+
     Route::get('social/accounts', [AdminSocialAccountController::class, 'index']);
-    Route::post('social/accounts', [AdminSocialAccountController::class, 'store']);
-    Route::put('social/accounts/{social_account}', [AdminSocialAccountController::class, 'update']);
-    Route::post('social/accounts/{social_account}/toggle', [AdminSocialAccountController::class, 'toggle']);
-    Route::delete('social/accounts/{social_account}', [AdminSocialAccountController::class, 'destroy']);
     Route::get('social/posts', [AdminSocialPostController::class, 'index']);
     Route::post('social/posts', [AdminSocialPostController::class, 'store']);
     Route::get('social/posts/{social_post}', [AdminSocialPostController::class, 'show']);

@@ -8,6 +8,7 @@ use Database\Factories\EmployeeFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Employee extends Model
@@ -20,6 +21,7 @@ class Employee extends Model
         'name',
         'phone',
         'email',
+        'user_id',
         'telegram_user_id',
         'telegram_username',
         'clickup_user_id',
@@ -65,6 +67,11 @@ class Employee extends Model
     public function isSales(): bool
     {
         return $this->profession === EmployeeProfession::Sales;
+    }
+
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
     }
 
     public function clickupTasks(): HasMany

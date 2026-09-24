@@ -17,6 +17,7 @@ use App\Models\SocialPost;
 use App\Models\SocialPostAccount;
 use App\Models\SocialPostMedia;
 use App\Services\SocialActivityLogger;
+use App\Services\SocialPageAccess;
 use App\Services\SocialPublishedPostSync;
 use App\Services\SocialPublisher;
 use App\Services\SocialSchedulePublisher;
@@ -35,6 +36,7 @@ class SocialPostController extends Controller
         private SocialPublisher $publisher,
         private SocialPublishedPostSync $publishedSync,
         private SocialSchedulePublisher $schedulePublisher,
+        private SocialPageAccess $pages,
     ) {}
 
     public function index(Request $request)
@@ -62,6 +64,18 @@ class SocialPostController extends Controller
                 $q->whereHas('accounts', fn ($accounts) => $accounts->where('social_accounts.id', $request->integer('account_id')));
             })
             ->when($request->filled('placement'), fn ($q) => $q->where('placement', $request->string('placement')))
+            ->when(true, function ($q) use ($request) {
+                $allowed = $this->pages->allowedAccountIds($request->user());
+                if ($allowed === null) {
+                    return;
+                }
+                if ($allowed === []) {
+                    $q->whereRaw('0 = 1');
+
+                    return;
+                }
+                $q->whereDoesntHave('accounts', fn ($accounts) => $accounts->whereNotIn('social_accounts.id', $allowed));
+            })
             ->when($request->filled('from') && $request->filled('to'), function ($q) use ($request) {
                 $from = $request->date('from')->startOfDay();
                 $to = $request->date('to')->endOfDay();
@@ -83,6 +97,7 @@ class SocialPostController extends Controller
     public function show(SocialPost $socialPost): SocialPostResource
     {
         abort_unless($this->canViewPosts(request()->user()), 403);
+        $this->assertPostPages(request()->user(), $socialPost);
 
         $socialPost->load([
             'accounts',
@@ -98,6 +113,7 @@ class SocialPostController extends Controller
 
     public function store(StoreSocialPostRequest $request): JsonResponse
     {
+        $this->pages->assertAccounts($request->user(), $request->validated('account_ids'));
         $post = SocialPost::query()->create([
             'body' => $request->validated('body') ?? '',
             'placement' => $request->validated('placement') ?? SocialPlacement::Feed->value,
@@ -124,6 +140,10 @@ class SocialPostController extends Controller
     public function update(UpdateSocialPostRequest $request, SocialPost $socialPost): SocialPostResource
     {
         abort_unless($socialPost->isEditable(), 422, 'This post can no longer be edited.');
+        $this->assertPostPages($request->user(), $socialPost);
+        if ($request->has('account_ids')) {
+            $this->pages->assertAccounts($request->user(), $request->validated('account_ids'));
+        }
 
         $wasPublished = $socialPost->status === SocialPostStatus::Published;
         $previousTargets = $socialPost->targets()->with('account')->get();
@@ -161,6 +181,7 @@ class SocialPostController extends Controller
     public function destroy(SocialPost $socialPost)
     {
         abort_unless(request()->user()?->canSocial(SocialAbility::Create), 403);
+        $this->assertPostPages(request()->user(), $socialPost);
         abort_unless($socialPost->isDeletable(), 422, 'This post can no longer be deleted.');
 
         $failures = [];
@@ -195,6 +216,7 @@ class SocialPostController extends Controller
     public function approve(SocialPost $socialPost): SocialPostResource
     {
         abort_unless(request()->user()?->canSocial(SocialAbility::Approve), 403);
+        $this->assertPostPages(request()->user(), $socialPost);
         abort_unless($socialPost->isEditable(), 422, 'This post cannot be approved.');
 
         $this->markApproved($socialPost, request()->user());
@@ -215,6 +237,7 @@ class SocialPostController extends Controller
     public function publish(SocialPost $socialPost): SocialPostResource
     {
         abort_unless(request()->user()?->canSocial(SocialAbility::Approve), 403);
+        $this->assertPostPages(request()->user(), $socialPost);
         abort_unless($socialPost->canRetryPublish(), 422, 'This post cannot be published.');
 
         $this->markApproved($socialPost, request()->user());
@@ -230,6 +253,16 @@ class SocialPostController extends Controller
             || $user?->canSocial(SocialAbility::Approve)
             || $user?->canSocial(SocialAbility::Engage)
             || $user?->canSocial(SocialAbility::Accounts);
+    }
+
+    private function assertPostPages(mixed $user, SocialPost $post): void
+    {
+        if (! $user) {
+            abort(403);
+        }
+
+        $ids = $post->accounts()->pluck('social_accounts.id')->map(fn ($id): int => (int) $id)->all();
+        $this->pages->assertAccounts($user, $ids);
     }
 
     private function applyIntent(SocialPost $post, string $intent, mixed $user): void

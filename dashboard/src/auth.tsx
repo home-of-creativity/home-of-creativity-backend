@@ -32,7 +32,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ready,
       async login(email, password) {
         const res = await api.login(email, password);
-        if (!res.data.user.is_admin) {
+        if (!res.data.user.is_admin && !res.data.user.role) {
           setToken(null);
           throw new Error("forbidden");
         }

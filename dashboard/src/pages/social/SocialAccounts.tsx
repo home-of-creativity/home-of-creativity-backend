@@ -3,34 +3,25 @@ import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { ConfirmAction } from "../../components/ConfirmAction";
 import { SocialBrandIcon } from "../../components/SocialBrandIcon";
-import { api, canSocial, type SocialAbility, type SocialAccount, type SocialStaff } from "../../api";
+import { api, canSocial, type SocialAccount } from "../../api";
 import { useAuth } from "../../auth";
 import { copy, type Locale } from "../../i18n";
 import { SocialChrome } from "./SocialChrome";
 import { useSocialWorkspace } from "./SocialWorkspace";
 import { facebookErrorMessage, groupSocialPages, linkedinOauthMessage, platformLabel, socialAccountStatusLabel, socialStatusLabel } from "./helpers";
 
-const abilities: { key: SocialAbility; label: typeof copy.socialPermAccounts }[] = [
-  { key: "accounts", label: copy.socialPermAccounts },
-  { key: "create", label: copy.socialPermCreate },
-  { key: "approve", label: copy.socialPermApprove },
-  { key: "engage", label: copy.socialPermEngage },
-];
-
 export function SocialAccounts({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
   const { user } = useAuth();
   const { accounts, meta, refreshAccounts, loading: accountsLoading } = useSocialWorkspace();
   const [searchParams, setSearchParams] = useSearchParams();
   const items = accounts;
-  const [staff, setStaff] = useState<SocialStaff[]>([]);
-  const [staffLoading, setStaffLoading] = useState(true);
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState("");
   const [oauthNotice, setOauthNotice] = useState("");
   const [oauthError, setOauthError] = useState("");
   const [connectingLinkedin, setConnectingLinkedin] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
-  const loading = accountsLoading || staffLoading;
+  const loading = accountsLoading;
   const facebookError = meta.facebook_error ?? "";
   const threadsError = meta.threads_error ?? "";
   const facebookPagesFound = typeof meta.facebook_pages_found === "number" ? meta.facebook_pages_found : null;
@@ -40,23 +31,7 @@ export function SocialAccounts({ locale, t }: { locale: Locale; t: (c: { ar: str
   const linkedinRedirectUri = meta.linkedin_redirect_uri ?? "";
   const linkedinError = meta.linkedin_error ?? "";
 
-  function loadStaff() {
-    if (!canSocial(user, "accounts")) {
-      setStaff([]);
-      setStaffLoading(false);
-      return;
-    }
-    setStaffLoading(true);
-    api
-      .socialStaff()
-      .then((team) => setStaff(team.data))
-      .catch(() => setStaff([]))
-      .finally(() => setStaffLoading(false));
-  }
-
-  useEffect(() => {
-    loadStaff();
-  }, []);
+  const pages = useMemo(() => groupSocialPages(items), [items]);
 
   useEffect(() => {
     const connected = searchParams.get("threads");
@@ -141,8 +116,6 @@ export function SocialAccounts({ locale, t }: { locale: Locale; t: (c: { ar: str
     }
   }
 
-  const pages = useMemo(() => groupSocialPages(items), [items]);
-
   function accountHandle(item: SocialAccount) {
     return item.handle ? `@${item.handle}` : item.page_id || "—";
   }
@@ -150,17 +123,6 @@ export function SocialAccounts({ locale, t }: { locale: Locale; t: (c: { ar: str
   function accountStatus(item: SocialAccount) {
     if (item.connection_status === "error") return socialStatusLabel("failed", t);
     return item.is_active ? t(copy.active) : t(copy.inactive);
-  }
-
-  async function updateStaff(member: SocialStaff, ability: SocialAbility, enabled: boolean) {
-    const current = member.social_permissions ?? member.social_abilities ?? [];
-    const next = enabled ? Array.from(new Set([...current, ability])) : current.filter((item) => item !== ability);
-    try {
-      await api.updateSocialStaff(member.id, next);
-      loadStaff();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t(copy.loading));
-    }
   }
 
   return (
@@ -283,45 +245,10 @@ export function SocialAccounts({ locale, t }: { locale: Locale; t: (c: { ar: str
         ))}
       </div>
 
-      {canSocial(user, "accounts") && staff.length > 0 ? (
-        <section className="card social-staff-card">
-          <h2 className="section-title">{t(copy.socialPermissions)}</h2>
-          <div className="table-wrap">
-            <table className="table-flush">
-              <thead>
-                <tr>
-                  <th>{t(copy.employeeName)}</th>
-                  {abilities.map((ability) => (
-                    <th key={ability.key}>{t(ability.label)}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {staff.map((member) => {
-                  const granted = member.social_permissions ?? member.social_abilities ?? [];
-                  const all = member.social_permissions == null;
-                  return (
-                    <tr key={member.id}>
-                      <td>
-                        {member.name}
-                        {all ? <small> · {t(copy.socialAllAbilities)}</small> : null}
-                      </td>
-                      {abilities.map((ability) => (
-                        <td key={ability.key}>
-                          <input
-                            type="checkbox"
-                            checked={all || granted.includes(ability.key)}
-                            onChange={(event) => void updateStaff(member, ability.key, event.target.checked)}
-                          />
-                        </td>
-                      ))}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </section>
+      {user?.is_admin ? (
+        <p className="notice notice-info">
+          <Link to="/permissions">{t(copy.navPermissions)}</Link>
+        </p>
       ) : null}
       </div>
     </SocialChrome>

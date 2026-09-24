@@ -2,7 +2,7 @@ import { NavLink, Navigate, Outlet, Route, Routes, useLocation } from "react-rou
 import { AnimatePresence, motion, MotionConfig } from "framer-motion";
 import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import { Toaster } from "sonner";
-import { canSocial } from "./api";
+import { canAbility, type StaffAbility, type User } from "./api";
 import { AuthProvider, useAuth } from "./auth";
 import { LiveFeedProvider, useLive } from "./live";
 import { applyLocale, applyTheme, copy, readLocale, readTheme, type Copy, type Locale, type Theme } from "./i18n";
@@ -16,6 +16,7 @@ import { Contact } from "./pages/Contact";
 import { ContactChannelForm } from "./pages/ContactChannelForm";
 import { EmployeeForm } from "./pages/EmployeeForm";
 import { Employees } from "./pages/Employees";
+import { Permissions } from "./pages/Permissions";
 import { Legal } from "./pages/Legal";
 import { ProfilePdf } from "./pages/ProfilePdf";
 import { Login } from "./pages/Login";
@@ -131,9 +132,9 @@ function Shell({
     { id: "add-reel", label: t(copy.addReel), to: "/reels/new", icon: <IconReels aria-hidden width={18} height={18} />, group: t(copy.commandGroupActions) },
     { id: "add-article", label: t(copy.addArticle), to: "/articles/new", icon: <IconArticles aria-hidden width={18} height={18} />, group: t(copy.commandGroupActions) },
     { id: "compose-post", label: t(copy.socialCompose), to: "/social", icon: <IconSocial aria-hidden width={18} height={18} />, group: t(copy.commandGroupActions) },
-  ];
+  ].filter((item) => commandAllowed(user, item.id));
 
-  if (!user?.is_admin) return <Navigate to="/" replace />;
+  if (!user) return null;
 
   const isSocial = location.pathname.startsWith("/social");
 
@@ -177,10 +178,13 @@ function Shell({
         </div>
         <nav className="nav-links" aria-label={t(copy.menu)}>
           <p className="nav-group-label">{t(copy.navOps)}</p>
+          {canAbility(user, "ops.overview") ? (
           <NavLink to="/" end>
             <IconOverview aria-hidden />
             <span>{t(copy.overview)}</span>
           </NavLink>
+          ) : null}
+          {canAbility(user, "ops.requests") ? (
           <NavLink to="/requests">
             <span className="nav-link-row">
               <IconRequests aria-hidden />
@@ -188,6 +192,8 @@ function Shell({
               {badges.openRequests > 0 ? <span className="nav-badge">{badges.openRequests}</span> : null}
             </span>
           </NavLink>
+          ) : null}
+          {canAbility(user, "ops.employees") ? (
           <NavLink to="/employees">
             <span className="nav-link-row">
               <IconEmployees aria-hidden />
@@ -195,61 +201,92 @@ function Shell({
               {badges.pendingEmployees > 0 ? <span className="nav-badge">{badges.pendingEmployees}</span> : null}
             </span>
           </NavLink>
+          ) : null}
+          {canAbility(user, "ops.clients") ? (
           <NavLink to="/clients">
             <IconClients aria-hidden />
             <span>{t(copy.clients)}</span>
           </NavLink>
-          {canSocial(user, "create") || canSocial(user, "approve") || canSocial(user, "engage") || canSocial(user, "accounts") ? (
+          ) : null}
+          {canAbility(user, "social.content") || canAbility(user, "social.approve") || canAbility(user, "social.engage") || canAbility(user, "social.messages") || canAbility(user, "social.accounts") || canAbility(user, "social.links") ? (
             <NavLink to="/social">
               <IconSocial aria-hidden />
               <span>{t(copy.navSocial)}</span>
             </NavLink>
           ) : null}
+          {canAbility(user, "ops.payments") ? (
           <NavLink to="/payments">
             <IconQr aria-hidden />
             <span>{t(copy.navPayments)}</span>
           </NavLink>
+          ) : null}
+          {canAbility(user, "ops.channels") ? (
           <NavLink to="/channels">
             <IconChannels aria-hidden />
             <span>{t(copy.navChannels)}</span>
           </NavLink>
+          ) : null}
           <p className="nav-group-label">{t(copy.navSite)}</p>
+          {canAbility(user, "site.projects") ? (
           <NavLink to="/projects">
             <IconProjects aria-hidden />
             <span>{t(copy.portfolioTabProjects)}</span>
           </NavLink>
+          ) : null}
+          {canAbility(user, "site.reels") ? (
           <NavLink to="/reels">
             <IconReels aria-hidden />
             <span>{t(copy.reelsTitle)}</span>
           </NavLink>
+          ) : null}
+          {canAbility(user, "site.articles") ? (
           <NavLink to="/articles">
             <IconArticles aria-hidden />
             <span>{t(copy.articlesTitle)}</span>
           </NavLink>
+          ) : null}
+          {canAbility(user, "site.categories") ? (
           <NavLink to="/categories">
             <IconCategories aria-hidden />
             <span>{t(copy.portfolioTabCategories)}</span>
           </NavLink>
+          ) : null}
+          {canAbility(user, "site.pricing") ? (
           <NavLink to="/pricing">
             <IconPricing aria-hidden />
             <span>{t(copy.pricingTitle)}</span>
           </NavLink>
+          ) : null}
+          {canAbility(user, "site.contact") ? (
           <NavLink to="/contact">
             <IconContact aria-hidden />
             <span>{t(copy.contactTitle)}</span>
           </NavLink>
+          ) : null}
+          {canAbility(user, "site.profile_pdf") ? (
           <NavLink to="/profile-pdf">
             <IconLegal aria-hidden />
             <span>{t(copy.navProfilePdf)}</span>
           </NavLink>
+          ) : null}
+          {canAbility(user, "site.legal") ? (
           <NavLink to="/privacy">
             <IconLegal aria-hidden />
             <span>{t(copy.legalPrivacyTitle)}</span>
           </NavLink>
+          ) : null}
+          {canAbility(user, "site.legal") ? (
           <NavLink to="/terms">
             <IconLegal aria-hidden />
             <span>{t(copy.legalTermsTitle)}</span>
           </NavLink>
+          ) : null}
+          {user?.is_admin ? (
+          <NavLink to="/permissions">
+            <IconEmployees aria-hidden />
+            <span>{t(copy.navPermissions)}</span>
+          </NavLink>
+          ) : null}
         </nav>
         <div className="sidebar-foot">
           <div className="staff-chip">
@@ -332,7 +369,7 @@ function Guarded({
   const { user, ready } = useAuth();
   const location = useLocation();
   if (!ready) return <LoadingLottie variant="page" label={copy.loading[readLocale()]} />;
-  if (!user?.is_admin) {
+  if (!user?.is_admin && !user?.role) {
     if (location.pathname === "/") {
       return <Login locale={locale} t={t} setLocale={setLocale} />;
     }
@@ -341,8 +378,13 @@ function Guarded({
   }
 
   const fromPath = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname;
-  if (location.pathname === "/" && fromPath && fromPath !== "/" && fromPath !== "/login") {
+  if (location.pathname === "/" && fromPath && fromPath !== "/" && fromPath !== "/login" && pathAllowed(user, fromPath)) {
     return <Navigate to={fromPath} replace />;
+  }
+
+  if (user && !pathAllowed(user, location.pathname)) {
+    const next = homeFor(user);
+    if (next !== location.pathname) return <Navigate to={next} replace />;
   }
 
   return children;
@@ -398,6 +440,7 @@ export function App() {
           <Route path="/employees/new" element={<EmployeeForm locale={locale} t={t} />} />
           <Route path="/employees/:id/edit" element={<EmployeeForm locale={locale} t={t} />} />
           <Route path="/employees/:id/approve" element={<EmployeeForm locale={locale} t={t} />} />
+          <Route path="/permissions" element={<Permissions locale={locale} t={t} />} />
           <Route path="/clients" element={<Clients locale={locale} t={t} />} />
           <Route path="/clients/new" element={<ClientForm locale={locale} t={t} />} />
           <Route path="/clients/:id/edit" element={<ClientForm locale={locale} t={t} />} />
@@ -473,4 +516,73 @@ export function App() {
     </AuthProvider>
     </MotionConfig>
   );
+}
+
+const commandAbility: Record<string, StaffAbility | "social" | "owner"> = {
+  overview: "ops.overview",
+  requests: "ops.requests",
+  employees: "ops.employees",
+  clients: "ops.clients",
+  social: "social",
+  "social-links": "social.links",
+  projects: "site.projects",
+  reels: "site.reels",
+  articles: "site.articles",
+  categories: "site.categories",
+  pricing: "site.pricing",
+  contact: "site.contact",
+  "profile-pdf": "site.profile_pdf",
+  privacy: "site.legal",
+  terms: "site.legal",
+  "sham-cash": "ops.payments",
+  channels: "ops.channels",
+  "add-employee": "ops.employees",
+  "add-client": "ops.clients",
+  "add-reel": "site.reels",
+  "add-article": "site.articles",
+  "compose-post": "social.content",
+};
+
+function commandAllowed(user: User | null, id: string) {
+  return pathAllowed(user, commandPath(id));
+}
+
+function commandPath(id: string) {
+  const ability = commandAbility[id];
+  if (ability === "social") return "/social";
+  if (id === "social-links") return "/social/links";
+  if (id === "sham-cash") return "/payments";
+  if (id === "overview") return "/";
+  if (id.startsWith("add-")) return `/${id.replace("add-", "")}/new`;
+  if (id === "compose-post") return "/social";
+  return `/${id}`;
+}
+
+function pathAllowed(user: User | null, pathname: string) {
+  if (!user) return false;
+  if (pathname === "/permissions") return user.is_admin;
+  if (user.is_admin && !user.role) return true;
+  if (pathname.startsWith("/requests")) return canAbility(user, "ops.requests");
+  if (pathname.startsWith("/employees")) return canAbility(user, "ops.employees");
+  if (pathname.startsWith("/clients")) return canAbility(user, "ops.clients");
+  if (pathname.startsWith("/payments")) return canAbility(user, "ops.payments");
+  if (pathname.startsWith("/channels")) return canAbility(user, "ops.channels");
+  if (pathname.startsWith("/projects")) return canAbility(user, "site.projects");
+  if (pathname.startsWith("/reels")) return canAbility(user, "site.reels");
+  if (pathname.startsWith("/articles")) return canAbility(user, "site.articles");
+  if (pathname.startsWith("/categories")) return canAbility(user, "site.categories");
+  if (pathname.startsWith("/pricing")) return canAbility(user, "site.pricing");
+  if (pathname.startsWith("/contact")) return canAbility(user, "site.contact");
+  if (pathname.startsWith("/profile-pdf")) return canAbility(user, "site.profile_pdf");
+  if (pathname.startsWith("/privacy") || pathname.startsWith("/terms") || pathname.startsWith("/legal")) return canAbility(user, "site.legal");
+  if (pathname.startsWith("/social/links") || pathname.startsWith("/social/design")) return canAbility(user, "social.links");
+  if (pathname.startsWith("/social/inbox")) return canAbility(user, "social.engage") || canAbility(user, "social.messages");
+  if (pathname.startsWith("/social/accounts")) return canAbility(user, "social.accounts");
+  if (pathname.startsWith("/social")) return canAbility(user, "social.content") || canAbility(user, "social.approve") || canAbility(user, "social.engage") || canAbility(user, "social.messages") || canAbility(user, "social.accounts") || canAbility(user, "social.links");
+  return user.is_admin;
+}
+
+function homeFor(user: User) {
+  const candidates = ["/", "/requests", "/employees", "/clients", "/social", "/payments", "/channels", "/projects", "/reels", "/articles", "/categories", "/pricing", "/contact", "/profile-pdf", "/privacy", "/permissions"];
+  return candidates.find((path) => pathAllowed(user, path)) ?? "/";
 }

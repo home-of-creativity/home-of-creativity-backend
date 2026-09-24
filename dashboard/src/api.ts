@@ -19,13 +19,38 @@ export function setToken(token: string | null) {
 
 export type SocialAbility = "accounts" | "create" | "approve" | "engage";
 
+export type StaffAbility =
+  | "ops.overview"
+  | "ops.requests"
+  | "ops.clients"
+  | "ops.employees"
+  | "ops.payments"
+  | "ops.channels"
+  | "site.projects"
+  | "site.categories"
+  | "site.reels"
+  | "site.articles"
+  | "site.pricing"
+  | "site.contact"
+  | "site.legal"
+  | "site.profile_pdf"
+  | "social.content"
+  | "social.approve"
+  | "social.engage"
+  | "social.messages"
+  | "social.accounts"
+  | "social.links";
+
 export type User = {
   id: number;
   name: string;
   email: string;
   is_admin: boolean;
+  role?: { id: number; name: string | null } | null;
+  abilities?: StaffAbility[];
   social_permissions?: SocialAbility[] | null;
   social_abilities?: SocialAbility[];
+  sees_all_social_pages?: boolean;
 };
 
 export type OpsSettings = {
@@ -52,7 +77,19 @@ export type SocialLinktreeProfile = {
   theme: "cream" | "purple" | "dark";
 };
 
+const socialAbilityMap: Record<SocialAbility, StaffAbility> = {
+  accounts: "social.accounts",
+  create: "social.content",
+  approve: "social.approve",
+  engage: "social.engage",
+};
+
+export function canAbility(user: User | null | undefined, ability: StaffAbility) {
+  return Boolean(user?.abilities?.includes(ability));
+}
+
 export function canSocial(user: User | null | undefined, ability: SocialAbility) {
+  if (user?.abilities) return canAbility(user, socialAbilityMap[ability]);
   return Boolean(user?.social_abilities?.includes(ability));
 }
 
@@ -75,6 +112,36 @@ export type LiveSnapshot = {
 };
 
 export type SocialStaff = User;
+
+export type StaffRole = {
+  id: number;
+  name: string;
+  abilities: StaffAbility[];
+  users_count?: number;
+};
+
+export type StaffAccessRow = {
+  id: number;
+  name: string;
+  email: string | null;
+  has_account: boolean;
+  role_id: number | null;
+  role_name: string | null;
+  page_keys: string[];
+};
+
+export type SocialPageOption = {
+  key: string;
+  name: string;
+  platforms: string[];
+};
+
+export type StaffAccessPayload = {
+  data: StaffAccessRow[];
+  pages: SocialPageOption[];
+  abilities: { key: StaffAbility; group: "ops" | "site" | "social" }[];
+  message: string;
+};
 
 export type SocialAccount = {
   id: number;
@@ -1245,6 +1312,33 @@ export const api = {
     return request<Envelope<SocialStaff>>(`/admin/social/staff/${id}`, {
       method: "PUT",
       body: JSON.stringify({ social_permissions }),
+    });
+  },
+  roles() {
+    return request<{ data: StaffRole[] }>("/admin/roles");
+  },
+  createRole(body: { name: string; abilities: StaffAbility[] }) {
+    return request<Envelope<StaffRole>>("/admin/roles", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+  updateRole(id: number, body: { name: string; abilities: StaffAbility[] }) {
+    return request<Envelope<StaffRole>>(`/admin/roles/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  },
+  deleteRole(id: number) {
+    return request<Envelope<null>>(`/admin/roles/${id}`, { method: "DELETE" });
+  },
+  staffAccess() {
+    return request<StaffAccessPayload>("/admin/staff-access");
+  },
+  updateStaffAccess(employeeId: number, body: { role_id: number | null; page_keys: string[]; password?: string }) {
+    return request<Envelope<StaffAccessRow>>(`/admin/staff-access/${employeeId}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
     });
   },
 };

@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\EnsureAbility;
 use App\Http\Middleware\EnsureAdmin;
 use App\Http\Middleware\EnsureClientTelegramEnabled;
 use App\Http\Middleware\VerifySharedSecret;
@@ -22,6 +23,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'whatsapp.signature' => VerifyWhatsAppSignature::class,
             'telegram.client' => EnsureClientTelegramEnabled::class,
             'admin' => EnsureAdmin::class,
+            'ability' => EnsureAbility::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
