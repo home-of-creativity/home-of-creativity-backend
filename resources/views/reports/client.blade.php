@@ -21,6 +21,12 @@
         td, th { border: 1px solid #d9d0e6; padding: 6px; }
         table.hoc-plain td, table.hoc-plain th { border: 0; }
         img { max-width: 100%; height: auto; }
+        .sheet > div { position: relative; }
+        .hoc-abs { position: absolute; box-sizing: border-box; }
+        .hoc-shape.is-rect { border: 2px solid #2e0e5c; }
+        .hoc-shape.is-ellipse { border: 2px solid #2e0e5c; border-radius: 50%; }
+        .hoc-shape.is-line { border-top: 3px solid #2e0e5c; height: 0; }
+        .hoc-abs img { width: 100%; height: 100%; }
         .watermark { position: fixed; left: 0; right: 0; top: 38%; text-align: center; z-index: -1; }
     </style>
 </head>

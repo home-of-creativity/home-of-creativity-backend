@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
 const HISTORY_LIMIT = 80;
 const IMAGE_ACCEPT = "image/*,.jpg,.jpeg,.jpe,.jfif,.png,.gif,.webp,.bmp,.svg,.avif,.heic,.heif,.tif,.tiff,.ico";
@@ -47,6 +47,15 @@ type Labels = {
   tableWidth: string;
   borders: string;
   noBorders: string;
+  textBox: string;
+  shapeRect: string;
+  shapeEllipse: string;
+  shapeLine: string;
+  direction: string;
+  nudge: string;
+  themeLight: string;
+  themeDark: string;
+  fontSize: string;
   watermark: string;
   watermarkOpacity: string;
   removeWatermark: string;
@@ -156,12 +165,24 @@ export function ReportEditor({
   const [markWidth, setMarkWidth] = useState(initial.mark?.width ?? 42);
   const [coverPicked, setCoverPicked] = useState(false);
   const [imageOn, setImageOn] = useState(false);
-  const [imageWidth, setImageWidth] = useState(100);
   const [tableOn, setTableOn] = useState(false);
   const [tableCols, setTableCols] = useState(3);
   const [tableRows, setTableRows] = useState(3);
+  const [fontSize, setFontSize] = useState(14);
+  const [themeName, setThemeName] = useState<"light" | "dark">("light");
+  const [absOn, setAbsOn] = useState(false);
+  const selectedAbs = useRef<HTMLElement | null>(null);
+  const drag = useRef<{ mode: "move" | "resize" | "cover"; el: HTMLElement; page: HTMLElement; x: number; y: number; left: number; top: number; width: number; height: number } | null>(null);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
+
+  useEffect(() => {
+    const read = () => setThemeName(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
+    read();
+    const observer = new MutationObserver(read);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     initial.pages.forEach((page, index) => {
@@ -309,18 +330,167 @@ export function ReportEditor({
     pickedImage.current?.classList.remove("is-picked");
     pickedImage.current = image;
     image.classList.add("is-picked");
-    const width = Number.parseFloat(image.style.width);
-    setImageWidth(Number.isFinite(width) && width > 0 ? width : 100);
     setImageOn(true);
     setCoverPicked(false);
     setTableOn(false);
   }
 
-  function addImage(file: File | undefined) {
+  function selectAbs(element: HTMLElement | null) {
+    selectedAbs.current?.classList.remove("is-selected");
+    selectedAbs.current = element;
+    element?.classList.add("is-selected");
+    setAbsOn(Boolean(element));
+  }
+
+  function placeObject(kind: "text" | "rect" | "ellipse" | "line" | "image", src?: string, at?: { left: number; top: number }) {
+    const page = pageRefs.current[active.current];
+    if (!page) return;
+    const box = document.createElement("div");
+    box.className = "hoc-abs";
+    box.contentEditable = "false";
+    box.style.left = `${at?.left ?? 12}%`;
+    box.style.top = `${at?.top ?? 16}%`;
+    box.style.width = kind === "line" ? "40%" : "34%";
+    box.style.height = kind === "line" ? "6%" : "18%";
+    if (kind === "text") {
+      box.classList.add("hoc-text");
+      box.dir = "rtl";
+      const text = document.createElement("div");
+      text.className = "hoc-text-body";
+      text.contentEditable = "true";
+      text.dataset.placeholder = labels.textBox;
+      text.style.fontSize = `${fontSize}pt`;
+      box.appendChild(text);
+    } else if (kind === "image" && src) {
+      const image = document.createElement("img");
+      image.src = src;
+      image.alt = "";
+      image.draggable = false;
+      box.appendChild(image);
+    } else {
+      const shape = document.createElement("div");
+      shape.className = `hoc-shape is-${kind}`;
+      box.appendChild(shape);
+    }
+    const handle = document.createElement("span");
+    handle.className = "hoc-resize";
+    handle.dataset.resize = "1";
+    box.appendChild(handle);
+    pushHistory(currentHtml());
+    page.appendChild(box);
+    selectAbs(box);
+    pushHistory(emit());
+  }
+
+  function addImage(file: File | undefined, at?: { left: number; top: number }) {
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => run("insertHTML", `<img src="${String(reader.result)}" alt="" style="width: 60%;">`);
+    reader.onload = () => placeObject("image", String(reader.result), at);
     reader.readAsDataURL(file);
+  }
+
+  function applyFont(size: number) {
+    const next = Math.min(72, Math.max(8, size));
+    setFontSize(next);
+    const text = selectedAbs.current?.querySelector(".hoc-text-body");
+    if (text instanceof HTMLElement) {
+      text.style.fontSize = `${next}pt`;
+      emit();
+    }
+  }
+
+  function flipDirection() {
+    const box = selectedAbs.current;
+    if (!box) return;
+    box.dir = box.dir === "ltr" ? "rtl" : "ltr";
+    emit();
+  }
+
+  function nudge(dx: number, dy: number) {
+    const box = selectedAbs.current;
+    if (!box) return;
+    box.style.left = `${Math.min(92, Math.max(0, (Number.parseFloat(box.style.left) || 0) + dx))}%`;
+    box.style.top = `${Math.min(92, Math.max(0, (Number.parseFloat(box.style.top) || 0) + dy))}%`;
+    emit();
+  }
+
+  function gestureStart(event: ReactPointerEvent<HTMLElement>, index: number) {
+    const target = event.target instanceof Element ? event.target : null;
+    const page = pageRefs.current[index];
+    if (!target || !page) return;
+    const box = target.closest(".hoc-abs");
+    if (!(box instanceof HTMLElement) || !page.contains(box)) return;
+    if (target.closest(".hoc-text-body")) {
+      selectAbs(box);
+      return;
+    }
+    event.preventDefault();
+    selectAbs(box);
+    drag.current = {
+      mode: target.closest("[data-resize]") ? "resize" : "move",
+      el: box,
+      page,
+      x: event.clientX,
+      y: event.clientY,
+      left: Number.parseFloat(box.style.left) || 0,
+      top: Number.parseFloat(box.style.top) || 0,
+      width: Number.parseFloat(box.style.width) || 30,
+      height: Number.parseFloat(box.style.height) || 16,
+    };
+  }
+
+  function gestureMove(event: ReactPointerEvent<HTMLElement>) {
+    const gesture = drag.current;
+    if (!gesture || gesture.mode === "cover") return;
+    const bounds = gesture.page.getBoundingClientRect();
+    const dx = ((event.clientX - gesture.x) / bounds.width) * 100;
+    const dy = ((event.clientY - gesture.y) / bounds.height) * 100;
+    if (gesture.mode === "move") {
+      gesture.el.style.left = `${Math.min(92, Math.max(0, gesture.left + dx))}%`;
+      gesture.el.style.top = `${Math.min(92, Math.max(0, gesture.top + dy))}%`;
+    } else {
+      gesture.el.style.width = `${Math.min(100, Math.max(8, gesture.width + dx))}%`;
+      gesture.el.style.height = `${Math.min(100, Math.max(4, gesture.height + dy))}%`;
+    }
+  }
+
+  function gestureEnd() {
+    if (!drag.current || drag.current.mode === "cover") return;
+    drag.current = null;
+    emit();
+  }
+
+  function coverResizeStart(event: ReactPointerEvent<HTMLElement>) {
+    const frame = event.currentTarget.parentElement;
+    if (!frame) return;
+    event.preventDefault();
+    event.stopPropagation();
+    drag.current = {
+      mode: "cover",
+      el: frame,
+      page: frame,
+      x: event.clientX,
+      y: event.clientY,
+      left: 0,
+      top: 0,
+      width: coverWidth,
+      height: 0,
+    };
+    const move = (pointer: PointerEvent) => {
+      const current = drag.current;
+      if (!current || current.mode !== "cover") return;
+      const bounds = frame.parentElement?.getBoundingClientRect();
+      if (!bounds) return;
+      const next = current.width + ((pointer.clientX - current.x) / bounds.width) * 100;
+      setCoverWidth(Math.min(100, Math.max(15, Math.round(next))));
+    };
+    const stop = () => {
+      drag.current = null;
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop);
   }
 
   function addPage() {
@@ -479,15 +649,6 @@ export function ReportEditor({
     run(command);
   }
 
-  function resizePicked(width: number) {
-    const image = pickedImage.current;
-    if (!image) return;
-    setImageWidth(width);
-    image.style.width = `${width}%`;
-    image.style.height = "auto";
-    emit();
-  }
-
   async function useImageAsCover() {
     const image = pickedImage.current;
     if (!image) return;
@@ -522,6 +683,23 @@ export function ReportEditor({
           {labels.image}
           <input type="file" accept={IMAGE_ACCEPT} hidden onChange={(event) => addImage(event.target.files?.[0])} />
         </label>
+        <button type="button" className="html-editor-btn html-editor-btn-wide" onClick={() => placeObject("text")}>{labels.textBox}</button>
+        <button type="button" className="html-editor-btn html-editor-btn-wide" onClick={() => placeObject("rect")}>{labels.shapeRect}</button>
+        <button type="button" className="html-editor-btn html-editor-btn-wide" onClick={() => placeObject("ellipse")}>{labels.shapeEllipse}</button>
+        <button type="button" className="html-editor-btn html-editor-btn-wide" onClick={() => placeObject("line")}>{labels.shapeLine}</button>
+        <button type="button" className="html-editor-btn html-editor-btn-wide" disabled={!absOn} onClick={flipDirection}>{labels.direction}</button>
+        <button type="button" className="html-editor-btn" disabled={!absOn} onClick={() => nudge(-2, 0)} aria-label={labels.nudge}>←</button>
+        <button type="button" className="html-editor-btn" disabled={!absOn} onClick={() => nudge(2, 0)} aria-label={labels.nudge}>→</button>
+        <button type="button" className="html-editor-btn" disabled={!absOn} onClick={() => nudge(0, -2)} aria-label={labels.nudge}>↑</button>
+        <button type="button" className="html-editor-btn" disabled={!absOn} onClick={() => nudge(0, 2)} aria-label={labels.nudge}>↓</button>
+        <label className="report-mini">
+          {labels.fontSize}
+          <input className="field" type="number" min={8} max={72} value={fontSize} onChange={(event) => applyFont(Number(event.target.value))} />
+        </label>
+        {[12, 14, 18, 24, 32].map((size) => (
+          <button key={size} type="button" className={`html-editor-btn${fontSize === size ? " is-active" : ""}`} onClick={() => applyFont(size)}>{size}</button>
+        ))}
+        <span className="report-theme">{themeName === "dark" ? labels.themeDark : labels.themeLight}</span>
         <label className="report-mini">
           {labels.rows}
           <input className="field" type="number" min={1} max={20} value={tableRows} onChange={(event) => setTableRows(Number(event.target.value))} />
@@ -560,20 +738,8 @@ export function ReportEditor({
       ) : null}
       {imageOn || coverPicked || tableOn ? (
         <div className="html-editor-toolbar report-inspector" role="toolbar">
-          {coverPicked ? (
-            <label className="report-mini">
-              {labels.imageSize}
-              <input type="range" min={15} max={100} value={coverWidth} onChange={(event) => setCoverWidth(Number(event.target.value))} />
-            </label>
-          ) : null}
           {imageOn ? (
-            <>
-              <label className="report-mini">
-                {labels.imageSize}
-                <input type="range" min={15} max={100} value={imageWidth} onChange={(event) => resizePicked(Number(event.target.value))} />
-              </label>
-              <button type="button" className="html-editor-btn html-editor-btn-wide" onClick={() => void useImageAsCover()}>{labels.useAsCover}</button>
-            </>
+            <button type="button" className="html-editor-btn html-editor-btn-wide" onClick={() => void useImageAsCover()}>{labels.useAsCover}</button>
           ) : null}
           {tableOn ? (
             <>
@@ -620,7 +786,6 @@ export function ReportEditor({
                     }}
                   />
                 </label>
-                <button type="button" className="html-editor-btn html-editor-btn-wide" onClick={() => { clearPicked(); setCoverPicked(true); }}>{labels.pickImage}</button>
                 <button
                   type="button"
                   className="html-editor-btn html-editor-btn-wide"
@@ -635,13 +800,10 @@ export function ReportEditor({
               </div>
               <div className="a4-cover-stage">
                 {coverUrl ? (
-                  <img
-                    src={coverUrl}
-                    alt=""
-                    className={coverPicked ? "is-picked" : ""}
-                    style={{ width: `${coverWidth}%` }}
-                    onClick={() => { clearPicked(); setCoverPicked(true); }}
-                  />
+                  <div className={`a4-cover-frame${coverPicked ? " is-picked" : ""}`} style={{ width: `${coverWidth}%` }}>
+                    <img src={coverUrl} alt="" draggable={false} onClick={() => { clearPicked(); setCoverPicked(true); }} />
+                    <span className="hoc-resize" data-resize="1" onPointerDown={coverResizeStart} />
+                  </div>
                 ) : null}
                 <div
                   ref={coverRef}
@@ -689,6 +851,21 @@ export function ReportEditor({
                 aria-multiline="true"
                 dir="rtl"
                 onFocus={() => { active.current = index; }}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  const file = event.dataTransfer.files?.[0];
+                  const bounds = event.currentTarget.getBoundingClientRect();
+                  const at = {
+                    left: Math.min(80, Math.max(0, ((event.clientX - bounds.left) / bounds.width) * 100)),
+                    top: Math.min(80, Math.max(0, ((event.clientY - bounds.top) / bounds.height) * 100)),
+                  };
+                  active.current = index;
+                  if (file) addImage(file, at);
+                }}
+                onPointerDown={(event) => gestureStart(event, index)}
+                onPointerMove={gestureMove}
+                onPointerUp={gestureEnd}
                 onMouseUp={(event) => {
                   const target = event.target instanceof Element ? event.target : null;
                   const image = target?.closest("img");
