@@ -17,6 +17,10 @@ export function ReportForm({ t }: { locale: Locale; t: (c: { ar: string; en: str
   const [body, setBody] = useState("");
   const [cover, setCover] = useState<File | null>(null);
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
+  const [removeCover, setRemoveCover] = useState(false);
+  const [watermark, setWatermark] = useState<File | null>(null);
+  const [watermarkUrl, setWatermarkUrl] = useState<string | null>(null);
+  const [removeWatermark, setRemoveWatermark] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [existing, setExisting] = useState<ClientReportAttachment[]>([]);
   const [removeIds, setRemoveIds] = useState<number[]>([]);
@@ -35,6 +39,7 @@ export function ReportForm({ t }: { locale: Locale; t: (c: { ar: string; en: str
       setFooter(res.data.footer ?? "");
       setBody(res.data.body);
       setCoverUrl(res.data.cover_url);
+      setWatermarkUrl(res.data.watermark_url ?? null);
       setExisting(res.data.attachments ?? []);
       setOwnerId(res.data.client_id);
       setLoaded(true);
@@ -70,6 +75,9 @@ export function ReportForm({ t }: { locale: Locale; t: (c: { ar: string; en: str
     form.set("footer", footer);
     form.set("body", body);
     if (cover) form.set("cover", cover);
+    else if (removeCover) form.set("remove_cover", "1");
+    if (watermark) form.set("watermark", watermark);
+    else if (removeWatermark) form.set("remove_watermark", "1");
     files.forEach((file) => form.append("attachments[]", file));
     removeIds.forEach((id) => form.append("remove_attachment_ids[]", String(id)));
     try {
@@ -89,19 +97,6 @@ export function ReportForm({ t }: { locale: Locale; t: (c: { ar: string; en: str
       <PageHeader title={reportId ? t(copy.edit) : t(copy.addReport)} lede={t(copy.reportBody)} />
       {error ? <p className="error">{error}</p> : null}
       <form className="card form-grid" onSubmit={(event) => void save(event)}>
-        <label className="field-label field-span">
-          {t(copy.reportCover)}
-          <input
-            className="field"
-            type="file"
-            accept="image/*"
-            onChange={(event) => {
-              const file = event.target.files?.[0] ?? null;
-              setCover(file);
-              setCoverUrl(file ? URL.createObjectURL(file) : coverUrl);
-            }}
-          />
-        </label>
         <div className="field-span">
           <div className="row-actions">
             <button type="button" className="btn" onClick={() => setZoom((value) => Math.max(70, value - 10))}>{t(copy.reportZoomOut)}</button>
@@ -114,11 +109,22 @@ export function ReportForm({ t }: { locale: Locale; t: (c: { ar: string; en: str
               footer={footer}
               value={body}
               coverUrl={coverUrl}
+              watermarkUrl={watermarkUrl}
               zoom={zoom}
               onTitle={setTitle}
               onHeader={setHeader}
               onFooter={setFooter}
               onChange={setBody}
+              onCoverFile={(file) => {
+                setCover(file);
+                setRemoveCover(file === null);
+                setCoverUrl(file ? URL.createObjectURL(file) : null);
+              }}
+              onWatermarkFile={(file) => {
+                setWatermark(file);
+                setRemoveWatermark(file === null);
+                setWatermarkUrl(file ? URL.createObjectURL(file) : null);
+              }}
               labels={{
                 bold: "B",
                 italic: "I",
@@ -142,6 +148,28 @@ export function ReportForm({ t }: { locale: Locale; t: (c: { ar: string; en: str
                 header: t(copy.reportHeader),
                 footer: t(copy.reportFooter),
                 page: t(copy.reportPage),
+                cover: t(copy.reportCover),
+                uploadImage: t(copy.reportUploadImage),
+                pickImage: t(copy.reportPickImage),
+                coverContent: t(copy.reportCoverContent),
+                hideChrome: t(copy.reportHideChrome),
+                showChrome: t(copy.reportShowChrome),
+                deletePage: t(copy.reportDeletePage),
+                imageSize: t(copy.reportImageSize),
+                useAsCover: t(copy.reportUseAsCover),
+                rows: t(copy.reportRows),
+                columns: t(copy.reportColumns),
+                addRow: t(copy.reportAddRow),
+                addColumn: t(copy.reportAddColumn),
+                deleteRow: t(copy.reportDeleteRow),
+                deleteColumn: t(copy.reportDeleteColumn),
+                headerRow: t(copy.reportHeaderRow),
+                tableWidth: t(copy.reportTableWidth),
+                borders: t(copy.reportBorders),
+                noBorders: t(copy.reportNoBorders),
+                watermark: t(copy.reportWatermark),
+                watermarkOpacity: t(copy.reportWatermarkOpacity),
+                removeWatermark: t(copy.reportRemoveWatermark),
               }}
             />
           ) : null}

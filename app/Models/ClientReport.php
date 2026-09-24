@@ -12,6 +12,7 @@ class ClientReport extends Model
         'client_id',
         'title',
         'cover_path',
+        'watermark_path',
         'header',
         'footer',
         'body',

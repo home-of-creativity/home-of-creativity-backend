@@ -110,8 +110,8 @@ class GoogleDriveClient
         }
 
         $parent = trim((string) $parentId);
-        if ($parent === '') {
-            $parent = 'root';
+        if ($parent === '' || $parent === 'root') {
+            $parent = $this->parentFolderId();
         }
 
         return $this->ensureFolderPath($parent, [$name]);
@@ -137,6 +137,11 @@ class GoogleDriveClient
                 return null;
             }
 
+            $writeToken = $this->writeToken($token, $context);
+            if ($writeToken === null) {
+                return null;
+            }
+
             $cursor = $context['id'];
             $created = false;
             foreach ($segments as $segment) {
@@ -145,7 +150,7 @@ class GoogleDriveClient
                     continue;
                 }
 
-                $next = $this->findOrCreateFolder($token, $cursor, $this->safeName($raw), $context['driveId']);
+                $next = $this->findOrCreateFolder($writeToken, $cursor, $this->safeName($raw), $context['driveId']);
                 if ($next === null) {
                     return null;
                 }
@@ -744,7 +749,7 @@ class GoogleDriveClient
             ->timeout(15)
             ->acceptJson()
             ->get(self::API.'/files/'.$parentId, [
-                'fields' => 'id,driveId,mimeType',
+                'fields' => 'id,driveId,mimeType,owners(emailAddress)',
                 'supportsAllDrives' => 'true',
             ]);
 
@@ -758,11 +763,37 @@ class GoogleDriveClient
         }
 
         $driveId = $meta->json('driveId');
+        $owners = $meta->json('owners');
+        $ownerEmail = is_array($owners) ? ($owners[0]['emailAddress'] ?? null) : null;
 
         return [
             'id' => (string) $meta->json('id', $parentId),
             'driveId' => filled($driveId) ? (string) $driveId : null,
+            'ownerEmail' => is_string($ownerEmail) && $ownerEmail !== '' ? $ownerEmail : null,
         ];
+    }
+
+    /**
+     * @param  array{id: string, driveId: ?string, ownerEmail: ?string}  $context
+     */
+    private function writeToken(string $serviceToken, array $context): ?string
+    {
+        if (filled($context['driveId'])) {
+            return $serviceToken;
+        }
+
+        $owner = $context['ownerEmail'];
+        $technical = $this->auth->clientEmail();
+        if ($owner === null || ($technical !== null && strcasecmp($owner, $technical) === 0)) {
+            return $this->fail('This folder is owned by the technical service account, which has no storage. Choose a folder owned by the Google account that should hold the files.');
+        }
+
+        $token = $this->auth->accessTokenFor($owner);
+        if ($token === null) {
+            return $this->fail('Could not upload as '.$owner.'. Enable domain-wide delegation for the service account and allow the Drive scope so storage counts on that account.');
+        }
+
+        return $token;
     }
 
     private function findOrCreateFolder(string $token, string $parentId, string $name, ?string $driveId = null): ?string
@@ -808,10 +839,10 @@ class GoogleDriveClient
             ]);
 
         if (! $created->successful()) {
-            $this->fail($this->googleErrorMessage(
+            $this->fail($this->quotaHint($this->googleErrorMessage(
                 $created,
                 'Google Drive rejected folder create. Share the parent folder with the service account.',
-            ));
+            )));
 
             return null;
         }
@@ -839,6 +870,15 @@ class GoogleDriveClient
             return $this->fail('Google service account could not get an access token. Check the private key.');
         }
 
+        $context = $this->parentContext($token, $folderId);
+        if ($context === null) {
+            return null;
+        }
+        $token = $this->writeToken($token, $context);
+        if ($token === null) {
+            return null;
+        }
+
         $boundary = 'hoc_'.bin2hex(random_bytes(8));
         $meta = json_encode([
             'name' => $this->safeName($name),
@@ -858,7 +898,7 @@ class GoogleDriveClient
             ->post('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,webViewLink');
 
         if (! $created->successful()) {
-            return $this->fail($this->googleErrorMessage($created, 'Google Drive rejected the file upload.'));
+            return $this->fail($this->quotaHint($this->googleErrorMessage($created, 'Google Drive rejected the file upload.')));
         }
 
         $id = $created->json('id');
@@ -872,6 +912,15 @@ class GoogleDriveClient
             'id' => (string) $id,
             'url' => is_string($link) && $link !== '' ? $link : 'https://drive.google.com/file/d/'.$id.'/view',
         ];
+    }
+
+    private function quotaHint(string $message): string
+    {
+        if (! str_contains($message, 'storage quota')) {
+            return $message;
+        }
+
+        return $message.' Create it inside the shared drive folder from GOOGLE_DRIVE_PARENT_FOLDER_ID. A service account cannot store files in its own My Drive.';
     }
 
     private function parentFolderId(): string

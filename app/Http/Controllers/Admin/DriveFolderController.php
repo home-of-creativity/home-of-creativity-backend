@@ -36,7 +36,9 @@ class DriveFolderController extends Controller
             'data' => [
                 'id' => $id,
                 'name' => (string) $request->validated('name'),
-                'parent_id' => filled($parent) ? (string) $parent : 'root',
+                'parent_id' => filled($parent) && $parent !== 'root'
+                    ? (string) $parent
+                    : (config('services.google.drive_parent_folder_id') ?: null),
             ],
             'message' => 'Drive folder created.',
         ], 201);

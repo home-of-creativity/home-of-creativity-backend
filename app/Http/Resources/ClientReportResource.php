@@ -23,6 +23,7 @@ class ClientReportResource extends JsonResource
             'footer' => $this->footer,
             'body' => $this->body,
             'cover_url' => filled($this->cover_path) ? Storage::disk('public')->url($this->cover_path) : null,
+            'watermark_url' => filled($this->watermark_path) ? Storage::disk('public')->url($this->watermark_path) : null,
             'drive_file_id' => $this->drive_file_id,
             'drive_url' => $this->drive_url,
             'attachments' => $this->whenLoaded('attachments', fn () => $this->attachments->map(fn ($file): array => [

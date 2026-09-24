@@ -49,6 +49,18 @@ class GoogleServiceAccount
         return $this->tokenFor(self::SCOPES);
     }
 
+    public function accessTokenFor(?string $subject): ?string
+    {
+        $subject = trim((string) $subject);
+
+        return $this->tokenFor(self::SCOPES, $subject !== '' ? $subject : null);
+    }
+
+    public function clientEmail(): ?string
+    {
+        return $this->credentials()['client_email'] ?? null;
+    }
+
     public function searchConsoleToken(): ?string
     {
         return $this->tokenFor([self::SEARCH_CONSOLE_SCOPE]);
@@ -57,13 +69,18 @@ class GoogleServiceAccount
     /**
      * @param  list<string>  $scopes
      */
-    private function tokenFor(array $scopes): ?string
+    private function tokenFor(array $scopes, ?string $subject = null): ?string
     {
         if (! $this->configured()) {
             return null;
         }
 
-        $cacheKey = implode(' ', $scopes);
+        $subject = trim((string) $subject);
+        if ($subject !== '' && strcasecmp($subject, (string) $this->clientEmail()) === 0) {
+            $subject = '';
+        }
+
+        $cacheKey = implode(' ', $scopes).'|'.$subject;
         $cached = $this->tokens[$cacheKey] ?? null;
         if ($cached !== null && time() < ($cached['expires'] - 60)) {
             return $cached['token'];
@@ -77,13 +94,17 @@ class GoogleServiceAccount
 
             $now = time();
             $jwtHeader = $this->base64UrlEncode(json_encode(['alg' => 'RS256', 'typ' => 'JWT'], JSON_THROW_ON_ERROR));
-            $jwtClaim = $this->base64UrlEncode(json_encode([
+            $claim = [
                 'iss' => $credentials['client_email'],
                 'scope' => implode(' ', $scopes),
                 'aud' => self::TOKEN_URL,
                 'iat' => $now,
                 'exp' => $now + 3600,
-            ], JSON_THROW_ON_ERROR));
+            ];
+            if ($subject !== '') {
+                $claim['sub'] = $subject;
+            }
+            $jwtClaim = $this->base64UrlEncode(json_encode($claim, JSON_THROW_ON_ERROR));
 
             $unsigned = $jwtHeader.'.'.$jwtClaim;
             $signature = '';

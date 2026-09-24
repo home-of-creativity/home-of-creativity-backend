@@ -296,6 +296,7 @@ export type ClientReport = {
   footer: string | null;
   body: string;
   cover_url: string | null;
+  watermark_url?: string | null;
   drive_file_id: string | null;
   drive_url: string | null;
   attachments?: ClientReportAttachment[];

@@ -171,4 +171,63 @@ class DriveFolderBrowserTest extends TestCase
         $this->getJson('/api/admin/drive/folders')->assertForbidden();
         $this->postJson('/api/admin/drive/folders', ['name' => 'ممنوع'])->assertForbidden();
     }
+
+    public function test_a_folder_without_a_parent_is_created_in_the_shared_drive(): void
+    {
+        config(['services.google.drive_parent_folder_id' => 'shared-parent']);
+        $this->mock(GoogleServiceAccount::class, function ($mock): void {
+            $mock->shouldReceive('configured')->andReturn(true);
+            $mock->shouldReceive('configurationError')->andReturn(null);
+            $mock->shouldReceive('accessToken')->andReturn('token');
+        });
+        Http::fake(function ($request) {
+            if (str_contains($request->url(), '/files/shared-parent')) {
+                return Http::response(['id' => 'shared-parent', 'driveId' => 'drive-1']);
+            }
+            if ($request->method() === 'GET') {
+                return Http::response(['files' => []]);
+            }
+
+            return Http::response(['id' => 'new-folder'], 200);
+        });
+
+        $this->assertSame('new-folder', app(GoogleDriveClient::class)->createFolder('تقارير'));
+
+        Http::assertSent(function ($request): bool {
+            return $request->method() === 'POST'
+                && ($request['parents'][0] ?? null) === 'shared-parent';
+        });
+    }
+
+    public function test_a_user_owned_folder_is_written_as_that_user(): void
+    {
+        config(['services.google.drive_parent_folder_id' => 'user-folder']);
+        $this->mock(GoogleServiceAccount::class, function ($mock): void {
+            $mock->shouldReceive('configured')->andReturn(true);
+            $mock->shouldReceive('configurationError')->andReturn(null);
+            $mock->shouldReceive('accessToken')->andReturn('service-token');
+            $mock->shouldReceive('clientEmail')->andReturn('tech@hoc.test');
+            $mock->shouldReceive('accessTokenFor')->once()->with('owner@hoc.test')->andReturn('owner-token');
+        });
+        Http::fake(function ($request) {
+            if (str_contains($request->url(), '/files/user-folder')) {
+                return Http::response([
+                    'id' => 'user-folder',
+                    'owners' => [['emailAddress' => 'owner@hoc.test']],
+                ]);
+            }
+            if ($request->method() === 'GET') {
+                return Http::response(['files' => []]);
+            }
+
+            return Http::response(['id' => 'owned-folder']);
+        });
+
+        $this->assertSame('owned-folder', app(GoogleDriveClient::class)->createFolder('تقرير', 'user-folder'));
+
+        Http::assertSent(function ($request): bool {
+            return $request->method() === 'POST'
+                && $request->hasHeader('Authorization', 'Bearer owner-token');
+        });
+    }
 }

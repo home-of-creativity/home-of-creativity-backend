@@ -59,6 +59,12 @@ class ClientReportController extends Controller
             ])->save();
         }
 
+        if ($request->hasFile('watermark')) {
+            $report->forceFill([
+                'watermark_path' => $request->file('watermark')->store('reports/'.$report->id, 'public'),
+            ])->save();
+        }
+
         foreach ($request->file('attachments', []) as $file) {
             $report->attachments()->create([
                 'original_name' => $file->getClientOriginalName(),
@@ -87,6 +93,21 @@ class ClientReportController extends Controller
             $report->forceFill([
                 'cover_path' => $request->file('cover')->store('reports/'.$report->id, 'public'),
             ])->save();
+        } elseif ($request->boolean('remove_cover') && filled($report->cover_path)) {
+            Storage::disk('public')->delete($report->cover_path);
+            $report->forceFill(['cover_path' => null])->save();
+        }
+
+        if ($request->hasFile('watermark')) {
+            if (filled($report->watermark_path)) {
+                Storage::disk('public')->delete($report->watermark_path);
+            }
+            $report->forceFill([
+                'watermark_path' => $request->file('watermark')->store('reports/'.$report->id, 'public'),
+            ])->save();
+        } elseif ($request->boolean('remove_watermark') && filled($report->watermark_path)) {
+            Storage::disk('public')->delete($report->watermark_path);
+            $report->forceFill(['watermark_path' => null])->save();
         }
 
         $remove = $request->input('remove_attachment_ids', []);
@@ -115,6 +136,9 @@ class ClientReportController extends Controller
         $report->load('attachments');
         if (filled($report->cover_path)) {
             Storage::disk('public')->delete($report->cover_path);
+        }
+        if (filled($report->watermark_path)) {
+            Storage::disk('public')->delete($report->watermark_path);
         }
         foreach ($report->attachments as $file) {
             Storage::disk('public')->delete($file->path);

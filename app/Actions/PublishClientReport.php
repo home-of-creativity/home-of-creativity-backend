@@ -4,6 +4,7 @@ namespace App\Actions;
 
 use App\Models\ClientReport;
 use App\Services\GoogleDriveClient;
+use App\Support\ReportImage;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\Storage;
 
@@ -21,12 +22,14 @@ class PublishClientReport
         abort_if($folderId === null, 422, $this->drive->lastError() ?? 'Could not open the report folder.');
 
         $cover = filled($report->cover_path) ? Storage::disk('public')->path($report->cover_path) : null;
+        $watermark = filled($report->watermark_path) ? Storage::disk('public')->path($report->watermark_path) : null;
         $pdf = Pdf::loadView('reports.client', [
             'title' => $report->title,
             'header' => $report->header,
             'footer' => $report->footer,
             'body' => $report->body,
-            'cover' => $cover && is_file($cover) ? $cover : null,
+            'cover' => $cover && is_file($cover) ? ReportImage::pdfPath($cover) : null,
+            'watermark' => $watermark && is_file($watermark) ? ReportImage::pdfPath($watermark) : null,
         ])->setPaper('a4');
 
         $uploaded = $this->drive->uploadFile($folderId, $report->title.'.pdf', $pdf->output(), 'application/pdf');
