@@ -38,6 +38,7 @@ services:
       DB_CONNECTION: mysql
       DB_HOST: mysql
       DB_PORT: "3306"
+      DEV_HEALTH_INTERNAL_URL: http://hoc-edge/up
     command: >
       sh -c "composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
       && php artisan migrate --force
@@ -83,10 +84,13 @@ services:
       DB_CONNECTION: mysql
       DB_HOST: mysql
       DB_PORT: "3306"
+      DEV_HEALTH_INTERNAL_URL: http://hoc-edge/up
     command: php artisan schedule:work
     depends_on:
       hoc-api:
         condition: service_healthy
+      hoc-edge:
+        condition: service_started
 
   hoc-edge:
     image: caddy:2-alpine

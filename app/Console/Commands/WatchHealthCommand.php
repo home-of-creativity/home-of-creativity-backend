@@ -3,9 +3,10 @@
 namespace App\Console\Commands;
 
 use App\Services\DevAlert;
+use App\Services\DevBeat;
+use App\Services\DevHealth;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Http;
 
 class WatchHealthCommand extends Command
 {
@@ -13,30 +14,33 @@ class WatchHealthCommand extends Command
 
     protected $description = 'Alert developers once when the public API health check is down.';
 
-    public function handle(DevAlert $alert): int
+    public function handle(DevAlert $alert, DevBeat $beats, DevHealth $health): int
     {
-        $url = (string) config('services.dev.health_url');
-        $up = false;
-        try {
-            $up = Http::timeout(8)->get($url)->successful();
-        } catch (\Throwable) {
-            $up = false;
-        }
-
+        $beats->touch('scheduler');
+        $url = $health->labelUrl();
+        $up = $health->up();
         $wasDown = (bool) Cache::get('dev.health.down');
-        if (! $up && ! $wasDown) {
-            Cache::put('dev.health.down', true, now()->addDay());
-            $alert->send('Server Down: '.$url);
-            $this->warn('Server Down');
+
+        if ($up) {
+            Cache::forget('dev.health.misses');
+            if ($wasDown) {
+                Cache::forget('dev.health.down');
+                $alert->send('Server up: '.$url);
+                $this->info('Server up');
+            }
 
             return self::SUCCESS;
         }
 
-        if ($up && $wasDown) {
-            Cache::forget('dev.health.down');
-            $alert->send('Server up: '.$url);
-            $this->info('Server up');
+        $misses = ((int) Cache::get('dev.health.misses')) + 1;
+        Cache::put('dev.health.misses', $misses, now()->addMinutes(10));
+        if ($wasDown || $misses < 2) {
+            return self::SUCCESS;
         }
+
+        Cache::put('dev.health.down', true, now()->addDay());
+        $alert->send('Server Down: '.$url);
+        $this->warn('Server Down');
 
         return self::SUCCESS;
     }

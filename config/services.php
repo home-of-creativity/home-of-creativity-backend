@@ -41,6 +41,7 @@ return [
 
     'dev' => [
         'health_url' => env('DEV_HEALTH_URL', 'https://api.hoc.agency/up'),
+        'health_internal_url' => env('DEV_HEALTH_INTERNAL_URL'),
     ],
 
     'sentry' => [
@@ -139,7 +140,7 @@ return [
     'gemini' => [
         'api_key' => env('GEMINI_API_KEY', env('GOOGLE_API_KEY')),
         'base_url' => env('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta'),
-        'model' => env('GEMINI_MODEL', 'gemini-2.5-flash'),
+        'model' => env('GEMINI_MODEL', 'gemini-3.6-flash'),
         'timeout' => (int) env('GEMINI_TIMEOUT', 30),
         'e2e_stub' => env('GEMINI_E2E_STUB', false),
     ],

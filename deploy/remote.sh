@@ -71,3 +71,5 @@ echo "Pushing missing Odoo CRM leads onto the Telegram pipeline..."
 "${COMPOSE[@]}" exec -T hoc-api php artisan seo:submit-sitemap || true
 
 echo "Deploy finished. API: https://api.hoc.agency/up | Site: https://hoc.agency"
+mkdir -p storage/app/dev-beats
+date -u +%Y-%m-%dT%H:%M:%SZ > storage/app/dev-beats/deploy

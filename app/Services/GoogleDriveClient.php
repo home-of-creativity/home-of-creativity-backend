@@ -914,6 +914,55 @@ class GoogleDriveClient
         ];
     }
 
+    /**
+     * Replace the contents of a file this app uploaded earlier, keeping its id and link.
+     * Falls back to a fresh upload in the folder when the old file is gone.
+     *
+     * @return array{id: string, url: string}|null
+     */
+    public function replaceFile(string $folderId, string $fileId, string $name, string $contents, string $mime): ?array
+    {
+        $this->lastError = null;
+        if ($error = $this->configurationError()) {
+            return $this->fail($error);
+        }
+        if ($fileId === '' || $contents === '') {
+            return $this->uploadFile($folderId, $name, $contents, $mime);
+        }
+
+        $token = $this->auth->accessToken();
+        if ($token === null) {
+            return $this->fail('Google service account could not get an access token. Check the private key.');
+        }
+        $context = $this->parentContext($token, $folderId);
+        if ($context === null) {
+            return null;
+        }
+        $token = $this->writeToken($token, $context);
+        if ($token === null) {
+            return null;
+        }
+
+        $updated = Http::withToken($token)
+            ->withBody($contents, $mime)
+            ->timeout(60)
+            ->patch('https://www.googleapis.com/upload/drive/v3/files/'.rawurlencode($fileId).'?uploadType=media&supportsAllDrives=true&fields=id,webViewLink,trashed');
+
+        if ($updated->status() === 404 || $updated->json('trashed') === true) {
+            return $this->uploadFile($folderId, $name, $contents, $mime);
+        }
+        if (! $updated->successful()) {
+            return $this->fail($this->quotaHint($this->googleErrorMessage($updated, 'Google Drive rejected the file update.')));
+        }
+
+        $link = $updated->json('webViewLink');
+
+        return [
+            'id' => $fileId,
+            'url' => is_string($link) && $link !== '' ? $link : 'https://drive.google.com/file/d/'.$fileId.'/view',
+        ];
+    }
+
     private function quotaHint(string $message): string
     {
         if (! str_contains($message, 'storage quota')) {

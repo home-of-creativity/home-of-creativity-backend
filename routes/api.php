@@ -134,6 +134,8 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::post('report-memories', [ReportGeminiController::class, 'storeMemory']);
         Route::delete('report-memories/{reportMemory}', [ReportGeminiController::class, 'destroyMemory']);
         Route::post('reports/gemini', [ReportGeminiController::class, 'edit']);
+        Route::get('reports/{client_report}/document', [AdminClientReportController::class, 'document']);
+        Route::get('reports/{client_report}/pdf', [AdminClientReportController::class, 'pdf']);
         Route::get('reports', [AdminClientReportController::class, 'clients']);
         Route::get('clients/{client}/reports', [AdminClientReportController::class, 'index']);
         Route::post('clients/{client}/reports', [AdminClientReportController::class, 'store']);
@@ -346,6 +348,9 @@ Route::prefix('bot/staff')->middleware('shared.secret:services.telegram.staff_bo
 Route::prefix('bot/dev')->middleware('shared.secret:services.telegram.dev_bot_secret')->group(function () {
     Route::get('ping', [DevBotController::class, 'ping']);
     Route::get('status', [DevBotController::class, 'status']);
+    Route::get('bots', [DevBotController::class, 'bots']);
+    Route::get('queue', [DevBotController::class, 'queue']);
+    Route::get('digest', [DevBotController::class, 'digest']);
 });
 
 Route::prefix('bot/admin')->middleware('shared.secret:services.telegram.admin_bot_secret')->group(function () {

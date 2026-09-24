@@ -10,6 +10,7 @@ use App\Enums\EmployeeProfession;
 use App\Enums\RequestStatus;
 use App\Models\DriveDelivery;
 use App\Models\ServiceRequest;
+use App\Services\DevAlert;
 use App\Services\GoogleDriveClient;
 use App\Services\RequestStatusTransitionService;
 use App\Services\TelegramNotifier;
@@ -43,12 +44,14 @@ class PollDriveDeliveriesCommand extends Command
         RequestStatusTransitionService $transitions,
         NotifyEmployees $notifyEmployees,
         AlertTelegramDeliveryFailure $alertTelegramDeliveryFailure,
+        DevAlert $devAlert,
     ): int {
         if (! $drive->configured()) {
             $error = $drive->configurationError() ?? 'Google Drive is not configured.';
             $this->error($error);
             Log::error('Drive poll skipped; Google Drive is not configured.', ['error' => $error]);
             $this->alertStaffOnce($notifyEmployees, 'Google Drive غير جاهز. الملفات في المجلدات لن تصل للزبون حتى يُضبط الحساب الخدمي.');
+            $devAlert->once('drive-config', 'Google Drive is not configured. Client files will not be sent.', 360);
 
             return self::SUCCESS;
         }
@@ -95,6 +98,11 @@ class PollDriveDeliveriesCommand extends Command
                     'request' => $request->number,
                     'error' => $exception->getMessage(),
                 ]);
+                $devAlert->once(
+                    'drive-poll',
+                    'Drive poll failed: '.$request->number.' — '.mb_substr($exception->getMessage(), 0, 160),
+                    30,
+                );
 
                 continue;
             }

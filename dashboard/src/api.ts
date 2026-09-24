@@ -297,10 +297,17 @@ export type ClientReport = {
   body: string;
   cover_url: string | null;
   watermark_url?: string | null;
+  has_document?: boolean;
+  has_pdf?: boolean;
   drive_file_id: string | null;
+  /** The PDF in the client's Drive folder. */
   drive_url: string | null;
+  /** The Word file in the client's Drive folder. */
+  drive_document_url?: string | null;
   attachments?: ClientReportAttachment[];
+  published_at?: string | null;
   created_at?: string | null;
+  updated_at?: string | null;
 };
 
 export type OdooQuotation = {
@@ -924,7 +931,15 @@ export const api = {
   },
   saveClientReport(clientId: number, form: FormData, reportId?: number) {
     const path = reportId ? `/admin/reports/${reportId}` : `/admin/clients/${clientId}/reports`;
-    return request<Envelope<ClientReport>>(path, { method: "POST", body: form });
+    return request<Envelope<ClientReport> & { drive_error?: string | null }>(path, { method: "POST", body: form });
+  },
+  async reportFile(id: number, kind: "document" | "pdf") {
+    const headers = new Headers({ Accept: "application/octet-stream" });
+    const token = getToken();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    const response = await fetch(`${API_URL}/admin/reports/${id}/${kind}`, { headers });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return new Uint8Array(await response.arrayBuffer());
   },
   deleteClientReport(id: number) {
     return request<Envelope<null>>(`/admin/reports/${id}`, { method: "DELETE" });

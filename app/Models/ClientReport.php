@@ -16,9 +16,21 @@ class ClientReport extends Model
         'header',
         'footer',
         'body',
+        'document_path',
+        'pdf_path',
         'drive_file_id',
         'drive_url',
+        'drive_document_id',
+        'drive_document_url',
+        'published_at',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'published_at' => 'datetime',
+        ];
+    }
 
     public function client(): BelongsTo
     {

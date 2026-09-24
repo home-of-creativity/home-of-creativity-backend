@@ -24,8 +24,11 @@ class ClientReportResource extends JsonResource
             'body' => $this->body,
             'cover_url' => filled($this->cover_path) ? Storage::disk('public')->url($this->cover_path) : null,
             'watermark_url' => filled($this->watermark_path) ? Storage::disk('public')->url($this->watermark_path) : null,
+            'has_document' => filled($this->document_path),
+            'has_pdf' => filled($this->pdf_path),
             'drive_file_id' => $this->drive_file_id,
             'drive_url' => $this->drive_url,
+            'drive_document_url' => $this->drive_document_url,
             'attachments' => $this->whenLoaded('attachments', fn () => $this->attachments->map(fn ($file): array => [
                 'id' => $file->id,
                 'name' => $file->original_name,
@@ -33,7 +36,9 @@ class ClientReportResource extends JsonResource
                 'url' => Storage::disk('public')->url($file->path),
                 'drive_url' => $file->drive_url,
             ])->all()),
+            'published_at' => $this->published_at?->toIso8601String(),
             'created_at' => $this->created_at?->toIso8601String(),
+            'updated_at' => $this->updated_at?->toIso8601String(),
         ];
     }
 }

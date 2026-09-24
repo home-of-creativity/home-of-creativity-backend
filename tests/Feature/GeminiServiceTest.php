@@ -33,7 +33,7 @@ class GeminiServiceTest extends TestCase
 
         $this->assertSame(WorkType::Design, $result['work_type']);
         Http::assertSent(function ($request): bool {
-            return str_contains($request->url(), '/models/gemini-2.5-flash:generateContent')
+            return str_contains($request->url(), '/models/gemini-3.6-flash:generateContent')
                 && ! str_contains($request->url(), 'key=')
                 && $request->hasHeader('x-goog-api-key', 'studio-auth-key');
         });

@@ -19,7 +19,7 @@ from telegram.ext import (
     filters,
 )
 
-from telegram_http import run_application, telegram_request
+from telegram_http import run_application, start_heartbeat, telegram_request
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 load_dotenv()
@@ -1801,6 +1801,7 @@ def main() -> None:
     )
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, route_text))
     application.add_error_handler(on_error)
+    start_heartbeat("client")
 
     try:
         run_application(

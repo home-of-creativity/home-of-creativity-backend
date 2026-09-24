@@ -9,7 +9,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton,
 from telegram.error import NetworkError, TimedOut
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, ConversationHandler, MessageHandler, filters
 
-from telegram_http import run_application, telegram_request
+from telegram_http import run_application, start_heartbeat, telegram_request
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 load_dotenv()
@@ -859,6 +859,7 @@ def main() -> None:
         )
     )
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, route_text))
+    start_heartbeat("staff")
 
     try:
         run_application(

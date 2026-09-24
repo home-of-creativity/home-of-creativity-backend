@@ -21,6 +21,7 @@
 /public/storage
 /storage/*.key
 /storage/app/private/google-sa.json
+/storage/app/dev-beats
 /storage/pail
 /vendor
 *.tsbuildinfo

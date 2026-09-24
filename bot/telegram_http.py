@@ -87,3 +87,22 @@ def telegram_request(*, long_polling: bool = False) -> HTTPXRequest:
             "transport": transport,
         },
     )
+
+
+def start_heartbeat(name: str) -> None:
+    import threading
+    import time
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "storage" / "app" / "dev-beats" / name
+
+    def loop() -> None:
+        while True:
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("", encoding="utf-8")
+            except OSError:
+                pass
+            time.sleep(180)
+
+    threading.Thread(target=loop, name=f"hoc-beat-{name}", daemon=True).start()

@@ -2,9 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\DevDigest;
+use App\Services\DevHealth;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Http;
 
 class DevBotController extends Controller
 {
@@ -16,15 +17,10 @@ class DevBotController extends Controller
         ]);
     }
 
-    public function status(): JsonResponse
+    public function status(DevHealth $health): JsonResponse
     {
-        $url = (string) config('services.dev.health_url');
-        $up = false;
-        try {
-            $up = Http::timeout(8)->get($url)->successful();
-        } catch (\Throwable) {
-            $up = false;
-        }
+        $url = $health->labelUrl();
+        $up = $health->up();
 
         return response()->json([
             'data' => [
@@ -33,6 +29,29 @@ class DevBotController extends Controller
                 'reported_down' => (bool) Cache::get('dev.health.down'),
             ],
             'message' => $up ? 'up' : 'down',
+        ]);
+    }
+
+    public function bots(DevDigest $digest): JsonResponse
+    {
+        return $this->text($digest->botsText());
+    }
+
+    public function queue(DevDigest $digest): JsonResponse
+    {
+        return $this->text($digest->queueText());
+    }
+
+    public function digest(DevDigest $digest): JsonResponse
+    {
+        return $this->text($digest->text());
+    }
+
+    private function text(string $text): JsonResponse
+    {
+        return response()->json([
+            'data' => ['text' => $text],
+            'message' => 'ok',
         ]);
     }
 }

@@ -462,7 +462,7 @@ PROMPT;
 
     private function generateJson(string $prompt, ?int $timeout = null): Response
     {
-        $model = (string) config('services.gemini.model', 'gemini-2.5-flash');
+        $model = (string) config('services.gemini.model', 'gemini-3.6-flash');
 
         return Http::timeout($timeout ?? (int) config('services.gemini.timeout', 30))
             ->connectTimeout(5)

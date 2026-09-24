@@ -24,3 +24,5 @@ Schedule::command('ops:renew-drive-watch')->hourly()->timezone('Asia/Damascus')-
 Schedule::command('ops:clickup-due-alerts')->hourly()->timezone('Asia/Damascus')->withoutOverlapping();
 Schedule::command('seo:submit-sitemap')->dailyAt('06:15')->timezone('Asia/Damascus')->withoutOverlapping();
 Schedule::command('ops:watch-health')->everyMinute()->withoutOverlapping();
+Schedule::command('ops:watch-signals')->everyFifteenMinutes()->withoutOverlapping();
+Schedule::command('ops:dev-digest')->dailyAt('09:00')->timezone('Asia/Damascus')->withoutOverlapping();

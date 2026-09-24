@@ -14,7 +14,9 @@ class SentryWebhookController extends Controller
         $issue = is_array($issue) ? $issue : [];
         $title = (string) ($issue['title'] ?? $request->input('message') ?? 'Sentry alert');
         $url = (string) ($issue['web_url'] ?? $issue['url'] ?? '');
-        $alert->send('Sentry: '.$title.($url !== '' ? "\n".$url : ''));
+        $id = (string) ($issue['id'] ?? '');
+        $key = $id !== '' ? 'sentry-'.$id : 'sentry-'.md5($title);
+        $alert->once($key, 'Sentry: '.$title.($url !== '' ? "\n".$url : ''), 360);
 
         return response()->json([
             'data' => null,

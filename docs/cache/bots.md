@@ -8,7 +8,7 @@ Python 3, `python-telegram-bot==21.6`, httpx, dotenv. Shared runner: `telegram_h
 | `main.py` | Client bot | 8445 (`client-bot`) |
 | `staff.py` | Staff bot | 8444 (`staff-bot`) |
 | `admin.py` | Admin ClickUp bot | 8446 (`admin-bot`) |
-| `dev.py` | Developer alerts (`/ping`, `/status`). Allowlist `TELEGRAM_DEV_IDS` only | 8447 (`dev-bot`) |
+| `dev.py` | Developer alerts (`/ping`, `/status`, `/bots`, `/queue`, `/digest`). Allowlist `TELEGRAM_DEV_IDS` only. Heartbeats are files under `storage/app/dev-beats` every 3 minutes. `ops:watch-signals` every 15 minutes alerts once. `ops:dev-digest` at 09:00 Damascus. The dev process watches the scheduler file and alerts if it is older than 150 seconds. | 8447 (`dev-bot`) |
 
 ```powershell
 cd backend\bot

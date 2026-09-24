@@ -12,9 +12,14 @@ use App\Models\ClientReport;
 use App\Models\ClientReportAttachment;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\StreamedResponse;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class ClientReportController extends Controller
 {
+    /** Report Word and PDF files are private: only staff with ops.reports read them through the API. */
+    private const DISK = 'local';
+
     public function clients()
     {
         $clients = Client::query()
@@ -28,7 +33,7 @@ class ClientReportController extends Controller
 
     public function index(Client $client)
     {
-        $reports = $client->reports()->with('attachments')->latest()->get();
+        $reports = $client->reports()->with('attachments')->latest('updated_at')->get();
 
         return ClientReportResource::collection($reports)->additional([
             'message' => 'ok',
@@ -44,39 +49,19 @@ class ClientReportController extends Controller
 
     public function store(StoreClientReportRequest $request, Client $client, PublishClientReport $publish): JsonResponse
     {
-        abort_unless(filled($client->google_drive_folder_id), 422, 'Assign a Drive folder to this client first.');
+        $publishing = $request->boolean('publish');
+        abort_if($publishing && blank($client->google_drive_folder_id), 422, 'Assign a Drive folder to this client first.');
 
         $report = $client->reports()->create([
             'title' => $request->validated('title'),
-            'header' => $request->validated('header'),
-            'footer' => $request->validated('footer'),
-            'body' => $request->validated('body'),
+            'body' => (string) ($request->validated('body') ?? ''),
         ]);
+        $this->storeFiles($request, $report);
 
-        if ($request->hasFile('cover')) {
-            $report->forceFill([
-                'cover_path' => $request->file('cover')->store('reports/'.$report->id, 'public'),
-            ])->save();
-        }
-
-        if ($request->hasFile('watermark')) {
-            $report->forceFill([
-                'watermark_path' => $request->file('watermark')->store('reports/'.$report->id, 'public'),
-            ])->save();
-        }
-
-        foreach ($request->file('attachments', []) as $file) {
-            $report->attachments()->create([
-                'original_name' => $file->getClientOriginalName(),
-                'path' => $file->store('reports/'.$report->id, 'public'),
-                'size' => $file->getSize() ?: 0,
-            ]);
-        }
-
-        $report = $publish->handle($report->fresh(['attachments', 'client']));
+        [$report, $driveError] = $this->publish($publish, $report, $publishing);
 
         return ClientReportResource::make($report)
-            ->additional(['message' => 'Created.'])
+            ->additional(['message' => 'Created.', 'drive_error' => $driveError])
             ->response()
             ->setStatusCode(201);
     }
@@ -84,31 +69,11 @@ class ClientReportController extends Controller
     public function update(StoreClientReportRequest $request, ClientReport $clientReport, PublishClientReport $publish): ClientReportResource
     {
         $report = $clientReport;
-        $report->fill($request->safe()->only(['title', 'header', 'footer', 'body']))->save();
-
-        if ($request->hasFile('cover')) {
-            if (filled($report->cover_path)) {
-                Storage::disk('public')->delete($report->cover_path);
-            }
-            $report->forceFill([
-                'cover_path' => $request->file('cover')->store('reports/'.$report->id, 'public'),
-            ])->save();
-        } elseif ($request->boolean('remove_cover') && filled($report->cover_path)) {
-            Storage::disk('public')->delete($report->cover_path);
-            $report->forceFill(['cover_path' => null])->save();
-        }
-
-        if ($request->hasFile('watermark')) {
-            if (filled($report->watermark_path)) {
-                Storage::disk('public')->delete($report->watermark_path);
-            }
-            $report->forceFill([
-                'watermark_path' => $request->file('watermark')->store('reports/'.$report->id, 'public'),
-            ])->save();
-        } elseif ($request->boolean('remove_watermark') && filled($report->watermark_path)) {
-            Storage::disk('public')->delete($report->watermark_path);
-            $report->forceFill(['watermark_path' => null])->save();
-        }
+        $report->fill([
+            'title' => $request->validated('title'),
+            'body' => (string) ($request->validated('body') ?? $report->body ?? ''),
+        ])->save();
+        $this->storeFiles($request, $report);
 
         $remove = $request->input('remove_attachment_ids', []);
         if (is_array($remove) && $remove !== []) {
@@ -118,28 +83,46 @@ class ClientReportController extends Controller
             });
         }
 
-        foreach ($request->file('attachments', []) as $file) {
-            $report->attachments()->create([
-                'original_name' => $file->getClientOriginalName(),
-                'path' => $file->store('reports/'.$report->id, 'public'),
-                'size' => $file->getSize() ?: 0,
-            ]);
-        }
+        [$report, $driveError] = $this->publish($publish, $report, $request->boolean('publish'));
 
-        return ClientReportResource::make($publish->handle($report->fresh(['attachments', 'client'])))
-            ->additional(['message' => 'Updated.']);
+        return ClientReportResource::make($report)
+            ->additional(['message' => 'Updated.', 'drive_error' => $driveError]);
+    }
+
+    /**
+     * The saved Word file, loaded into the dashboard editor.
+     */
+    public function document(ClientReport $clientReport): StreamedResponse
+    {
+        abort_unless(filled($clientReport->document_path) && Storage::disk(self::DISK)->exists($clientReport->document_path), 404);
+
+        return Storage::disk(self::DISK)->download(
+            $clientReport->document_path,
+            $clientReport->title.'.docx',
+            ['Content-Type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+        );
+    }
+
+    /**
+     * The PDF rendered in the browser at the last save.
+     */
+    public function pdf(ClientReport $clientReport): StreamedResponse
+    {
+        abort_unless(filled($clientReport->pdf_path) && Storage::disk(self::DISK)->exists($clientReport->pdf_path), 404);
+
+        return Storage::disk(self::DISK)->download($clientReport->pdf_path, $clientReport->title.'.pdf', ['Content-Type' => 'application/pdf']);
     }
 
     public function destroy(ClientReport $clientReport): JsonResponse
     {
         $report = $clientReport;
         $report->load('attachments');
-        if (filled($report->cover_path)) {
-            Storage::disk('public')->delete($report->cover_path);
+        foreach (['cover_path', 'watermark_path'] as $column) {
+            if (filled($report->{$column})) {
+                Storage::disk('public')->delete($report->{$column});
+            }
         }
-        if (filled($report->watermark_path)) {
-            Storage::disk('public')->delete($report->watermark_path);
-        }
+        Storage::disk(self::DISK)->deleteDirectory('reports/'.$report->id);
         foreach ($report->attachments as $file) {
             Storage::disk('public')->delete($file->path);
         }
@@ -149,5 +132,47 @@ class ClientReportController extends Controller
             'data' => null,
             'message' => 'Deleted.',
         ]);
+    }
+
+    private function storeFiles(StoreClientReportRequest $request, ClientReport $report): void
+    {
+        $paths = [];
+        if ($request->hasFile('document')) {
+            $paths['document_path'] = $request->file('document')->storeAs('reports/'.$report->id, 'report.docx', self::DISK);
+        }
+        if ($request->hasFile('pdf')) {
+            $paths['pdf_path'] = $request->file('pdf')->storeAs('reports/'.$report->id, 'report.pdf', self::DISK);
+        }
+        if ($paths !== []) {
+            $report->forceFill($paths)->save();
+        }
+
+        foreach ($request->file('attachments', []) as $file) {
+            $report->attachments()->create([
+                'original_name' => $file->getClientOriginalName(),
+                'path' => $file->store('reports/'.$report->id, 'public'),
+                'size' => $file->getSize() ?: 0,
+            ]);
+        }
+    }
+
+    /**
+     * Publish to Drive when asked. A Drive failure keeps the saved report and returns the reason,
+     * so the editor stays on this report and a retry updates it instead of creating a duplicate.
+     *
+     * @return array{0: ClientReport, 1: ?string}
+     */
+    private function publish(PublishClientReport $publish, ClientReport $report, bool $publishing): array
+    {
+        $report = $report->fresh(['attachments', 'client']) ?? $report;
+        if (! $publishing) {
+            return [$report, null];
+        }
+
+        try {
+            return [$publish->handle($report), null];
+        } catch (HttpException $exception) {
+            return [$report->fresh(['attachments', 'client']) ?? $report, $exception->getMessage() ?: 'Could not upload the report.'];
+        }
     }
 }

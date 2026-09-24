@@ -41,8 +41,8 @@ export function Reports({ t }: { locale: Locale; t: (c: { ar: string; en: string
           }}
         />
       ) : null}
-      <div className="table-wrap card">
-        <table className="table-flush">
+      <div className="table-wrap">
+        <table>
           <thead>
             <tr>
               <th>{t(copy.employeeName)}</th>
@@ -62,13 +62,13 @@ export function Reports({ t }: { locale: Locale; t: (c: { ar: string; en: string
             {items.map((item) => (
               <tr key={item.id}>
                 <td>
-                  <Link to={`/reports/clients/${item.id}`}>{item.name}</Link>
+                  <Link className="table-link" to={`/reports/clients/${item.id}`}>{item.name}</Link>
                 </td>
                 <td>{item.company_name || "—"}</td>
                 <td>{item.reports_count ?? 0}</td>
                 <td>{item.google_drive_folder_id ? t(copy.driveFolderExisting) : "—"}</td>
                 <td>
-                  <button type="button" className="btn btn-ghost" onClick={() => setFolderClient(item)}>{t(copy.driveFolder)}</button>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setFolderClient(item)}>{t(copy.driveFolder)}</button>
                 </td>
               </tr>
             ))}

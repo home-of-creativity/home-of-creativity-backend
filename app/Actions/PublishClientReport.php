@@ -4,10 +4,13 @@ namespace App\Actions;
 
 use App\Models\ClientReport;
 use App\Services\GoogleDriveClient;
-use App\Support\ReportImage;
-use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\Storage;
 
+/**
+ * Upload a report to the client's Drive folder: the Word file, the PDF rendered in the dashboard,
+ * and any attachments not uploaded yet. Republishing replaces the same Drive files instead of
+ * adding copies.
+ */
 class PublishClientReport
 {
     public function __construct(private GoogleDriveClient $drive) {}
@@ -17,32 +20,41 @@ class PublishClientReport
         $report->loadMissing(['client', 'attachments']);
         $client = $report->client;
         abort_unless($client && filled($client->google_drive_folder_id), 422, 'Assign a Drive folder to this client first.');
+        abort_unless($this->readable($report->document_path), 422, 'Open and save this report in the editor before publishing.');
 
         $folderId = $this->drive->ensureFolderPath((string) $client->google_drive_folder_id, [$report->title]);
         abort_if($folderId === null, 422, $this->drive->lastError() ?? 'Could not open the report folder.');
 
-        $cover = filled($report->cover_path) ? Storage::disk('public')->path($report->cover_path) : null;
-        $watermark = filled($report->watermark_path) ? Storage::disk('public')->path($report->watermark_path) : null;
-        $pdf = Pdf::loadView('reports.client', [
-            'title' => $report->title,
-            'header' => $report->header,
-            'footer' => $report->footer,
-            'body' => $report->body,
-            'cover' => $cover && is_file($cover) ? ReportImage::pdfPath($cover) : null,
-            'watermark' => $watermark && is_file($watermark) ? ReportImage::pdfPath($watermark) : null,
-        ])->setPaper('a4');
+        $document = $this->put(
+            $folderId,
+            (string) $report->drive_document_id,
+            $report->title.'.docx',
+            (string) Storage::disk('local')->get((string) $report->document_path),
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        );
+        $fill = [
+            'drive_document_id' => $document['id'],
+            'drive_document_url' => $document['url'],
+            'published_at' => now(),
+        ];
 
-        $uploaded = $this->drive->uploadFile($folderId, $report->title.'.pdf', $pdf->output(), 'application/pdf');
-        abort_if($uploaded === null, 422, $this->drive->lastError() ?? 'Could not upload the report.');
+        if ($this->readable($report->pdf_path)) {
+            $pdf = $this->put(
+                $folderId,
+                (string) $report->drive_file_id,
+                $report->title.'.pdf',
+                (string) Storage::disk('local')->get((string) $report->pdf_path),
+                'application/pdf',
+            );
+            $fill['drive_file_id'] = $pdf['id'];
+            $fill['drive_url'] = $pdf['url'];
+        }
 
-        $report->forceFill([
-            'drive_file_id' => $uploaded['id'],
-            'drive_url' => $uploaded['url'],
-        ])->save();
+        $report->forceFill($fill)->save();
 
         foreach ($report->attachments as $attachment) {
             $path = Storage::disk('public')->path($attachment->path);
-            if (! is_file($path)) {
+            if (filled($attachment->drive_file_id) || ! is_file($path)) {
                 continue;
             }
             $file = $this->drive->uploadFile(
@@ -61,5 +73,23 @@ class PublishClientReport
         }
 
         return $report->fresh(['attachments', 'client']);
+    }
+
+    /**
+     * @return array{id: string, url: string}
+     */
+    private function put(string $folderId, string $fileId, string $name, string $contents, string $mime): array
+    {
+        $file = $fileId !== ''
+            ? $this->drive->replaceFile($folderId, $fileId, $name, $contents, $mime)
+            : $this->drive->uploadFile($folderId, $name, $contents, $mime);
+        abort_if($file === null, 422, $this->drive->lastError() ?? 'Could not upload the report.');
+
+        return $file;
+    }
+
+    private function readable(?string $path): bool
+    {
+        return filled($path) && Storage::disk('local')->exists((string) $path);
     }
 }

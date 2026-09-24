@@ -19,19 +19,21 @@ class StoreClientReportRequest extends FormRequest
     }
 
     /**
+     * The report is a Word file edited in the dashboard. `document` is the .docx, `pdf` the copy the
+     * browser renders from the same pages, and `body` a plain-text extract for search and Gemini.
+     *
      * @return array<string, mixed>
      */
     public function rules(): array
     {
+        $creating = $this->route('client_report') === null;
+
         return [
             'title' => ['required', 'string', 'max:160'],
-            'header' => ['nullable', 'string', 'max:200'],
-            'footer' => ['nullable', 'string', 'max:200'],
-            'body' => ['required', 'string', 'max:200000'],
-            'cover' => ['nullable', 'file', 'max:10240', 'extensions:jpg,jpeg,jpe,jfif,png,gif,webp,bmp,svg,avif,heic,heif,tif,tiff,ico'],
-            'remove_cover' => ['sometimes', 'boolean'],
-            'watermark' => ['nullable', 'file', 'max:10240', 'extensions:jpg,jpeg,jpe,jfif,png,gif,webp,bmp,svg,avif,heic,heif,tif,tiff,ico'],
-            'remove_watermark' => ['sometimes', 'boolean'],
+            'body' => ['nullable', 'string', 'max:200000'],
+            'document' => [$creating ? 'required' : 'nullable', 'file', 'max:30720', 'extensions:docx'],
+            'pdf' => ['nullable', 'file', 'max:51200', 'extensions:pdf'],
+            'publish' => ['sometimes', 'boolean'],
             'attachments' => ['sometimes', 'array', 'max:12'],
             'attachments.*' => ['file', 'max:20480'],
             'remove_attachment_ids' => ['sometimes', 'array'],

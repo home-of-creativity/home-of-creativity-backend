@@ -19,9 +19,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
+        id: checkout
         uses: actions/checkout@v5
 
       - name: Setup PHP
+        id: php
         uses: shivammathur/setup-php@v2
         with:
           php-version: "8.3"
@@ -29,9 +31,11 @@ jobs:
           coverage: none
 
       - name: Install dependencies
+        id: install
         run: composer install --no-interaction --prefer-dist --no-progress
 
       - name: Run API and bot tests
+        id: tests
         run: php artisan test
 
       - name: Notify developer Telegram
@@ -39,13 +43,24 @@ jobs:
         env:
           TELEGRAM_DEV_BOT_TOKEN: ${{ secrets.TELEGRAM_DEV_BOT_TOKEN }}
           TELEGRAM_DEV_CHAT_ID: ${{ secrets.TELEGRAM_DEV_CHAT_ID }}
+          CHECKOUT: ${{ steps.checkout.outcome }}
+          PHP_SETUP: ${{ steps.php.outcome }}
+          INSTALL: ${{ steps.install.outcome }}
+          TESTS: ${{ steps.tests.outcome }}
+          JOB: ${{ job.status }}
         run: |
           set -euo pipefail
           if [ -z "${TELEGRAM_DEV_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_DEV_CHAT_ID:-}" ]; then
             echo "Dev Telegram secrets are unset; skip notify"
             exit 0
           fi
-          text="GitHub tests ${{ job.status }}
+          step="ok"
+          if [ "$CHECKOUT" = "failure" ]; then step="Checkout"; fi
+          if [ "$PHP_SETUP" = "failure" ]; then step="Setup PHP"; fi
+          if [ "$INSTALL" = "failure" ]; then step="Install dependencies"; fi
+          if [ "$TESTS" = "failure" ]; then step="Run API and bot tests"; fi
+          text="GitHub tests ${JOB}
+          step: ${step}
           ${{ github.sha }}
           ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_DEV_BOT_TOKEN}/sendMessage" \
@@ -58,9 +73,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
+        id: checkout
         uses: actions/checkout@v5
 
       - name: Start SSH agent
+        id: ssh
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
           SSH_PASSPHRASE: ${{ secrets.SSH_PASSPHRASE }}
@@ -90,7 +107,8 @@ jobs:
             ssh-add "$key_file" < /dev/null
           fi
 
-      - name: Sync and restart on the server
+      - name: Upload code
+        id: upload
         env:
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_USER: ${{ secrets.SSH_USER }}
@@ -139,6 +157,18 @@ jobs:
             echo "$GOOGLE_SERVICE_ACCOUNT_JSON_B64" | base64 -d | tr -d '\r' | "${SSH[@]}" "${SSH_USER}@${SSH_HOST}" "umask 177; mkdir -p '$REMOTE/storage/app/private' && cat > '$REMOTE/storage/app/private/google-sa.json' && chmod 600 '$REMOTE/storage/app/private/google-sa.json'"
           fi
 
+      - name: Run server script
+        id: remote
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          set -euo pipefail
+          PORT="${SSH_PORT:-22}"
+          REMOTE="${DEPLOY_PATH:-/var/www/landing/backend}"
+          SSH=(ssh -p "$PORT" -o StrictHostKeyChecking=yes)
           "${SSH[@]}" "${SSH_USER}@${SSH_HOST}" "bash '$REMOTE/deploy/remote.sh'"
 
       - name: Notify developer Telegram
@@ -146,13 +176,24 @@ jobs:
         env:
           TELEGRAM_DEV_BOT_TOKEN: ${{ secrets.TELEGRAM_DEV_BOT_TOKEN }}
           TELEGRAM_DEV_CHAT_ID: ${{ secrets.TELEGRAM_DEV_CHAT_ID }}
+          CHECKOUT: ${{ steps.checkout.outcome }}
+          SSH_STEP: ${{ steps.ssh.outcome }}
+          UPLOAD: ${{ steps.upload.outcome }}
+          REMOTE: ${{ steps.remote.outcome }}
+          JOB: ${{ job.status }}
         run: |
           set -euo pipefail
           if [ -z "${TELEGRAM_DEV_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_DEV_CHAT_ID:-}" ]; then
             echo "Dev Telegram secrets are unset; skip notify"
             exit 0
           fi
-          text="GitHub deploy ${{ job.status }}
+          step="ok"
+          if [ "$CHECKOUT" = "failure" ]; then step="Checkout"; fi
+          if [ "$SSH_STEP" = "failure" ]; then step="Start SSH agent"; fi
+          if [ "$UPLOAD" = "failure" ]; then step="Upload code"; fi
+          if [ "$REMOTE" = "failure" ]; then step="Run server script"; fi
+          text="GitHub deploy ${JOB}
+          step: ${step}
           ${{ github.sha }}
           ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_DEV_BOT_TOKEN}/sendMessage" \

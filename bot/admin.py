@@ -17,7 +17,7 @@ from telegram.ext import (
     filters,
 )
 
-from telegram_http import run_application, telegram_request
+from telegram_http import run_application, start_heartbeat, telegram_request
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 load_dotenv()
@@ -929,6 +929,7 @@ def main() -> None:
         )
     )
 
+    start_heartbeat("admin")
     try:
         run_application(
             application,
