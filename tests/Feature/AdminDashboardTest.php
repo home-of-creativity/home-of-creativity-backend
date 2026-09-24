@@ -1539,6 +1539,7 @@ class AdminDashboardTest extends TestCase
             'name' => 'Stale',
             'email' => 'stale@hoc.test',
             'odoo_employee_id' => '66',
+            'clickup_user_id' => null,
         ]);
 
         $this->getJson('/api/admin/employees')

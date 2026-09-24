@@ -8,6 +8,7 @@ Python 3, `python-telegram-bot==21.6`, httpx, dotenv. Shared runner: `telegram_h
 | `main.py` | Client bot | 8445 (`client-bot`) |
 | `staff.py` | Staff bot | 8444 (`staff-bot`) |
 | `admin.py` | Admin ClickUp bot | 8446 (`admin-bot`) |
+| `dev.py` | Developer alerts (`/ping`, `/status`). Allowlist `TELEGRAM_DEV_IDS` only | 8447 (`dev-bot`) |
 
 ```powershell
 cd backend\bot
@@ -16,7 +17,7 @@ python staff.py
 python admin.py
 ```
 
-Loads parent `.env` + local. API base `HOC_API_URL`. Secrets: `TELEGRAM_BOT_TOKEN` / `TELEGRAM_BOT_SECRET`, staff equivalents, `TELEGRAM_ADMIN_BOT_TOKEN` / `TELEGRAM_ADMIN_BOT_SECRET`, allowlist `TELEGRAM_ADMIN_IDS`. Optional `TELEGRAM_PROXY`.
+Loads parent `.env` + local. API base `HOC_API_URL`. Secrets: `TELEGRAM_BOT_TOKEN` / `TELEGRAM_BOT_SECRET`, staff equivalents, `TELEGRAM_ADMIN_BOT_TOKEN` / `TELEGRAM_ADMIN_BOT_SECRET`, allowlist `TELEGRAM_ADMIN_IDS`. Developer bot: `TELEGRAM_DEV_BOT_TOKEN` / `TELEGRAM_DEV_BOT_SECRET`, allowlist `TELEGRAM_DEV_IDS`, outbound chat `TELEGRAM_DEV_CHAT_ID`. Optional `TELEGRAM_PROXY`. `SENTRY_DSN` enables Python Sentry; empty disables it.
 
 HTTP: client → `/api/bot/telegram/*`, staff → `/api/bot/staff/*`, admin → `/api/bot/admin/*`, header `X-Webhook-Secret`. WhatsApp Cloud API (client bot only) → `GET|POST /api/bot/whatsapp/webhook` (Meta hub.verify_token + `X-Hub-Signature-256`). Dashboard **قنوات البوت** (`/channels`) stores `client_telegram_enabled` / `client_whatsapp_enabled` in `ops_settings` (default on). Telegram pause returns `503` `channel_paused` on `/bot/telegram/*` (Python shows the Arabic message). WhatsApp pause still verifies the webhook, skips conversation, and replies once per 30 minutes. Outbound `TelegramNotifier` skips the paused channel (`canReachClient` false). Staff/admin bots are not gated.
 

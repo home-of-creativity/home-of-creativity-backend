@@ -148,6 +148,21 @@ services:
       hoc-edge:
         condition: service_started
 
+  hoc-dev-bot:
+    image: python:3.12-slim
+    restart: unless-stopped
+    working_dir: /var/www/hoc/bot
+    volumes:
+      - ../:/var/www/hoc
+    env_file:
+      - ../.env
+    environment:
+      HOC_API_URL: http://hoc-edge/api
+    command: sh -c "pip install --no-cache-dir -r requirements.txt && python dev.py"
+    depends_on:
+      hoc-edge:
+        condition: service_started
+
 volumes:
   hoc_mysql:
   hoc_vendor:

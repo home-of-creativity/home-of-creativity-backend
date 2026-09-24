@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Admin\ArticleController as AdminArticleController;
 use App\Http\Controllers\Admin\ClientChannelController as AdminClientChannelController;
+use App\Http\Controllers\Admin\ClientController as AdminClientController;
 use App\Http\Controllers\Admin\ClientReportController as AdminClientReportController;
 use App\Http\Controllers\Admin\ContactChannelController as AdminContactChannelController;
 use App\Http\Controllers\Admin\EmployeeController as AdminEmployeeController;
@@ -28,6 +29,7 @@ use App\Http\Controllers\AdminBotController;
 use App\Http\Controllers\ArticleController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\ContactController;
+use App\Http\Controllers\DevBotController;
 use App\Http\Controllers\IntegrationController;
 use App\Http\Controllers\LandingReelController;
 use App\Http\Controllers\LegalPageController;
@@ -36,6 +38,7 @@ use App\Http\Controllers\N8nWebhookController;
 use App\Http\Controllers\PortfolioController;
 use App\Http\Controllers\PricingController;
 use App\Http\Controllers\ProfilePdfController;
+use App\Http\Controllers\SentryWebhookController;
 use App\Http\Controllers\ServiceRequestController;
 use App\Http\Controllers\SocialFeedController;
 use App\Http\Controllers\StaffBotController;
@@ -280,6 +283,9 @@ Route::prefix('integrations')->middleware(['shared.secret:services.n8n.webhook_s
 Route::post('integrations/drive/changed', [IntegrationController::class, 'driveChanged'])
     ->middleware('throttle:60,1');
 
+Route::post('integrations/sentry', SentryWebhookController::class)
+    ->middleware(['shared.secret:services.sentry.webhook_secret', 'throttle:60,1']);
+
 Route::prefix('bot/telegram')->middleware(['shared.secret:services.telegram.bot_secret', 'telegram.client'])->group(function () {
     Route::post('link', [TelegramBotController::class, 'link']);
     Route::get('me', [TelegramBotController::class, 'me']);
@@ -324,6 +330,11 @@ Route::prefix('bot/staff')->middleware('shared.secret:services.telegram.staff_bo
     Route::get('progressable-requests', [StaffBotController::class, 'progressableRequests']);
     Route::get('completable-requests', [StaffBotController::class, 'completableRequests']);
     Route::post('confirm-payment', [StaffBotController::class, 'confirmPayment']);
+});
+
+Route::prefix('bot/dev')->middleware('shared.secret:services.telegram.dev_bot_secret')->group(function () {
+    Route::get('ping', [DevBotController::class, 'ping']);
+    Route::get('status', [DevBotController::class, 'status']);
 });
 
 Route::prefix('bot/admin')->middleware('shared.secret:services.telegram.admin_bot_secret')->group(function () {

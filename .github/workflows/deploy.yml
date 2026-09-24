@@ -15,7 +15,46 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          extensions: mbstring, pdo_sqlite, sqlite3, xml, curl, zip, bcmath, intl
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Run API and bot tests
+        run: php artisan test
+
+      - name: Notify developer Telegram
+        if: always()
+        env:
+          TELEGRAM_DEV_BOT_TOKEN: ${{ secrets.TELEGRAM_DEV_BOT_TOKEN }}
+          TELEGRAM_DEV_CHAT_ID: ${{ secrets.TELEGRAM_DEV_CHAT_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TELEGRAM_DEV_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_DEV_CHAT_ID:-}" ]; then
+            echo "Dev Telegram secrets are unset; skip notify"
+            exit 0
+          fi
+          text="GitHub tests ${{ job.status }}
+          ${{ github.sha }}
+          ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_DEV_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${TELEGRAM_DEV_CHAT_ID}" \
+            --data-urlencode "text=${text}" \
+            -o /dev/null
+
   deploy:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -101,3 +140,22 @@ jobs:
           fi
 
           "${SSH[@]}" "${SSH_USER}@${SSH_HOST}" "bash '$REMOTE/deploy/remote.sh'"
+
+      - name: Notify developer Telegram
+        if: always()
+        env:
+          TELEGRAM_DEV_BOT_TOKEN: ${{ secrets.TELEGRAM_DEV_BOT_TOKEN }}
+          TELEGRAM_DEV_CHAT_ID: ${{ secrets.TELEGRAM_DEV_CHAT_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TELEGRAM_DEV_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_DEV_CHAT_ID:-}" ]; then
+            echo "Dev Telegram secrets are unset; skip notify"
+            exit 0
+          fi
+          text="GitHub deploy ${{ job.status }}
+          ${{ github.sha }}
+          ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_DEV_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${TELEGRAM_DEV_CHAT_ID}" \
+            --data-urlencode "text=${text}" \
+            -o /dev/null

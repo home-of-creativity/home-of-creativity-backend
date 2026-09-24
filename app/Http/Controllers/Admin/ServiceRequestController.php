@@ -64,10 +64,21 @@ class ServiceRequestController extends Controller
         EnsureRequestDriveFolder $ensureRequestDriveFolder,
     ): ServiceRequestResource {
         $serviceRequest = $hydrateServiceRequestFromOdoo->handle($serviceRequest);
+        $quotationLive = $serviceRequest->getAttribute('odoo_quotation_live');
+        $invoiceLive = $serviceRequest->getAttribute('odoo_invoice_live');
 
         if (blank($serviceRequest->google_drive_folder_id)
             && ! in_array($serviceRequest->status, [RequestStatus::Completed, RequestStatus::Cancelled], true)) {
             $serviceRequest = $ensureRequestDriveFolder->handleQuietly($serviceRequest);
+        }
+
+        if (is_array($quotationLive)) {
+            $serviceRequest->setAttribute('odoo_quotation_live', $quotationLive);
+            $serviceRequest->syncOriginalAttribute('odoo_quotation_live');
+        }
+        if (is_array($invoiceLive)) {
+            $serviceRequest->setAttribute('odoo_invoice_live', $invoiceLive);
+            $serviceRequest->syncOriginalAttribute('odoo_invoice_live');
         }
 
         $serviceRequest->load([

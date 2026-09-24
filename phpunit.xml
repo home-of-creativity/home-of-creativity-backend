@@ -46,6 +46,9 @@
         <env name="TELEGRAM_STAFF_BOT_TOKEN" value=""/>
         <env name="TELEGRAM_STAFF_BOT_SECRET" value="change-me-staff"/>
         <env name="TELEGRAM_ADMIN_BOT_SECRET" value="change-me-admin"/>
+        <env name="TELEGRAM_DEV_BOT_SECRET" value="change-me-dev"/>
+        <env name="SENTRY_LARAVEL_DSN" value=""/>
+        <env name="DEV_HEALTH_URL" value="https://api.hoc.agency/up"/>
         <env name="TELEGRAM_ADMIN_IDS" value=""/>
         <env name="TELEGRAM_STAFF_CHAT_ID" value=""/>
         <env name="WHATSAPP_TOKEN" value=""/>

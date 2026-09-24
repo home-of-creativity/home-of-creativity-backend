@@ -5,7 +5,7 @@ React **19**, TypeScript, Vite **7**, react-router-dom **7**. No Next.js.
 
 Dev: `npm run dev` → http://127.0.0.1:5173/dashboard/  
 Main pane fills the remaining width beside the sidebar (`max-width: none`). Social `/social` uses a flush studio (`main.is-social`) so phones + rail occupy the viewport.  
-API: same-origin `/api` via Vite proxy → `http://127.0.0.1:8000` (`VITE_API_PROXY` overrides the target; proxy timeout 180s). Production builds use `VITE_API_URL` (default `https://api.hoc.agency/api`).  
+API: same-origin `/api` via Vite proxy → `http://127.0.0.1:8000` (`VITE_API_PROXY` overrides the target; proxy timeout 180s). Production builds use `VITE_API_URL` (default `https://api.hoc.agency/api`). `VITE_SENTRY_DSN` empty disables dashboard Sentry.  
 Build: `tsc --noEmit && vite build` (`vite.config` `base` `/dashboard/`, React Router `basename` `/dashboard`). Production Caddy serves `dashboard/dist` at `/dashboard/` (no Vite preview proxy). Hashed `/dashboard/assets/*` are immutable; a missing JS/CSS file is 404 (never the SPA HTML). `index.html` is not cached so a deploy does not leave the browser on an old `index-*.js` that then lazy-loads deleted chunks.
 
 ## Auth

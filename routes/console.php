@@ -23,3 +23,4 @@ Schedule::command('ops:poll-drive', ['--limit' => 200])->everyMinute()->timezone
 Schedule::command('ops:renew-drive-watch')->hourly()->timezone('Asia/Damascus')->withoutOverlapping();
 Schedule::command('ops:clickup-due-alerts')->hourly()->timezone('Asia/Damascus')->withoutOverlapping();
 Schedule::command('seo:submit-sitemap')->dailyAt('06:15')->timezone('Asia/Damascus')->withoutOverlapping();
+Schedule::command('ops:watch-health')->everyMinute()->withoutOverlapping();

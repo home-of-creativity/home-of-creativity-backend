@@ -39,6 +39,14 @@ return [
         ],
     ],
 
+    'dev' => [
+        'health_url' => env('DEV_HEALTH_URL', 'https://api.hoc.agency/up'),
+    ],
+
+    'sentry' => [
+        'webhook_secret' => env('SENTRY_WEBHOOK_SECRET'),
+    ],
+
     'n8n' => [
         'webhook_url' => env('N8N_WEBHOOK_URL'),
         'webhook_secret' => env('N8N_WEBHOOK_SECRET'),
@@ -56,6 +64,13 @@ return [
         'staff_bot_username' => env('TELEGRAM_STAFF_BOT_USERNAME'),
         'admin_bot_token' => env('TELEGRAM_ADMIN_BOT_TOKEN'),
         'admin_bot_secret' => env('TELEGRAM_ADMIN_BOT_SECRET', 'change-me-admin'),
+        'dev_bot_token' => env('TELEGRAM_DEV_BOT_TOKEN'),
+        'dev_bot_secret' => env('TELEGRAM_DEV_BOT_SECRET', 'change-me-dev'),
+        'dev_chat_id' => env('TELEGRAM_DEV_CHAT_ID'),
+        'dev_telegram_ids' => array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) env('TELEGRAM_DEV_IDS', '')),
+        ))),
         'admin_telegram_ids' => array_values(array_filter(array_map(
             'trim',
             explode(',', (string) env('TELEGRAM_ADMIN_IDS', '')),
