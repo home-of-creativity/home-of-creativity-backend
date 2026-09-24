@@ -252,6 +252,12 @@ export type SocialInboxItem = {
   replies?: SocialInboxReply[];
 };
 
+export type DriveFolder = {
+  id: string;
+  name: string;
+  parent_id?: string | null;
+};
+
 export type Client = {
   id: number;
   name: string;
@@ -922,7 +928,18 @@ export const api = {
   deleteClientReport(id: number) {
     return request<Envelope<null>>(`/admin/reports/${id}`, { method: "DELETE" });
   },
-  assignClientDriveFolder(clientId: number, body: { mode: "existing" | "create"; folder?: string }) {
+  driveFolders(parent?: string, pageToken?: string) {
+    return request<{ data: DriveFolder[]; meta: { parent_id: string | null; next_page_token: string | null }; message?: string }>(
+      `/admin/drive/folders${queryString({ parent: parent || undefined, page_token: pageToken || undefined })}`,
+    );
+  },
+  createDriveFolder(name: string, parent?: string) {
+    return request<Envelope<DriveFolder>>("/admin/drive/folders", {
+      method: "POST",
+      body: JSON.stringify({ name, parent }),
+    });
+  },
+  assignClientDriveFolder(clientId: number, body: { mode: "existing" | "create"; folder?: string; name?: string; parent?: string }) {
     return request<Envelope<Client>>(`/admin/clients/${clientId}/drive-folder`, {
       method: "PUT",
       body: JSON.stringify(body),

@@ -99,7 +99,13 @@ class ClientController extends Controller
         Client $client,
         AssignClientDriveFolder $assign,
     ): ClientResource {
-        $updated = $assign->handle($client, $request->validated('mode'), $request->validated('folder'));
+        $updated = $assign->handle(
+            $client,
+            $request->validated('mode'),
+            $request->validated('folder'),
+            $request->validated('name'),
+            $request->validated('parent'),
+        );
 
         return ClientResource::make($updated)
             ->additional(['message' => 'Drive folder saved.']);

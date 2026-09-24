@@ -5,6 +5,7 @@ use App\Http\Controllers\Admin\ClientChannelController as AdminClientChannelCont
 use App\Http\Controllers\Admin\ClientController as AdminClientController;
 use App\Http\Controllers\Admin\ClientReportController as AdminClientReportController;
 use App\Http\Controllers\Admin\ContactChannelController as AdminContactChannelController;
+use App\Http\Controllers\Admin\DriveFolderController as AdminDriveFolderController;
 use App\Http\Controllers\Admin\EmployeeController as AdminEmployeeController;
 use App\Http\Controllers\Admin\LandingReelController as AdminLandingReelController;
 use App\Http\Controllers\Admin\LegalPageController as AdminLegalPageController;
@@ -113,13 +114,18 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::post('clients', [AdminClientController::class, 'store']);
         Route::put('clients/{client}', [AdminClientController::class, 'update']);
         Route::delete('clients/{client}', [AdminClientController::class, 'destroy']);
-        Route::put('clients/{client}/drive-folder', [AdminClientController::class, 'driveFolder']);
         Route::get('odoo/status', [AdminOdooController::class, 'status']);
         Route::post('odoo/sync-partners', [AdminOdooController::class, 'syncPartners']);
         Route::post('odoo/import-crm-clients', [AdminOdooController::class, 'importCrmClients']);
         Route::post('odoo/import-crm-clients/excel', [AdminOdooController::class, 'importCrmClientsExcel']);
         Route::get('odoo/quotations', [AdminOdooController::class, 'quotations']);
         Route::get('odoo/invoices', [AdminOdooController::class, 'invoices']);
+    });
+
+    Route::middleware('crud:ops.clients,ops.reports')->group(function () {
+        Route::get('drive/folders', [AdminDriveFolderController::class, 'index']);
+        Route::post('drive/folders', [AdminDriveFolderController::class, 'store']);
+        Route::put('clients/{client}/drive-folder', [AdminClientController::class, 'driveFolder']);
     });
 
     Route::middleware('crud:ops.reports')->group(function () {

@@ -38,6 +38,85 @@ class GoogleDriveClient
         return null;
     }
 
+    /**
+     * @return array{folders: list<array{id: string, name: string}>, next_page_token: ?string}|null
+     */
+    public function listFolders(?string $parentId, ?string $pageToken = null): ?array
+    {
+        $this->lastError = null;
+        if ($error = $this->configurationError()) {
+            return $this->fail($error);
+        }
+
+        $token = $this->auth->accessToken();
+        if ($token === null) {
+            return $this->fail('Google service account could not get an access token. Check the private key.');
+        }
+
+        $parent = trim((string) $parentId);
+        $query = $parent === ''
+            ? "mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+            : sprintf(
+                "'%s' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
+                str_replace("'", "\\'", $parent),
+            );
+
+        try {
+            $response = Http::withToken($token)
+                ->timeout(20)
+                ->acceptJson()
+                ->get(self::API.'/files', array_filter([
+                    'q' => $query,
+                    'fields' => 'nextPageToken,files(id,name)',
+                    'pageSize' => 100,
+                    'pageToken' => $pageToken ?: null,
+                    'supportsAllDrives' => 'true',
+                    'includeItemsFromAllDrives' => 'true',
+                    'corpora' => 'allDrives',
+                ], fn (mixed $value): bool => $value !== null && $value !== ''));
+
+            if (! $response->successful()) {
+                return $this->fail($this->googleErrorMessage($response, 'Google Drive could not list folders.'));
+            }
+
+            $folders = [];
+            foreach ($response->json('files') ?? [] as $file) {
+                if (! is_array($file) || ! filled($file['id'] ?? null)) {
+                    continue;
+                }
+                $folders[] = [
+                    'id' => (string) $file['id'],
+                    'name' => (string) ($file['name'] ?? ''),
+                ];
+            }
+
+            $next = $response->json('nextPageToken');
+            usort($folders, fn (array $a, array $b): int => strcasecmp($a['name'], $b['name']));
+
+            return [
+                'folders' => $folders,
+                'next_page_token' => filled($next) ? (string) $next : null,
+            ];
+        } catch (Throwable $exception) {
+            return $this->fail('Google Drive listFolders failed: '.$exception->getMessage());
+        }
+    }
+
+    public function createFolder(string $name, ?string $parentId = null): ?string
+    {
+        $name = $this->safeName($name);
+        if ($name === '') {
+            return $this->fail('Folder name is empty.');
+        }
+
+        $parent = trim((string) $parentId);
+        if ($parent === '') {
+            $parent = 'root';
+        }
+
+        return $this->ensureFolderPath($parent, [$name]);
+    }
+
     public function ensureFolderPath(string $parentId, array $segments): ?string
     {
         $this->lastError = null;

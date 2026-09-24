@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, type Client, type OdooInvoice, type OdooQuotation, type PageMeta } from "../api";
 import { ConfirmAction } from "../components/ConfirmAction";
+import { DriveFolderPicker } from "../components/DriveFolderPicker";
 import { LoadingTableRow } from "../components/LoadingTableRow";
 import { PageHeader } from "../components/PageHeader";
 import { Pagination } from "../components/Pagination";
@@ -59,10 +60,6 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [folderClient, setFolderClient] = useState<Client | null>(null);
-  const [folderMode, setFolderMode] = useState<"existing" | "create">("create");
-  const [folderLink, setFolderLink] = useState("");
-  const [folderBusy, setFolderBusy] = useState(false);
-
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedQuery(query.trim()), 300);
     return () => window.clearTimeout(timer);
@@ -235,42 +232,15 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
       {tab === "clients" && notice ? <p className="notice">{notice}</p> : null}
       {tab === "clients" && error ? <p className="error">{error}</p> : null}
       {folderClient ? (
-        <form
-          className="card form-grid"
-          onSubmit={(event) => {
-            event.preventDefault();
-            setFolderBusy(true);
-            api.assignClientDriveFolder(folderClient.id, {
-              mode: folderMode,
-              folder: folderMode === "existing" ? folderLink : undefined,
-            }).then((res) => {
-              setItems((current) => current.map((item) => (item.id === res.data.id ? res.data : item)));
-              setFolderClient(null);
-              toast.success(t(copy.saveSuccess));
-            }).catch((err) => toast.error(err instanceof Error ? err.message : t(copy.saveFailed)))
-              .finally(() => setFolderBusy(false));
+        <DriveFolderPicker
+          client={folderClient}
+          t={t}
+          onClose={() => setFolderClient(null)}
+          onSaved={(saved) => {
+            setItems((current) => current.map((item) => (item.id === saved.id ? saved : item)));
+            setFolderClient(null);
           }}
-        >
-          <h2 className="section-title">{folderClient.company_name || folderClient.name}</h2>
-          <label className="check-row">
-            <input type="radio" checked={folderMode === "create"} onChange={() => setFolderMode("create")} />
-            {t(copy.driveFolderCreate)}
-          </label>
-          <label className="check-row">
-            <input type="radio" checked={folderMode === "existing"} onChange={() => setFolderMode("existing")} />
-            {t(copy.driveFolderExisting)}
-          </label>
-          {folderMode === "existing" ? (
-            <label className="field-label field-span">
-              {t(copy.driveFolderLink)}
-              <input className="field" dir="ltr" value={folderLink} onChange={(event) => setFolderLink(event.target.value)} required />
-            </label>
-          ) : null}
-          <div className="row-actions field-span">
-            <button className="btn btn-primary" type="submit" disabled={folderBusy}>{t(copy.save)}</button>
-            <button className="btn" type="button" onClick={() => setFolderClient(null)}>{t(copy.cancel)}</button>
-          </div>
-        </form>
+        />
       ) : null}
 
       {tab === "logos" ? <ClientLogosPanel locale={locale} t={t} /> : null}
@@ -353,11 +323,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                         <button
                           type="button"
                           className="btn btn-ghost"
-                          onClick={() => {
-                            setFolderClient(item);
-                            setFolderMode(item.google_drive_folder_id ? "existing" : "create");
-                            setFolderLink(item.google_drive_folder_url ?? "");
-                          }}
+                          onClick={() => setFolderClient(item)}
                         >
                           {t(copy.driveFolder)}
                         </button>

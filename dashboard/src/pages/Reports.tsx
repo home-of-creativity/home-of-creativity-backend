@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type Client, type PageMeta } from "../api";
+import { DriveFolderPicker } from "../components/DriveFolderPicker";
 import { LoadingTableRow } from "../components/LoadingTableRow";
 import { PageHeader } from "../components/PageHeader";
 import { Pagination } from "../components/Pagination";
@@ -12,6 +13,7 @@ export function Reports({ t }: { locale: Locale; t: (c: { ar: string; en: string
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [folderClient, setFolderClient] = useState<Client | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -28,6 +30,17 @@ export function Reports({ t }: { locale: Locale; t: (c: { ar: string; en: string
     <section>
       <PageHeader title={t(copy.reportsTitle)} lede={t(copy.reportsLede)} />
       {error ? <p className="error">{error}</p> : null}
+      {folderClient ? (
+        <DriveFolderPicker
+          client={folderClient}
+          t={t}
+          onClose={() => setFolderClient(null)}
+          onSaved={(saved) => {
+            setItems((current) => current.map((item) => (item.id === saved.id ? saved : item)));
+            setFolderClient(null);
+          }}
+        />
+      ) : null}
       <div className="table-wrap card">
         <table className="table-flush">
           <thead>
@@ -36,13 +49,14 @@ export function Reports({ t }: { locale: Locale; t: (c: { ar: string; en: string
               <th>{t(copy.company)}</th>
               <th>{t(copy.reportsTitle)}</th>
               <th>{t(copy.driveFolder)}</th>
+              <th>{t(copy.actions)}</th>
             </tr>
           </thead>
           <tbody>
-            {loading ? <LoadingTableRow colSpan={4} /> : null}
+            {loading ? <LoadingTableRow colSpan={5} /> : null}
             {!loading && items.length === 0 ? (
               <tr>
-                <td colSpan={4}>{t(copy.noReports)}</td>
+                <td colSpan={5}>{t(copy.noReports)}</td>
               </tr>
             ) : null}
             {items.map((item) => (
@@ -53,6 +67,9 @@ export function Reports({ t }: { locale: Locale; t: (c: { ar: string; en: string
                 <td>{item.company_name || "—"}</td>
                 <td>{item.reports_count ?? 0}</td>
                 <td>{item.google_drive_folder_id ? t(copy.driveFolderExisting) : "—"}</td>
+                <td>
+                  <button type="button" className="btn btn-ghost" onClick={() => setFolderClient(item)}>{t(copy.driveFolder)}</button>
+                </td>
               </tr>
             ))}
           </tbody>

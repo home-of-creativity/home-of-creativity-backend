@@ -15,6 +15,7 @@
         table { width: 100%; border-collapse: collapse; margin: 8px 0; }
         td, th { border: 1px solid #d9d0e6; padding: 6px; }
         img { max-width: 100%; }
+        .page-break { page-break-before: always; height: 0; }
     </style>
 </head>
 <body>

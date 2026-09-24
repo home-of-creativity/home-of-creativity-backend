@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, type Client, type ClientReport } from "../api";
+import { DriveFolderPicker } from "../components/DriveFolderPicker";
 import { PageHeader } from "../components/PageHeader";
 import { copy, type Locale } from "../i18n";
 
@@ -10,6 +11,7 @@ export function ClientReports({ t }: { locale: Locale; t: (c: { ar: string; en: 
   const [client, setClient] = useState<Client | null>(null);
   const [reports, setReports] = useState<ClientReport[]>([]);
   const [error, setError] = useState("");
+  const [folderOpen, setFolderOpen] = useState(false);
 
   useEffect(() => {
     api.clientReports(clientId)
@@ -28,7 +30,19 @@ export function ClientReports({ t }: { locale: Locale; t: (c: { ar: string; en: 
       />
       {error ? <p className="error">{error}</p> : null}
       {!client?.google_drive_folder_id ? <p className="error">{t(copy.reportNoFolder)}</p> : null}
+      {folderOpen && client ? (
+        <DriveFolderPicker
+          client={client}
+          t={t}
+          onClose={() => setFolderOpen(false)}
+          onSaved={(saved) => {
+            setClient(saved);
+            setFolderOpen(false);
+          }}
+        />
+      ) : null}
       <div className="row-actions">
+        <button type="button" className="btn" onClick={() => setFolderOpen(true)}>{t(copy.driveFolder)}</button>
         <Link className="btn btn-primary" to={`/reports/clients/${clientId}/new`}>{t(copy.addReport)}</Link>
         <Link className="btn" to="/reports">{t(copy.reportsTitle)}</Link>
       </div>

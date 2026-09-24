@@ -9,7 +9,7 @@ class AssignClientDriveFolder
 {
     public function __construct(private GoogleDriveClient $drive) {}
 
-    public function handle(Client $client, string $mode, ?string $folder): Client
+    public function handle(Client $client, string $mode, ?string $folder, ?string $name = null, ?string $parent = null): Client
     {
         if ($mode === 'existing') {
             $id = $this->folderId((string) $folder);
@@ -19,8 +19,11 @@ class AssignClientDriveFolder
             return $client->refresh();
         }
 
-        $name = $client->driveCompanyFolderName();
-        $id = $this->drive->ensureFolderPath('', [$name]);
+        $folderName = trim((string) $name);
+        if ($folderName === '') {
+            $folderName = $client->driveCompanyFolderName();
+        }
+        $id = $this->drive->createFolder($folderName, $parent);
         abort_if($id === null, 422, $this->drive->lastError() ?? 'Could not create the Drive folder.');
         $client->forceFill(['google_drive_folder_id' => $id])->save();
 

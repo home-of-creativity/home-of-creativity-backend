@@ -21,6 +21,8 @@ export function ReportForm({ t }: { locale: Locale; t: (c: { ar: string; en: str
   const [existing, setExisting] = useState<ClientReportAttachment[]>([]);
   const [removeIds, setRemoveIds] = useState<number[]>([]);
   const [zoom, setZoom] = useState(100);
+  const [loaded, setLoaded] = useState(!reportId);
+  const [filePast, setFilePast] = useState<Array<{ files: File[]; removeIds: number[] }>>([]);
   const [ownerId, setOwnerId] = useState<number | null>(clientId);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -35,12 +37,26 @@ export function ReportForm({ t }: { locale: Locale; t: (c: { ar: string; en: str
       setCoverUrl(res.data.cover_url);
       setExisting(res.data.attachments ?? []);
       setOwnerId(res.data.client_id);
+      setLoaded(true);
     }).catch((err) => setError(err instanceof Error ? err.message : t(copy.saveFailed)));
   }, [reportId, t]);
 
+  function rememberFiles() {
+    setFilePast((past) => [...past, { files: [...files], removeIds: [...removeIds] }].slice(-20));
+  }
+
   function addFiles(list: FileList | null) {
     if (!list) return;
+    rememberFiles();
     setFiles((current) => [...current, ...Array.from(list)]);
+  }
+
+  function undoFiles() {
+    const previous = filePast[filePast.length - 1];
+    if (!previous) return;
+    setFilePast((past) => past.slice(0, -1));
+    setFiles(previous.files);
+    setRemoveIds(previous.removeIds);
   }
 
   async function save(event: FormEvent) {
@@ -74,44 +90,61 @@ export function ReportForm({ t }: { locale: Locale; t: (c: { ar: string; en: str
       {error ? <p className="error">{error}</p> : null}
       <form className="card form-grid" onSubmit={(event) => void save(event)}>
         <label className="field-label field-span">
-          {t(copy.reportTitle)}
-          <input className="field" value={title} onChange={(event) => setTitle(event.target.value)} required />
-        </label>
-        <label className="field-label">
-          {t(copy.reportHeader)}
-          <input className="field" value={header} onChange={(event) => setHeader(event.target.value)} />
-        </label>
-        <label className="field-label">
-          {t(copy.reportFooter)}
-          <input className="field" value={footer} onChange={(event) => setFooter(event.target.value)} />
-        </label>
-        <label className="field-label field-span">
           {t(copy.reportCover)}
-          <input className="field" type="file" accept="image/*" onChange={(event) => setCover(event.target.files?.[0] ?? null)} />
-          {coverUrl ? <img src={coverUrl} alt="" className="report-cover-preview" /> : null}
+          <input
+            className="field"
+            type="file"
+            accept="image/*"
+            onChange={(event) => {
+              const file = event.target.files?.[0] ?? null;
+              setCover(file);
+              setCoverUrl(file ? URL.createObjectURL(file) : coverUrl);
+            }}
+          />
         </label>
         <div className="field-span">
           <div className="row-actions">
-            <button type="button" className="btn" onClick={() => setZoom((value) => Math.max(80, value - 10))}>{t(copy.reportZoomOut)}</button>
-            <button type="button" className="btn" onClick={() => setZoom((value) => Math.min(160, value + 10))}>{t(copy.reportZoomIn)}</button>
+            <button type="button" className="btn" onClick={() => setZoom((value) => Math.max(70, value - 10))}>{t(copy.reportZoomOut)}</button>
+            <button type="button" className="btn" onClick={() => setZoom((value) => Math.min(140, value + 10))}>{t(copy.reportZoomIn)}</button>
           </div>
-          <ReportEditor
-            value={body}
-            onChange={setBody}
-            zoom={zoom}
-            labels={{
-              zoomIn: t(copy.reportZoomIn),
-              zoomOut: t(copy.reportZoomOut),
-              bold: "B",
-              italic: "I",
-              underline: "U",
-              heading: "H",
-              list: "•",
-              align: "↔",
-              image: t(copy.reportCover),
-              table: t(copy.reportBody),
-            }}
-          />
+          {loaded ? (
+            <ReportEditor
+              title={title}
+              header={header}
+              footer={footer}
+              value={body}
+              coverUrl={coverUrl}
+              zoom={zoom}
+              onTitle={setTitle}
+              onHeader={setHeader}
+              onFooter={setFooter}
+              onChange={setBody}
+              labels={{
+                bold: "B",
+                italic: "I",
+                underline: "U",
+                strike: "S",
+                heading: "H",
+                paragraph: "¶",
+                list: "•",
+                numbered: "1.",
+                alignRight: "⇤",
+                alignCenter: "↔",
+                alignLeft: "⇥",
+                image: t(copy.reportImage),
+                table: t(copy.reportTable),
+                undo: t(copy.reportUndo),
+                redo: t(copy.reportRedo),
+                delete: t(copy.delete),
+                clear: t(copy.reportClear),
+                pageBreak: t(copy.reportPage),
+                title: t(copy.reportTitle),
+                header: t(copy.reportHeader),
+                footer: t(copy.reportFooter),
+                page: t(copy.reportPage),
+              }}
+            />
+          ) : null}
         </div>
         <div
           className="field-span report-drop"
@@ -123,20 +156,21 @@ export function ReportForm({ t }: { locale: Locale; t: (c: { ar: string; en: str
         >
           <strong>{t(copy.reportAttachments)}</strong>
           <p>{t(copy.reportDrop)}</p>
+          <button type="button" className="btn" disabled={filePast.length === 0} onClick={undoFiles}>{t(copy.reportUndo)}</button>
           <input type="file" multiple onChange={(event) => addFiles(event.target.files)} />
           <ul className="plain-list">
             {existing.filter((file) => !removeIds.includes(file.id)).map((file) => (
               <li key={file.id}>
                 {file.name}
                 <small> · {Math.ceil(file.size / 1024)} KB</small>
-                <button type="button" className="btn btn-ghost" onClick={() => setRemoveIds((current) => [...current, file.id])}>{t(copy.delete)}</button>
+                <button type="button" className="btn btn-ghost" onClick={() => { rememberFiles(); setRemoveIds((current) => [...current, file.id]); }}>{t(copy.delete)}</button>
               </li>
             ))}
             {files.map((file, index) => (
               <li key={`${file.name}-${index}`}>
                 {file.name}
                 <small> · {Math.ceil(file.size / 1024)} KB</small>
-                <button type="button" className="btn btn-ghost" onClick={() => setFiles((current) => current.filter((_, item) => item !== index))}>{t(copy.delete)}</button>
+                <button type="button" className="btn btn-ghost" onClick={() => { rememberFiles(); setFiles((current) => current.filter((_, item) => item !== index)); }}>{t(copy.delete)}</button>
               </li>
             ))}
           </ul>

@@ -3,9 +3,8 @@
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rule;
 
-class AssignClientDriveFolderRequest extends FormRequest
+class CreateDriveFolderRequest extends FormRequest
 {
     public function authorize(): bool
     {
@@ -18,9 +17,7 @@ class AssignClientDriveFolderRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'mode' => ['required', Rule::in(['existing', 'create'])],
-            'folder' => ['required_if:mode,existing', 'nullable', 'string', 'max:500'],
-            'name' => ['required_if:mode,create', 'nullable', 'string', 'max:120'],
+            'name' => ['required', 'string', 'max:120'],
             'parent' => ['nullable', 'string', 'max:200'],
         ];
     }
