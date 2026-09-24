@@ -18,6 +18,7 @@ use App\Http\Controllers\Admin\PricingCategoryController as AdminPricingCategory
 use App\Http\Controllers\Admin\PricingPackageController as AdminPricingPackageController;
 use App\Http\Controllers\Admin\PricingSubcategoryController as AdminPricingSubcategoryController;
 use App\Http\Controllers\Admin\ProfilePdfController as AdminProfilePdfController;
+use App\Http\Controllers\Admin\ReportGeminiController;
 use App\Http\Controllers\Admin\RoleController;
 use App\Http\Controllers\Admin\ServiceRequestController as AdminServiceRequestController;
 use App\Http\Controllers\Admin\ShowcaseClientController as AdminShowcaseClientController;
@@ -129,6 +130,10 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
     });
 
     Route::middleware('crud:ops.reports')->group(function () {
+        Route::get('report-memories', [ReportGeminiController::class, 'memories']);
+        Route::post('report-memories', [ReportGeminiController::class, 'storeMemory']);
+        Route::delete('report-memories/{reportMemory}', [ReportGeminiController::class, 'destroyMemory']);
+        Route::post('reports/gemini', [ReportGeminiController::class, 'edit']);
         Route::get('reports', [AdminClientReportController::class, 'clients']);
         Route::get('clients/{client}/reports', [AdminClientReportController::class, 'index']);
         Route::post('clients/{client}/reports', [AdminClientReportController::class, 'store']);

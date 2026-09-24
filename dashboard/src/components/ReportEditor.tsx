@@ -66,6 +66,8 @@ type Props = {
   onChange: (html: string) => void;
   onCoverFile: (file: File | null) => void;
   onWatermarkFile: (file: File | null) => void;
+  syncKey?: number;
+  syncHtml?: string;
   labels: Labels;
 };
 
@@ -132,6 +134,8 @@ export function ReportEditor({
   onChange,
   onCoverFile,
   onWatermarkFile,
+  syncKey = 0,
+  syncHtml = "",
   labels,
 }: Props) {
   const initial = parseDocument(value);
@@ -261,6 +265,16 @@ export function ReportEditor({
       markHistory();
     });
   }
+
+  useEffect(() => {
+    if (syncKey === 0) return;
+    const past = history.current.slice(0, historyIndex.current + 1);
+    history.current = [...past, syncHtml].slice(-HISTORY_LIMIT);
+    historyIndex.current = history.current.length - 1;
+    restore(syncHtml);
+    // Apply an external Gemini edit into the page DOM.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncKey]);
 
   function undo() {
     if (historyIndex.current <= 0) return;

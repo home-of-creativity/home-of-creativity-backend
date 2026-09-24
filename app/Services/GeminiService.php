@@ -393,11 +393,78 @@ PROMPT;
         ]];
     }
 
-    private function generateJson(string $prompt): Response
+    /**
+     * @param  list<string>  $pages
+     * @param  list<string>  $memories
+     * @return array{reply: string, pages: list<string>, remember: ?string}
+     */
+    public function editReport(string $instruction, array $pages, array $memories, ?int $pageIndex): array
+    {
+        $targets = $pageIndex === null ? $pages : [($pages[$pageIndex] ?? '<p></p>')];
+        if (config('services.gemini.e2e_stub')) {
+            $edited = array_map(
+                fn (string $html): string => $html.'<p>مراجعة Gemini</p>',
+                $targets,
+            );
+
+            return [
+                'reply' => 'تمت المراجعة',
+                'pages' => $edited,
+                'remember' => null,
+            ];
+        }
+
+        $this->requireApiKey();
+        $memory = $memories === [] ? 'none' : implode("\n- ", $memories);
+        $packet = [];
+        foreach ($targets as $index => $html) {
+            $packet[] = 'PAGE '.($index + 1).":\n".$this->reportPromptHtml($html);
+        }
+        $prompt = <<<PROMPT
+You edit an Arabic RTL client report. Return ONLY JSON:
+{"reply":"short Arabic note","pages":["<p>html</p>"],"remember":null}
+pages must contain exactly the same number of items as the pages below.
+Keep existing tags. Do not add scripts, iframes, or event handlers.
+Use the saved memory when it still fits the instruction.
+Memory:
+- {$memory}
+Instruction:
+{$instruction}
+Pages:
+PROMPT;
+        $response = $this->generateJson($prompt."\n".implode("\n\n", $packet), 60);
+        if (! $response->successful()) {
+            Log::warning('Gemini report edit failed', ['status' => $response->status()]);
+            throw ValidationException::withMessages([
+                'gemini' => $this->failedClassificationMessage((string) $response->json('error.message', 'Gemini report edit failed.')),
+            ]);
+        }
+        $text = (string) $response->json('candidates.0.content.parts.0.text', '');
+        $decoded = json_decode($this->extractJsonText($text), true);
+        $edited = is_array($decoded) ? ($decoded['pages'] ?? null) : null;
+        if (! is_array($edited) || count($edited) !== count($targets)) {
+            throw ValidationException::withMessages(['gemini' => 'Gemini returned an unexpected page edit.']);
+        }
+
+        return [
+            'reply' => is_string($decoded['reply'] ?? null) ? $decoded['reply'] : 'تم التعديل.',
+            'pages' => array_map(fn ($html): string => is_string($html) ? $html : '<p></p>', $edited),
+            'remember' => is_string($decoded['remember'] ?? null) && trim($decoded['remember']) !== '' ? trim($decoded['remember']) : null,
+        ];
+    }
+
+    private function reportPromptHtml(string $html): string
+    {
+        $html = preg_replace('/src="data:[^"]*"/i', 'src=""', $html) ?? $html;
+
+        return mb_substr($html, 0, 8000);
+    }
+
+    private function generateJson(string $prompt, ?int $timeout = null): Response
     {
         $model = (string) config('services.gemini.model', 'gemini-2.5-flash');
 
-        return Http::timeout((int) config('services.gemini.timeout', 30))
+        return Http::timeout($timeout ?? (int) config('services.gemini.timeout', 30))
             ->connectTimeout(5)
             ->acceptJson()
             ->withHeaders(['x-goog-api-key' => $this->apiKey()])

@@ -929,6 +929,24 @@ export const api = {
   deleteClientReport(id: number) {
     return request<Envelope<null>>(`/admin/reports/${id}`, { method: "DELETE" });
   },
+  reportMemories() {
+    return request<Envelope<Array<{ id: number; body: string }>>>("/admin/report-memories");
+  },
+  saveReportMemory(body: string) {
+    return request<Envelope<Array<{ id: number; body: string }>>>("/admin/report-memories", {
+      method: "POST",
+      body: JSON.stringify({ body }),
+    });
+  },
+  deleteReportMemory(id: number) {
+    return request<Envelope<Array<{ id: number; body: string }>>>(`/admin/report-memories/${id}`, { method: "DELETE" });
+  },
+  editReportWithGemini(payload: { instruction: string; body: string; scope: "all" | "page"; page?: number; save_memory?: boolean }) {
+    return request<Envelope<{ reply: string; body: string; memories: Array<{ id: number; body: string }> }>>("/admin/reports/gemini", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
   driveFolders(parent?: string, pageToken?: string) {
     return request<{ data: DriveFolder[]; meta: { parent_id: string | null; next_page_token: string | null }; message?: string }>(
       `/admin/drive/folders${queryString({ parent: parent || undefined, page_token: pageToken || undefined })}`,

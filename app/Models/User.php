@@ -60,6 +60,11 @@ class User extends Authenticatable
         return $this->hasOne(Employee::class);
     }
 
+    public function reportMemories(): HasMany
+    {
+        return $this->hasMany(ReportMemory::class);
+    }
+
     public function pageGrants(): HasMany
     {
         return $this->hasMany(StaffPageGrant::class);

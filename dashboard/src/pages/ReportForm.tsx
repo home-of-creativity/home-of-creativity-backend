@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { api, type ClientReportAttachment } from "../api";
 import { ReportEditor } from "../components/ReportEditor";
+import { ReportGemini } from "../components/ReportGemini";
 import { PageHeader } from "../components/PageHeader";
 import { copy, type Locale } from "../i18n";
 
@@ -25,6 +26,8 @@ export function ReportForm({ t }: { locale: Locale; t: (c: { ar: string; en: str
   const [existing, setExisting] = useState<ClientReportAttachment[]>([]);
   const [removeIds, setRemoveIds] = useState<number[]>([]);
   const [zoom, setZoom] = useState(100);
+  const [syncKey, setSyncKey] = useState(0);
+  const [syncHtml, setSyncHtml] = useState("");
   const [loaded, setLoaded] = useState(!reportId);
   const [filePast, setFilePast] = useState<Array<{ files: File[]; removeIds: number[] }>>([]);
   const [ownerId, setOwnerId] = useState<number | null>(clientId);
@@ -115,6 +118,8 @@ export function ReportForm({ t }: { locale: Locale; t: (c: { ar: string; en: str
               onHeader={setHeader}
               onFooter={setFooter}
               onChange={setBody}
+              syncKey={syncKey}
+              syncHtml={syncHtml}
               onCoverFile={(file) => {
                 setCover(file);
                 setRemoveCover(file === null);
@@ -173,6 +178,17 @@ export function ReportForm({ t }: { locale: Locale; t: (c: { ar: string; en: str
               }}
             />
           ) : null}
+        </div>
+        <div className="field-span">
+          <ReportGemini
+            body={body}
+            t={t}
+            onApply={(html) => {
+              setBody(html);
+              setSyncHtml(html);
+              setSyncKey((key) => key + 1);
+            }}
+          />
         </div>
         <div
           className="field-span report-drop"
