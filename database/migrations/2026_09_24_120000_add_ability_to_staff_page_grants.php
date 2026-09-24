@@ -10,6 +10,10 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('staff_page_grants', function (Blueprint $table) {
+            $table->index('user_id');
+        });
+
+        Schema::table('staff_page_grants', function (Blueprint $table) {
             $table->dropUnique(['user_id', 'page_key']);
         });
 
@@ -54,6 +58,12 @@ return new class extends Migration
 
     public function down(): void
     {
+        if (! Schema::hasIndex('staff_page_grants', ['user_id'])) {
+            Schema::table('staff_page_grants', function (Blueprint $table) {
+                $table->index('user_id');
+            });
+        }
+
         Schema::table('staff_page_grants', function (Blueprint $table) {
             $table->dropUnique(['user_id', 'ability', 'page_key']);
             $table->dropColumn('ability');
