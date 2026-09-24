@@ -19,7 +19,9 @@ export function setToken(token: string | null) {
 
 export type SocialAbility = "accounts" | "create" | "approve" | "engage";
 
-export type StaffAbility =
+export type CrudAction = "view" | "create" | "update" | "delete";
+
+export type StaffModule =
   | "ops.overview"
   | "ops.requests"
   | "ops.clients"
@@ -40,6 +42,18 @@ export type StaffAbility =
   | "social.messages"
   | "social.accounts"
   | "social.links";
+
+export type StaffAbility = StaffModule | `${Extract<StaffModule, "ops.requests" | "ops.clients" | "ops.employees" | "site.projects" | "site.categories" | "site.reels" | "site.articles" | "site.pricing" | "site.contact">}.${CrudAction}`;
+
+const crudActions: CrudAction[] = ["view", "create", "update", "delete"];
+
+export function canAbility(user: User | null | undefined, ability: string) {
+  const list = user?.abilities ?? [];
+  if (list.includes(ability as StaffAbility)) return true;
+  const verb = ability.match(/\.(view|create|update|delete)$/);
+  if (verb) return list.includes(ability.slice(0, -verb[0].length) as StaffAbility);
+  return crudActions.some((action) => list.includes(`${ability}.${action}` as StaffAbility));
+}
 
 export type User = {
   id: number;
@@ -77,16 +91,12 @@ export type SocialLinktreeProfile = {
   theme: "cream" | "purple" | "dark";
 };
 
-const socialAbilityMap: Record<SocialAbility, StaffAbility> = {
+const socialAbilityMap: Record<SocialAbility, StaffModule> = {
   accounts: "social.accounts",
   create: "social.content",
   approve: "social.approve",
   engage: "social.engage",
 };
-
-export function canAbility(user: User | null | undefined, ability: StaffAbility) {
-  return Boolean(user?.abilities?.includes(ability));
-}
 
 export function canSocial(user: User | null | undefined, ability: SocialAbility) {
   if (user?.abilities) return canAbility(user, socialAbilityMap[ability]);
@@ -120,6 +130,11 @@ export type StaffRole = {
   users_count?: number;
 };
 
+export type PageGrant = {
+  ability: string;
+  page_key: string;
+};
+
 export type StaffAccessRow = {
   id: number;
   name: string;
@@ -128,6 +143,7 @@ export type StaffAccessRow = {
   role_id: number | null;
   role_name: string | null;
   page_keys: string[];
+  page_grants: PageGrant[];
 };
 
 export type SocialPageOption = {
@@ -139,7 +155,7 @@ export type SocialPageOption = {
 export type StaffAccessPayload = {
   data: StaffAccessRow[];
   pages: SocialPageOption[];
-  abilities: { key: StaffAbility; group: "ops" | "site" | "social" }[];
+  abilities: { key: StaffModule; group: "ops" | "site" | "social"; actions: CrudAction[] }[];
   message: string;
 };
 
@@ -1335,7 +1351,7 @@ export const api = {
   staffAccess() {
     return request<StaffAccessPayload>("/admin/staff-access");
   },
-  updateStaffAccess(employeeId: number, body: { role_id: number | null; page_keys: string[]; password?: string }) {
+  updateStaffAccess(employeeId: number, body: { role_id: number | null; page_grants: PageGrant[]; password?: string }) {
     return request<Envelope<StaffAccessRow>>(`/admin/staff-access/${employeeId}`, {
       method: "PUT",
       body: JSON.stringify(body),

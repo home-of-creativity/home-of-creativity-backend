@@ -721,6 +721,10 @@ export const copy = {
   socialPages: { ar: "صفحات السوشال", en: "Social pages" },
   noSocialPages: { ar: "لا توجد صفحات مربوطة بعد.", en: "No connected pages yet." },
   accessSaved: { ar: "تم حفظ الوصول.", en: "Access saved." },
+  crudView: { ar: "عرض", en: "View" },
+  crudCreate: { ar: "إنشاء", en: "Create" },
+  crudUpdate: { ar: "تعديل", en: "Update" },
+  crudDelete: { ar: "حذف", en: "Delete" },
 } satisfies Record<string, Copy>;
 
 export const socialPlacements: Record<string, Copy> = {

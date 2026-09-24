@@ -21,7 +21,8 @@ class ReplySocialInboxRequest extends FormRequest
             ? StaffAbility::SocialMessages
             : StaffAbility::SocialEngage;
 
-        return $user->canAbility($ability) && $user->canAccessSocialAccount((int) $item->social_account_id);
+        return $user->canAbility($ability)
+            && $user->canAccessSocialAccount((int) $item->social_account_id, $ability->value);
     }
 
     /**

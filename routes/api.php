@@ -97,7 +97,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::put('legal/{slug}', [AdminLegalPageController::class, 'update'])->whereIn('slug', LegalPage::SLUGS);
     });
 
-    Route::middleware('ability:site.contact')->group(function () {
+    Route::middleware('crud:site.contact')->group(function () {
         Route::get('contact', [AdminContactChannelController::class, 'index']);
         Route::post('contact', [AdminContactChannelController::class, 'store']);
         Route::put('contact/{contact_channel}', [AdminContactChannelController::class, 'update']);
@@ -105,7 +105,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::delete('contact/{contact_channel}', [AdminContactChannelController::class, 'destroy']);
     });
 
-    Route::middleware('ability:ops.clients')->group(function () {
+    Route::middleware('crud:ops.clients')->group(function () {
         Route::get('clients', [AdminClientController::class, 'index']);
         Route::post('clients', [AdminClientController::class, 'store']);
         Route::put('clients/{client}', [AdminClientController::class, 'update']);
@@ -118,7 +118,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::get('odoo/invoices', [AdminOdooController::class, 'invoices']);
     });
 
-    Route::middleware('ability:ops.employees')->group(function () {
+    Route::middleware('crud:ops.employees')->group(function () {
         Route::post('odoo/sync-employees', [AdminOdooController::class, 'syncEmployees']);
         Route::get('clickup/members', [AdminEmployeeController::class, 'clickupMembers']);
         Route::apiResource('employees', AdminEmployeeController::class);
@@ -126,7 +126,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::post('employees/{employee}/reject', [AdminEmployeeController::class, 'reject']);
     });
 
-    Route::middleware('ability:ops.requests')->group(function () {
+    Route::middleware('crud:ops.requests')->group(function () {
         Route::get('requests', [AdminServiceRequestController::class, 'index']);
         Route::get('requests/{service_request}', [AdminServiceRequestController::class, 'show']);
         Route::patch('requests/{service_request}', [AdminServiceRequestController::class, 'update']);
@@ -165,7 +165,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::put('ops-settings/client-channels', [AdminClientChannelController::class, 'update']);
     });
 
-    Route::middleware('ability:site.categories')->group(function () {
+    Route::middleware('crud:site.categories')->group(function () {
         Route::get('portfolio/categories', [AdminPortfolioCategoryController::class, 'index']);
         Route::post('portfolio/categories', [AdminPortfolioCategoryController::class, 'store']);
         Route::delete('portfolio/categories/bulk', [AdminPortfolioCategoryController::class, 'destroyAll']);
@@ -174,7 +174,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::delete('portfolio/categories/{portfolio_category}', [AdminPortfolioCategoryController::class, 'destroy']);
     });
 
-    Route::middleware('ability:ops.clients,site.projects')->group(function () {
+    Route::middleware('crud:ops.clients,site.projects')->group(function () {
         Route::get('portfolio/clients', [AdminShowcaseClientController::class, 'index']);
         Route::post('portfolio/clients', [AdminShowcaseClientController::class, 'store']);
         Route::delete('portfolio/clients/bulk', [AdminShowcaseClientController::class, 'destroyAll']);
@@ -182,7 +182,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::delete('portfolio/clients/{showcase_client}', [AdminShowcaseClientController::class, 'destroy']);
     });
 
-    Route::middleware('ability:site.projects')->group(function () {
+    Route::middleware('crud:site.projects')->group(function () {
         Route::get('portfolio/projects', [AdminPortfolioProjectController::class, 'index']);
         Route::post('portfolio/projects', [AdminPortfolioProjectController::class, 'store']);
         Route::delete('portfolio/projects/bulk', [AdminPortfolioProjectController::class, 'destroyAll']);
@@ -190,7 +190,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::delete('portfolio/projects/{portfolio_project}', [AdminPortfolioProjectController::class, 'destroy']);
     });
 
-    Route::middleware('ability:site.reels')->group(function () {
+    Route::middleware('crud:site.reels')->group(function () {
         Route::get('reels', [AdminLandingReelController::class, 'index']);
         Route::post('reels', [AdminLandingReelController::class, 'store']);
         Route::delete('reels/bulk', [AdminLandingReelController::class, 'destroyAll']);
@@ -199,7 +199,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::delete('reels/{landing_reel}', [AdminLandingReelController::class, 'destroy']);
     });
 
-    Route::middleware('ability:site.articles')->group(function () {
+    Route::middleware('crud:site.articles')->group(function () {
         Route::get('articles', [AdminArticleController::class, 'index']);
         Route::post('articles', [AdminArticleController::class, 'store']);
         Route::delete('articles/bulk', [AdminArticleController::class, 'destroyAll']);
@@ -208,7 +208,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::delete('articles/{article}', [AdminArticleController::class, 'destroy']);
     });
 
-    Route::middleware('ability:site.pricing')->group(function () {
+    Route::middleware('crud:site.pricing')->group(function () {
         Route::get('pricing/categories', [AdminPricingCategoryController::class, 'index']);
         Route::post('pricing/categories', [AdminPricingCategoryController::class, 'store']);
         Route::delete('pricing/categories/bulk', [AdminPricingCategoryController::class, 'destroyAll']);

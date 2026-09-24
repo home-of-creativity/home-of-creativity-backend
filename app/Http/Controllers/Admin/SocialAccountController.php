@@ -66,7 +66,7 @@ class SocialAccountController extends Controller
             ->orderBy('platform')
             ->orderBy('name');
 
-        $allowed = $user ? $this->pages->allowedAccountIds($user) : [];
+        $allowed = $this->visibleAccountIds($user);
         if ($allowed === []) {
             $accounts->whereRaw('0 = 1');
         } elseif (is_array($allowed)) {
@@ -135,7 +135,6 @@ class SocialAccountController extends Controller
 
     public function update(UpdateSocialAccountRequest $request, SocialAccount $socialAccount): SocialAccountResource
     {
-        $this->pages->assertAccounts($request->user(), [$socialAccount->id]);
         $data = $request->safe()->except(['access_token', 'refresh_token']);
 
         if ($request->filled('access_token')) {
@@ -159,7 +158,6 @@ class SocialAccountController extends Controller
     public function toggle(SocialAccount $socialAccount): SocialAccountResource
     {
         abort_unless(request()->user()?->canSocial(SocialAbility::Accounts), 403);
-        $this->pages->assertAccounts(request()->user(), [$socialAccount->id]);
 
         $socialAccount->forceFill([
             'is_active' => ! $socialAccount->is_active,
@@ -176,7 +174,6 @@ class SocialAccountController extends Controller
     public function destroy(SocialAccount $socialAccount)
     {
         abort_unless(request()->user()?->canSocial(SocialAbility::Accounts), 403);
-        $this->pages->assertAccounts(request()->user(), [$socialAccount->id]);
 
         $socialAccount->forceFill([
             'is_active' => false,
@@ -192,5 +189,25 @@ class SocialAccountController extends Controller
             'data' => null,
             'message' => 'Deleted.',
         ]);
+    }
+
+    /**
+     * @return list<int>|null
+     */
+    private function visibleAccountIds(mixed $user): ?array
+    {
+        if (! $user) {
+            return [];
+        }
+        if ($user->seesAllSocialPages() || $user->canAbility(StaffAbility::SocialAccounts)) {
+            return null;
+        }
+
+        $abilities = array_values(array_filter(
+            StaffAbility::pageScoped(),
+            fn (string $ability): bool => $user->canAbility($ability),
+        ));
+
+        return $this->pages->allowedAccountIds($user, $abilities);
     }
 }

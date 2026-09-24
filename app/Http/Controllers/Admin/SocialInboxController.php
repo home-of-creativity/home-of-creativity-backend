@@ -45,17 +45,32 @@ class SocialInboxController extends Controller
             ->when(! $canComments, fn ($q) => $q->where('kind', SocialInboxKind::Message))
             ->when(! $canMessages, fn ($q) => $q->where('kind', SocialInboxKind::Comment))
             ->when($request->filled('account_id'), fn ($q) => $q->where('social_account_id', $request->integer('account_id')))
-            ->when(true, function ($q) use ($user) {
-                $allowed = $user ? $this->pages->allowedAccountIds($user) : [];
-                if ($allowed === null) {
+            ->when(true, function ($q) use ($user, $canComments, $canMessages) {
+                if (! $user || $user->seesAllSocialPages()) {
                     return;
                 }
-                if ($allowed === []) {
-                    $q->whereRaw('0 = 1');
 
-                    return;
-                }
-                $q->whereIn('social_account_id', $allowed);
+                $commentIds = $canComments
+                    ? $this->pages->allowedAccountIds($user, [StaffAbility::SocialEngage->value])
+                    : [];
+                $messageIds = $canMessages
+                    ? $this->pages->allowedAccountIds($user, [StaffAbility::SocialMessages->value])
+                    : [];
+
+                $q->where(function ($inner) use ($canComments, $canMessages, $commentIds, $messageIds) {
+                    if ($canComments) {
+                        $inner->orWhere(function ($comments) use ($commentIds) {
+                            $comments->where('kind', SocialInboxKind::Comment);
+                            $this->limitAccounts($comments, $commentIds);
+                        });
+                    }
+                    if ($canMessages) {
+                        $inner->orWhere(function ($messages) use ($messageIds) {
+                            $messages->where('kind', SocialInboxKind::Message);
+                            $this->limitAccounts($messages, $messageIds);
+                        });
+                    }
+                });
             })
             ->latest('occurred_at')
             ->latest('id')
@@ -65,6 +80,22 @@ class SocialInboxController extends Controller
             'message' => 'ok',
             'sync_error' => $this->inboxSync->lastError,
         ]);
+    }
+
+    /**
+     * @param  list<int>|null  $accountIds
+     */
+    private function limitAccounts($query, ?array $accountIds): void
+    {
+        if ($accountIds === null) {
+            return;
+        }
+        if ($accountIds === []) {
+            $query->whereRaw('0 = 1');
+
+            return;
+        }
+        $query->whereIn('social_account_id', $accountIds);
     }
 
     public function reply(ReplySocialInboxRequest $request, SocialInboxItem $socialInboxItem): SocialInboxItemResource

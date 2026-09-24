@@ -33,9 +33,12 @@ class SocialPageAccess
         return array_values($groups);
     }
 
-    public function allowsAccount(User $user, int $accountId): bool
+    /**
+     * @param  list<string>|null  $abilities
+     */
+    public function allowsAccount(User $user, int $accountId, ?array $abilities = null): bool
     {
-        $allowed = $this->allowedAccountIds($user);
+        $allowed = $this->allowedAccountIds($user, $abilities);
         if ($allowed === null) {
             return true;
         }
@@ -45,24 +48,33 @@ class SocialPageAccess
 
     /**
      * @param  list<int>  $accountIds
+     * @param  list<string>|null  $abilities
      */
-    public function assertAccounts(User $user, array $accountIds): void
+    public function assertAccounts(User $user, array $accountIds, ?array $abilities = null): void
     {
         foreach ($accountIds as $accountId) {
-            abort_unless($this->allowsAccount($user, (int) $accountId), 403, 'This page is not assigned to you.');
+            abort_unless($this->allowsAccount($user, (int) $accountId, $abilities), 403, 'This page is not assigned to you.');
         }
     }
 
     /**
+     * @param  list<string>|null  $abilities  Null means every granted social ability.
      * @return list<int>|null Null means every page.
      */
-    public function allowedAccountIds(User $user): ?array
+    public function allowedAccountIds(User $user, ?array $abilities = null): ?array
     {
         if ($user->seesAllSocialPages()) {
             return null;
         }
 
-        $keys = $user->pageGrants()->pluck('page_key')->all();
+        $grants = $user->relationLoaded('pageGrants') ? $user->pageGrants : $user->pageGrants()->get();
+        if ($abilities !== null) {
+            $grants = $grants->filter(
+                fn ($grant): bool => $grant->ability === null || in_array($grant->ability, $abilities, true),
+            );
+        }
+
+        $keys = $grants->pluck('page_key')->unique()->values()->all();
         if ($keys === []) {
             return [];
         }

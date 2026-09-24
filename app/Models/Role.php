@@ -28,8 +28,15 @@ class Role extends Model
     public function allows(StaffAbility|string $ability): bool
     {
         $ability = $ability instanceof StaffAbility ? $ability->value : $ability;
+        $granted = $this->abilities ?? [];
 
-        return in_array($ability, $this->abilities ?? [], true);
+        if (in_array($ability, $granted, true)) {
+            return true;
+        }
+
+        $base = preg_replace('/\.(view|create|update|delete)$/', '', $ability) ?? $ability;
+
+        return $base !== $ability && in_array($base, $granted, true);
     }
 
     public function includesSocial(): bool

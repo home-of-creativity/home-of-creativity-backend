@@ -7,6 +7,7 @@ use App\Enums\StaffAbility;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\UpdateStaffAccessRequest;
 use App\Models\Employee;
+use App\Models\Role;
 use App\Models\User;
 use App\Services\SocialPageAccess;
 use Illuminate\Http\JsonResponse;
@@ -82,10 +83,9 @@ class StaffAccessController extends Controller
                 $user->forceFill($updates)->save();
             }
 
-            $keys = array_values(array_unique($request->input('page_keys', [])));
             $user->pageGrants()->delete();
-            foreach ($keys as $key) {
-                $user->pageGrants()->create(['page_key' => $key]);
+            foreach ($this->grantsFor($request, (int) $roleId) as $grant) {
+                $user->pageGrants()->create($grant);
             }
 
             return $employee->fresh(['user.role', 'user.pageGrants']);
@@ -98,19 +98,60 @@ class StaffAccessController extends Controller
     }
 
     /**
-     * @return list<array{key: string, group: string}>
+     * @return list<array{ability: string, page_key: string}>
+     */
+    private function grantsFor(UpdateStaffAccessRequest $request, int $roleId): array
+    {
+        $incoming = $request->input('page_grants');
+        if (is_array($incoming)) {
+            $seen = [];
+            $grants = [];
+            foreach ($incoming as $grant) {
+                $ability = (string) ($grant['ability'] ?? '');
+                $pageKey = (string) ($grant['page_key'] ?? '');
+                $token = $ability.'|'.$pageKey;
+                if ($ability === '' || $pageKey === '' || isset($seen[$token])) {
+                    continue;
+                }
+                $seen[$token] = true;
+                $grants[] = ['ability' => $ability, 'page_key' => $pageKey];
+            }
+
+            return $grants;
+        }
+
+        $role = Role::query()->find($roleId);
+        $abilities = array_values(array_intersect($role?->abilities ?? [], StaffAbility::pageScoped()));
+        $grants = [];
+        foreach ($abilities as $ability) {
+            foreach (array_values(array_unique($request->input('page_keys', []))) as $pageKey) {
+                $grants[] = ['ability' => $ability, 'page_key' => $pageKey];
+            }
+        }
+
+        return $grants;
+    }
+
+    /**
+     * @return list<array{key: string, group: string, actions: list<string>}>
      */
     private function catalog(): array
     {
-        return array_map(function (string $ability): array {
+        return array_map(function (StaffAbility $ability): array {
             $group = match (true) {
-                str_starts_with($ability, 'ops.') => 'ops',
-                str_starts_with($ability, 'site.') => 'site',
+                str_starts_with($ability->value, 'ops.') => 'ops',
+                str_starts_with($ability->value, 'site.') => 'site',
                 default => 'social',
             };
 
-            return ['key' => $ability, 'group' => $group];
-        }, StaffAbility::values());
+            return [
+                'key' => $ability->value,
+                'group' => $group,
+                'actions' => in_array($ability->value, StaffAbility::crudResources(), true)
+                    ? StaffAbility::crudActions()
+                    : [],
+            ];
+        }, StaffAbility::cases());
     }
 
     /**
@@ -127,7 +168,11 @@ class StaffAccessController extends Controller
             'has_account' => $user !== null,
             'role_id' => $user?->role_id,
             'role_name' => $user?->role?->name,
-            'page_keys' => $user?->pageGrants->pluck('page_key')->values()->all() ?? [],
+            'page_keys' => $user?->pageGrants->pluck('page_key')->unique()->values()->all() ?? [],
+            'page_grants' => $user?->pageGrants->map(fn ($grant): array => [
+                'ability' => $grant->ability,
+                'page_key' => $grant->page_key,
+            ])->values()->all() ?? [],
         ];
     }
 }

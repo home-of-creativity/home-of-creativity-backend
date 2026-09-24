@@ -94,12 +94,59 @@ class StaffAccessTest extends TestCase
             'abilities' => [StaffAbility::SocialMessages->value],
         ]);
         $user = User::factory()->create(['role_id' => $role->id]);
-        $user->pageGrants()->create(['page_key' => '111']);
+        $user->pageGrants()->create(['page_key' => '111', 'ability' => StaffAbility::SocialMessages->value]);
         Sanctum::actingAs($user);
 
         $this->getJson('/api/admin/social/inbox')
             ->assertOk()
             ->assertJsonCount(1, 'data')
             ->assertJsonPath('data.0.kind', SocialInboxKind::Message->value);
+    }
+
+    public function test_social_page_grants_follow_each_ability(): void
+    {
+        Http::fake();
+        $contentPage = SocialAccount::factory()->connected()->create(['page_id' => '111', 'name' => 'Content']);
+        $messagePage = SocialAccount::factory()->connected()->create(['page_id' => '222', 'name' => 'Inbox']);
+        SocialInboxItem::factory()->create(['social_account_id' => $contentPage->id, 'kind' => SocialInboxKind::Comment]);
+        SocialInboxItem::factory()->message()->create(['social_account_id' => $messagePage->id]);
+        SocialInboxItem::factory()->message()->create(['social_account_id' => $contentPage->id]);
+
+        $role = Role::query()->create([
+            'name' => 'محتوى ورسائل',
+            'abilities' => [StaffAbility::SocialContent->value, StaffAbility::SocialEngage->value, StaffAbility::SocialMessages->value],
+        ]);
+        $user = User::factory()->create(['role_id' => $role->id]);
+        $user->pageGrants()->create(['ability' => StaffAbility::SocialContent->value, 'page_key' => '111']);
+        $user->pageGrants()->create(['ability' => StaffAbility::SocialEngage->value, 'page_key' => '111']);
+        $user->pageGrants()->create(['ability' => StaffAbility::SocialMessages->value, 'page_key' => '222']);
+        Sanctum::actingAs($user);
+
+        $this->getJson('/api/admin/social/accounts')
+            ->assertOk()
+            ->assertJsonCount(2, 'data');
+
+        $inbox = $this->getJson('/api/admin/social/inbox')->assertOk();
+        $this->assertSame(
+            [SocialInboxKind::Comment->value],
+            collect($inbox->json('data'))->where('account.id', $contentPage->id)->pluck('kind')->all(),
+        );
+        $this->assertSame(
+            [SocialInboxKind::Message->value],
+            collect($inbox->json('data'))->where('account.id', $messagePage->id)->pluck('kind')->all(),
+        );
+    }
+
+    public function test_table_view_does_not_allow_updates(): void
+    {
+        $role = Role::query()->create([
+            'name' => 'قارئ التصنيفات',
+            'abilities' => ['site.categories.view'],
+        ]);
+        $user = User::factory()->create(['role_id' => $role->id]);
+        Sanctum::actingAs($user);
+
+        $this->getJson('/api/admin/portfolio/categories')->assertOk();
+        $this->postJson('/api/admin/portfolio/categories', [])->assertForbidden();
     }
 }

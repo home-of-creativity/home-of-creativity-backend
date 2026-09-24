@@ -184,7 +184,7 @@ function Shell({
             <span>{t(copy.overview)}</span>
           </NavLink>
           ) : null}
-          {canAbility(user, "ops.requests") ? (
+          {canAbility(user, "ops.requests.view") ? (
           <NavLink to="/requests">
             <span className="nav-link-row">
               <IconRequests aria-hidden />
@@ -193,7 +193,7 @@ function Shell({
             </span>
           </NavLink>
           ) : null}
-          {canAbility(user, "ops.employees") ? (
+          {canAbility(user, "ops.employees.view") ? (
           <NavLink to="/employees">
             <span className="nav-link-row">
               <IconEmployees aria-hidden />
@@ -202,7 +202,7 @@ function Shell({
             </span>
           </NavLink>
           ) : null}
-          {canAbility(user, "ops.clients") ? (
+          {canAbility(user, "ops.clients.view") ? (
           <NavLink to="/clients">
             <IconClients aria-hidden />
             <span>{t(copy.clients)}</span>
@@ -227,37 +227,37 @@ function Shell({
           </NavLink>
           ) : null}
           <p className="nav-group-label">{t(copy.navSite)}</p>
-          {canAbility(user, "site.projects") ? (
+          {canAbility(user, "site.projects.view") ? (
           <NavLink to="/projects">
             <IconProjects aria-hidden />
             <span>{t(copy.portfolioTabProjects)}</span>
           </NavLink>
           ) : null}
-          {canAbility(user, "site.reels") ? (
+          {canAbility(user, "site.reels.view") ? (
           <NavLink to="/reels">
             <IconReels aria-hidden />
             <span>{t(copy.reelsTitle)}</span>
           </NavLink>
           ) : null}
-          {canAbility(user, "site.articles") ? (
+          {canAbility(user, "site.articles.view") ? (
           <NavLink to="/articles">
             <IconArticles aria-hidden />
             <span>{t(copy.articlesTitle)}</span>
           </NavLink>
           ) : null}
-          {canAbility(user, "site.categories") ? (
+          {canAbility(user, "site.categories.view") ? (
           <NavLink to="/categories">
             <IconCategories aria-hidden />
             <span>{t(copy.portfolioTabCategories)}</span>
           </NavLink>
           ) : null}
-          {canAbility(user, "site.pricing") ? (
+          {canAbility(user, "site.pricing.view") ? (
           <NavLink to="/pricing">
             <IconPricing aria-hidden />
             <span>{t(copy.pricingTitle)}</span>
           </NavLink>
           ) : null}
-          {canAbility(user, "site.contact") ? (
+          {canAbility(user, "site.contact.view") ? (
           <NavLink to="/contact">
             <IconContact aria-hidden />
             <span>{t(copy.contactTitle)}</span>
@@ -562,17 +562,18 @@ function pathAllowed(user: User | null, pathname: string) {
   if (!user) return false;
   if (pathname === "/permissions") return user.is_admin;
   if (user.is_admin && !user.role) return true;
-  if (pathname.startsWith("/requests")) return canAbility(user, "ops.requests");
-  if (pathname.startsWith("/employees")) return canAbility(user, "ops.employees");
-  if (pathname.startsWith("/clients")) return canAbility(user, "ops.clients");
+  const verb = pathname.includes("/new") ? "create" : pathname.includes("/edit") ? "update" : "view";
+  if (pathname.startsWith("/requests")) return canAbility(user, `ops.requests.${verb}`);
+  if (pathname.startsWith("/employees")) return canAbility(user, `ops.employees.${verb}`);
+  if (pathname.startsWith("/clients")) return canAbility(user, `ops.clients.${verb}`);
   if (pathname.startsWith("/payments")) return canAbility(user, "ops.payments");
   if (pathname.startsWith("/channels")) return canAbility(user, "ops.channels");
-  if (pathname.startsWith("/projects")) return canAbility(user, "site.projects");
-  if (pathname.startsWith("/reels")) return canAbility(user, "site.reels");
-  if (pathname.startsWith("/articles")) return canAbility(user, "site.articles");
-  if (pathname.startsWith("/categories")) return canAbility(user, "site.categories");
-  if (pathname.startsWith("/pricing")) return canAbility(user, "site.pricing");
-  if (pathname.startsWith("/contact")) return canAbility(user, "site.contact");
+  if (pathname.startsWith("/projects")) return canAbility(user, `site.projects.${verb}`);
+  if (pathname.startsWith("/reels")) return canAbility(user, `site.reels.${verb}`);
+  if (pathname.startsWith("/articles")) return canAbility(user, `site.articles.${verb}`);
+  if (pathname.startsWith("/categories")) return canAbility(user, `site.categories.${verb}`);
+  if (pathname.startsWith("/pricing")) return canAbility(user, `site.pricing.${verb}`);
+  if (pathname.startsWith("/contact")) return canAbility(user, `site.contact.${verb}`);
   if (pathname.startsWith("/profile-pdf")) return canAbility(user, "site.profile_pdf");
   if (pathname.startsWith("/privacy") || pathname.startsWith("/terms") || pathname.startsWith("/legal")) return canAbility(user, "site.legal");
   if (pathname.startsWith("/social/links") || pathname.startsWith("/social/design")) return canAbility(user, "social.links");

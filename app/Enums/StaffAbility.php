@@ -26,9 +26,55 @@ enum StaffAbility: string
     case SocialLinks = 'social.links';
 
     /** @return list<string> */
+    public static function crudResources(): array
+    {
+        return [
+            self::OpsRequests->value,
+            self::OpsClients->value,
+            self::OpsEmployees->value,
+            self::SiteProjects->value,
+            self::SiteCategories->value,
+            self::SiteReels->value,
+            self::SiteArticles->value,
+            self::SitePricing->value,
+            self::SiteContact->value,
+        ];
+    }
+
+    /** @return list<string> */
+    public static function crudActions(): array
+    {
+        return ['view', 'create', 'update', 'delete'];
+    }
+
+    /** @return list<string> */
+    public static function pageScoped(): array
+    {
+        return [
+            self::SocialContent->value,
+            self::SocialApprove->value,
+            self::SocialEngage->value,
+            self::SocialMessages->value,
+        ];
+    }
+
+    /** @return list<string> */
     public static function values(): array
     {
-        return array_column(self::cases(), 'value');
+        $values = [];
+        foreach (self::cases() as $case) {
+            if (in_array($case->value, self::crudResources(), true)) {
+                foreach (self::crudActions() as $action) {
+                    $values[] = $case->value.'.'.$action;
+                }
+
+                continue;
+            }
+
+            $values[] = $case->value;
+        }
+
+        return $values;
     }
 
     /** @return list<string> */

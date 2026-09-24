@@ -1,16 +1,19 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
   api,
+  type CrudAction,
+  type PageGrant,
   type SocialPageOption,
   type StaffAbility,
   type StaffAccessRow,
+  type StaffModule,
   type StaffRole,
 } from "../api";
 import { PageHeader } from "../components/PageHeader";
 import { copy, type Locale } from "../i18n";
 
-const abilityLabels: Record<StaffAbility, { ar: string; en: string }> = {
+const abilityLabels: Record<StaffModule, { ar: string; en: string }> = {
   "ops.overview": { ar: "نظرة عامة", en: "Overview" },
   "ops.requests": { ar: "الطلبات", en: "Requests" },
   "ops.clients": { ar: "العملاء", en: "Clients" },
@@ -33,34 +36,44 @@ const abilityLabels: Record<StaffAbility, { ar: string; en: string }> = {
   "social.links": { ar: "الروابط والمظهر", en: "Links and design" },
 };
 
+const crudLabels: Record<CrudAction, { ar: string; en: string }> = {
+  view: copy.crudView,
+  create: copy.crudCreate,
+  update: copy.crudUpdate,
+  delete: copy.crudDelete,
+};
+
+const pageAbilities = ["social.content", "social.approve", "social.engage", "social.messages"] as const;
+
+type AbilityModule = { key: StaffModule; group: "ops" | "site" | "social"; actions: CrudAction[] };
+
 type Draft = {
   id: number | null;
   name: string;
-  abilities: StaffAbility[];
+  abilities: string[];
 };
 
 const emptyDraft: Draft = { id: null, name: "", abilities: [] };
+
+function holds(abilities: string[], module: string, action?: string) {
+  if (!action) return abilities.includes(module);
+  return abilities.includes(module) || abilities.includes(`${module}.${action}`);
+}
 
 export function Permissions({ t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
   const [roles, setRoles] = useState<StaffRole[]>([]);
   const [staff, setStaff] = useState<StaffAccessRow[]>([]);
   const [pages, setPages] = useState<SocialPageOption[]>([]);
-  const [groups, setGroups] = useState<{ key: StaffAbility; group: "ops" | "site" | "social" }[]>([]);
+  const [groups, setGroups] = useState<AbilityModule[]>([]);
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [passwords, setPasswords] = useState<Record<number, string>>({});
 
-  const selectedRole = roles.find((role) => role.id === draft.id) ?? null;
-  const roleHasSocial = useMemo(
-    () => (selectedRole?.abilities ?? []).some((ability) => ability.startsWith("social.")),
-    [selectedRole],
-  );
-
   function load() {
     return Promise.all([api.roles(), api.staffAccess()]).then(([roleRes, access]) => {
       setRoles(roleRes.data);
-      setStaff(access.data);
+      setStaff(access.data.map((row) => ({ ...row, page_grants: row.page_grants ?? [] })));
       setPages(access.pages);
       setGroups(access.abilities);
     });
@@ -70,20 +83,38 @@ export function Permissions({ t }: { locale: Locale; t: (c: { ar: string; en: st
     load().catch((err) => setError(err instanceof Error ? err.message : t(copy.saveFailed)));
   }, [t]);
 
-  function toggleAbility(ability: StaffAbility) {
-    setDraft((current) => ({
-      ...current,
-      abilities: current.abilities.includes(ability)
-        ? current.abilities.filter((item) => item !== ability)
-        : [...current.abilities, ability],
-    }));
+  function toggleAbility(module: string, action?: CrudAction) {
+    setDraft((current) => {
+      if (!action) {
+        const abilities = current.abilities.includes(module)
+          ? current.abilities.filter((item) => item !== module)
+          : [...current.abilities, module];
+        return { ...current, abilities };
+      }
+
+      if (current.abilities.includes(module)) {
+        const abilities = (["view", "create", "update", "delete"] as const)
+          .filter((verb) => verb !== action)
+          .map((verb) => `${module}.${verb}`);
+        return {
+          ...current,
+          abilities: [...current.abilities.filter((item) => item !== module && !item.startsWith(`${module}.`)), ...abilities],
+        };
+      }
+
+      const key = `${module}.${action}`;
+      const abilities = current.abilities.includes(key)
+        ? current.abilities.filter((item) => item !== key)
+        : [...current.abilities, key];
+      return { ...current, abilities };
+    });
   }
 
   async function saveRole() {
     setBusy(true);
     setError("");
     try {
-      const body = { name: draft.name.trim(), abilities: draft.abilities };
+      const body = { name: draft.name.trim(), abilities: draft.abilities as StaffAbility[] };
       if (draft.id) await api.updateRole(draft.id, body);
       else await api.createRole(body);
       await load();
@@ -111,17 +142,20 @@ export function Permissions({ t }: { locale: Locale; t: (c: { ar: string; en: st
     }
   }
 
-  async function saveAccess(row: StaffAccessRow, roleId: number | null, pageKeys: string[]) {
+  async function saveAccess(row: StaffAccessRow) {
     setBusy(true);
     setError("");
     try {
       const password = passwords[row.id]?.trim();
+      const role = roles.find((item) => item.id === row.role_id);
+      const allowed = new Set(pageAbilities.filter((ability) => role?.abilities.includes(ability)));
+      const page_grants = row.page_grants.filter((grant) => allowed.has(grant.ability as (typeof pageAbilities)[number]));
       const res = await api.updateStaffAccess(row.id, {
-        role_id: roleId,
-        page_keys: pageKeys,
+        role_id: row.role_id,
+        page_grants,
         password: password || undefined,
       });
-      setStaff((current) => current.map((item) => (item.id === row.id ? res.data : item)));
+      setStaff((current) => current.map((item) => (item.id === row.id ? { ...res.data, page_grants: res.data.page_grants ?? [] } : item)));
       setPasswords((current) => ({ ...current, [row.id]: "" }));
       toast.success(t(copy.accessSaved));
     } catch (err) {
@@ -129,6 +163,13 @@ export function Permissions({ t }: { locale: Locale; t: (c: { ar: string; en: st
     } finally {
       setBusy(false);
     }
+  }
+
+  function toggleGrant(row: StaffAccessRow, ability: string, pageKey: string, checked: boolean) {
+    const page_grants: PageGrant[] = checked
+      ? [...row.page_grants, { ability, page_key: pageKey }]
+      : row.page_grants.filter((grant) => !(grant.ability === ability && grant.page_key === pageKey));
+    setStaff((current) => current.map((item) => (item.id === row.id ? { ...item, page_grants } : item)));
   }
 
   return (
@@ -144,21 +185,6 @@ export function Permissions({ t }: { locale: Locale; t: (c: { ar: string; en: st
           }}
         >
           <h2 className="section-title">{draft.id ? t(copy.edit) : t(copy.newPermission)}</h2>
-          <label>
-            {t(copy.permissionName)}
-            <input value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} required />
-          </label>
-          {(["ops", "site", "social"] as const).map((group) => (
-            <fieldset key={group}>
-              <legend>{t(group === "ops" ? copy.abilityOps : group === "site" ? copy.abilitySite : copy.abilitySocial)}</legend>
-              {groups.filter((item) => item.group === group).map((item) => (
-                <label key={item.key} className="check-row">
-                  <input type="checkbox" checked={draft.abilities.includes(item.key)} onChange={() => toggleAbility(item.key)} />
-                  {t(abilityLabels[item.key])}
-                </label>
-              ))}
-            </fieldset>
-          ))}
           <div className="row-actions">
             <button className="btn btn-primary" type="submit" disabled={busy || draft.abilities.length === 0}>
               {t(copy.savePermission)}
@@ -169,6 +195,39 @@ export function Permissions({ t }: { locale: Locale; t: (c: { ar: string; en: st
               </button>
             ) : null}
           </div>
+          <label>
+            {t(copy.permissionName)}
+            <input value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} required />
+          </label>
+          {(["ops", "site", "social"] as const).map((group) => (
+            <fieldset key={group}>
+              <legend>{t(group === "ops" ? copy.abilityOps : group === "site" ? copy.abilitySite : copy.abilitySocial)}</legend>
+              {groups.filter((item) => item.group === group).map((item) => (
+                <div key={item.key}>
+                  {item.actions.length === 0 ? (
+                    <label className="check-row">
+                      <input type="checkbox" checked={holds(draft.abilities, item.key)} onChange={() => toggleAbility(item.key)} />
+                      {t(abilityLabels[item.key])}
+                    </label>
+                  ) : (
+                    <div>
+                      <strong>{t(abilityLabels[item.key])}</strong>
+                      {item.actions.map((action) => (
+                        <label key={action} className="check-row">
+                          <input
+                            type="checkbox"
+                            checked={holds(draft.abilities, item.key, action)}
+                            onChange={() => toggleAbility(item.key, action)}
+                          />
+                          {t(crudLabels[action])}
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </fieldset>
+          ))}
         </form>
         <div className="card">
           <h2 className="section-title">{t(copy.permissionsTitle)}</h2>
@@ -203,7 +262,8 @@ export function Permissions({ t }: { locale: Locale; t: (c: { ar: string; en: st
             </thead>
             <tbody>
               {staff.map((row) => {
-                const showPages = roles.find((role) => role.id === row.role_id)?.abilities.some((ability) => ability.startsWith("social.")) ?? roleHasSocial;
+                const role = roles.find((item) => item.id === row.role_id);
+                const grantedPages = pageAbilities.filter((ability) => role?.abilities.includes(ability));
                 return (
                   <tr key={row.id}>
                     <td>
@@ -220,9 +280,9 @@ export function Permissions({ t }: { locale: Locale; t: (c: { ar: string; en: st
                         }}
                       >
                         <option value="">{t(copy.noRole)}</option>
-                        {roles.map((role) => (
-                          <option key={role.id} value={role.id}>
-                            {role.name}
+                        {roles.map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.name}
                           </option>
                         ))}
                       </select>
@@ -237,32 +297,30 @@ export function Permissions({ t }: { locale: Locale; t: (c: { ar: string; en: st
                       />
                     </td>
                     <td>
-                      {showPages ? (
-                        pages.length === 0 ? (
-                          <small>{t(copy.noSocialPages)}</small>
-                        ) : (
-                          pages.map((page) => (
-                            <label key={page.key} className="check-row">
-                              <input
-                                type="checkbox"
-                                checked={row.page_keys.includes(page.key)}
-                                onChange={(event) => {
-                                  const pageKeys = event.target.checked
-                                    ? [...row.page_keys, page.key]
-                                    : row.page_keys.filter((key) => key !== page.key);
-                                  setStaff((current) => current.map((item) => (item.id === row.id ? { ...item, page_keys: pageKeys } : item)));
-                                }}
-                              />
-                              {page.name}
-                            </label>
-                          ))
-                        )
-                      ) : (
+                      {grantedPages.length === 0 ? (
                         "—"
+                      ) : pages.length === 0 ? (
+                        <small>{t(copy.noSocialPages)}</small>
+                      ) : (
+                        grantedPages.map((ability) => (
+                          <div key={ability}>
+                            <strong>{t(abilityLabels[ability])}</strong>
+                            {pages.map((page) => (
+                              <label key={page.key} className="check-row">
+                                <input
+                                  type="checkbox"
+                                  checked={row.page_grants.some((grant) => grant.ability === ability && grant.page_key === page.key)}
+                                  onChange={(event) => toggleGrant(row, ability, page.key, event.target.checked)}
+                                />
+                                {page.name}
+                              </label>
+                            ))}
+                          </div>
+                        ))
                       )}
                     </td>
                     <td>
-                      <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void saveAccess(row, row.role_id, row.page_keys)}>
+                      <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void saveAccess(row)}>
                         {t(copy.save)}
                       </button>
                     </td>

@@ -9,6 +9,7 @@ class StaffPageGrant extends Model
 {
     protected $fillable = [
         'user_id',
+        'ability',
         'page_key',
     ];
 

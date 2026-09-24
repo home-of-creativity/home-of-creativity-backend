@@ -144,8 +144,12 @@ class User extends Authenticatable
         return $legacy;
     }
 
-    public function canAccessSocialAccount(int $accountId): bool
+    public function canAccessSocialAccount(int $accountId, ?string $ability = null): bool
     {
-        return app(SocialPageAccess::class)->allowsAccount($this, $accountId);
+        return app(SocialPageAccess::class)->allowsAccount(
+            $this,
+            $accountId,
+            $ability === null ? null : [$ability],
+        );
     }
 }

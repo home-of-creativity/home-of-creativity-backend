@@ -3,6 +3,7 @@
 use App\Http\Middleware\EnsureAbility;
 use App\Http\Middleware\EnsureAdmin;
 use App\Http\Middleware\EnsureClientTelegramEnabled;
+use App\Http\Middleware\EnsureCrudAbility;
 use App\Http\Middleware\VerifySharedSecret;
 use App\Http\Middleware\VerifyWhatsAppSignature;
 use Illuminate\Foundation\Application;
@@ -24,6 +25,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'telegram.client' => EnsureClientTelegramEnabled::class,
             'admin' => EnsureAdmin::class,
             'ability' => EnsureAbility::class,
+            'crud' => EnsureCrudAbility::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
