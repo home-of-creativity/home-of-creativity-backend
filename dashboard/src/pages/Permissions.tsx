@@ -60,6 +60,21 @@ function holds(abilities: string[], module: string, action?: string) {
   return abilities.includes(module) || abilities.includes(`${module}.${action}`);
 }
 
+function moduleKeys(item: AbilityModule) {
+  return item.actions.length ? item.actions.map((action) => `${item.key}.${action}`) : [item.key];
+}
+
+function withoutModule(abilities: string[], item: AbilityModule) {
+  return abilities.filter((ability) => ability !== item.key && !ability.startsWith(`${item.key}.`));
+}
+
+function moduleFilled(abilities: string[], item: AbilityModule) {
+  return moduleKeys(item).filter((key) => {
+    const action = item.actions.find((verb) => key.endsWith(`.${verb}`));
+    return holds(abilities, item.key, action);
+  }).length;
+}
+
 export function Permissions({ t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
   const [roles, setRoles] = useState<StaffRole[]>([]);
   const [staff, setStaff] = useState<StaffAccessRow[]>([]);
@@ -165,6 +180,15 @@ export function Permissions({ t }: { locale: Locale; t: (c: { ar: string; en: st
     }
   }
 
+  function setModules(items: AbilityModule[], on: boolean) {
+    setDraft((current) => {
+      let abilities = current.abilities;
+      for (const item of items) abilities = withoutModule(abilities, item);
+      if (on) abilities = [...abilities, ...items.flatMap(moduleKeys)];
+      return { ...current, abilities };
+    });
+  }
+
   function toggleGrant(row: StaffAccessRow, ability: string, pageKey: string, checked: boolean) {
     const page_grants: PageGrant[] = checked
       ? [...row.page_grants, { ability, page_key: pageKey }]
@@ -199,35 +223,65 @@ export function Permissions({ t }: { locale: Locale; t: (c: { ar: string; en: st
             {t(copy.permissionName)}
             <input value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} required />
           </label>
-          {(["ops", "site", "social"] as const).map((group) => (
-            <fieldset key={group}>
-              <legend>{t(group === "ops" ? copy.abilityOps : group === "site" ? copy.abilitySite : copy.abilitySocial)}</legend>
-              {groups.filter((item) => item.group === group).map((item) => (
-                <div key={item.key}>
-                  {item.actions.length === 0 ? (
-                    <label className="check-row">
-                      <input type="checkbox" checked={holds(draft.abilities, item.key)} onChange={() => toggleAbility(item.key)} />
-                      {t(abilityLabels[item.key])}
-                    </label>
-                  ) : (
-                    <div>
-                      <strong>{t(abilityLabels[item.key])}</strong>
-                      {item.actions.map((action) => (
-                        <label key={action} className="check-row">
+          {(["ops", "site", "social"] as const).map((group) => {
+            const items = groups.filter((item) => item.group === group);
+            const filled = items.reduce((count, item) => count + moduleFilled(draft.abilities, item), 0);
+            const total = items.reduce((count, item) => count + moduleKeys(item).length, 0);
+            return (
+              <fieldset key={group} className="permission-fieldset">
+                <legend className="permission-line">
+                  <span>{t(group === "ops" ? copy.abilityOps : group === "site" ? copy.abilitySite : copy.abilitySocial)}</span>
+                  <label className="check-row">
+                    <input
+                      type="checkbox"
+                      checked={total > 0 && filled === total}
+                      ref={(input) => {
+                        if (input) input.indeterminate = filled > 0 && filled < total;
+                      }}
+                      onChange={(event) => setModules(items, event.target.checked)}
+                    />
+                    {t(copy.selectAll)}
+                  </label>
+                </legend>
+                <div className="permission-line">
+                  {items.map((item) => {
+                    const picked = moduleFilled(draft.abilities, item);
+                    const size = moduleKeys(item).length;
+                    return item.actions.length === 0 ? (
+                      <label key={item.key} className="check-row">
+                        <input type="checkbox" checked={holds(draft.abilities, item.key)} onChange={() => toggleAbility(item.key)} />
+                        {t(abilityLabels[item.key])}
+                      </label>
+                    ) : (
+                      <div key={item.key} className="permission-part">
+                        <label className="check-row">
                           <input
                             type="checkbox"
-                            checked={holds(draft.abilities, item.key, action)}
-                            onChange={() => toggleAbility(item.key, action)}
+                            checked={picked === size}
+                            ref={(input) => {
+                              if (input) input.indeterminate = picked > 0 && picked < size;
+                            }}
+                            onChange={(event) => setModules([item], event.target.checked)}
                           />
-                          {t(crudLabels[action])}
+                          <strong>{t(abilityLabels[item.key])}</strong>
                         </label>
-                      ))}
-                    </div>
-                  )}
+                        {item.actions.map((action) => (
+                          <label key={action} className="check-row">
+                            <input
+                              type="checkbox"
+                              checked={holds(draft.abilities, item.key, action)}
+                              onChange={() => toggleAbility(item.key, action)}
+                            />
+                            {t(crudLabels[action])}
+                          </label>
+                        ))}
+                      </div>
+                    );
+                  })}
                 </div>
-              ))}
-            </fieldset>
-          ))}
+              </fieldset>
+            );
+          })}
         </form>
         <div className="card">
           <h2 className="section-title">{t(copy.permissionsTitle)}</h2>
@@ -302,21 +356,42 @@ export function Permissions({ t }: { locale: Locale; t: (c: { ar: string; en: st
                       ) : pages.length === 0 ? (
                         <small>{t(copy.noSocialPages)}</small>
                       ) : (
-                        grantedPages.map((ability) => (
-                          <div key={ability}>
-                            <strong>{t(abilityLabels[ability])}</strong>
-                            {pages.map((page) => (
-                              <label key={page.key} className="check-row">
+                        grantedPages.map((ability) => {
+                          const picked = pages.filter((page) => row.page_grants.some((grant) => grant.ability === ability && grant.page_key === page.key)).length;
+                          return (
+                            <div key={ability} className="permission-part">
+                              <label className="check-row">
                                 <input
                                   type="checkbox"
-                                  checked={row.page_grants.some((grant) => grant.ability === ability && grant.page_key === page.key)}
-                                  onChange={(event) => toggleGrant(row, ability, page.key, event.target.checked)}
+                                  checked={picked === pages.length}
+                                  ref={(input) => {
+                                    if (input) input.indeterminate = picked > 0 && picked < pages.length;
+                                  }}
+                                  onChange={(event) => {
+                                    const page_grants = event.target.checked
+                                      ? [
+                                          ...row.page_grants.filter((grant) => grant.ability !== ability),
+                                          ...pages.map((page) => ({ ability, page_key: page.key })),
+                                        ]
+                                      : row.page_grants.filter((grant) => grant.ability !== ability);
+                                    setStaff((current) => current.map((item) => (item.id === row.id ? { ...item, page_grants } : item)));
+                                  }}
                                 />
-                                {page.name}
+                                <strong>{t(abilityLabels[ability])}</strong>
                               </label>
-                            ))}
-                          </div>
-                        ))
+                              {pages.map((page) => (
+                                <label key={page.key} className="check-row">
+                                  <input
+                                    type="checkbox"
+                                    checked={row.page_grants.some((grant) => grant.ability === ability && grant.page_key === page.key)}
+                                    onChange={(event) => toggleGrant(row, ability, page.key, event.target.checked)}
+                                  />
+                                  {page.name}
+                                </label>
+                              ))}
+                            </div>
+                          );
+                        })
                       )}
                     </td>
                     <td>

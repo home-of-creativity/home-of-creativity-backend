@@ -1836,6 +1836,28 @@ html[dir="rtl"] .back-link span {
   min-height: 2.9rem;
 }
 
+.permission-fieldset {
+  grid-column: 1 / -1;
+  margin: 0;
+  border: 1px solid color-mix(in srgb, var(--brand-muted) 35%, transparent);
+  border-radius: 1rem;
+  padding: 0.75rem 1rem 1rem;
+}
+
+.permission-line,
+.permission-part {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.85rem;
+}
+
+.permission-part {
+  padding: 0.2rem 0.7rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--brand-purple) 8%, transparent);
+}
+
 .row-actions {
   display: flex;
   flex-wrap: wrap;

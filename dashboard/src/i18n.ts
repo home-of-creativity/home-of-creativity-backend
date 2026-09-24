@@ -725,6 +725,7 @@ export const copy = {
   crudCreate: { ar: "إنشاء", en: "Create" },
   crudUpdate: { ar: "تعديل", en: "Update" },
   crudDelete: { ar: "حذف", en: "Delete" },
+  selectAll: { ar: "الكل", en: "All" },
 } satisfies Record<string, Copy>;
 
 export const socialPlacements: Record<string, Copy> = {
