@@ -44,6 +44,12 @@ return [
         'health_internal_url' => env('DEV_HEALTH_INTERNAL_URL'),
     ],
 
+    'contact' => [
+        'info' => env('CONTACT_MAIL_INFO', 'info@hoc.agency'),
+        'sales' => env('CONTACT_MAIL_SALES', 'sales@hoc.agency'),
+        'support' => env('CONTACT_MAIL_SUPPORT', 'support@hoc.agency'),
+    ],
+
     'sentry' => [
         'webhook_secret' => env('SENTRY_WEBHOOK_SECRET'),
     ],

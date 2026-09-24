@@ -79,6 +79,16 @@ return [
             'transport' => 'array',
         ],
 
+        'contact' => [
+            'transport' => 'smtp',
+            'scheme' => env('CONTACT_MAIL_SCHEME', 'smtps'),
+            'host' => env('CONTACT_MAIL_HOST', 'mail.hoc.agency'),
+            'port' => env('CONTACT_MAIL_PORT', 465),
+            'username' => env('CONTACT_MAIL_USERNAME', 'info@hoc.agency'),
+            'password' => env('CONTACT_MAIL_PASSWORD'),
+            'timeout' => 15,
+        ],
+
         'failover' => [
             'transport' => 'failover',
             'mailers' => [

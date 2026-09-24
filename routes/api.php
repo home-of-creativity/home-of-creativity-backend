@@ -63,6 +63,7 @@ Route::prefix('auth')->group(function () {
 
 Route::get('pricing', [PricingController::class, 'index']);
 Route::get('contact', [ContactController::class, 'index']);
+Route::post('contact/messages', [ContactController::class, 'send'])->middleware('throttle:8,1');
 Route::get('portfolio/clients', [PortfolioController::class, 'clients']);
 Route::get('portfolio/projects', [PortfolioController::class, 'projects']);
 Route::get('portfolio/projects/{portfolio_project}', [PortfolioController::class, 'show']);

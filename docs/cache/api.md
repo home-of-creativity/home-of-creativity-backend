@@ -21,6 +21,7 @@ Seeded: `admin@example.com` / `password` (admin), `test@example.com` / `password
 | Method | Path |
 | --- | --- |
 | GET | `/pricing` `/contact` `/reels` |
+| POST | `/contact/messages` (throttle 8/min; support interest → `support@`, else `sales@`, always CC `info@`; `contact` SMTP mailer) |
 | GET | `/articles` `/articles/{slug}` (published only; HTML `body_en`/`body_ar`) |
 | GET | `/pricing` `/contact` `/reels` `/legal` `/legal/{slug}` `/profile-pdf` `/profile-pdf/file` |
 | GET | `/portfolio/clients` `/portfolio/projects` `/portfolio/projects/{id}` |
