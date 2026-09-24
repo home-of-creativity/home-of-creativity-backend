@@ -308,6 +308,7 @@ export function Permissions({ t }: { locale: Locale; t: (c: { ar: string; en: st
             <thead>
               <tr>
                 <th>{t(copy.employeeName)}</th>
+                <th>{t(copy.email)}</th>
                 <th>{t(copy.permissionsTitle)}</th>
                 <th>{t(copy.dashboardPassword)}</th>
                 <th>{t(copy.socialPages)}</th>
@@ -320,11 +321,8 @@ export function Permissions({ t }: { locale: Locale; t: (c: { ar: string; en: st
                 const grantedPages = pageAbilities.filter((ability) => role?.abilities.includes(ability));
                 return (
                   <tr key={row.id}>
-                    <td>
-                      {row.name}
-                      <br />
-                      <small>{row.email || "—"}</small>
-                    </td>
+                    <td>{row.name}</td>
+                    <td dir="ltr">{row.email || "—"}</td>
                     <td>
                       <select
                         value={row.role_id ?? ""}

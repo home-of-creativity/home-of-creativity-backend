@@ -26,7 +26,6 @@ export function EmployeeForm({ t }: { locale: Locale; t: (c: { ar: string; en: s
         name: z.string().trim().min(1, t(copy.fieldRequired)),
         code: z.string().trim(),
         phone: z.string().trim(),
-        email: z.union([z.literal(""), z.string().trim().email(t(copy.invalidEmail))]),
         clickup_user_id: z.string().trim(),
         profession: z.string(),
         notes: z.string().trim(),
@@ -39,13 +38,13 @@ export function EmployeeForm({ t }: { locale: Locale; t: (c: { ar: string; en: s
     register,
     handleSubmit,
     reset,
+    watch,
     formState: { errors },
   } = useZodForm(schema, {
     defaultValues: {
       name: "",
       code: "",
       phone: "",
-      email: "",
       clickup_user_id: "",
       profession: "sales",
       notes: "",
@@ -79,7 +78,6 @@ export function EmployeeForm({ t }: { locale: Locale; t: (c: { ar: string; en: s
             name: item.name,
             code: "",
             phone: "",
-            email: "",
             clickup_user_id: item.clickup_user_id ?? "",
             profession: item.profession || "sales",
             notes: "",
@@ -90,7 +88,6 @@ export function EmployeeForm({ t }: { locale: Locale; t: (c: { ar: string; en: s
             name: item.name,
             code: item.code,
             phone: item.phone ?? "",
-            email: item.email ?? "",
             clickup_user_id: item.clickup_user_id ?? "",
             profession: item.profession,
             notes: item.notes ?? "",
@@ -106,7 +103,6 @@ export function EmployeeForm({ t }: { locale: Locale; t: (c: { ar: string; en: s
     name: string;
     code: string;
     phone: string;
-    email: string;
     clickup_user_id: string;
     profession: string;
     notes: string;
@@ -118,7 +114,7 @@ export function EmployeeForm({ t }: { locale: Locale; t: (c: { ar: string; en: s
       name: values.name.trim(),
       code: values.code.trim() || undefined,
       phone: values.phone.trim() || null,
-      email: values.email.trim() || null,
+      email: members.find((member) => member.id === values.clickup_user_id)?.email ?? null,
       clickup_user_id: values.clickup_user_id.trim() || null,
       profession: values.profession,
       notes: values.notes.trim() || null,
@@ -178,11 +174,6 @@ export function EmployeeForm({ t }: { locale: Locale; t: (c: { ar: string; en: s
               {t(copy.phone)}
               <input className="field" dir="ltr" {...register("phone")} />
             </label>
-            <label className="field-label field-span">
-              {t(copy.email)}
-              <input className={errors.email ? "field has-error" : "field"} dir="ltr" type="email" {...register("email")} />
-              {errors.email ? <p className="field-error">{errors.email.message}</p> : null}
-            </label>
           </>
         ) : null}
       </FormSection>
@@ -209,6 +200,10 @@ export function EmployeeForm({ t }: { locale: Locale; t: (c: { ar: string; en: s
             ))}
           </select>
         </label>
+        <p className="field-label">
+          {t(copy.email)}
+          <span dir="ltr">{members.find((member) => member.id === watch("clickup_user_id"))?.email || "—"}</span>
+        </p>
         {!isApprove ? (
           <>
             <label className="checkbox-row">

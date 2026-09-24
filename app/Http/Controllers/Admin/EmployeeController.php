@@ -14,6 +14,7 @@ use App\Http\Requests\StoreEmployeeRequest;
 use App\Http\Requests\UpdateEmployeeRequest;
 use App\Http\Resources\EmployeeResource;
 use App\Models\Employee;
+use App\Models\User;
 use App\Services\ClickUpClient;
 use App\Services\OdooClient;
 use App\Services\TelegramNotifier;
@@ -56,7 +57,7 @@ class EmployeeController extends Controller
         GenerateEmployeeCode $generateEmployeeCode,
         PushEmployeeToOdoo $pushEmployeeToOdoo,
     ): JsonResponse {
-        $data = $request->validated();
+        $data = $this->applyClickUpEmail($request->validated());
         $data['code'] = $data['code'] ?? $generateEmployeeCode->handle();
         $data['is_active'] = $data['is_active'] ?? true;
         $data['status'] = EmployeeStatus::Approved;
@@ -77,7 +78,8 @@ class EmployeeController extends Controller
 
     public function update(UpdateEmployeeRequest $request, Employee $employee, PushEmployeeToOdoo $pushEmployeeToOdoo): EmployeeResource
     {
-        $employee->fill($request->validated())->save();
+        $employee->fill($this->applyClickUpEmail($request->validated()))->save();
+        $this->syncLoginEmail($employee);
 
         return EmployeeResource::make($pushEmployeeToOdoo->handle($employee->refresh()))
             ->additional(['message' => 'Employee updated in dashboard and Odoo.']);
@@ -102,10 +104,11 @@ class EmployeeController extends Controller
         }
 
         $employee->fill([
-            ...$request->validated(),
+            ...$this->applyClickUpEmail($request->validated()),
             'status' => EmployeeStatus::Approved,
             'is_active' => true,
         ])->save();
+        $this->syncLoginEmail($employee);
 
         $employee = $pushEmployeeToOdoo->handle($employee->refresh());
 
@@ -144,6 +147,52 @@ class EmployeeController extends Controller
             'data' => $members,
             'message' => $clickUp->configured() ? 'ok' : 'ClickUp is not configured.',
         ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    private function applyClickUpEmail(array $data): array
+    {
+        if (! filled($data['clickup_user_id'] ?? null)) {
+            return $data;
+        }
+
+        $clickUp = app(ClickUpClient::class);
+        if (! $clickUp->configured()) {
+            return $data;
+        }
+
+        $member = collect($clickUp->members())->firstWhere('id', (string) $data['clickup_user_id']);
+        $email = is_array($member) ? ($member['email'] ?? null) : null;
+        if (! filled($email)) {
+            throw ValidationException::withMessages([
+                'clickup_user_id' => ['This ClickUp member has no email.'],
+            ]);
+        }
+
+        $data['email'] = $email;
+
+        return $data;
+    }
+
+    private function syncLoginEmail(Employee $employee): void
+    {
+        $user = $employee->user;
+        if (! $user || ! filled($employee->email) || $user->email === $employee->email) {
+            return;
+        }
+
+        $taken = User::query()
+            ->where('email', $employee->email)
+            ->whereKeyNot($user->id)
+            ->exists();
+        if ($taken) {
+            return;
+        }
+
+        $user->forceFill(['email' => $employee->email])->save();
     }
 
     private function notifyDecision(Employee $employee, string $text): void

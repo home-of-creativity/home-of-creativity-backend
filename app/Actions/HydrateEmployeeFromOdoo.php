@@ -34,12 +34,14 @@ class HydrateEmployeeFromOdoo
             return $employee;
         }
 
+        $fields = array_filter([
+            'name' => $live['name'] ?? null,
+            'email' => filled($employee->clickup_user_id) ? null : ($live['email'] ?? null),
+            'phone' => $live['phone'] ?? null,
+        ], fn (mixed $value): bool => $value !== null && $value !== '');
+
         $employee->forceFill([
-            ...array_filter([
-                'name' => $live['name'] ?? null,
-                'email' => $live['email'] ?? null,
-                'phone' => $live['phone'] ?? null,
-            ], fn (mixed $value): bool => $value !== null && $value !== ''),
+            ...$fields,
             'is_active' => (bool) ($live['active'] ?? true),
         ])->save();
         $employee->setAttribute('odoo_live', $live);

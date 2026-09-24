@@ -42,7 +42,7 @@ class SyncOdooEmployees
             if ($employee) {
                 $employee->fill([
                     'name' => $row['name'] !== '' ? $row['name'] : $employee->name,
-                    'email' => $row['email'] ?? $employee->email,
+                    'email' => filled($employee->clickup_user_id) ? $employee->email : ($row['email'] ?? $employee->email),
                     'phone' => $row['phone'] ?? $employee->phone,
                     'odoo_employee_id' => $odooId,
                     'is_active' => $row['active'],

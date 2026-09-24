@@ -616,6 +616,31 @@ class EmployeeTest extends TestCase
             ->assertJsonPath('data.0.name', 'Sara Design');
     }
 
+    public function test_employee_email_follows_the_clickup_member(): void
+    {
+        Sanctum::actingAs($this->admin());
+        config([
+            'services.clickup.token' => 'pk_test',
+            'services.clickup.list_id' => '12345',
+            'services.clickup.lists.sales' => '12345',
+        ]);
+        Http::fake([
+            'https://api.clickup.com/api/v2/list/12345/member' => Http::response([
+                'members' => [
+                    ['id' => 42, 'username' => 'Sara Design', 'email' => 'sara@example.com'],
+                ],
+            ], 200),
+        ]);
+
+        $this->postJson('/api/admin/employees', [
+            'name' => 'Sara Saleh',
+            'email' => 'other@example.com',
+            'clickup_user_id' => '42',
+            'profession' => 'sales',
+        ])->assertCreated()
+            ->assertJsonPath('data.email', 'sara@example.com');
+    }
+
     public function test_guest_cannot_list_clickup_members(): void
     {
         $this->getJson('/api/admin/clickup/members')->assertUnauthorized();
