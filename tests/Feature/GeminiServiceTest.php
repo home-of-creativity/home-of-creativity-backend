@@ -131,4 +131,122 @@ class GeminiServiceTest extends TestCase
                 && ! $request->hasHeader('x-goog-api-key');
         });
     }
+
+    public function test_report_image_uses_the_vertex_image_model(): void
+    {
+        config([
+            'services.gemini.e2e_stub' => false,
+            'services.gemini.api_key' => '',
+            'services.gemini.vertex_project' => 'project-9c32a8a1-2afa-499c-882',
+            'services.gemini.vertex_location' => 'global',
+            'services.gemini.vertex_access_token' => 'test-access-token',
+            'services.gemini.image_model' => 'gemini-2.5-flash-image',
+        ]);
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://aiplatform.googleapis.com/*' => Http::response([
+                'candidates' => [[
+                    'content' => [
+                        'parts' => [[
+                            'inlineData' => [
+                                'mimeType' => 'image/png',
+                                'data' => base64_encode('png-bytes'),
+                            ],
+                        ]],
+                    ],
+                ]],
+            ], 200),
+        ]);
+
+        $image = app(GeminiService::class)->generateReportImage('دائرة برتقالية');
+
+        $this->assertSame('image/png', $image['mime']);
+        $this->assertSame('png-bytes', $image['bytes']);
+        Http::assertSent(function ($request): bool {
+            return str_contains($request->url(), '/models/gemini-2.5-flash-image:generateContent')
+                && $request->hasHeader('Authorization', 'Bearer test-access-token');
+        });
+    }
+
+    public function test_report_image_sends_the_source_picture(): void
+    {
+        config([
+            'services.gemini.e2e_stub' => false,
+            'services.gemini.api_key' => '',
+            'services.gemini.vertex_project' => 'project-9c32a8a1-2afa-499c-882',
+            'services.gemini.vertex_location' => 'global',
+            'services.gemini.vertex_access_token' => 'test-access-token',
+            'services.gemini.image_model' => 'gemini-2.5-flash-image',
+        ]);
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://aiplatform.googleapis.com/*' => Http::response([
+                'candidates' => [[
+                    'content' => [
+                        'parts' => [[
+                            'inlineData' => [
+                                'mimeType' => 'image/png',
+                                'data' => base64_encode('out'),
+                            ],
+                        ]],
+                    ],
+                ]],
+            ], 200),
+        ]);
+
+        $image = app(GeminiService::class)->generateReportImage('ارفع الجودة', [
+            'mime' => 'image/jpeg',
+            'base64' => base64_encode('source'),
+        ]);
+
+        $this->assertSame('out', $image['bytes']);
+        Http::assertSent(function ($request): bool {
+            $body = $request->body();
+
+            return str_contains($body, '"inlineData"')
+                && str_contains($body, 'image\\/jpeg')
+                && str_contains($body, base64_encode('source'));
+        });
+    }
+
+    public function test_report_edit_sends_the_attached_image(): void
+    {
+        config([
+            'services.gemini.e2e_stub' => false,
+            'services.gemini.api_key' => '',
+            'services.gemini.vertex_project' => 'project-9c32a8a1-2afa-499c-882',
+            'services.gemini.vertex_location' => 'global',
+            'services.gemini.vertex_access_token' => 'test-access-token',
+        ]);
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://aiplatform.googleapis.com/*' => Http::response([
+                'candidates' => [[
+                    'content' => [
+                        'parts' => [[
+                            'text' => '{"reply":"رأيت الصورة","pages":["<p>نص</p>"],"remember":null}',
+                        ]],
+                    ],
+                ]],
+            ], 200),
+        ]);
+
+        $result = app(GeminiService::class)->editReport(
+            'صف الصورة',
+            ['<p>نص</p>'],
+            [],
+            null,
+            ['mime' => 'image/jpeg', 'base64' => base64_encode('jpeg-bytes')],
+        );
+
+        $this->assertSame('رأيت الصورة', $result['reply']);
+        Http::assertSent(function ($request): bool {
+            $body = $request->body();
+
+            return str_contains($request->url(), '/models/gemini-3.6-flash:generateContent')
+                && str_contains($body, '"inlineData"')
+                && str_contains($body, 'image\\/jpeg')
+                && str_contains($body, base64_encode('jpeg-bytes'));
+        });
+    }
 }

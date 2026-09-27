@@ -30,6 +30,8 @@ class EditReportWithGeminiRequest extends FormRequest
             'scope' => ['required', Rule::in(['all', 'page'])],
             'page' => ['required_if:scope,page', 'integer', 'min:1', 'max:40'],
             'save_memory' => ['sometimes', 'boolean'],
+            'image_mime' => ['nullable', 'required_with:image_base64', 'string', Rule::in(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])],
+            'image_base64' => ['nullable', 'required_with:image_mime', 'string', 'max:6000000'],
         ];
     }
 }

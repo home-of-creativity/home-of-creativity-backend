@@ -13,6 +13,10 @@ use Symfony\Component\Process\Process;
 
 class GeminiService
 {
+    private static ?string $vertexToken = null;
+
+    private static int $vertexTokenExpires = 0;
+
     /**
      * @return array{work_type: WorkType, briefs: list<array{type: string, brief: string}>}
      */
@@ -397,9 +401,10 @@ PROMPT;
     /**
      * @param  list<string>  $pages
      * @param  list<string>  $memories
+     * @param  array{mime: string, base64: string}|null  $image
      * @return array{reply: string, pages: list<string>, remember: ?string}
      */
-    public function editReport(string $instruction, array $pages, array $memories, ?int $pageIndex): array
+    public function editReport(string $instruction, array $pages, array $memories, ?int $pageIndex, ?array $image = null): array
     {
         $targets = $pageIndex === null ? $pages : [($pages[$pageIndex] ?? '<p></p>')];
         if (config('services.gemini.e2e_stub')) {
@@ -416,6 +421,12 @@ PROMPT;
         }
 
         $this->requireApiKey();
+        if ($image !== null) {
+            $decoded = base64_decode($image['base64'], true);
+            if ($decoded === false || $decoded === '' || strlen($decoded) > 4_000_000) {
+                throw ValidationException::withMessages(['gemini' => 'The attached image is too large.']);
+            }
+        }
         $memory = $memories === [] ? 'none' : implode("\n- ", $memories);
         $packet = [];
         foreach ($targets as $index => $html) {
@@ -426,14 +437,20 @@ You edit an Arabic RTL client report. Return ONLY JSON:
 {"reply":"short Arabic note","pages":["<p>html</p>"],"remember":null}
 pages must contain exactly the same number of items as the pages below.
 Keep existing tags. Do not add scripts, iframes, or event handlers.
+Preserve every line break and every list number.
+A blank line must stay an empty <p></p>. Do not merge lines into one paragraph.
+A numbered list must stay <ol><li> items in the same order and count. Do not drop or renumber items unless the instruction asks.
 Use the saved memory when it still fits the instruction.
 Memory:
 - {$memory}
 Instruction:
 {$instruction}
-Pages:
 PROMPT;
-        $response = $this->generateJson($prompt."\n".implode("\n\n", $packet), 60);
+        if ($image !== null) {
+            $prompt .= "\nAn image is attached. Use what it shows when the instruction refers to a picture, layout, color, or wording in that image. Do not describe anything the image does not show.\n";
+        }
+        $prompt .= "Pages:\n";
+        $response = $this->generateJson($prompt.implode("\n\n", $packet), 60, $image);
         if (! $response->successful()) {
             Log::warning('Gemini report edit failed', ['status' => $response->status()]);
             throw ValidationException::withMessages([
@@ -454,6 +471,82 @@ PROMPT;
         ];
     }
 
+    /**
+     * @param  array{mime: string, base64: string}|null  $source
+     * @return array{mime: string, bytes: string}
+     */
+    public function generateReportImage(string $prompt, ?array $source = null): array
+    {
+        if (config('services.gemini.e2e_stub')) {
+            return [
+                'mime' => 'image/png',
+                'bytes' => base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='),
+            ];
+        }
+
+        $this->requireApiKey();
+        if ($source !== null) {
+            $decoded = base64_decode($source['base64'], true);
+            if ($decoded === false || $decoded === '' || strlen($decoded) > 4_000_000) {
+                throw ValidationException::withMessages(['gemini' => 'The attached image is too large.']);
+            }
+            $prompt .= "\nThe attached image is the source. Follow the instruction on that image. Keep the same subject unless the instruction asks for a new one.";
+        }
+        $parts = [['text' => $prompt]];
+        if ($source !== null) {
+            $parts[] = [
+                'inlineData' => [
+                    'mimeType' => $source['mime'],
+                    'data' => $source['base64'],
+                ],
+            ];
+        }
+        $model = (string) config('services.gemini.image_model', 'gemini-2.5-flash-image');
+        $request = Http::timeout(60)->connectTimeout(5)->acceptJson();
+        $request = $this->usesVertex()
+            ? $request->withToken($this->vertexAccessToken())
+            : $request->withHeaders(['x-goog-api-key' => $this->apiKey()]);
+        $response = $request->post($this->generateContentUrl($model), [
+            'contents' => [
+                ['role' => 'user', 'parts' => $parts],
+            ],
+            'generationConfig' => [
+                'responseModalities' => ['IMAGE'],
+            ],
+        ]);
+        if (! $response->successful()) {
+            throw ValidationException::withMessages([
+                'gemini' => $this->failedClassificationMessage((string) $response->json('error.message', 'Gemini image generation failed.')),
+            ]);
+        }
+
+        $parts = $response->json('candidates.0.content.parts');
+        if (! is_array($parts)) {
+            throw ValidationException::withMessages(['gemini' => 'Gemini returned no image.']);
+        }
+        foreach ($parts as $part) {
+            if (! is_array($part)) {
+                continue;
+            }
+            $inline = $part['inlineData'] ?? $part['inline_data'] ?? null;
+            if (! is_array($inline) || ! is_string($inline['data'] ?? null)) {
+                continue;
+            }
+            $bytes = base64_decode($inline['data'], true);
+            if ($bytes === false || $bytes === '') {
+                continue;
+            }
+            $mime = $inline['mimeType'] ?? $inline['mime_type'] ?? 'image/png';
+
+            return [
+                'mime' => is_string($mime) && $mime !== '' ? $mime : 'image/png',
+                'bytes' => $bytes,
+            ];
+        }
+
+        throw ValidationException::withMessages(['gemini' => 'Gemini returned no image.']);
+    }
+
     private function reportPromptHtml(string $html): string
     {
         $html = preg_replace('/src="data:[^"]*"/i', 'src=""', $html) ?? $html;
@@ -461,7 +554,10 @@ PROMPT;
         return mb_substr($html, 0, 8000);
     }
 
-    private function generateJson(string $prompt, ?int $timeout = null): Response
+    /**
+     * @param  array{mime: string, base64: string}|null  $image
+     */
+    private function generateJson(string $prompt, ?int $timeout = null, ?array $image = null): Response
     {
         $model = (string) config('services.gemini.model', 'gemini-3.6-flash');
         $generation = [
@@ -479,9 +575,19 @@ PROMPT;
             $request = $request->withHeaders(['x-goog-api-key' => $this->apiKey()]);
         }
 
+        $parts = [['text' => $prompt]];
+        if ($image !== null) {
+            $parts[] = [
+                'inlineData' => [
+                    'mimeType' => $image['mime'],
+                    'data' => $image['base64'],
+                ],
+            ];
+        }
+
         return $request->post($this->generateContentUrl($model), [
             'contents' => [
-                ['role' => 'user', 'parts' => [['text' => $prompt]]],
+                ['role' => 'user', 'parts' => $parts],
             ],
             'generationConfig' => $generation,
         ]);
@@ -523,18 +629,155 @@ PROMPT;
             return $configured;
         }
 
-        $binary = PHP_OS_FAMILY === 'Windows' ? 'gcloud.cmd' : 'gcloud';
-        $process = new Process([$binary, 'auth', 'print-access-token']);
-        $process->setTimeout(20);
-        $process->run();
-        $token = trim($process->getOutput());
-        if (! $process->isSuccessful() || $token === '') {
+        if (self::$vertexToken !== null && self::$vertexTokenExpires > time() + 60) {
+            return self::$vertexToken;
+        }
+
+        $token = $this->tokenFromCredentialsFile() ?? $this->tokenFromGcloud();
+        if ($token === null) {
             throw ValidationException::withMessages([
-                'gemini' => 'Gemini classification failed: gcloud has no active login. Run gcloud auth login on this machine.',
+                'gemini' => 'Gemini classification failed: the API process has no saved Google Cloud credential. A browser login is not required on each request.',
             ]);
         }
 
+        self::$vertexToken = $token;
+        self::$vertexTokenExpires = time() + 2400;
+
         return $token;
+    }
+
+    private function tokenFromCredentialsFile(): ?string
+    {
+        $path = $this->credentialsPath();
+        if ($path === null) {
+            return null;
+        }
+
+        try {
+            $json = json_decode((string) file_get_contents($path), true);
+        } catch (\Throwable) {
+            return null;
+        }
+        if (! is_array($json)) {
+            return null;
+        }
+
+        return match ($json['type'] ?? '') {
+            'authorized_user' => $this->refreshAuthorizedUser($json),
+            'service_account' => $this->tokenFromServiceAccount($json),
+            default => null,
+        };
+    }
+
+    private function credentialsPath(): ?string
+    {
+        $configured = trim((string) config('services.gemini.vertex_credentials'));
+        if ($configured !== '' && is_readable($configured)) {
+            return $configured;
+        }
+
+        $appData = getenv('APPDATA');
+        if (is_string($appData) && $appData !== '') {
+            $adc = $appData.DIRECTORY_SEPARATOR.'gcloud'.DIRECTORY_SEPARATOR.'application_default_credentials.json';
+            if (is_readable($adc)) {
+                return $adc;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $json
+     */
+    private function refreshAuthorizedUser(array $json): ?string
+    {
+        $clientId = $json['client_id'] ?? null;
+        $clientSecret = $json['client_secret'] ?? null;
+        $refresh = $json['refresh_token'] ?? null;
+        if (! is_string($clientId) || ! is_string($clientSecret) || ! is_string($refresh)) {
+            return null;
+        }
+
+        $response = Http::asForm()
+            ->timeout(15)
+            ->post('https://oauth2.googleapis.com/token', [
+                'client_id' => $clientId,
+                'client_secret' => $clientSecret,
+                'refresh_token' => $refresh,
+                'grant_type' => 'refresh_token',
+            ]);
+        $token = $response->json('access_token');
+
+        return is_string($token) && $token !== '' ? $token : null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $json
+     */
+    private function tokenFromServiceAccount(array $json): ?string
+    {
+        $email = $json['client_email'] ?? null;
+        $privateKey = $json['private_key'] ?? null;
+        if (! is_string($email) || ! is_string($privateKey) || $privateKey === '') {
+            return null;
+        }
+
+        $now = time();
+        $header = $this->base64Url((string) json_encode(['alg' => 'RS256', 'typ' => 'JWT']));
+        $claim = $this->base64Url((string) json_encode([
+            'iss' => $email,
+            'scope' => 'https://www.googleapis.com/auth/cloud-platform',
+            'aud' => 'https://oauth2.googleapis.com/token',
+            'iat' => $now,
+            'exp' => $now + 3600,
+        ]));
+        $unsigned = $header.'.'.$claim;
+        $signature = '';
+        if (! openssl_sign($unsigned, $signature, $privateKey, OPENSSL_ALGO_SHA256)) {
+            return null;
+        }
+
+        $response = Http::asForm()
+            ->timeout(15)
+            ->post('https://oauth2.googleapis.com/token', [
+                'grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+                'assertion' => $unsigned.'.'.$this->base64Url($signature),
+            ]);
+        $token = $response->json('access_token');
+
+        return is_string($token) && $token !== '' ? $token : null;
+    }
+
+    private function base64Url(string $value): string
+    {
+        return rtrim(strtr(base64_encode($value), '+/', '-_'), '=');
+    }
+
+    private function tokenFromGcloud(): ?string
+    {
+        $candidates = PHP_OS_FAMILY === 'Windows'
+            ? array_filter([
+                getenv('LOCALAPPDATA').'\\Google\\Cloud SDK\\google-cloud-sdk\\bin\\gcloud.cmd',
+                'C:\\Program Files (x86)\\Google\\Cloud SDK\\google-cloud-sdk\\bin\\gcloud.cmd',
+                'gcloud.cmd',
+            ])
+            : ['gcloud'];
+
+        foreach ($candidates as $binary) {
+            if ($binary !== 'gcloud.cmd' && $binary !== 'gcloud' && ! is_file($binary)) {
+                continue;
+            }
+            $process = new Process([$binary, 'auth', 'print-access-token']);
+            $process->setTimeout(20);
+            $process->run();
+            $token = trim($process->getOutput());
+            if ($process->isSuccessful() && $token !== '') {
+                return $token;
+            }
+        }
+
+        return null;
     }
 
     private function responseText(Response $response): string

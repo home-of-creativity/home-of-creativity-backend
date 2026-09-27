@@ -22,7 +22,8 @@ import { DriveFolderPicker } from "../components/DriveFolderPicker";
 import { FileDropzone } from "../components/FileDropzone";
 import { LoadingLottie } from "../components/LoadingLottie";
 import { ReportGemini } from "../components/ReportGemini";
-import { buildDocxFromParagraphs, buildReportDocx, legacyHtmlToParagraphs, type ReportTemplateId } from "../components/report/docxTemplate";
+import { addParagraphFontStyle, buildDocxFromParagraphs, buildReportDocx, legacyHtmlToParagraphs, type ReportTemplateId } from "../components/report/docxTemplate";
+import { loadReportFonts, rememberReportFont, type StoredReportFont } from "../components/report/fontStore";
 import type { ReportDocHandle } from "../components/report/ReportDocEditor";
 import { copy, type Locale } from "../i18n";
 
@@ -76,6 +77,7 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
   const [removeIds, setRemoveIds] = useState<number[]>([]);
   const [panel, setPanel] = useState<PanelTab | null>(() => (window.matchMedia("(min-width: 1180px)").matches ? "gemini" : null));
   const [folderOpen, setFolderOpen] = useState(false);
+  const [extraFonts, setExtraFonts] = useState<StoredReportFont[]>([]);
   const ownerId = report?.client_id ?? clientId;
   const BackIcon = locale === "ar" ? ArrowRight : ArrowLeft;
 
@@ -83,6 +85,9 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
     let cancelled = false;
     async function load() {
       try {
+        const fonts = await loadReportFonts();
+        if (cancelled) return;
+        setExtraFonts(fonts);
         if (!reportId) {
           const res = await api.clientReports(Number(clientId));
           if (cancelled) return;
@@ -101,7 +106,7 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
         setTitle(res.data.title);
         setExisting(res.data.attachments ?? []);
         if (document) {
-          setBytes(document);
+          setBytes(fonts.reduce((file, font) => addParagraphFontStyle(file, font.family), document));
         } else {
           // Saved before reports were Word files: start a document from its text.
           setBytes(buildDocxFromParagraphs(
@@ -328,8 +333,10 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
           {bytes ? (
             <Suspense fallback={<LoadingLottie variant="page" label={t(copy.loading)} />}>
               <ReportDocEditor
+                key={extraFonts.map((font) => font.family).join("|")}
                 ref={editor}
                 document={bytes}
+                extraFonts={extraFonts}
                 title={title}
                 locale={locale}
                 onTitleChange={(value) => {
@@ -372,6 +379,16 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
                     const result = await editor.current?.insertImage(bytes, widthPercent, page) ?? "refused";
                     if (result === "ok") setDirty(true);
                     return result;
+                  }}
+                  fonts={extraFonts}
+                  onInstallFont={async (family, file) => {
+                    if (file.size > 4 * 1024 * 1024) throw new Error(t(copy.reportFontTooBig));
+                    const faces = await rememberReportFont(family, await file.arrayBuffer());
+                    const saved = await editor.current?.save();
+                    if (!saved) throw new Error(t(copy.saveFailed));
+                    setExtraFonts(faces);
+                    setBytes(addParagraphFontStyle(saved, family));
+                    setDirty(true);
                   }}
                 />
               ) : null}

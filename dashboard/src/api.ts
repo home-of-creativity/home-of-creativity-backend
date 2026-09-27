@@ -956,7 +956,13 @@ export const api = {
   deleteReportMemory(id: number) {
     return request<Envelope<Array<{ id: number; body: string }>>>(`/admin/report-memories/${id}`, { method: "DELETE" });
   },
-  editReportWithGemini(payload: { instruction: string; body: string; scope: "all" | "page"; page?: number; save_memory?: boolean }) {
+  generateReportImage(payload: { prompt: string; image_mime?: string; image_base64?: string }) {
+    return request<Envelope<{ mime: string; base64: string }>>("/admin/reports/gemini-image", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  editReportWithGemini(payload: { instruction: string; body: string; scope: "all" | "page"; page?: number; save_memory?: boolean; image_mime?: string; image_base64?: string }) {
     return request<Envelope<{ reply: string; body: string; memories: Array<{ id: number; body: string }> }>>("/admin/reports/gemini", {
       method: "POST",
       body: JSON.stringify(payload),

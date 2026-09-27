@@ -135,6 +135,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::post('report-memories', [ReportGeminiController::class, 'storeMemory']);
         Route::delete('report-memories/{reportMemory}', [ReportGeminiController::class, 'destroyMemory']);
         Route::post('reports/gemini', [ReportGeminiController::class, 'edit']);
+        Route::post('reports/gemini-image', [ReportGeminiController::class, 'image'])->middleware('throttle:4,1');
         Route::get('reports/{client_report}/document', [AdminClientReportController::class, 'document']);
         Route::get('reports/{client_report}/pdf', [AdminClientReportController::class, 'pdf']);
         Route::get('reports', [AdminClientReportController::class, 'clients']);

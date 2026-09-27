@@ -10,6 +10,7 @@ use App\Services\GeminiService;
 use App\Support\ReportPages;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class ReportGeminiController extends Controller
 {
@@ -55,7 +56,13 @@ class ReportGeminiController extends Controller
             ? min(count($pages) - 1, ((int) $request->validated('page')) - 1)
             : null;
         $memories = $request->user()->reportMemories()->latest()->limit(12)->pluck('body')->all();
-        $result = $gemini->editReport($request->validated('instruction'), $pages, $memories, $pageIndex);
+        $image = null;
+        $imageBase64 = $request->validated('image_base64');
+        $imageMime = $request->validated('image_mime');
+        if (is_string($imageBase64) && $imageBase64 !== '' && is_string($imageMime) && $imageMime !== '') {
+            $image = ['mime' => $imageMime, 'base64' => $imageBase64];
+        }
+        $result = $gemini->editReport($request->validated('instruction'), $pages, $memories, $pageIndex, $image);
 
         if ($pageIndex === null) {
             foreach ($result['pages'] as $index => $html) {
@@ -82,6 +89,29 @@ class ReportGeminiController extends Controller
                 'reply' => $result['reply'],
                 'body' => $this->documentHtml($document),
                 'memories' => $this->memoryList($request),
+            ],
+            'message' => 'ok',
+        ]);
+    }
+
+    public function image(Request $request, GeminiService $gemini): JsonResponse
+    {
+        $input = $request->validate([
+            'prompt' => ['required', 'string', 'max:1000'],
+            'image_mime' => ['nullable', 'required_with:image_base64', 'string', Rule::in(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])],
+            'image_base64' => ['nullable', 'required_with:image_mime', 'string', 'max:6000000'],
+        ]);
+        $prompt = trim((string) $input['prompt']);
+        $source = null;
+        if (is_string($input['image_base64'] ?? null) && $input['image_base64'] !== '' && is_string($input['image_mime'] ?? null)) {
+            $source = ['mime' => $input['image_mime'], 'base64' => $input['image_base64']];
+        }
+        $image = $gemini->generateReportImage($prompt, $source);
+
+        return response()->json([
+            'data' => [
+                'mime' => $image['mime'],
+                'base64' => base64_encode($image['bytes']),
             ],
             'message' => 'ok',
         ]);

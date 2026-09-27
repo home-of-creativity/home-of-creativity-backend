@@ -27,10 +27,25 @@ const FAMILIES = [
   "Dubai",
 ];
 
-export const reportFonts = customFonts({
-  sources: FAMILIES.flatMap((family) => [
-    { url: REPORT_FONT_FILES.regular, family, weight: 400, style: "normal" as const },
-    { url: REPORT_FONT_FILES.bold, family, weight: 700, style: "normal" as const },
-  ]),
-  onFailure: () => undefined,
-});
+export type ExtraFont = { family: string; url: string };
+
+const bundled = FAMILIES.flatMap((family) => [
+  { url: REPORT_FONT_FILES.regular, family, weight: 400, style: "normal" as const },
+  { url: REPORT_FONT_FILES.bold, family, weight: 700, style: "normal" as const },
+]);
+
+/** Bundled faces plus any font the staff uploaded. The same file covers regular and bold. */
+export function reportFontConfiguration(extra: ExtraFont[] = []) {
+  return customFonts({
+    sources: [
+      ...bundled,
+      ...extra.flatMap((font) => [
+        { url: font.url, family: font.family, weight: 400, style: "normal" as const },
+        { url: font.url, family: font.family, weight: 700, style: "normal" as const },
+      ]),
+    ],
+    onFailure: () => undefined,
+  });
+}
+
+export const reportFonts = reportFontConfiguration();

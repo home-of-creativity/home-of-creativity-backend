@@ -147,10 +147,12 @@ return [
         'api_key' => env('GEMINI_API_KEY', env('GOOGLE_API_KEY')),
         'base_url' => env('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta'),
         'model' => env('GEMINI_MODEL', 'gemini-3.6-flash'),
+        'image_model' => env('GEMINI_IMAGE_MODEL', 'gemini-2.5-flash-image'),
         'timeout' => (int) env('GEMINI_TIMEOUT', 30),
         'e2e_stub' => env('GEMINI_E2E_STUB', false),
         'vertex_project' => env('GEMINI_VERTEX_PROJECT'),
         'vertex_location' => env('GEMINI_VERTEX_LOCATION', 'global'),
+        'vertex_credentials' => env('GEMINI_VERTEX_CREDENTIALS', env('GOOGLE_APPLICATION_CREDENTIALS')),
     ],
 
     'google_translate' => [

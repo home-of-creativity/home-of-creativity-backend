@@ -5,7 +5,7 @@ import harfbuzzWasm from "@docx-editor.dev/core/harfbuzz.wasm?url";
 import "@docx-editor.dev/core/styles/editor.css";
 import type { Locale } from "../../i18n";
 import { editorArabic } from "./editorArabic";
-import { reportFonts } from "./fonts";
+import { reportFontConfiguration, type ExtraFont } from "./fonts";
 import { pagesToPdf } from "./pdf";
 
 // The text shaper is WebAssembly; point it at the copy Vite emits so dev and production both find it.
@@ -45,6 +45,7 @@ function pagePlainText(page: HTMLElement) {
 
 function paragraphHtml(text: string) {
   return text.split("\n").map((line) => {
+    if (line === "") return "<p><br></p>";
     const dir = /[؀-ۿ]/.test(line) ? "rtl" : "ltr";
     return `<p dir="${dir}">${line.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</p>`;
   }).join("");
@@ -59,6 +60,8 @@ type Props = {
   onSave: () => void;
   titleBarStart?: () => ReactNode;
   titleBarEnd?: () => ReactNode;
+  /** Uploaded faces. Changing this remounts the editor; font bytes are fixed for one mount. */
+  extraFonts?: ExtraFont[];
 };
 
 function useDashboardTheme() {
@@ -73,12 +76,13 @@ function useDashboardTheme() {
 }
 
 export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function ReportDocEditor(
-  { document: bytes, title, locale, onTitleChange, onChange, onSave, titleBarStart, titleBarEnd },
+  { document: bytes, title, locale, onTitleChange, onChange, onSave, titleBarStart, titleBarEnd, extraFonts = [] },
   ref,
 ) {
   const editor = useRef<DocxEditorRef>(null);
   const root = useRef<HTMLDivElement>(null);
-  const fonts = useFonts(reportFonts);
+  const fonts = useFonts(useMemo(() => reportFontConfiguration(extraFonts), [extraFonts]));
+  const fontKey = extraFonts.map((font) => font.family).join("|");
   const theme = useDashboardTheme();
   // The PDF is always a light page, even when the dashboard (and so the editor) is in dark mode.
   const [printLight, setPrintLight] = useState(false);
@@ -256,6 +260,7 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
     // RTL page the browser would reverse them again, so the host box stays dir="ltr".
     <div ref={root} className="report-doc" dir="ltr">
       <DocxEditor
+        key={fontKey}
         ref={editor}
         document={bytes}
         fonts={fonts}

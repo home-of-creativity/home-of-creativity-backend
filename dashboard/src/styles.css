@@ -2087,6 +2087,26 @@ html[dir="ltr"] .report-panel {
   gap: 0.65rem;
 }
 
+.report-gemini-attach {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.report-gemini-attach img {
+  width: 4.5rem;
+  height: 4.5rem;
+  object-fit: cover;
+  border-radius: 0.55rem;
+}
+
+.report-font-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.88rem;
+}
+
 .report-picture .btn {
   width: fit-content;
   cursor: pointer;

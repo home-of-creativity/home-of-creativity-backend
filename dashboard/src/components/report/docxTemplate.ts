@@ -1,4 +1,5 @@
-import { strToU8, zipSync } from "fflate";
+import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
+import { cachedReportFontFamilies } from "./fontStore";
 
 /** Font every new report starts with. Served from public/fonts and loaded into the editor. */
 export const REPORT_FONT = "IBM Plex Sans Arabic";
@@ -150,6 +151,34 @@ const STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:style w:type="table" w:styleId="TableGrid"><w:name w:val="Table Grid"/><w:basedOn w:val="TableNormal"/><w:tblPr><w:tblBorders><w:top w:val="single" w:sz="4" w:space="0" w:color="D9D0E6"/><w:left w:val="single" w:sz="4" w:space="0" w:color="D9D0E6"/><w:bottom w:val="single" w:sz="4" w:space="0" w:color="D9D0E6"/><w:right w:val="single" w:sz="4" w:space="0" w:color="D9D0E6"/><w:insideH w:val="single" w:sz="4" w:space="0" w:color="D9D0E6"/><w:insideV w:val="single" w:sz="4" w:space="0" w:color="D9D0E6"/></w:tblBorders><w:tblCellMar><w:top w:w="60" w:type="dxa"/><w:bottom w:w="60" w:type="dxa"/></w:tblCellMar></w:tblPr></w:style>
 </w:styles>`;
 
+/** Stable style id for an uploaded face. The visible name stays the family name. */
+export function fontStyleId(family: string) {
+  let hash = 2166136261;
+  for (const char of family) hash = Math.imul(hash ^ (char.codePointAt(0) ?? 0), 16777619);
+  return `HocFont${(hash >>> 0).toString(16)}`;
+}
+
+export function fontStyleXml(family: string) {
+  const name = esc(family);
+  return `<w:style w:type="paragraph" w:customStyle="1" w:styleId="${fontStyleId(family)}"><w:name w:val="${name}"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:rPr><w:rFonts w:ascii="${name}" w:hAnsi="${name}" w:cs="${name}" w:eastAsia="${name}"/></w:rPr></w:style>`;
+}
+
+function stylesDocument() {
+  const extra = cachedReportFontFamilies().map(fontStyleXml).join("");
+  return STYLES.replace("</w:styles>", `${extra}</w:styles>`);
+}
+
+/** Add a paragraph style that uses this family. Returns the same bytes when the style is already there. */
+export function addParagraphFontStyle(docx: Uint8Array, family: string): Uint8Array {
+  const files = unzipSync(docx);
+  const stylesFile = files["word/styles.xml"];
+  if (!stylesFile) return docx;
+  const styles = strFromU8(stylesFile);
+  if (styles.includes(`w:styleId="${fontStyleId(family)}"`) || !styles.includes("</w:styles>")) return docx;
+  files["word/styles.xml"] = strToU8(styles.replace("</w:styles>", `${fontStyleXml(family)}</w:styles>`));
+  return zipSync(files);
+}
+
 const NUMBERING = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:numbering ${W}>
 <w:abstractNum w:abstractNumId="0"><w:multiLevelType w:val="hybridMultilevel"/>
@@ -197,7 +226,7 @@ function pack(input: ReportTemplateInput, blocks: Block[]): Uint8Array {
     "word/_rels/document.xml.rels": strToU8(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rIdNumbering" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/><Relationship Id="rIdHeader" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/><Relationship Id="rIdFooter" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/></Relationships>`),
     "word/document.xml": strToU8(document),
-    "word/styles.xml": strToU8(STYLES),
+    "word/styles.xml": strToU8(stylesDocument()),
     "word/numbering.xml": strToU8(NUMBERING),
     "word/header1.xml": strToU8(header),
     "word/footer1.xml": strToU8(footer),
