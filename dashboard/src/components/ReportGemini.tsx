@@ -21,21 +21,34 @@ function htmlToText(html: string) {
 export function ReportGemini({
   t,
   selectedText,
+  pageCount,
+  pageText,
   onApply,
+  onInsertImage,
 }: {
   t: (c: { ar: string; en: string }) => string;
   /** Text currently selected in the document. */
   selectedText: () => string;
-  /** Put text into the document: replaces the selection, or inserts at the caret. */
-  onApply: (text: string) => boolean;
+  pageCount: () => number;
+  pageText: (page: number) => string;
+  /** Apply the new text. `page` is set when writing onto a chosen page. */
+  onApply: (text: string, page: number | null) => boolean;
+  onInsertImage: (bytes: Uint8Array, widthPercent: number, page: number) => Promise<"ok" | "unsupported" | "refused">;
 }) {
   const [instruction, setInstruction] = useState("");
   const [scope, setScope] = useState<Scope>("selection");
   const [saveMemory, setSaveMemory] = useState(false);
   const [memoryNote, setMemoryNote] = useState("");
   const [memories, setMemories] = useState<Memory[]>([]);
-  const [draft, setDraft] = useState<{ reply: string; text: string } | null>(null);
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
+  const [width, setWidth] = useState(60);
+  const [draft, setDraft] = useState<{ reply: string; previous: string; next: string } | null>(null);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setPages(Math.max(1, pageCount()));
+  }, [pageCount, scope, busy]);
 
   useEffect(() => {
     api.reportMemories()
@@ -46,7 +59,7 @@ export function ReportGemini({
   async function ask(text = instruction) {
     const request = text.trim();
     if (request === "") return;
-    const source = scope === "selection" ? selectedText().trim() : "";
+    const source = scope === "selection" ? selectedText().trim() : pageText(page).trim();
     if (scope === "selection" && source === "") {
       toast.info(t(copy.reportGeminiSelectFirst));
       return;
@@ -58,7 +71,7 @@ export function ReportGemini({
         : source.split(/\n+/).map((line) => `<p>${escapeHtml(line)}</p>`).join("");
       const res = await api.editReportWithGemini({ instruction: request, body, scope: "all", save_memory: saveMemory });
       setMemories(res.data.memories);
-      setDraft({ reply: res.data.reply, text: htmlToText(res.data.body) });
+      setDraft({ reply: res.data.reply, previous: source, next: htmlToText(res.data.body) });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t(copy.saveFailed));
     } finally {
@@ -66,15 +79,28 @@ export function ReportGemini({
     }
   }
 
-  function apply(requireSelection: boolean) {
+  function apply() {
     if (!draft) return;
-    if (requireSelection && selectedText().trim() === "") {
+    if (scope === "selection" && selectedText().trim() === "") {
       toast.info(t(copy.reportGeminiSelectFirst));
       return;
     }
-    if (onApply(draft.text)) {
+    if (onApply(draft.next, scope === "write" ? page : null)) {
       toast.success(t(copy.reportGeminiApplied));
       setDraft(null);
+    }
+  }
+
+  async function insertPicture(file: File | undefined) {
+    if (!file) return;
+    setBusy(true);
+    try {
+      const result = await onInsertImage(new Uint8Array(await file.arrayBuffer()), width, page);
+      if (result === "ok") toast.success(t(copy.reportImageInserted));
+      else if (result === "unsupported") toast.error(t(copy.reportImageUnsupported));
+      else toast.error(t(copy.reportImageRefused));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -98,6 +124,26 @@ export function ReportGemini({
 
   return (
     <div className="report-gemini" aria-label={t(copy.reportGemini)}>
+      <fieldset className="report-picture">
+        <legend>{t(copy.reportImage)}</legend>
+        <p className="muted">{t(copy.reportImageHint)}</p>
+        <label className="field-label">
+          {t(copy.reportGeminiPage)}
+          <select className="field" value={page} onChange={(event) => setPage(Number(event.target.value))}>
+            {Array.from({ length: pages }, (_, index) => (
+              <option key={index + 1} value={index + 1}>{index + 1}</option>
+            ))}
+          </select>
+        </label>
+        <label className="field-label">
+          {t(copy.reportImageWidth)} ({width}%)
+          <input className="field" type="range" min={20} max={100} step={5} value={width} onChange={(event) => setWidth(Number(event.target.value))} />
+        </label>
+        <label className="btn btn-sm">
+          {t(copy.reportImageInsert)}
+          <input type="file" accept="image/png,image/jpeg,image/gif" hidden disabled={busy} onChange={(event) => { void insertPicture(event.target.files?.[0]); event.target.value = ""; }} />
+        </label>
+      </fieldset>
       <div className="segmented" role="radiogroup">
         <button type="button" role="radio" aria-checked={scope === "selection"} className={scope === "selection" ? "is-active" : ""} onClick={() => setScope("selection")}>{t(copy.reportGeminiScopeSelection)}</button>
         <button type="button" role="radio" aria-checked={scope === "write"} className={scope === "write" ? "is-active" : ""} onClick={() => setScope("write")}>{t(copy.reportGeminiScopeWrite)}</button>
@@ -108,7 +154,16 @@ export function ReportGemini({
             <button key={item.en} type="button" className="chip" disabled={busy} onClick={() => { setInstruction(t(item)); void ask(t(item)); }}>{t(item)}</button>
           ))}
         </div>
-      ) : null}
+      ) : (
+        <label className="field-label">
+          {t(copy.reportGeminiPage)}
+          <select className="field" value={page} onChange={(event) => setPage(Number(event.target.value))}>
+            {Array.from({ length: pages }, (_, index) => (
+              <option key={index + 1} value={index + 1}>{index + 1}</option>
+            ))}
+          </select>
+        </label>
+      )}
       <label className="field-label">
         {t(copy.reportGeminiAsk)}
         <textarea
@@ -131,14 +186,19 @@ export function ReportGemini({
       {draft ? (
         <div className="report-gemini-draft">
           {draft.reply ? <p className="muted">{draft.reply}</p> : null}
-          <textarea className="field field-area" rows={6} value={draft.text} onChange={(event) => setDraft({ ...draft, text: event.target.value })} />
+          <div className="report-gemini-compare">
+            <label className="field-label">
+              {t(copy.reportGeminiPrevious)}
+              <textarea className="field field-area" rows={6} readOnly value={draft.previous} />
+            </label>
+            <label className="field-label">
+              {t(copy.reportGeminiNext)}
+              <textarea className="field field-area" rows={6} value={draft.next} onChange={(event) => setDraft({ ...draft, next: event.target.value })} />
+            </label>
+          </div>
           <div className="row-actions">
-            {scope === "selection" ? (
-              <button type="button" className="btn btn-primary btn-sm" onClick={() => apply(true)}>{t(copy.reportGeminiReplace)}</button>
-            ) : null}
-            <button type="button" className="btn btn-sm" onClick={() => apply(false)}>{t(copy.reportGeminiInsert)}</button>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => void navigator.clipboard?.writeText(draft.text)}>{t(copy.reportGeminiCopy)}</button>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDraft(null)}>{t(copy.cancel)}</button>
+            <button type="button" className="btn btn-primary btn-sm" onClick={apply}>{t(copy.reportGeminiApply)}</button>
+            <button type="button" className="btn btn-sm" onClick={() => setDraft(null)}>{t(copy.reportGeminiKeep)}</button>
           </div>
         </div>
       ) : null}

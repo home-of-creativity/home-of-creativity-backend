@@ -2068,6 +2068,30 @@ html[dir="ltr"] .report-panel {
   font-size: 0.88rem;
 }
 
+.report-picture {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--brand-line);
+  border-radius: 0.9rem;
+}
+
+.report-picture legend {
+  padding: 0 0.35rem;
+  font-weight: 650;
+}
+
+.report-gemini-compare {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.report-picture .btn {
+  width: fit-content;
+  cursor: pointer;
+}
+
 .report-memory {
   border-top: 1px solid var(--brand-line);
   padding-top: 0.75rem;

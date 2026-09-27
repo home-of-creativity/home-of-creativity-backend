@@ -1,5 +1,5 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from "react";
-import { DocxEditor, useFonts, type DocxEditorRef } from "@docx-editor.dev/react";
+import { DocxEditor, normalizeImageBytes, useFonts, type DocxEditorRef } from "@docx-editor.dev/react";
 import { setHarfBuzzWasmUrl } from "@docx-editor.dev/core/layout";
 import harfbuzzWasm from "@docx-editor.dev/core/harfbuzz.wasm?url";
 import "@docx-editor.dev/core/styles/editor.css";
@@ -16,13 +16,39 @@ export type ReportDocHandle = {
   save(): Promise<Uint8Array>;
   /** The painted pages as a PDF (one image per page). */
   pdf(onProgress?: (done: number, total: number) => void): Promise<Uint8Array>;
-  /** Plain text of every page, for search and the report list. */
+  /** Plain text of every page, for search and the report list. Pictures are omitted. */
   text(): string;
+  /** Plain text of one page, 1-based. Pictures are omitted. */
+  pageText(page: number): string;
+  pageCount(): number;
   selectedText(): string;
   /** Replace the current selection (or insert at the caret) with plain text. */
   replaceSelection(text: string): boolean;
+  /** Put plain text at the start of a page. */
+  insertOnPage(page: number, text: string): boolean;
+  /**
+   * Insert a picture as its own block (text does not run through it) at the chosen width.
+   * `widthPercent` is a share of the page's text width.
+   */
+  insertImage(bytes: Uint8Array, widthPercent: number, page: number): Promise<"ok" | "unsupported" | "refused">;
   focus(): void;
 };
+
+const PAGE_TEXT_WIDTH_PT = 460;
+const EMU_PER_POINT = 12700;
+
+function pagePlainText(page: HTMLElement) {
+  const copy = page.cloneNode(true) as HTMLElement;
+  copy.querySelectorAll("img, svg, canvas, [class*='drawing']").forEach((node) => node.remove());
+  return copy.innerText.trim();
+}
+
+function paragraphHtml(text: string) {
+  return text.split("\n").map((line) => {
+    const dir = /[؀-ۿ]/.test(line) ? "rtl" : "ltr";
+    return `<p dir="${dir}">${line.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</p>`;
+  }).join("");
+}
 
 type Props = {
   document: Uint8Array;
@@ -78,6 +104,75 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
     [onSave, renderPdf],
   );
 
+  const placeCaret = useCallback((page: number) => {
+    const current = editor.current?.getEditor();
+    const host = root.current;
+    if (!current || !host) return;
+    const total = Math.max(1, current.getTotalPages());
+    const targetPage = Math.min(Math.max(1, page), total);
+    current.setActiveScope({ kind: "body" });
+    current.scrollToPage(targetPage);
+    const outline = current.getOutline();
+    const blockId = outline.find((item) => {
+      current.scrollToBlock(item.blockId);
+      return current.getCurrentPage("viewport") === targetPage;
+    })?.blockId ?? outline[0]?.blockId;
+    if (blockId) {
+      const caret = { paragraphId: blockId, offset: 0 };
+      const moved = current.exec({ type: "setSelection", range: { anchor: caret, head: caret } });
+      if (moved.ok) return;
+      current.exec({ type: "setSelection", anchor: { paraId: blockId } });
+      return;
+    }
+    const pageNode = host.querySelector<HTMLElement>(`.docx-page[data-page-index="${targetPage - 1}"]`)
+      ?? host.querySelectorAll<HTMLElement>(".docx-page")[targetPage - 1];
+    const content = pageNode?.querySelector<HTMLElement>(".docx-page-content") ?? pageNode;
+    if (!content) return;
+    const rect = content.getBoundingClientRect();
+    const x = rect.left + Math.min(48, rect.width / 3);
+    const y = rect.top + Math.min(56, rect.height / 4);
+    const hit = document.elementFromPoint(x, y) ?? content;
+    hit.dispatchEvent(new PointerEvent("pointerdown", {
+      bubbles: true,
+      cancelable: true,
+      clientX: x,
+      clientY: y,
+      pointerId: 1,
+      pointerType: "mouse",
+      button: 0,
+    }));
+  }, []);
+
+  useEffect(() => {
+    const host = root.current;
+    if (!host) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const control = event.target instanceof Element
+        ? event.target.closest("button, [role='menuitem']")
+        : null;
+      if (!control) return;
+      const name = (control.getAttribute("aria-label") || control.textContent || "").replace(/\s+/g, " ").trim();
+      if (/خصائص|التفاف|بديل|properties|wrap|alt/i.test(name)) return;
+      if (!/(صورة|image|picture)/i.test(name)) return;
+      placeCaret(editor.current?.getEditor()?.getCurrentPage("viewport") ?? 1);
+    };
+    const previousAlert = window.alert.bind(window);
+    window.alert = (message?: unknown) => {
+      if (message === "invalid-range") {
+        previousAlert(locale === "ar"
+          ? "تعذر إدراج الصورة في هذا الموضع. اختر الصفحة والحجم من اللوحة الجانبية."
+          : "The image could not be inserted here. Choose the page and size in the side panel.");
+        return;
+      }
+      previousAlert(message);
+    };
+    host.addEventListener("pointerdown", onPointerDown, true);
+    return () => {
+      host.removeEventListener("pointerdown", onPointerDown, true);
+      window.alert = previousAlert;
+    };
+  }, [locale, placeCaret]);
+
   useImperativeHandle(ref, () => ({
     async save() {
       const buffer = await editor.current?.save();
@@ -89,9 +184,18 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
     },
     text() {
       return Array.from(root.current?.querySelectorAll<HTMLElement>(".docx-page") ?? [])
-        .map((page) => page.innerText.trim())
+        .map(pagePlainText)
         .filter(Boolean)
         .join("\n\n");
+    },
+    pageText(page) {
+      const node = root.current?.querySelectorAll<HTMLElement>(".docx-page")[page - 1];
+      return node ? pagePlainText(node) : "";
+    },
+    pageCount() {
+      return editor.current?.getEditor()?.getTotalPages()
+        ?? root.current?.querySelectorAll(".docx-page").length
+        ?? 1;
     },
     selectedText() {
       const current = editor.current?.getEditor();
@@ -100,24 +204,47 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
       return typeof value === "string" ? value : "";
     },
     replaceSelection(text) {
-      // The editor's command API cannot replace a text range yet, so hand the text to its own
-      // paste handler: it replaces the selection (or inserts at the caret) like a real paste,
-      // and each line becomes a paragraph.
-      editor.current?.focus();
-      const target = document.activeElement instanceof HTMLElement && root.current?.contains(document.activeElement)
-        ? document.activeElement
-        : root.current;
-      if (!target) return false;
-      const data = new DataTransfer();
-      data.setData("text/plain", text);
-      // As HTML too, so Arabic lines keep their right-to-left direction (and punctuation side).
-      data.setData("text/html", text.split("\n").map((line) => {
-        const dir = /[؀-ۿ]/.test(line) ? "rtl" : "ltr";
-        return `<p dir="${dir}">${line.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</p>`;
-      }).join(""));
-      const paste = new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true });
-      target.dispatchEvent(paste);
-      return paste.defaultPrevented;
+      const current = editor.current?.getEditor();
+      if (!current) return false;
+      current.focus();
+      return current.exec({ type: "paste", text, html: paragraphHtml(text) }).ok;
+    },
+    insertOnPage(page, text) {
+      placeCaret(page);
+      const current = editor.current?.getEditor();
+      if (!current) return false;
+      return current.exec({ type: "paste", text, html: paragraphHtml(text) }).ok;
+    },
+    async insertImage(bytes, widthPercent, page) {
+      const current = editor.current?.getEditor();
+      if (!current) return "refused";
+      const normalized = normalizeImageBytes(bytes);
+      if (!normalized.ok) return "unsupported";
+      placeCaret(page);
+      const percent = Math.min(100, Math.max(15, widthPercent));
+      const width = PAGE_TEXT_WIDTH_PT * (percent / 100);
+      const height = Math.max(1, normalized.heightPoints * (width / Math.max(1, normalized.widthPoints)));
+      const command = {
+        type: "insertImage" as const,
+        data: normalized.bytes,
+        mime: normalized.mime,
+        widthPoints: width,
+        heightPoints: height,
+      };
+      let result = await current.executeImageCommand(command);
+      if (!result.ok) {
+        placeCaret(page);
+        result = await current.executeImageCommand(command);
+      }
+      if (!result.ok) return "refused";
+      current.exec({ type: "setImageWrapType", target: "topAndBottom" });
+      current.exec({
+        type: "setImageProperties",
+        widthEmu: Math.round(width * EMU_PER_POINT),
+        heightEmu: Math.round(height * EMU_PER_POINT),
+        wrap: "topAndBottom",
+      });
+      return "ok";
     },
     focus() {
       editor.current?.focus();

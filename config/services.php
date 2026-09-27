@@ -149,6 +149,8 @@ return [
         'model' => env('GEMINI_MODEL', 'gemini-3.6-flash'),
         'timeout' => (int) env('GEMINI_TIMEOUT', 30),
         'e2e_stub' => env('GEMINI_E2E_STUB', false),
+        'vertex_project' => env('GEMINI_VERTEX_PROJECT'),
+        'vertex_location' => env('GEMINI_VERTEX_LOCATION', 'global'),
     ],
 
     'google_translate' => [

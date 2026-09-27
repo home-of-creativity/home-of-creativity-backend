@@ -9,6 +9,7 @@ use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
+use Symfony\Component\Process\Process;
 
 class GeminiService
 {
@@ -57,7 +58,7 @@ PROMPT;
             ]);
         }
 
-        $text = trim((string) data_get($response->json(), 'candidates.0.content.parts.0.text', ''));
+        $text = $this->responseText($response);
         $text = $this->extractJsonText($text);
         $decoded = json_decode($text, true);
         if (! is_array($decoded)) {
@@ -160,7 +161,7 @@ PROMPT;
                 return $this->heuristicPlan($title, $description, $packageContext);
             }
 
-            $text = $this->extractJsonText(trim((string) data_get($response->json(), 'candidates.0.content.parts.0.text', '')));
+            $text = $this->extractJsonText($this->responseText($response));
             $decoded = json_decode($text, true);
             $operations = is_array($decoded) ? ($decoded['operations'] ?? $decoded) : null;
             if (! is_array($operations) || $operations === []) {
@@ -210,7 +211,7 @@ PROMPT;
                 return null;
             }
 
-            $text = trim((string) data_get($response->json(), 'candidates.0.content.parts.0.text', ''));
+            $text = $this->responseText($response);
             $text = $this->extractJsonText($text);
             $decoded = json_decode($text, true);
             if (! is_array($decoded)) {
@@ -439,7 +440,7 @@ PROMPT;
                 'gemini' => $this->failedClassificationMessage((string) $response->json('error.message', 'Gemini report edit failed.')),
             ]);
         }
-        $text = (string) $response->json('candidates.0.content.parts.0.text', '');
+        $text = $this->responseText($response);
         $decoded = json_decode($this->extractJsonText($text), true);
         $edited = is_array($decoded) ? ($decoded['pages'] ?? null) : null;
         if (! is_array($edited) || count($edited) !== count($targets)) {
@@ -463,27 +464,93 @@ PROMPT;
     private function generateJson(string $prompt, ?int $timeout = null): Response
     {
         $model = (string) config('services.gemini.model', 'gemini-3.6-flash');
-
-        return Http::timeout($timeout ?? (int) config('services.gemini.timeout', 30))
+        $generation = [
+            'temperature' => 0.2,
+            'responseMimeType' => 'application/json',
+        ];
+        $request = Http::timeout($timeout ?? (int) config('services.gemini.timeout', 30))
             ->connectTimeout(5)
-            ->acceptJson()
-            ->withHeaders(['x-goog-api-key' => $this->apiKey()])
-            ->post($this->generateContentUrl($model), [
-                'contents' => [
-                    ['parts' => [['text' => $prompt]]],
-                ],
-                'generationConfig' => [
-                    'temperature' => 0.2,
-                    'responseMimeType' => 'application/json',
-                ],
-            ]);
+            ->acceptJson();
+
+        if ($this->usesVertex()) {
+            $generation['thinkingConfig'] = ['thinkingLevel' => 'LOW'];
+            $request = $request->withToken($this->vertexAccessToken());
+        } else {
+            $request = $request->withHeaders(['x-goog-api-key' => $this->apiKey()]);
+        }
+
+        return $request->post($this->generateContentUrl($model), [
+            'contents' => [
+                ['role' => 'user', 'parts' => [['text' => $prompt]]],
+            ],
+            'generationConfig' => $generation,
+        ]);
     }
 
     private function generateContentUrl(string $model): string
     {
+        if ($this->usesVertex()) {
+            $project = rawurlencode($this->vertexProject());
+            $location = (string) config('services.gemini.vertex_location', 'global');
+            $model = rawurlencode($model);
+            if ($location === 'global') {
+                return "https://aiplatform.googleapis.com/v1/projects/{$project}/locations/global/publishers/google/models/{$model}:generateContent";
+            }
+            $location = rawurlencode($location);
+
+            return "https://{$location}-aiplatform.googleapis.com/v1/projects/{$project}/locations/{$location}/publishers/google/models/{$model}:generateContent";
+        }
+
         $base = rtrim((string) config('services.gemini.base_url', 'https://generativelanguage.googleapis.com/v1beta'), '/');
 
         return "{$base}/models/{$model}:generateContent";
+    }
+
+    private function usesVertex(): bool
+    {
+        return $this->vertexProject() !== '';
+    }
+
+    private function vertexProject(): string
+    {
+        return trim((string) config('services.gemini.vertex_project'));
+    }
+
+    private function vertexAccessToken(): string
+    {
+        $configured = trim((string) config('services.gemini.vertex_access_token', ''));
+        if ($configured !== '') {
+            return $configured;
+        }
+
+        $binary = PHP_OS_FAMILY === 'Windows' ? 'gcloud.cmd' : 'gcloud';
+        $process = new Process([$binary, 'auth', 'print-access-token']);
+        $process->setTimeout(20);
+        $process->run();
+        $token = trim($process->getOutput());
+        if (! $process->isSuccessful() || $token === '') {
+            throw ValidationException::withMessages([
+                'gemini' => 'Gemini classification failed: gcloud has no active login. Run gcloud auth login on this machine.',
+            ]);
+        }
+
+        return $token;
+    }
+
+    private function responseText(Response $response): string
+    {
+        $parts = data_get($response->json(), 'candidates.0.content.parts', []);
+        if (! is_array($parts)) {
+            return '';
+        }
+        $texts = [];
+        foreach ($parts as $part) {
+            if (is_array($part) && is_string($part['text'] ?? null) && trim($part['text']) !== '') {
+                $texts[] = trim($part['text']);
+            }
+        }
+
+        return $texts === [] ? '' : $texts[array_key_last($texts)];
     }
 
     private function apiKey(): string
@@ -493,7 +560,7 @@ PROMPT;
 
     private function requireApiKey(): void
     {
-        if ($this->apiKey() !== '') {
+        if ($this->usesVertex() || $this->apiKey() !== '') {
             return;
         }
 

@@ -230,4 +230,44 @@ class DriveFolderBrowserTest extends TestCase
                 && $request->hasHeader('Authorization', 'Bearer owner-token');
         });
     }
+
+    public function test_a_service_account_folder_is_written_as_the_owner_above_it(): void
+    {
+        config(['services.google.drive_parent_folder_id' => 'user-folder']);
+        $this->mock(GoogleServiceAccount::class, function ($mock): void {
+            $mock->shouldReceive('configured')->andReturn(true);
+            $mock->shouldReceive('configurationError')->andReturn(null);
+            $mock->shouldReceive('accessToken')->andReturn('service-token');
+            $mock->shouldReceive('clientEmail')->andReturn('tech@hoc.test');
+            $mock->shouldReceive('accessTokenFor')->once()->with('owner@hoc.test')->andReturn('owner-token');
+        });
+        Http::fake(function ($request) {
+            if (str_contains($request->url(), '/files/client-folder')) {
+                return Http::response([
+                    'id' => 'client-folder',
+                    'parents' => ['user-folder'],
+                    'owners' => [['emailAddress' => 'tech@hoc.test']],
+                ]);
+            }
+            if (str_contains($request->url(), '/files/user-folder')) {
+                return Http::response([
+                    'id' => 'user-folder',
+                    'owners' => [['emailAddress' => 'owner@hoc.test']],
+                ]);
+            }
+            if ($request->method() === 'GET') {
+                return Http::response(['files' => []]);
+            }
+
+            return Http::response(['id' => 'report-folder']);
+        });
+
+        $this->assertSame('report-folder', app(GoogleDriveClient::class)->ensureFolderPath('client-folder', ['تقرير']));
+
+        Http::assertSent(function ($request): bool {
+            return $request->method() === 'POST'
+                && ($request['parents'][0] ?? null) === 'client-folder'
+                && $request->hasHeader('Authorization', 'Bearer owner-token');
+        });
+    }
 }

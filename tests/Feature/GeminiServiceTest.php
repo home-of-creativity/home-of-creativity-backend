@@ -15,6 +15,7 @@ class GeminiServiceTest extends TestCase
         config([
             'services.gemini.e2e_stub' => false,
             'services.gemini.api_key' => 'studio-auth-key',
+            'services.gemini.vertex_project' => '',
         ]);
         Http::preventStrayRequests();
         Http::fake([
@@ -44,6 +45,7 @@ class GeminiServiceTest extends TestCase
         config([
             'services.gemini.e2e_stub' => false,
             'services.gemini.api_key' => 'studio-auth-key',
+            'services.gemini.vertex_project' => '',
             'services.google_translate.enabled' => true,
             'services.google_translate.api_key' => '',
         ]);
@@ -74,6 +76,7 @@ class GeminiServiceTest extends TestCase
         config([
             'services.gemini.e2e_stub' => false,
             'services.gemini.api_key' => 'legacy-key',
+            'services.gemini.vertex_project' => '',
         ]);
         Http::preventStrayRequests();
         Http::fake([
@@ -94,5 +97,38 @@ class GeminiServiceTest extends TestCase
             $this->assertStringContainsString('GEMINI_API_KEY', $message);
             $this->assertStringContainsString('AI Studio', $message);
         }
+    }
+
+    public function test_vertex_project_uses_gcloud_bearer_on_the_global_endpoint(): void
+    {
+        config([
+            'services.gemini.e2e_stub' => false,
+            'services.gemini.api_key' => '',
+            'services.gemini.vertex_project' => 'project-9c32a8a1-2afa-499c-882',
+            'services.gemini.vertex_location' => 'global',
+            'services.gemini.vertex_access_token' => 'test-access-token',
+        ]);
+        Http::preventStrayRequests();
+        Http::fake([
+            'https://aiplatform.googleapis.com/*' => Http::response([
+                'candidates' => [[
+                    'content' => [
+                        'parts' => [
+                            ['text' => 'thinking'],
+                            ['text' => '{"work_type":"content","briefs":[{"type":"content","brief":"اكتب النص"}]}'],
+                        ],
+                    ],
+                ]],
+            ], 200),
+        ]);
+
+        $result = app(GeminiService::class)->classify('Post', 'Write a caption');
+
+        $this->assertSame(WorkType::Content, $result['work_type']);
+        Http::assertSent(function ($request): bool {
+            return str_contains($request->url(), '/projects/project-9c32a8a1-2afa-499c-882/locations/global/publishers/google/models/gemini-3.6-flash:generateContent')
+                && $request->hasHeader('Authorization', 'Bearer test-access-token')
+                && ! $request->hasHeader('x-goog-api-key');
+        });
     }
 }

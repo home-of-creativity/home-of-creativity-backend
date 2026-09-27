@@ -749,7 +749,7 @@ class GoogleDriveClient
             ->timeout(15)
             ->acceptJson()
             ->get(self::API.'/files/'.$parentId, [
-                'fields' => 'id,driveId,mimeType,owners(emailAddress)',
+                'fields' => 'id,driveId,mimeType,parents,owners(emailAddress)',
                 'supportsAllDrives' => 'true',
             ]);
 
@@ -763,14 +763,50 @@ class GoogleDriveClient
         }
 
         $driveId = $meta->json('driveId');
-        $owners = $meta->json('owners');
-        $ownerEmail = is_array($owners) ? ($owners[0]['emailAddress'] ?? null) : null;
 
         return [
             'id' => (string) $meta->json('id', $parentId),
             'driveId' => filled($driveId) ? (string) $driveId : null,
-            'ownerEmail' => is_string($ownerEmail) && $ownerEmail !== '' ? $ownerEmail : null,
+            'ownerEmail' => filled($driveId) ? null : $this->storageOwner($token, $meta->json() ?? []),
         ];
+    }
+
+    /**
+     * Folders the service account created are owned by it even inside a person's Drive,
+     * so walk up to the first ancestor owned by a real account and write as that account.
+     *
+     * @param  array<string, mixed>  $meta
+     */
+    private function storageOwner(string $token, array $meta): ?string
+    {
+        $technical = $this->auth->clientEmail();
+
+        for ($depth = 0; $depth < 8; $depth++) {
+            $owner = data_get($meta, 'owners.0.emailAddress');
+            if (is_string($owner) && $owner !== '' && ($technical === null || strcasecmp($owner, $technical) !== 0)) {
+                return $owner;
+            }
+
+            $parent = data_get($meta, 'parents.0');
+            if (! filled($parent)) {
+                return null;
+            }
+
+            $response = Http::withToken($token)
+                ->timeout(15)
+                ->acceptJson()
+                ->get(self::API.'/files/'.$parent, [
+                    'fields' => 'id,parents,owners(emailAddress)',
+                    'supportsAllDrives' => 'true',
+                ]);
+            if (! $response->successful()) {
+                return null;
+            }
+
+            $meta = $response->json() ?? [];
+        }
+
+        return null;
     }
 
     /**
@@ -783,9 +819,8 @@ class GoogleDriveClient
         }
 
         $owner = $context['ownerEmail'];
-        $technical = $this->auth->clientEmail();
-        if ($owner === null || ($technical !== null && strcasecmp($owner, $technical) === 0)) {
-            return $this->fail('This folder is owned by the technical service account, which has no storage. Choose a folder owned by the Google account that should hold the files.');
+        if ($owner === null) {
+            return $this->fail('This folder and every folder above it are owned by the technical service account, which has no storage. Choose a folder inside the Drive of the Google account that should hold the files.');
         }
 
         $token = $this->auth->accessTokenFor($owner);

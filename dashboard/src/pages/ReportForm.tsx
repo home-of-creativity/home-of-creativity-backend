@@ -359,10 +359,19 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
                 <ReportGemini
                   t={t}
                   selectedText={() => editor.current?.selectedText() ?? ""}
-                  onApply={(text) => {
-                    const done = editor.current?.replaceSelection(text) ?? false;
+                  pageCount={() => editor.current?.pageCount() ?? 1}
+                  pageText={(page) => editor.current?.pageText(page) ?? ""}
+                  onApply={(text, page) => {
+                    const done = page === null
+                      ? editor.current?.replaceSelection(text) ?? false
+                      : editor.current?.insertOnPage(page, text) ?? false;
                     if (done) setDirty(true);
                     return done;
+                  }}
+                  onInsertImage={async (bytes, widthPercent, page) => {
+                    const result = await editor.current?.insertImage(bytes, widthPercent, page) ?? "refused";
+                    if (result === "ok") setDirty(true);
+                    return result;
                   }}
                 />
               ) : null}
