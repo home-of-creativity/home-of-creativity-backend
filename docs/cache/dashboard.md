@@ -10,7 +10,7 @@ Build: `tsc --noEmit && vite build` (`vite.config` `base` `/dashboard/`, React R
 
 ## Auth
 
-`src/auth.tsx` + `src/api.ts`. Login `POST /auth/login`. Token key `hoc-staff-token` in **localStorage**. Dashboard entry requires `user.is_admin` or a staff `role`. `is_admin` without a role is unrestricted. A role limits sidebar routes to its abilities. Canonical URL **https://hoc.agency/dashboard**: logged out → login form, logged in → overview or the first allowed page. `/dashboard/login` and old `/staff` redirect there.
+`src/auth.tsx` + `src/api.ts`. Login `POST /auth/login`. Token key `hoc-staff-token` in **localStorage**. Dashboard entry requires `user.is_admin` or a staff `role`. `is_admin` without a role is unrestricted. A role limits sidebar routes to its abilities. Canonical URL **https://hoc.agency/dashboard/** (trailing slash). React Router `basename` stays `/dashboard`. On each navigation, if the browser path is exactly `/dashboard`, the shell `history.replaceState`s to `/dashboard/` and keeps the search and hash. Caddy still 308s `/dashboard` to `/dashboard/`. `/staff` 308s straight to `/dashboard/`.
 
 Demo: `admin@example.com` / `password`.
 
