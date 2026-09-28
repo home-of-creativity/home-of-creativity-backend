@@ -28,6 +28,8 @@ class GoogleDriveStorageAccountTest extends TestCase
             'services.google.drive_parent_folder_id' => 'root-hoc',
             'services.google.drive_oauth_client_id' => null,
             'services.google.drive_oauth_client_secret' => null,
+            'services.google.drive_refresh_token' => null,
+            'services.google.drive_storage_email' => null,
         ]);
     }
 
@@ -240,5 +242,12 @@ class GoogleDriveStorageAccountTest extends TestCase
             ->assertJsonPath('data.connected', false);
 
         $this->assertFalse(app(GoogleDriveUploader::class)->connected());
+    }
+
+    public function test_a_refresh_token_in_the_environment_counts_as_connected(): void
+    {
+        config(['services.google.drive_refresh_token' => 'env-refresh']);
+
+        $this->assertTrue(app(GoogleDriveUploader::class)->connected());
     }
 }

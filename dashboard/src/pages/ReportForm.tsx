@@ -19,7 +19,6 @@ import { toast } from "sonner";
 import { api, type Client, type ClientReport, type ClientReportAttachment } from "../api";
 import { ConfirmAction } from "../components/ConfirmAction";
 import { DriveFolderPicker } from "../components/DriveFolderPicker";
-import { DriveStorageCard } from "../components/DriveStorageCard";
 import { FileDropzone } from "../components/FileDropzone";
 import { LoadingLottie } from "../components/LoadingLottie";
 import { ReportGemini } from "../components/ReportGemini";
@@ -209,9 +208,7 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
       }
       if (mode === "publish") {
         if (res.drive_error) {
-          const needsStorage = /Drive storage/i.test(res.drive_error);
-          toast.warning(fill(tr(copy.reportDriveFailed), { message: needsStorage ? tr(copy.driveStorageNeeded) : res.drive_error }));
-          if (needsStorage && mounted.current) setPanel("info");
+          toast.warning(fill(tr(copy.reportDriveFailed), { message: res.drive_error }));
         } else {
           toast.success(tr(copy.reportPublishedToast));
         }
@@ -534,15 +531,15 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
                   selectedText={() => editor.current?.selectedText() ?? ""}
                   pageCount={() => editor.current?.pageCount() ?? 1}
                   pageText={(page) => editor.current?.pageText(page) ?? ""}
-                  onApply={(text, page) => {
+                  onApply={async (text, page) => {
                     const done = page === null
                       ? editor.current?.replaceSelection(text) ?? false
-                      : editor.current?.insertOnPage(page, text) ?? false;
+                      : await (editor.current?.insertOnPage(page, text) ?? false);
                     if (done) markChanged();
                     return done;
                   }}
-                  onInsertImage={async (bytes, widthPercent, page) => {
-                    const result = await editor.current?.insertImage(bytes, widthPercent, page) ?? "refused";
+                  onInsertImage={async (bytes, widthPercent, page, wrap) => {
+                    const result = await editor.current?.insertImage(bytes, widthPercent, page, wrap) ?? "refused";
                     if (result === "ok") markChanged();
                     return result;
                   }}
@@ -613,7 +610,6 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
                       }}
                     />
                   ) : null}
-                  <DriveStorageCard t={t} />
                   {report ? (
                     <ConfirmAction
                       label={t(copy.delete)}

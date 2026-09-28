@@ -845,9 +845,13 @@ class GoogleDriveClient
         if ($uploader->connected()) {
             $token = $uploader->accessToken();
             if ($token === null) {
-                return $this->fail('Google no longer accepts the Drive storage account '.$uploader->email().'. Connect it again under Reports › Drive storage, then publish again.');
+                return $this->fail('Google no longer accepts the Drive storage account. Set GOOGLE_DRIVE_REFRESH_TOKEN in the server environment, then publish again.');
             }
-            $this->shareFolderWith($context['id'], (string) $uploader->email(), $serviceToken);
+            $email = $uploader->email() ?? ($uploader->about($token)['email'] ?? null);
+            if (! is_string($email) || $email === '') {
+                return $this->fail('Set GOOGLE_DRIVE_STORAGE_EMAIL in the server environment so the report folder can be shared with the Drive storage account.');
+            }
+            $this->shareFolderWith($context['id'], $email, $serviceToken);
 
             return $token;
         }
@@ -855,7 +859,7 @@ class GoogleDriveClient
         $owner = $this->storageOwner($serviceToken, $context['meta']);
         $token = $owner !== null ? $this->auth->accessTokenFor($owner) : null;
         if ($token === null) {
-            return $this->fail('The service account has no Drive storage. Connect the Google account that should hold the files under Reports › Drive storage, then publish again.');
+            return $this->fail('The service account has no Drive storage. Set GOOGLE_DRIVE_OAUTH_CLIENT_ID, GOOGLE_DRIVE_OAUTH_CLIENT_SECRET, and GOOGLE_DRIVE_REFRESH_TOKEN in the server environment, then publish again.');
         }
 
         return $token;
@@ -1079,7 +1083,7 @@ class GoogleDriveClient
             return $message;
         }
 
-        return $message.' The service account has no Drive storage: connect the Google account that should hold the files under Reports › Drive storage.';
+        return $message.' The service account has no Drive storage. Set GOOGLE_DRIVE_REFRESH_TOKEN in the server environment.';
     }
 
     private function parentFolderId(): string

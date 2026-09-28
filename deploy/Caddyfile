@@ -107,7 +107,7 @@
 	}
 
 	@siteAsset {
-		path *.css *.js *.mjs *.map *.woff *.woff2 *.ttf *.png *.jpg *.jpeg *.webp *.avif *.svg *.ico *.txt *.xml *.webmanifest
+		path *.css *.js *.mjs *.map *.woff *.woff2 *.ttf *.png *.jpg *.jpeg *.webp *.avif *.svg *.ico *.txt *.xml *.webmanifest *.mp4 *.webm
 		not path /dashboard /dashboard/*
 	}
 	handle @siteAsset {

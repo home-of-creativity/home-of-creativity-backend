@@ -126,8 +126,13 @@ export function ReportGemini({
   pageCount: () => number;
   pageText: (page: number) => string;
   /** Apply the new text. `page` is set when writing onto a chosen page. */
-  onApply: (text: string, page: number | null) => boolean;
-  onInsertImage: (bytes: Uint8Array, widthPercent: number, page: number) => Promise<"ok" | "unsupported" | "refused">;
+  onApply: (text: string, page: number | null) => boolean | Promise<boolean>;
+  onInsertImage: (
+    bytes: Uint8Array,
+    widthPercent: number,
+    page: number,
+    wrap: "square" | "topAndBottom",
+  ) => Promise<"ok" | "unsupported" | "refused">;
   fonts: Array<{ family: string }>;
   onInstallFont: (family: string, file: File) => Promise<void>;
 }) {
@@ -138,7 +143,8 @@ export function ReportGemini({
   const [memories, setMemories] = useState<Memory[]>([]);
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
-  const [width, setWidth] = useState(60);
+  const [width, setWidth] = useState(55);
+  const [place, setPlace] = useState<"wrap" | "fill">("wrap");
   const [imagePrompt, setImagePrompt] = useState("");
   const [draft, setDraft] = useState<{ reply: string; previous: string; next: string } | null>(null);
   const [attachment, setAttachment] = useState<ChatImage | null>(null);
@@ -185,13 +191,13 @@ export function ReportGemini({
     }
   }
 
-  function apply() {
+  async function apply() {
     if (!draft) return;
     if (scope === "selection" && selectedText().trim() === "") {
       toast.info(t(copy.reportGeminiSelectFirst));
       return;
     }
-    if (onApply(draft.next, scope === "write" ? page : null)) {
+    if (await onApply(draft.next, scope === "write" ? page : null)) {
       toast.success(t(copy.reportGeminiApplied));
       setDraft(null);
     }
@@ -201,7 +207,7 @@ export function ReportGemini({
     if (!file) return;
     setBusy(true);
     try {
-      const result = await onInsertImage(new Uint8Array(await file.arrayBuffer()), width, page);
+      const result = await onInsertImage(new Uint8Array(await file.arrayBuffer()), place === "fill" ? 100 : width, page, "square");
       if (result === "ok") toast.success(t(copy.reportImageInserted));
       else if (result === "unsupported") toast.error(t(copy.reportImageUnsupported));
       else toast.error(t(copy.reportImageRefused));
@@ -223,7 +229,7 @@ export function ReportGemini({
       const png = res.data.mime === "image/png" || res.data.mime === "image/jpeg" || res.data.mime === "image/gif"
         ? binary
         : await rasterToPng(binary, res.data.mime);
-      const result = await onInsertImage(png, width, page);
+      const result = await onInsertImage(png, place === "fill" ? 100 : width, page, "square");
       if (result === "ok") toast.success(t(copy.reportImageGenerated));
       else if (result === "unsupported") toast.error(t(copy.reportImageUnsupported));
       else toast.error(t(copy.reportImageRefused));
@@ -325,6 +331,10 @@ export function ReportGemini({
       <fieldset className="report-picture">
         <legend>{t(copy.reportImage)}</legend>
         <p className="muted">{t(copy.reportImageHint)}</p>
+        <div className="segmented" role="radiogroup" aria-label={t(copy.reportImagePlace)}>
+          <button type="button" role="radio" aria-checked={place === "wrap"} className={place === "wrap" ? "is-active" : ""} onClick={() => setPlace("wrap")}>{t(copy.reportImageWrap)}</button>
+          <button type="button" role="radio" aria-checked={place === "fill"} className={place === "fill" ? "is-active" : ""} onClick={() => setPlace("fill")}>{t(copy.reportImageFill)}</button>
+        </div>
         <label className="field-label">
           {t(copy.reportGeminiPage)}
           <select className="field" value={page} onChange={(event) => setPage(Number(event.target.value))}>
@@ -333,10 +343,12 @@ export function ReportGemini({
             ))}
           </select>
         </label>
-        <label className="field-label">
-          {t(copy.reportImageWidth)} ({width}%)
-          <input className="field" type="range" min={20} max={100} step={5} value={width} onChange={(event) => setWidth(Number(event.target.value))} />
-        </label>
+        {place === "wrap" ? (
+          <label className="field-label">
+            {t(copy.reportImageWidth)} ({width}%)
+            <input className="field" type="range" min={20} max={80} step={5} value={width} onChange={(event) => setWidth(Number(event.target.value))} />
+          </label>
+        ) : null}
         <label className="btn btn-sm">
           {t(copy.reportImageInsert)}
           <input type="file" accept="image/png,image/jpeg,image/gif" hidden disabled={busy} onChange={(event) => { void insertPicture(event.target.files?.[0]); event.target.value = ""; }} />
