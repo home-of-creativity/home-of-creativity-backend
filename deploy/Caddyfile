@@ -70,14 +70,6 @@
 
 	redir /dashboard /dashboard/ 308
 
-	@legacyArticle {
-		path /articles/detail /articles/detail/
-		query slug=*
-	}
-	redir @legacyArticle /articles/{http.request.uri.query.slug}/ 301
-	@legacyArticleBare path /articles/detail /articles/detail/
-	redir @legacyArticleBare /articles/ 301
-
 	handle_path /dashboard* {
 		root * /var/www/hoc/dashboard/dist
 		encode zstd gzip
@@ -133,6 +125,15 @@
 			Content-Security-Policy "default-src 'self'; img-src 'self' data: blob: https: https://*.googleapis.com https://*.gstatic.com; media-src 'self' blob: https:; script-src 'self' 'unsafe-inline' https://maps.googleapis.com https://maps.gstatic.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' https://api.hoc.agency https://maps.googleapis.com https://maps.gstatic.com https://*.ingest.de.sentry.io; frame-src 'self' https://www.google.com https://maps.google.com; object-src 'none'; base-uri 'self'"
 			Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
 		}
+
+		# Articles added after the static export have no folder. Send them to the
+		# client page that loads the post from the API. Built slugs still have a file.
+		@missingArticle {
+			path_regexp miss ^/articles/([^/]+)/?$
+			not path /articles/detail /articles/detail/
+			not file {path}/index.html
+		}
+		redir @missingArticle /articles/?slug={re.miss.1} 302
 
 		@static file {
 			try_files {path} {path}/index.html
