@@ -62,10 +62,21 @@ class SocialLandingFeed
         $this->skipCache = false;
         $data = $builder();
         if (! $this->skipCache) {
-            Cache::put($key, $data, 600);
+            Cache::put($key, $data, now()->addHours(6));
         }
 
         return $data;
+    }
+
+    /** Rebuild both landing feeds so the next page view is cached and signed media URLs stay fresh. */
+    public function warm(): void
+    {
+        foreach (['instagram', 'facebook'] as $platform) {
+            Cache::forget($this->cacheKey($platform, 200));
+        }
+
+        $this->instagram(200);
+        $this->facebook(200);
     }
 
     /**

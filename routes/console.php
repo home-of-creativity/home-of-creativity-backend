@@ -12,6 +12,7 @@ Schedule::command('social:publish-due')->everyMinute()->timezone('Asia/Damascus'
 Schedule::command('social:sync-inbox')->everyFifteenMinutes()->withoutOverlapping();
 Schedule::command('social:sync-posts')->everyFifteenMinutes()->withoutOverlapping();
 Schedule::command('social:sync-accounts')->everyFifteenMinutes()->withoutOverlapping();
+Schedule::command('social:warm-feeds')->everyThreeHours()->timezone('Asia/Damascus')->withoutOverlapping();
 Schedule::command('integration:process-outbox')->everyMinute()->withoutOverlapping();
 // --limit=500 keeps the whole client table hydrating from Odoo every run
 // (not a rotating slice) so a stage/tag/contact edit made directly in Odoo
