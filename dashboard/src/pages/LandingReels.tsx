@@ -121,7 +121,13 @@ export function LandingReels({ locale, t }: { locale: Locale; t: (c: { ar: strin
                       {item.poster_url ? (
                         <img src={item.poster_url} alt="" className="logo-row-thumb project-thumb" />
                       ) : item.video_url ? (
-                        <video src={item.video_url} className="logo-row-thumb project-thumb" muted playsInline preload="none" />
+                        <video
+                          src={`${item.video_url}#t=0.1`}
+                          className="logo-row-thumb project-thumb"
+                          muted
+                          playsInline
+                          preload="metadata"
+                        />
                       ) : null}
                       <span>{locale === "ar" ? item.title_ar : item.title_en}</span>
                     </div>

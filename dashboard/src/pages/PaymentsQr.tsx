@@ -115,6 +115,11 @@ export function PaymentsQr({ locale, t }: { locale?: Locale; t: (c: { ar: string
         <section className="card stack qr-panel">
           <h2 className="form-title">{t(copy.qrPreview)}</h2>
           <p className="muted">{t(copy.shamCashQrHelp)}</p>
+          {preview ? (
+            <img className="qr-preview" src={preview} alt={t(copy.shamCashQr)} />
+          ) : (
+            <p className="muted">{t(copy.qrMissing)}</p>
+          )}
           {error ? <p className="error">{error}</p> : null}
           <FileDropzone
             accept={{ "image/png": [], "image/jpeg": [], "image/webp": [] }}

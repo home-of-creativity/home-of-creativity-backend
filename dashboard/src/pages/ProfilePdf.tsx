@@ -15,6 +15,7 @@ function previewSrc(pdf: ProfilePdfPayload | null) {
 
 export function ProfilePdf({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
   const [pdf, setPdf] = useState<ProfilePdfPayload | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -26,6 +27,32 @@ export function ProfilePdf({ locale, t }: { locale: Locale; t: (c: { ar: string;
   useEffect(() => {
     refresh().catch((err) => setError(err instanceof Error ? err.message : t(copy.saveFailed)));
   }, [t]);
+
+  useEffect(() => {
+    if (!pdf?.url) {
+      setPreviewUrl(null);
+      return;
+    }
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    fetch(pdf.url)
+      .then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.blob();
+      })
+      .then((blob) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setPreviewUrl(objectUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setPreviewUrl(null);
+      });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [pdf?.url, pdf?.updated_at]);
 
   async function upload(files: File[]) {
     const file = files[0];
@@ -65,8 +92,8 @@ export function ProfilePdf({ locale, t }: { locale: Locale; t: (c: { ar: string;
       <div className="pdf-studio">
         <section className="card stack pdf-preview-panel">
           <h2 className="form-title">{t(copy.profilePdfPreview)}</h2>
-          {src ? (
-            <iframe className="pdf-preview" title={pdf?.name ?? t(copy.profilePdfTitle)} src={src} />
+          {previewUrl ? (
+            <iframe className="pdf-preview" title={pdf?.name ?? t(copy.profilePdfTitle)} src={previewUrl} />
           ) : (
             <p className="muted">{t(copy.profilePdfMissing)}</p>
           )}
