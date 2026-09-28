@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\UpdateLegalPageRequest;
 use App\Http\Resources\LegalPageResource;
 use App\Models\LegalPage;
+use App\Support\LegalDefaults;
 use App\Support\LegalHtml;
 
 class LegalPageController extends Controller
@@ -21,8 +22,12 @@ class LegalPageController extends Controller
     {
         abort_unless(in_array($slug, LegalPage::SLUGS, true), 404);
 
-        $page = LegalPage::query()->where('slug', $slug)->first()
-            ?? new LegalPage(LegalPage::scaffold($slug));
+        $page = LegalPage::query()->where('slug', $slug)->first();
+
+        if (! $page instanceof LegalPage || $page->isPlaceholderOnly()) {
+            $defaults = collect(LegalDefaults::pages())->firstWhere('slug', $slug);
+            $page = new LegalPage($defaults ?? LegalPage::scaffold($slug));
+        }
 
         return LegalPageResource::make($page)
             ->additional(['message' => 'ok']);

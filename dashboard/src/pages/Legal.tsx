@@ -62,6 +62,7 @@ export function Legal({
       .then((res) => {
         if (!active) return;
         const page = res.data;
+        if (page.slug !== slug) return;
         reset({
           title_en: page.title_en,
           title_ar: page.title_ar,
@@ -140,7 +141,7 @@ export function Legal({
               value={field.value}
               onChange={field.onChange}
               dir="ltr"
-              placeholder="<h2>Privacy policy</h2>"
+              placeholder={isTerms ? "<h2>The agreement</h2>" : "<h2>Who we are</h2>"}
               hint={t(copy.articleBodyHint)}
               error={errors.body_en?.message}
               toolbarLabel={t(copy.htmlEditorToolbar)}
@@ -156,7 +157,7 @@ export function Legal({
               value={field.value}
               onChange={field.onChange}
               dir="rtl"
-              placeholder="<h2>سياسة الخصوصية</h2>"
+              placeholder={isTerms ? "<h2>الاتفاق</h2>" : "<h2>من نحن</h2>"}
               hint={t(copy.articleBodyHint)}
               error={errors.body_ar?.message}
               toolbarLabel={t(copy.htmlEditorToolbar)}

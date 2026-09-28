@@ -218,14 +218,14 @@ class ServiceRequest extends Model
     public function expectedDue(): float
     {
         $total = (float) ($this->amount_total ?? $this->quotation_amount ?? 0);
-        $paid = (float) ($this->amount_paid ?? 0);
-        $remaining = $total > 0 ? max(round($total - $paid, 2), 0) : 0;
-
-        if ($paid > 0.009 || $this->paid_at) {
-            return $remaining;
-        }
-
         if ($this->requires_full_payment || $this->payment_plan === 'full') {
+            $paid = (float) ($this->amount_paid ?? 0);
+            $remaining = $total > 0 ? max(round($total - $paid, 2), 0) : 0;
+
+            if ($paid > 0.009 || $this->paid_at) {
+                return $remaining;
+            }
+
             return round($total, 2);
         }
 

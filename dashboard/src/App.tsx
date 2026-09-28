@@ -464,8 +464,8 @@ export function App() {
           <Route path="/contact/:id/edit" element={<ContactChannelForm locale={locale} t={t} />} />
           <Route path="/legal" element={<Navigate to="/privacy" replace />} />
           <Route path="/profile-pdf" element={<ProfilePdf locale={locale} t={t} />} />
-          <Route path="/privacy" element={<Legal locale={locale} t={t} slug="privacy" />} />
-          <Route path="/terms" element={<Legal locale={locale} t={t} slug="terms" />} />
+          <Route path="/privacy" element={<Legal key="privacy" locale={locale} t={t} slug="privacy" />} />
+          <Route path="/terms" element={<Legal key="terms" locale={locale} t={t} slug="terms" />} />
           <Route path="/social" element={<SocialWorkspace locale={locale} t={t} />}>
             <Route index element={<SocialHome locale={locale} t={t} />} />
             <Route path="links" element={<SocialLinks locale={locale} t={t} />} />

@@ -61,19 +61,36 @@ class LegalPage extends Model
 
     public function hasPublishedContent(): bool
     {
+        return $this->plainText() !== '';
+    }
+
+    /** Editor placeholders that were saved as the whole page, not a real policy or terms body. */
+    public function isPlaceholderOnly(): bool
+    {
+        $text = $this->plainText();
+
+        return $text === '' || in_array($text, [
+            'سياسة الخصوصية',
+            'Privacy policy',
+            'سياسة الخصوصية Privacy policy',
+            'Privacy policy سياسة الخصوصية',
+        ], true);
+    }
+
+    private function plainText(): string
+    {
+        $text = '';
+
         foreach ($this->sections ?? [] as $section) {
             if (! is_array($section)) {
                 continue;
             }
 
-            foreach (['html_ar', 'html_en'] as $key) {
-                $html = trim(strip_tags((string) ($section[$key] ?? '')));
-                if ($html !== '') {
-                    return true;
-                }
+            foreach (['heading_ar', 'heading_en', 'html_ar', 'html_en'] as $key) {
+                $text .= ' '.trim(strip_tags((string) ($section[$key] ?? '')));
             }
         }
 
-        return false;
+        return trim(preg_replace('/\s+/u', ' ', $text) ?? '');
     }
 }

@@ -23,9 +23,9 @@ Seeded: `admin@example.com` / `password` (admin), `test@example.com` / `password
 | GET | `/pricing` `/contact` `/reels` |
 | POST | `/contact/messages` (throttle 8/min; support interest → `support@`, else `sales@`, always CC `info@`; `contact` SMTP mailer) |
 | GET | `/articles` `/articles/{slug}` (published only; HTML `body_en`/`body_ar`) |
-| GET | `/pricing` `/contact` `/reels` `/legal` `/legal/{slug}` `/profile-pdf` `/profile-pdf/file` |
+| GET | `/legal` `/legal/{slug}` — privacy and terms. A missing or placeholder-only row is filled from `LegalDefaults` (migration `2026_09_28_140000` inserts those rows when the slug is absent). `/profile-pdf` `/profile-pdf/file` |
 | GET | `/portfolio/clients` `/portfolio/projects` `/portfolio/projects/{id}` |
-| GET | `/social/instagram-feed` `/social/facebook-feed` |
+| GET | `/social/instagram-feed` `/social/facebook-feed` — cached 6 hours; `social:warm-feeds` every 3 hours refreshes signed media URLs |
 
 ## Client (`auth:sanctum`)
 

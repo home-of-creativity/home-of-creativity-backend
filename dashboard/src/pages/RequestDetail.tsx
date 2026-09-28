@@ -6,6 +6,7 @@ import { api, type ServiceRequest } from "../api";
 import { copy, sources, statuses, type Locale } from "../i18n";
 import { useLive, useLiveStamp } from "../live";
 import { ShamCashQrThumb } from "./PaymentsQr";
+import { formatWhen } from "./social/helpers";
 
 type QuotationLine = {
   id: string;
@@ -13,6 +14,25 @@ type QuotationLine = {
   amount: string;
   units: string;
   notes: string;
+};
+
+function planText(value: string | number | null | undefined) {
+  const text = String(value ?? "").trim();
+  return text === "" || text === "." ? "" : text;
+}
+
+const departments: Record<string, { ar: string; en: string }> = {
+  programming: { ar: "برمجة", en: "Programming" },
+  photography: { ar: "تصوير", en: "Photography" },
+  sales: { ar: "مبيعات", en: "Sales" },
+  design: { ar: "تصميم", en: "Design" },
+};
+
+const geminiLabels: Record<string, { ar: string; en: string }> = {
+  pending: { ar: "قيد الانتظار", en: "Pending" },
+  running: { ar: "جارٍ", en: "Running" },
+  done: { ar: "اكتمل", en: "Done" },
+  failed: { ar: "فشل", en: "Failed" },
 };
 
 function createQuotationLine(): QuotationLine {
@@ -25,7 +45,7 @@ function createQuotationLine(): QuotationLine {
   };
 }
 
-export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
+export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
   const { id } = useParams();
   const [item, setItem] = useState<ServiceRequest | null>(null);
   const [loading, setLoading] = useState(true);
@@ -310,7 +330,7 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
           </div>
           <div>
             <dt>{t(copy.geminiStatus)}</dt>
-            <dd>{item.gemini_status ?? "—"}</dd>
+            <dd>{item.gemini_status ? t(geminiLabels[item.gemini_status] ?? { ar: item.gemini_status, en: item.gemini_status }) : "—"}</dd>
           </div>
           <div>
             <dt>{t(copy.telegram)}</dt>
@@ -442,7 +462,7 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
                         <span className={`status status-${delivery.status}`}>{delivery.status_label}</span>
                         {" "}
                         <strong>{delivery.name || delivery.drive_file_id}</strong>
-                        {delivery.sent_at ? ` · ${delivery.sent_at}` : ""}
+                        {delivery.sent_at ? ` · ${formatWhen(delivery.sent_at, locale)}` : ""}
                         {delivery.fail_reason ? ` — ${delivery.fail_reason}` : ""}
                       </li>
                     ))}
@@ -456,15 +476,23 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
               <div className="briefs">
                 <h3>{t(copy.workPlan)}</h3>
                 <ul>
-                  {item.work_plan.operations.map((operation, index) => (
-                    <li key={`${operation.department}-${index}`}>
-                      <strong>{operation.department}</strong>
-                      {operation.employee_name ? ` · ${operation.employee_name}` : ""}
-                      {operation.priority_label ? ` · ${operation.priority_label}` : ""}
-                      {operation.hours ? ` · ${operation.hours} ${t(copy.workPlanHours)}` : ""}
-                      {operation.brief ? ` — ${operation.brief}` : ""}
-                    </li>
-                  ))}
+                  {item.work_plan.operations.map((operation, index) => {
+                    const department = departments[operation.department]
+                      ? t(departments[operation.department])
+                      : planText(operation.department);
+                    const details = [
+                      planText(operation.employee_name),
+                      planText(operation.priority_label),
+                      operation.hours ? `${operation.hours} ${t(copy.workPlanHours)}` : "",
+                      planText(operation.brief),
+                    ].filter(Boolean);
+                    return (
+                      <li key={`${operation.department}-${index}`}>
+                        <strong>{department}</strong>
+                        {details.length ? ` · ${details.join(" · ")}` : ""}
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
             ) : null}
@@ -475,7 +503,7 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
                   {item.quotations.map((quote) => (
                     <li key={quote.id}>
                       v{quote.version} · {quote.amount} USD
-                      {quote.sent_at ? ` · ${quote.sent_at}` : ""}
+                      {quote.sent_at ? ` · ${formatWhen(quote.sent_at, locale)}` : ""}
                     </li>
                   ))}
                 </ul>
@@ -509,12 +537,11 @@ export function RequestDetail({ t }: { locale: Locale; t: (c: { ar: string; en: 
                 <ul>
                   {item.clickup_tasks.map((task) => (
                     <li key={task.integration_key}>
-                      <strong>{task.task_type}</strong>
-                      {task.clickup_task_id ? <span dir="ltr"> · {task.clickup_task_id}</span> : null}
+                      <strong>{planText(task.task_type) || t(copy.clickupTasks)}</strong>
                       {task.clickup_url ? (
                         <a href={task.clickup_url} target="_blank" rel="noreferrer">
                           {" "}
-                          · Open
+                          · {t(copy.clickupTasks)}
                         </a>
                       ) : null}
                     </li>

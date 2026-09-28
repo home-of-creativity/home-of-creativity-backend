@@ -75,7 +75,7 @@ Route::get('articles', [ArticleController::class, 'index']);
 Route::get('articles/{article:slug}', [ArticleController::class, 'show']);
 
 Route::get('legal', [LegalPageController::class, 'index']);
-Route::get('legal/{legal_page:slug}', [LegalPageController::class, 'show']);
+Route::get('legal/{slug}', [LegalPageController::class, 'show'])->whereIn('slug', LegalPage::SLUGS);
 Route::get('profile-pdf', [ProfilePdfController::class, 'show']);
 Route::get('profile-pdf/file', [ProfilePdfController::class, 'file']);
 

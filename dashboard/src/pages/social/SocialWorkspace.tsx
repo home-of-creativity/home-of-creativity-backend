@@ -148,9 +148,7 @@ export function SocialWorkspace({ locale, t }: { locale: Locale; t: (c: { ar: st
       selectPage,
       pickerOpen,
       openPicker: () => setPickerOpen(true),
-      closePicker: () => {
-        if (selectedPage) setPickerOpen(false);
-      },
+      closePicker: () => setPickerOpen(false),
       loading,
       refreshAccounts,
       meta,
@@ -167,11 +165,9 @@ export function SocialWorkspace({ locale, t }: { locale: Locale; t: (c: { ar: st
           locale={locale}
           pages={pages}
           selectedKey={selectedPage?.key ?? null}
-          required={!selectedPage}
+          required={false}
           onSelect={selectPage}
-          onClose={() => {
-            if (selectedPage) setPickerOpen(false);
-          }}
+          onClose={() => setPickerOpen(false)}
         />
       ) : null}
     </SocialWorkspaceContext.Provider>

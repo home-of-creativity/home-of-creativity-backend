@@ -90,15 +90,60 @@ class LegalPageTest extends TestCase
         $this->getJson('/api/legal/cookies')->assertNotFound();
     }
 
-    public function test_admin_show_scaffolds_missing_page(): void
+    public function test_missing_pages_still_return_builtin_copy(): void
+    {
+        $this->getJson('/api/legal')
+            ->assertOk()
+            ->assertJsonPath('data.0.slug', 'privacy')
+            ->assertJsonPath('data.1.slug', 'terms');
+
+        $this->getJson('/api/legal/terms')
+            ->assertOk()
+            ->assertJsonPath('data.title_en', 'Terms of Use')
+            ->assertJsonPath('data.sections.0.id', 'agreement');
+
+        $this->getJson('/api/legal/privacy')
+            ->assertOk()
+            ->assertJsonPath('data.sections.0.id', 'about');
+    }
+
+    public function test_admin_show_uses_builtin_copy_when_missing(): void
     {
         Sanctum::actingAs(User::factory()->create(['is_admin' => true]));
+
+        $this->getJson('/api/admin/legal/terms')
+            ->assertOk()
+            ->assertJsonPath('data.slug', 'terms')
+            ->assertJsonPath('data.title_en', 'Terms of Use')
+            ->assertJsonPath('data.sections.0.id', 'agreement');
 
         $this->getJson('/api/admin/legal/privacy')
             ->assertOk()
             ->assertJsonPath('data.slug', 'privacy')
-            ->assertJsonPath('data.sections.0.id', 'content')
-            ->assertJsonPath('data.sections.0.html_en', '');
+            ->assertJsonPath('data.sections.0.heading_en', 'Who we are');
+    }
+
+    public function test_saving_terms_does_not_change_privacy(): void
+    {
+        LegalPage::factory()->create();
+        Sanctum::actingAs(User::factory()->create(['is_admin' => true]));
+
+        $this->putJson('/api/admin/legal/terms', [
+            'title_ar' => 'شروط الاستخدام',
+            'title_en' => 'Terms of Use',
+            'sections' => [[
+                'id' => 'agreement',
+                'heading_ar' => 'الاتفاق',
+                'heading_en' => 'The agreement',
+                'html_ar' => '<p>شروط</p>',
+                'html_en' => '<p>Terms body</p>',
+            ]],
+        ])->assertOk()->assertJsonPath('data.slug', 'terms');
+
+        $this->assertDatabaseHas('legal_pages', ['slug' => 'privacy']);
+        $privacy = LegalPage::query()->where('slug', 'privacy')->first();
+        $this->assertNotNull($privacy);
+        $this->assertStringNotContainsString('Terms body', json_encode($privacy->sections));
     }
 
     public function test_admin_can_create_legal_page_without_seeder(): void
