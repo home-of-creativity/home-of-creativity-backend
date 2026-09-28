@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Admin;
 
 use App\Actions\AssignClientDriveFolder;
 use App\Actions\DeleteClient;
+use App\Actions\PushClientLeadToOdoo;
+use App\Actions\PushClientToOdoo;
 use App\Actions\StoreClient;
 use App\Actions\UpdateClient;
 use App\Http\Controllers\Controller;
@@ -18,8 +20,13 @@ use Illuminate\Http\JsonResponse;
 
 class ClientController extends Controller
 {
-    public function index(PaginatedIndexRequest $request)
-    {
+    public function index(
+        PaginatedIndexRequest $request,
+        PushClientToOdoo $pushClient,
+        PushClientLeadToOdoo $pushLead,
+    ) {
+        $this->pushPendingTelegramLeads($pushClient, $pushLead);
+
         $search = trim((string) $request->query('search', ''));
 
         $paginator = Client::query()
@@ -37,6 +44,29 @@ class ClientController extends Controller
             ->paginate($request->perPage());
 
         return ClientResource::collection($paginator)->additional(['message' => 'ok']);
+    }
+
+    /**
+     * Complete Telegram clients stay hidden until name, phone, and company
+     * exist. Once they are visible, opening the list creates the missing
+     * تلغرام opportunity. Capped so a full table is not pushed on every page view.
+     */
+    private function pushPendingTelegramLeads(PushClientToOdoo $pushClient, PushClientLeadToOdoo $pushLead): void
+    {
+        Client::query()
+            ->visibleOnDashboard()
+            ->whereNotNull('telegram_user_id')
+            ->where('telegram_user_id', '!=', '')
+            ->where(function ($query): void {
+                $query->whereNull('odoo_lead_id')->orWhere('odoo_lead_id', '');
+            })
+            ->orderBy('id')
+            ->limit(3)
+            ->get()
+            ->each(function (Client $client) use ($pushClient, $pushLead): void {
+                $client = $pushClient->handle($client);
+                $pushLead->handle($client, false, false);
+            });
     }
 
     public function store(StoreClientRequest $request, StoreClient $storeClient, OdooClient $odoo): JsonResponse
