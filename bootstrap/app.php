@@ -4,6 +4,7 @@ use App\Http\Middleware\EnsureAbility;
 use App\Http\Middleware\EnsureAdmin;
 use App\Http\Middleware\EnsureClientTelegramEnabled;
 use App\Http\Middleware\EnsureCrudAbility;
+use App\Http\Middleware\StripPoweredByHeader;
 use App\Http\Middleware\VerifySharedSecret;
 use App\Http\Middleware\VerifyWhatsAppSignature;
 use Illuminate\Foundation\Application;
@@ -19,6 +20,7 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->trustProxies(at: '*');
+        $middleware->append(StripPoweredByHeader::class);
         $middleware->alias([
             'shared.secret' => VerifySharedSecret::class,
             'whatsapp.signature' => VerifyWhatsAppSignature::class,
