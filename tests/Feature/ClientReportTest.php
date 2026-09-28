@@ -72,6 +72,27 @@ class ClientReportTest extends TestCase
         $this->get("/api/admin/reports/{$id}/pdf")->assertOk()->assertHeader('Content-Type', 'application/pdf');
     }
 
+    public function test_saving_a_new_word_file_with_the_same_text_still_counts_as_an_edit(): void
+    {
+        $client = Client::factory()->create();
+        $id = $this->post("/api/admin/clients/{$client->id}/reports", [
+            'title' => 'تقرير',
+            'body' => 'نص',
+            'document' => $this->docx(),
+        ])->assertCreated()->json('data.id');
+        $first = $this->getJson("/api/admin/reports/{$id}")->json('data.updated_at');
+
+        $this->travel(5)->seconds();
+        $this->post("/api/admin/reports/{$id}", [
+            'title' => 'تقرير',
+            'body' => 'نص',
+            'document' => UploadedFile::fake()->createWithContent('report.docx', 'PK bold heading now'),
+        ])->assertOk();
+
+        $this->assertNotSame($first, $this->getJson("/api/admin/reports/{$id}")->json('data.updated_at'));
+        $this->assertSame('PK bold heading now', Storage::disk('local')->get("reports/{$id}/report.docx"));
+    }
+
     public function test_a_new_report_needs_its_word_file(): void
     {
         $client = Client::factory()->create();

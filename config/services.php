@@ -99,6 +99,11 @@ return [
         'credentials_json' => env('GOOGLE_CREDENTIALS_JSON', env('GOOGLE_SERVICE_ACCOUNT_JSON', env('GOOGLE_APPLICATION_CREDENTIALS'))),
         'drive_parent_folder_id' => env('GOOGLE_DRIVE_PARENT_FOLDER_ID'),
         'drive_watch_token' => env('GOOGLE_DRIVE_WATCH_TOKEN'),
+        // Optional: the dashboard (Reports › Drive storage) stores the OAuth client when these are empty.
+        'drive_oauth_client_id' => env('GOOGLE_DRIVE_OAUTH_CLIENT_ID'),
+        'drive_oauth_client_secret' => env('GOOGLE_DRIVE_OAUTH_CLIENT_SECRET'),
+        'drive_oauth_redirect_uri' => env('GOOGLE_DRIVE_OAUTH_REDIRECT_URI'),
+        'drive_dashboard_url' => env('GOOGLE_DRIVE_DASHBOARD_URL'),
         'calendar_id' => env('GOOGLE_CALENDAR_ID', 'primary'),
         'search_site_url' => env('GOOGLE_SEARCH_SITE_URL', 'https://hoc.agency/'),
         'search_sitemap_url' => env('GOOGLE_SEARCH_SITEMAP_URL', 'https://hoc.agency/sitemap.xml'),

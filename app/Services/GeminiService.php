@@ -676,6 +676,16 @@ PROMPT;
             return $configured;
         }
 
+        foreach ([
+            storage_path('app/private/gemini-sa.json'),
+            storage_path('app/private/google-sa.json'),
+            base_path('storage/app/private/google-sa.json'),
+        ] as $path) {
+            if (is_readable($path)) {
+                return $path;
+            }
+        }
+
         $appData = getenv('APPDATA');
         if (is_string($appData) && $appData !== '') {
             $adc = $appData.DIRECTORY_SEPARATOR.'gcloud'.DIRECTORY_SEPARATOR.'application_default_credentials.json';

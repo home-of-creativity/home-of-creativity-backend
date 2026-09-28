@@ -1,5 +1,5 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
   ArrowRight,
@@ -19,10 +19,12 @@ import { toast } from "sonner";
 import { api, type Client, type ClientReport, type ClientReportAttachment } from "../api";
 import { ConfirmAction } from "../components/ConfirmAction";
 import { DriveFolderPicker } from "../components/DriveFolderPicker";
+import { DriveStorageCard } from "../components/DriveStorageCard";
 import { FileDropzone } from "../components/FileDropzone";
 import { LoadingLottie } from "../components/LoadingLottie";
 import { ReportGemini } from "../components/ReportGemini";
 import { addParagraphFontStyle, buildDocxFromParagraphs, buildReportDocx, legacyHtmlToParagraphs, type ReportTemplateId } from "../components/report/docxTemplate";
+import { clearReportDraft, readReportDraft, writeReportDraft } from "../components/report/draftStore";
 import { loadReportFonts, rememberReportFont, type StoredReportFont } from "../components/report/fontStore";
 import type { ReportDocHandle } from "../components/report/ReportDocEditor";
 import { copy, type Locale } from "../i18n";
@@ -33,6 +35,20 @@ const ReportDocEditor = lazy(() => import("../components/report/ReportDocEditor"
 type Phase = "loading" | "template" | "editing" | "error";
 type Busy = null | "saving" | "rendering" | "publishing";
 type PanelTab = "gemini" | "files" | "info";
+/**
+ * auto: the timer after an edit; skipped when the server is current, retried when it fails.
+ * leave: leaving the editor; skipped when the server is current.
+ * manual: the Save button or Ctrl+S. publish: save, render the PDF, and upload both to Drive.
+ */
+type SaveMode = "auto" | "leave" | "manual" | "publish";
+/** The document read at one moment, before an await lets the editor change or unmount. */
+type Capture = { docx: Promise<Uint8Array>; text: string };
+
+const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+/** Autosave this long after the last edit, and at least this often while typing. */
+const AUTOSAVE_DELAY_MS = 1500;
+const AUTOSAVE_MAX_WAIT_MS = 15000;
+const AUTOSAVE_RETRY_MS = 8000;
 
 const TEMPLATES: Array<{ id: ReportTemplateId; name: { ar: string; en: string }; hint: { ar: string; en: string } }> = [
   { id: "social", name: copy.reportTemplateSocial, hint: copy.reportTemplateSocialHint },
@@ -56,11 +72,9 @@ function fill(template: string, values: Record<string, string | number>) {
 
 export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
   const navigate = useNavigate();
-  const location = useLocation();
   const params = useParams();
   const clientId = params.clientId ? Number(params.clientId) : null;
   const reportId = params.reportId ? Number(params.reportId) : null;
-  const handed = (location.state as { bytes?: Uint8Array } | null)?.bytes;
 
   const editor = useRef<ReportDocHandle>(null);
   const [phase, setPhase] = useState<Phase>("loading");
@@ -69,6 +83,8 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
   const [bytes, setBytes] = useState<Uint8Array | null>(null);
   const [title, setTitle] = useState("");
   const [dirty, setDirty] = useState(false);
+  const [autoSaving, setAutoSaving] = useState(false);
+  const [autoFailed, setAutoFailed] = useState(false);
   const [legacy, setLegacy] = useState(false);
   const [busy, setBusy] = useState<Busy>(null);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
@@ -81,7 +97,149 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
   const ownerId = report?.client_id ?? clientId;
   const BackIcon = locale === "ar" ? ArrowRight : ArrowLeft;
 
+  // Autosave runs from timers and from the leave-page flush, so it reads the newest values here.
+  const latest = useRef({ report, title, files, removeIds, ownerId, t });
+  /** Bumps on every edit; `savedSeq` is the newest edit the server has. */
+  const changeSeq = useRef(0);
+  const savedSeq = useRef(0);
+  const timer = useRef<number | null>(null);
+  const pendingSince = useRef<number | null>(null);
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
+  const loadedId = useRef<number | null>(null);
+  const mounted = useRef(true);
+  const failureShown = useRef(false);
+
+  /** Save to the server; one save at a time, in order. Resolves true when the server has the document. */
+  function save(mode: SaveMode, captured?: Capture): Promise<boolean> {
+    const run = queue.current.then(() => upload(mode, captured));
+    queue.current = run.catch(() => undefined);
+    return run;
+  }
+  const saveRef = useRef(save);
+
+  useLayoutEffect(() => {
+    latest.current = { report, title, files, removeIds, ownerId, t };
+    saveRef.current = save;
+  });
+
+  function schedule(delay: number) {
+    if (timer.current !== null) window.clearTimeout(timer.current);
+    const now = Date.now();
+    pendingSince.current ??= now;
+    const wait = Math.min(delay, Math.max(0, pendingSince.current + AUTOSAVE_MAX_WAIT_MS - now));
+    timer.current = window.setTimeout(() => {
+      timer.current = null;
+      void saveRef.current("auto");
+    }, wait);
+  }
+
+  function markChanged() {
+    changeSeq.current += 1;
+    setDirty(true);
+    schedule(AUTOSAVE_DELAY_MS);
+  }
+
+  async function upload(mode: SaveMode, captured?: Capture): Promise<boolean> {
+    const { report: current, title: name, files: added, removeIds: removed, ownerId: ownerKey, t: tr } = latest.current;
+    const background = mode === "auto" || mode === "leave";
+    const seq = changeSeq.current;
+    if (background && seq === savedSeq.current) return true;
+
+    const handle = editor.current;
+    let snapshot = captured;
+    if (!snapshot) {
+      // Never save before the document is on the page: that would store an empty file.
+      if (!handle?.ready()) {
+        if (mode === "auto" && mounted.current) schedule(AUTOSAVE_DELAY_MS);
+        if (mode === "manual" || mode === "publish") toast.error(tr(copy.loading));
+        return false;
+      }
+      snapshot = { docx: handle.save(), text: handle.text() };
+    }
+    if (!ownerKey) return false;
+    if (timer.current !== null) {
+      window.clearTimeout(timer.current);
+      timer.current = null;
+    }
+    pendingSince.current = null;
+    if (background) setAutoSaving(true);
+    else setBusy("saving");
+
+    try {
+      const docx = await snapshot.docx;
+      if (current) {
+        void writeReportDraft({ reportId: current.id, bytes: docx, title: name, base: current.updated_at ?? null, savedAt: Date.now() });
+      }
+      const form = new FormData();
+      form.set("title", name.trim() || tr(copy.reportTemplateBlank));
+      form.set("body", snapshot.text.slice(0, 190000));
+      form.set("document", new File([docx as BlobPart], "report.docx", { type: DOCX_MIME }));
+      if (mode === "publish" && handle) {
+        setBusy("rendering");
+        const pdf = await handle.pdf((done, total) => setProgress({ done, total }));
+        form.set("pdf", new File([pdf as BlobPart], "report.pdf", { type: "application/pdf" }));
+        form.set("publish", "1");
+        setBusy("publishing");
+      }
+      added.forEach((file) => form.append("attachments[]", file));
+      removed.forEach((id) => form.append("remove_attachment_ids[]", String(id)));
+
+      const res = await api.saveClientReport(ownerKey, form, current?.id);
+      savedSeq.current = Math.max(savedSeq.current, seq);
+      latest.current = { ...latest.current, report: res.data };
+      failureShown.current = false;
+      setReport(res.data);
+      setExisting(res.data.attachments ?? []);
+      setFiles((list) => list.filter((file) => !added.includes(file)));
+      setRemoveIds((list) => list.filter((id) => !removed.includes(id)));
+      setLegacy(false);
+      setAutoFailed(false);
+      if (changeSeq.current === seq) {
+        setDirty(false);
+        void clearReportDraft(res.data.id);
+      }
+      if (!current) {
+        loadedId.current = res.data.id;
+        // Point the address at the saved report without remounting this page (pages are keyed
+        // by path), so a reload or Back opens it instead of a new blank report.
+        if (mounted.current) {
+          const path = window.location.pathname.replace(/\/reports\/clients\/\d+\/new\/?$/, `/reports/${res.data.id}/edit`);
+          window.history.replaceState(window.history.state, "", path);
+        }
+      }
+      if (mode === "publish") {
+        if (res.drive_error) {
+          const needsStorage = /Drive storage/i.test(res.drive_error);
+          toast.warning(fill(tr(copy.reportDriveFailed), { message: needsStorage ? tr(copy.driveStorageNeeded) : res.drive_error }));
+          if (needsStorage && mounted.current) setPanel("info");
+        } else {
+          toast.success(tr(copy.reportPublishedToast));
+        }
+      } else if (mode === "manual") {
+        toast.success(tr(copy.saveSuccess));
+      }
+      return true;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : tr(copy.saveFailed);
+      if (mode === "auto") {
+        setAutoFailed(true);
+        if (!failureShown.current) toast.error(message);
+        failureShown.current = true;
+        if (mounted.current) schedule(AUTOSAVE_RETRY_MS);
+      } else {
+        toast.error(message);
+      }
+      return false;
+    } finally {
+      if (background) setAutoSaving(false);
+      else setBusy(null);
+      setProgress({ done: 0, total: 0 });
+    }
+  }
+
   useEffect(() => {
+    // After the first save of a new report this page keeps editing it; nothing to reload.
+    if (reportId !== null && loadedId.current === reportId) return;
     let cancelled = false;
     async function load() {
       try {
@@ -96,17 +254,24 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
           return;
         }
         const res = await api.clientReport(reportId);
-        const [owner, document] = await Promise.all([
+        const [owner, document, draft] = await Promise.all([
           api.clientReports(res.data.client_id).then((list) => list.client),
-          handed ? Promise.resolve(handed) : res.data.has_document ? api.reportFile(reportId, "document") : Promise.resolve(null),
+          res.data.has_document ? api.reportFile(reportId, "document") : Promise.resolve(null),
+          readReportDraft(reportId),
         ]);
         if (cancelled) return;
+        // A copy from this browser that never reached the server wins while the server has not
+        // been saved since that copy was made.
+        const restore = draft !== null && draft.base === (res.data.updated_at ?? null);
+        if (draft && !restore) void clearReportDraft(reportId);
+        loadedId.current = reportId;
         setReport(res.data);
         setClient(owner);
-        setTitle(res.data.title);
+        setTitle(restore ? draft.title : res.data.title);
         setExisting(res.data.attachments ?? []);
-        if (document) {
-          setBytes(fonts.reduce((file, font) => addParagraphFontStyle(file, font.family), document));
+        const source = restore ? draft.bytes : document;
+        if (source) {
+          setBytes(fonts.reduce((file, font) => addParagraphFontStyle(file, font.family), source));
         } else {
           // Saved before reports were Word files: start a document from its text.
           setBytes(buildDocxFromParagraphs(
@@ -114,9 +279,10 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
             legacyHtmlToParagraphs(res.data.body ?? ""),
           ));
           setLegacy(true);
-          setDirty(true);
         }
         setPhase("editing");
+        if (restore) toast.info(t(copy.reportRecovered));
+        if (restore || !source) markChanged();
       } catch {
         if (!cancelled) setPhase("error");
       }
@@ -125,24 +291,54 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
     return () => {
       cancelled = true;
     };
-    // `handed` is read once, when the page opens.
+    // Loads when the address names another report; `t` and `markChanged` are read once here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId, reportId]);
 
+  // Leaving the editor (sidebar, command palette): send what the server does not have yet.
+  // This runs before the editor below unmounts, so the document can still be read here.
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      if (timer.current !== null) window.clearTimeout(timer.current);
+      const handle = editor.current;
+      if (!handle || changeSeq.current === savedSeq.current || !handle.ready()) return;
+      try {
+        const docx = handle.save();
+        // It may reject before its turn in the queue; the upload reports that failure.
+        docx.catch(() => undefined);
+        void saveRef.current("leave", { docx, text: handle.text() });
+      } catch {
+        // The local draft and the leave warning cover this case.
+      }
+    };
+  }, []);
+
+  // Switching tab or window saves right away instead of waiting for the timer.
   useEffect(() => {
-    if (!dirty) return;
+    const onHide = () => {
+      if (document.visibilityState === "hidden" && changeSeq.current !== savedSeq.current) void saveRef.current("auto");
+    };
+    document.addEventListener("visibilitychange", onHide);
+    return () => document.removeEventListener("visibilitychange", onHide);
+  }, []);
+
+  useEffect(() => {
+    if (!dirty && !autoSaving) return;
     const warn = (event: BeforeUnloadEvent) => {
       event.preventDefault();
     };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [dirty]);
+  }, [dirty, autoSaving]);
 
   function start(id: ReportTemplateId) {
     const company = client?.company_name || client?.name || "";
     const name = t(TEMPLATES.find((item) => item.id === id)?.name ?? copy.reportTemplateBlank);
     const docTitle = company ? `${name} — ${company}` : name;
     setTitle(docTitle);
+    // Stored on the first edit, so an untouched template does not create a report.
     setBytes(buildReportDocx(id, {
       title: docTitle,
       header: company ? `${company} · دار الإبداع` : "دار الإبداع",
@@ -150,7 +346,6 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
       client: company,
       date: new Date().toLocaleDateString("ar-SA-u-nu-latn", { year: "numeric", month: "long", day: "numeric" }),
     }));
-    setDirty(true);
     setPhase("editing");
   }
 
@@ -158,57 +353,28 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
     if (!file) return;
     setBytes(new Uint8Array(await file.arrayBuffer()));
     setTitle(file.name.replace(/\.docx$/i, ""));
-    setDirty(true);
     setPhase("editing");
+    markChanged();
   }
 
-  const save = useCallback(async (publish: boolean) => {
-    const handle = editor.current;
-    if (!handle || !ownerId || busy) return;
-    if (publish && !client?.google_drive_folder_id) {
+  function publish() {
+    if (!client?.google_drive_folder_id) {
       toast.error(t(copy.reportNoFolder));
       setPanel("info");
       setFolderOpen(true);
       return;
     }
-    try {
-      setBusy("saving");
-      const docx = await handle.save();
-      const form = new FormData();
-      form.set("title", title.trim() || t(copy.reportTemplateBlank));
-      form.set("body", handle.text().slice(0, 190000));
-      form.set("document", new File([docx as BlobPart], "report.docx", { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }));
-      if (publish) {
-        setBusy("rendering");
-        const pdf = await handle.pdf((done, total) => setProgress({ done, total }));
-        form.set("pdf", new File([pdf as BlobPart], "report.pdf", { type: "application/pdf" }));
-        form.set("publish", "1");
-        setBusy("publishing");
-      }
-      files.forEach((file) => form.append("attachments[]", file));
-      removeIds.forEach((id) => form.append("remove_attachment_ids[]", String(id)));
+    void save("publish");
+  }
 
-      const res = await api.saveClientReport(ownerId, form, report?.id);
-      setReport(res.data);
-      setExisting(res.data.attachments ?? []);
-      setFiles([]);
-      setRemoveIds([]);
-      setDirty(false);
-      setLegacy(false);
-      if (res.drive_error) toast.warning(fill(t(copy.reportDriveFailed), { message: res.drive_error }));
-      else toast.success(publish ? t(copy.reportPublishedToast) : t(copy.saveSuccess));
-      if (!report) navigate(`/reports/${res.data.id}/edit`, { replace: true, state: { bytes: docx } });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t(copy.saveFailed));
-    } finally {
-      setBusy(null);
-      setProgress({ done: 0, total: 0 });
-    }
-  }, [busy, client, files, navigate, ownerId, removeIds, report, t, title]);
+  async function leave() {
+    if (changeSeq.current !== savedSeq.current && !(await save("leave"))) return;
+    navigate(backTo);
+  }
 
   async function downloadWord() {
     const docx = await editor.current?.save();
-    if (docx) download(docx, `${title || "report"}.docx`, "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    if (docx) download(docx, `${title || "report"}.docx`, DOCX_MIME);
   }
 
   async function downloadPdf() {
@@ -226,17 +392,26 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
   }
 
   const backTo = ownerId ? `/reports/clients/${ownerId}` : "/reports";
-  const status = busy === "saving"
-    ? t(copy.reportSaving)
-    : busy === "rendering"
-      ? fill(t(copy.reportRendering), { done: progress.done, total: progress.total || "…" })
-      : busy === "publishing"
-        ? t(copy.reportPublishing)
-        : dirty
-          ? t(copy.reportUnsaved)
-          : report?.published_at
-            ? fill(t(copy.reportPublishedAt), { time: new Date(report.published_at).toLocaleString(locale === "ar" ? "ar-SA-u-nu-latn" : "en-GB", { dateStyle: "medium", timeStyle: "short" }) })
-            : t(copy.reportSaved);
+  const saving = busy === "saving" || autoSaving;
+  // Publishing saves first, so a publish time within a moment of the last save is the same version.
+  const editedSincePublish = report?.published_at && report.updated_at
+    ? Date.parse(report.updated_at) - Date.parse(report.published_at) > 2000
+    : false;
+  const status = busy === "rendering"
+    ? fill(t(copy.reportRendering), { done: progress.done, total: progress.total || "…" })
+    : busy === "publishing"
+      ? t(copy.reportPublishing)
+      : saving
+        ? t(copy.reportSaving)
+        : autoFailed
+          ? t(copy.reportSaveRetry)
+          : dirty
+            ? t(copy.reportUnsaved)
+            : !report
+              ? t(copy.reportDraftStatus)
+              : report.published_at && !editedSincePublish
+                ? fill(t(copy.reportPublishedAt), { time: new Date(report.published_at).toLocaleString(locale === "ar" ? "ar-SA-u-nu-latn" : "en-GB", { dateStyle: "medium", timeStyle: "short" }) })
+                : t(copy.reportAllSaved);
 
   if (phase === "loading") {
     return <LoadingLottie variant="page" label={t(copy.loading)} />;
@@ -282,29 +457,20 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
 
   const titleBarStart = () => (
     <div className="report-bar" dir={locale === "ar" ? "rtl" : "ltr"}>
-      {dirty ? (
-        <ConfirmAction
-          label={t(copy.reportBackToList)}
-          confirmLabel={t(copy.reportLeaveWarning)}
-          yesLabel={t(copy.reportBackToList)}
-          noLabel={t(copy.cancel)}
-          className="btn btn-ghost btn-sm"
-          onConfirm={() => navigate(backTo)}
-        />
-      ) : (
-        <Link className="btn btn-ghost btn-sm" to={backTo} title={t(copy.reportBackToList)}><BackIcon size={15} aria-hidden="true" /><span className="btn-label">{t(copy.reportBackToList)}</span></Link>
-      )}
+      <button type="button" className="btn btn-ghost btn-sm" title={t(copy.reportBackToList)} onClick={() => void leave()}>
+        <BackIcon size={15} aria-hidden="true" /><span className="btn-label">{t(copy.reportBackToList)}</span>
+      </button>
       <span className="report-bar-client">{client?.company_name || client?.name}</span>
     </div>
   );
 
   const titleBarEnd = () => (
     <div className="report-bar" dir={locale === "ar" ? "rtl" : "ltr"}>
-      <span className={`status-dot${dirty ? " is-dirty" : report?.published_at ? " is-live" : ""}${busy ? " is-busy" : ""}`} role="status" aria-live="polite">{status}</span>
-      <button type="button" className="btn btn-sm" disabled={busy !== null} onClick={() => void save(false)} title="Ctrl+S">
+      <span className={`status-dot${dirty || autoFailed ? " is-dirty" : report?.published_at && !editedSincePublish ? " is-live" : ""}${busy || autoSaving ? " is-busy" : ""}`} role="status" aria-live="polite">{status}</span>
+      <button type="button" className="btn btn-sm" disabled={busy !== null} onClick={() => void save("manual")} title="Ctrl+S">
         <Save size={15} aria-hidden="true" /><span className="btn-label">{t(copy.reportSaveDraft)}</span>
       </button>
-      <button type="button" className="btn btn-primary btn-sm" disabled={busy !== null} onClick={() => void save(true)} title={t(copy.reportPublish)}>
+      <button type="button" className="btn btn-primary btn-sm" disabled={busy !== null} onClick={publish} title={t(copy.reportPublish)}>
         <CloudUpload size={15} aria-hidden="true" /><span className="btn-label">{t(copy.reportPublish)}</span>
       </button>
       <button
@@ -341,10 +507,10 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
                 locale={locale}
                 onTitleChange={(value) => {
                   setTitle(value);
-                  setDirty(true);
+                  markChanged();
                 }}
-                onChange={() => setDirty(true)}
-                onSave={() => void save(false)}
+                onChange={markChanged}
+                onSave={() => void save("manual")}
                 titleBarStart={titleBarStart}
                 titleBarEnd={titleBarEnd}
               />
@@ -372,12 +538,12 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
                     const done = page === null
                       ? editor.current?.replaceSelection(text) ?? false
                       : editor.current?.insertOnPage(page, text) ?? false;
-                    if (done) setDirty(true);
+                    if (done) markChanged();
                     return done;
                   }}
                   onInsertImage={async (bytes, widthPercent, page) => {
                     const result = await editor.current?.insertImage(bytes, widthPercent, page) ?? "refused";
-                    if (result === "ok") setDirty(true);
+                    if (result === "ok") markChanged();
                     return result;
                   }}
                   fonts={extraFonts}
@@ -388,7 +554,7 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
                     if (!saved) throw new Error(t(copy.saveFailed));
                     setExtraFonts(faces);
                     setBytes(addParagraphFontStyle(saved, family));
-                    setDirty(true);
+                    markChanged();
                   }}
                 />
               ) : null}
@@ -399,7 +565,7 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
                     hint={t(copy.reportDrop)}
                     onFiles={(list) => {
                       setFiles((current) => [...current, ...list]);
-                      setDirty(true);
+                      markChanged();
                     }}
                   />
                   <ul className="file-list">
@@ -408,7 +574,7 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
                         <Paperclip size={14} aria-hidden="true" />
                         <span className="file-name">{file.drive_url ? <a href={file.drive_url} target="_blank" rel="noreferrer">{file.name}</a> : file.name}</span>
                         <small>{Math.ceil(file.size / 1024)} KB</small>
-                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setRemoveIds((current) => [...current, file.id]); setDirty(true); }}>{t(copy.delete)}</button>
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setRemoveIds((current) => [...current, file.id]); markChanged(); }}>{t(copy.delete)}</button>
                       </li>
                     ))}
                     {files.map((file, index) => (
@@ -447,6 +613,7 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
                       }}
                     />
                   ) : null}
+                  <DriveStorageCard t={t} />
                   {report ? (
                     <ConfirmAction
                       label={t(copy.delete)}
@@ -455,6 +622,10 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
                       noLabel={t(copy.cancel)}
                       onConfirm={() => {
                         void api.deleteClientReport(report.id).then(() => {
+                          // Nothing is left to save once the report is gone.
+                          savedSeq.current = changeSeq.current;
+                          if (timer.current !== null) window.clearTimeout(timer.current);
+                          void clearReportDraft(report.id);
                           setDirty(false);
                           navigate(backTo, { replace: true });
                         });

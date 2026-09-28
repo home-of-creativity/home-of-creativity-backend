@@ -2504,6 +2504,78 @@ html[dir="ltr"] .report-panel {
   gap: 0.85rem;
 }
 
+.drive-storage {
+  display: grid;
+  gap: 0.7rem;
+  margin-bottom: 1rem;
+}
+
+.drive-storage p,
+.drive-storage h2,
+.drive-storage h3 {
+  margin: 0;
+}
+
+.drive-storage-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.drive-storage-head h2 {
+  font-size: 1rem;
+}
+
+.drive-storage-setup {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.drive-storage-setup h3 {
+  font-size: 0.95rem;
+}
+
+.drive-storage-state {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  overflow-wrap: anywhere;
+}
+
+.drive-storage-state svg {
+  flex: none;
+  margin-top: 0.2rem;
+}
+
+.drive-storage-state.is-ok svg {
+  color: var(--brand-teal);
+}
+
+.drive-storage-state.is-warn {
+  color: #9a2b2b;
+}
+
+.drive-storage-copy {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.drive-storage-copy .field {
+  min-width: 0;
+  flex: 1;
+}
+
+.report-panel .drive-storage {
+  margin-bottom: 0;
+  padding: 0.85rem;
+  box-shadow: none;
+}
+
+.report-panel .drive-storage-copy {
+  flex-wrap: wrap;
+}
+
 .drive-target {
   margin: 0;
   color: var(--brand-muted);

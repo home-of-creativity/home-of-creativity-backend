@@ -144,7 +144,10 @@ class ClientReportController extends Controller
             $paths['pdf_path'] = $request->file('pdf')->storeAs('reports/'.$report->id, 'report.pdf', self::DISK);
         }
         if ($paths !== []) {
-            $report->forceFill($paths)->save();
+            // A new Word file is an edit even when the title and text extract did not change
+            // (formatting, pictures), and the editor compares its local copy with updated_at.
+            $report->forceFill($paths);
+            $report->isDirty() ? $report->save() : $report->touch();
         }
 
         foreach ($request->file('attachments', []) as $file) {

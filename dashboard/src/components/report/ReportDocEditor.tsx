@@ -12,6 +12,8 @@ import { pagesToPdf } from "./pdf";
 setHarfBuzzWasmUrl(harfbuzzWasm);
 
 export type ReportDocHandle = {
+  /** The document is loaded and painted, so `save()` returns it and not an empty one. */
+  ready(): boolean;
   /** The document as .docx bytes. */
   save(): Promise<Uint8Array>;
   /** The painted pages as a PDF (one image per page). */
@@ -178,6 +180,14 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
   }, [locale, placeCaret]);
 
   useImperativeHandle(ref, () => ({
+    ready() {
+      const snapshot = editor.current?.getEditor() ? editor.current.snapshot() : null;
+      return snapshot !== null
+        && !snapshot.isLoading
+        && snapshot.isOpening !== true
+        && snapshot.parseError === null
+        && root.current?.querySelector(".docx-page") != null;
+    },
     async save() {
       const buffer = await editor.current?.save();
       if (!buffer) throw new Error("editor not ready");

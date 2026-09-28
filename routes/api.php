@@ -32,6 +32,7 @@ use App\Http\Controllers\ArticleController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\DevBotController;
+use App\Http\Controllers\GoogleDriveAccountController;
 use App\Http\Controllers\IntegrationController;
 use App\Http\Controllers\LandingReelController;
 use App\Http\Controllers\LegalPageController;
@@ -144,6 +145,10 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::get('reports/{client_report}', [AdminClientReportController::class, 'show']);
         Route::match(['put', 'post'], 'reports/{client_report}', [AdminClientReportController::class, 'update']);
         Route::delete('reports/{client_report}', [AdminClientReportController::class, 'destroy']);
+        Route::get('drive/storage-account', [GoogleDriveAccountController::class, 'show']);
+        Route::put('drive/storage-account/client', [GoogleDriveAccountController::class, 'updateClient']);
+        Route::post('drive/storage-account/connect', [GoogleDriveAccountController::class, 'connect'])->middleware('throttle:10,1');
+        Route::delete('drive/storage-account', [GoogleDriveAccountController::class, 'destroy']);
     });
 
     Route::middleware('crud:ops.employees')->group(function () {

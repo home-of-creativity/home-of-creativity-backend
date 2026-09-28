@@ -13,7 +13,13 @@ class GoogleDriveClient
 
     private ?string $lastError = null;
 
-    public function __construct(private GoogleServiceAccount $auth) {}
+    /** @var array<string, bool> Folders already shared with the storage account in this request. */
+    private array $sharedFolders = [];
+
+    public function __construct(
+        private GoogleServiceAccount $auth,
+        private ?GoogleDriveUploader $uploader = null,
+    ) {}
 
     public function configured(): bool
     {
@@ -137,11 +143,7 @@ class GoogleDriveClient
                 return null;
             }
 
-            $writeToken = $this->writeToken($token, $context);
-            if ($writeToken === null) {
-                return null;
-            }
-
+            $writeToken = $this->folderToken($token, $context);
             $cursor = $context['id'];
             $created = false;
             foreach ($segments as $segment) {
@@ -741,7 +743,7 @@ class GoogleDriveClient
     }
 
     /**
-     * @return array{id: string, driveId: ?string}|null
+     * @return array{id: string, driveId: ?string, meta: array<string, mixed>}|null
      */
     private function parentContext(string $token, string $parentId): ?array
     {
@@ -767,7 +769,7 @@ class GoogleDriveClient
         return [
             'id' => (string) $meta->json('id', $parentId),
             'driveId' => filled($driveId) ? (string) $driveId : null,
-            'ownerEmail' => filled($driveId) ? null : $this->storageOwner($token, $meta->json() ?? []),
+            'meta' => $meta->json() ?? [],
         ];
     }
 
@@ -810,25 +812,98 @@ class GoogleDriveClient
     }
 
     /**
-     * @param  array{id: string, driveId: ?string, ownerEmail: ?string}  $context
+     * Folders hold no bytes, so the service account may create them without storage. Inside a
+     * person's Drive they are still created as that person when Workspace delegation allows it.
+     *
+     * @param  array{id: string, driveId: ?string, meta: array<string, mixed>}  $context
      */
-    private function writeToken(string $serviceToken, array $context): ?string
+    private function folderToken(string $serviceToken, array $context): string
     {
         if (filled($context['driveId'])) {
             return $serviceToken;
         }
 
-        $owner = $context['ownerEmail'];
-        if ($owner === null) {
-            return $this->fail('This folder and every folder above it are owned by the technical service account, which has no storage. Choose a folder inside the Drive of the Google account that should hold the files.');
+        $owner = $this->storageOwner($serviceToken, $context['meta']);
+
+        return ($owner !== null ? $this->auth->accessTokenFor($owner) : null) ?? $serviceToken;
+    }
+
+    /**
+     * Files take storage from their owner and the service account has none. Outside a shared
+     * drive, upload as the connected storage account (after giving it edit access to the folder),
+     * else as the folder's owner through Workspace delegation.
+     *
+     * @param  array{id: string, driveId: ?string, meta: array<string, mixed>}  $context
+     */
+    private function fileToken(string $serviceToken, array $context): ?string
+    {
+        if (filled($context['driveId'])) {
+            return $serviceToken;
         }
 
-        $token = $this->auth->accessTokenFor($owner);
+        $uploader = $this->uploader ?? app(GoogleDriveUploader::class);
+        if ($uploader->connected()) {
+            $token = $uploader->accessToken();
+            if ($token === null) {
+                return $this->fail('Google no longer accepts the Drive storage account '.$uploader->email().'. Connect it again under Reports › Drive storage, then publish again.');
+            }
+            $this->shareFolderWith($context['id'], (string) $uploader->email(), $serviceToken);
+
+            return $token;
+        }
+
+        $owner = $this->storageOwner($serviceToken, $context['meta']);
+        $token = $owner !== null ? $this->auth->accessTokenFor($owner) : null;
         if ($token === null) {
-            return $this->fail('Could not upload as '.$owner.'. Enable domain-wide delegation for the service account and allow the Drive scope so storage counts on that account.');
+            return $this->fail('The service account has no Drive storage. Connect the Google account that should hold the files under Reports › Drive storage, then publish again.');
         }
 
         return $token;
+    }
+
+    /**
+     * Give an account edit access to a folder the service account can share, so uploads made
+     * as that account may go inside it. Returns false when Drive refuses.
+     */
+    public function shareFolderWith(string $folderId, string $email, ?string $serviceToken = null): bool
+    {
+        $key = $folderId.'|'.strtolower($email);
+        if ($folderId === '' || $email === '') {
+            return false;
+        }
+        if (isset($this->sharedFolders[$key])) {
+            return $this->sharedFolders[$key];
+        }
+
+        $serviceToken ??= $this->auth->accessToken();
+        if ($serviceToken === null) {
+            return false;
+        }
+
+        try {
+            $response = Http::withToken($serviceToken)
+                ->timeout(15)
+                ->acceptJson()
+                ->asJson()
+                ->post(self::API.'/files/'.rawurlencode($folderId).'/permissions?supportsAllDrives=true&sendNotificationEmail=false&fields=id', [
+                    'role' => 'writer',
+                    'type' => 'user',
+                    'emailAddress' => $email,
+                ]);
+            $shared = $response->successful();
+            if (! $shared) {
+                Log::warning('Google Drive: could not share a folder with the storage account.', [
+                    'folder_id' => $folderId,
+                    'status' => $response->status(),
+                    'error' => $response->json('error.message'),
+                ]);
+            }
+        } catch (Throwable $exception) {
+            Log::warning('Google Drive: sharing a folder failed.', ['error' => $exception->getMessage()]);
+            $shared = false;
+        }
+
+        return $this->sharedFolders[$key] = $shared;
     }
 
     private function findOrCreateFolder(string $token, string $parentId, string $name, ?string $driveId = null): ?string
@@ -909,7 +984,7 @@ class GoogleDriveClient
         if ($context === null) {
             return null;
         }
-        $token = $this->writeToken($token, $context);
+        $token = $this->fileToken($token, $context);
         if ($token === null) {
             return null;
         }
@@ -973,7 +1048,7 @@ class GoogleDriveClient
         if ($context === null) {
             return null;
         }
-        $token = $this->writeToken($token, $context);
+        $token = $this->fileToken($token, $context);
         if ($token === null) {
             return null;
         }
@@ -1004,7 +1079,7 @@ class GoogleDriveClient
             return $message;
         }
 
-        return $message.' Create it inside the shared drive folder from GOOGLE_DRIVE_PARENT_FOLDER_ID. A service account cannot store files in its own My Drive.';
+        return $message.' The service account has no Drive storage: connect the Google account that should hold the files under Reports › Drive storage.';
     }
 
     private function parentFolderId(): string

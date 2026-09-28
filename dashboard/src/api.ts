@@ -258,6 +258,20 @@ export type DriveFolder = {
   parent_id?: string | null;
 };
 
+/** The Google account whose storage holds files the API uploads to Drive. */
+export type DriveStorageAccount = {
+  oauth_configured: boolean;
+  client_id: string | null;
+  client_from_env: boolean;
+  redirect_uri: string;
+  connected: boolean;
+  email: string | null;
+  connected_at: string | null;
+  working: boolean;
+  error: string | null;
+  storage: { limit: number | null; usage: number } | null;
+};
+
 export type Client = {
   id: number;
   name: string;
@@ -972,6 +986,21 @@ export const api = {
     return request<{ data: DriveFolder[]; meta: { parent_id: string | null; next_page_token: string | null }; message?: string }>(
       `/admin/drive/folders${queryString({ parent: parent || undefined, page_token: pageToken || undefined })}`,
     );
+  },
+  driveStorageAccount() {
+    return request<Envelope<DriveStorageAccount>>("/admin/drive/storage-account");
+  },
+  saveDriveStorageClient(body: { client_id: string; client_secret: string }) {
+    return request<Envelope<DriveStorageAccount>>("/admin/drive/storage-account/client", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  },
+  connectDriveStorage() {
+    return request<Envelope<{ authorize_url: string; redirect_uri: string }>>("/admin/drive/storage-account/connect", { method: "POST" });
+  },
+  disconnectDriveStorage() {
+    return request<Envelope<DriveStorageAccount>>("/admin/drive/storage-account", { method: "DELETE" });
   },
   createDriveFolder(name: string, parent?: string) {
     return request<Envelope<DriveFolder>>("/admin/drive/folders", {

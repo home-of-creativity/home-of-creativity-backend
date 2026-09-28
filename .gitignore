@@ -35,3 +35,7 @@ Thumbs.db
 /playwright-report/
 /test-results/
 /blob-report/
+
+# Local test pages (zz-*) are never deployed; tsconfig skips them too
+dashboard/zz-*
+dashboard/src/zz-*

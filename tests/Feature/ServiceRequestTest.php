@@ -215,6 +215,8 @@ class ServiceRequestTest extends TestCase
         config([
             'services.gemini.e2e_stub' => false,
             'services.gemini.api_key' => 'blocked-key',
+            // A local .env may point Gemini at Vertex; this test covers the blocked AI Studio key.
+            'services.gemini.vertex_project' => '',
             'services.google_translate.enabled' => false,
         ]);
         Http::fake([
