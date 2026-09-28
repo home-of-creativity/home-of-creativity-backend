@@ -974,7 +974,7 @@ td {
 th {
   font-size: 0.75rem;
   letter-spacing: 0.04em;
-  text-transform: uppercase;
+  text-transform: none;
   color: var(--brand-muted);
 }
 
@@ -1071,6 +1071,10 @@ td[colspan] {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
+  max-width: 11rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   border-radius: 999px;
   padding: 0.18rem 0.65rem;
   font-size: 0.75rem;
@@ -1689,7 +1693,11 @@ html[dir="rtl"] .back-link span {
   display: grid;
   gap: 1rem;
   margin: 1.2rem 0 0;
-  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+}
+
+.meta-grid > div {
+  min-width: 0;
 }
 
 .meta-grid dt {
@@ -1700,10 +1708,11 @@ html[dir="rtl"] .back-link span {
 .meta-grid dd {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: baseline;
   gap: 0.45rem;
   margin: 0.25rem 0 0;
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .briefs {
