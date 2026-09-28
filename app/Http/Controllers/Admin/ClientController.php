@@ -4,8 +4,6 @@ namespace App\Http\Controllers\Admin;
 
 use App\Actions\AssignClientDriveFolder;
 use App\Actions\DeleteClient;
-use App\Actions\PushClientLeadToOdoo;
-use App\Actions\PushClientToOdoo;
 use App\Actions\StoreClient;
 use App\Actions\UpdateClient;
 use App\Http\Controllers\Controller;
@@ -20,11 +18,8 @@ use Illuminate\Http\JsonResponse;
 
 class ClientController extends Controller
 {
-    public function index(
-        PaginatedIndexRequest $request,
-        PushClientToOdoo $pushClientToOdoo,
-        PushClientLeadToOdoo $pushClientLeadToOdoo,
-    ) {
+    public function index(PaginatedIndexRequest $request)
+    {
         $search = trim((string) $request->query('search', ''));
 
         $paginator = Client::query()
@@ -40,24 +35,6 @@ class ClientController extends Controller
             })
             ->latest('id')
             ->paginate($request->perPage());
-
-        $pushed = 0;
-        $paginator->setCollection(
-            $paginator->getCollection()->map(function (Client $client) use (&$pushed, $pushClientToOdoo, $pushClientLeadToOdoo): Client {
-                if (
-                    $pushed >= 3
-                    || ! filled($client->telegram_user_id)
-                    || ! $client->profileComplete()
-                    || filled($client->odoo_lead_id)
-                ) {
-                    return $client;
-                }
-
-                $pushed++;
-
-                return $pushClientLeadToOdoo->handle($pushClientToOdoo->handle($client), false, false);
-            })
-        );
 
         return ClientResource::collection($paginator)->additional(['message' => 'ok']);
     }
