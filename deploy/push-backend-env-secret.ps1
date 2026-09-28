@@ -18,6 +18,11 @@ if ($bytes.Length -lt 40) {
   throw ".env looks empty."
 }
 
+$text = [Text.Encoding]::UTF8.GetString($bytes)
+if ($text -match '(?m)^DB_PASSWORD=\s*$') {
+  throw "Refusing to upload .env: DB_PASSWORD is empty. Production MySQL needs that password. Fill it before running this script."
+}
+
 $b64 = [Convert]::ToBase64String($bytes)
 $b64 | gh secret set BACKEND_ENV_FILE_B64 --repo $Repo
 Write-Host "Saved BACKEND_ENV_FILE_B64. The next Deploy (SSH) writes it to the server .env."
