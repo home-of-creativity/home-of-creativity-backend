@@ -88,9 +88,15 @@
 			file_server
 		}
 
-		header Cache-Control "no-cache, no-store, must-revalidate"
-		try_files {path} {path}/ /index.html
-		file_server
+		handle {
+			header {
+				Cache-Control "no-cache, no-store, must-revalidate"
+				Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' blob: https:; connect-src 'self' https://api.hoc.agency https://*.ingest.de.sentry.io; frame-src 'self' blob: https://api.hoc.agency; object-src 'none'; base-uri 'self'"
+				Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+			}
+			try_files {path} {path}/ /index.html
+			file_server
+		}
 	}
 
 	handle /sitemap.xml {
