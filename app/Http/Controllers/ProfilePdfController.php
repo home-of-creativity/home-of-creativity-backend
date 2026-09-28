@@ -27,6 +27,7 @@ class ProfilePdfController extends Controller
             'Content-Disposition' => 'inline; filename="'.$name.'"',
             'Cache-Control' => 'public, max-age=60',
             'X-Content-Type-Options' => 'nosniff',
+            'Content-Security-Policy' => "frame-ancestors 'self' https://hoc.agency https://www.hoc.agency",
         ]);
     }
 }

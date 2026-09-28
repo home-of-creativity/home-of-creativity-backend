@@ -16,7 +16,8 @@ use Throwable;
  * The service account owns the HOC Clients folders but has no storage quota, and delegation
  * needs Google Workspace. So staff connect a normal Google account once over OAuth and uploads
  * run as that account: the files count against its storage while staying in the same folders.
- * The OAuth client and the refresh token are stored encrypted in ops_settings.
+ * The OAuth client and refresh token come from .env (`GOOGLE_DRIVE_OAUTH_CLIENT_ID`,
+ * `GOOGLE_DRIVE_OAUTH_CLIENT_SECRET`, `GOOGLE_DRIVE_REFRESH_TOKEN`).
  */
 class GoogleDriveUploader
 {
@@ -226,11 +227,16 @@ class GoogleDriveUploader
 
     public function connected(): bool
     {
-        return filled($this->stored(self::ACCOUNT_KEY)['refresh_token'] ?? null);
+        return $this->refreshToken() !== '';
     }
 
     public function email(): ?string
     {
+        $env = trim((string) config('services.google.drive_storage_email'));
+        if ($env !== '') {
+            return $env;
+        }
+
         $email = $this->stored(self::ACCOUNT_KEY)['email'] ?? null;
 
         return is_string($email) && $email !== '' ? $email : null;
@@ -246,9 +252,9 @@ class GoogleDriveUploader
             return $this->token['token'];
         }
 
-        $account = $this->stored(self::ACCOUNT_KEY);
-        $refresh = $account['refresh_token'] ?? null;
-        if (! is_string($refresh) || $refresh === '' || ! $this->oauthConfigured()) {
+        $refresh = $this->refreshToken();
+        $account = $this->usingEnvAccount() ? [] : $this->stored(self::ACCOUNT_KEY);
+        if ($refresh === '' || ! $this->oauthConfigured()) {
             return null;
         }
 
@@ -273,8 +279,8 @@ class GoogleDriveUploader
         if (! $response->successful() || ! is_string($token) || $token === '') {
             $error = (string) $response->json('error', 'HTTP '.$response->status());
             Log::warning('Google Drive storage account token refresh rejected.', ['error' => $error]);
-            if ($error === 'invalid_grant') {
-                $this->store(self::ACCOUNT_KEY, [...$account, 'error' => 'Google no longer accepts this connection. Connect the account again.']);
+            if ($error === 'invalid_grant' && ! $this->usingEnvAccount()) {
+                $this->store(self::ACCOUNT_KEY, [...$account, 'error' => 'Google no longer accepts this connection. Set GOOGLE_DRIVE_REFRESH_TOKEN in the server environment.']);
             }
 
             return null;
@@ -317,6 +323,23 @@ class GoogleDriveUploader
                 : null,
             'storage' => $about !== null ? ['limit' => $about['limit'], 'usage' => $about['usage']] : null,
         ];
+    }
+
+    private function usingEnvAccount(): bool
+    {
+        return trim((string) config('services.google.drive_refresh_token')) !== '';
+    }
+
+    private function refreshToken(): string
+    {
+        $env = trim((string) config('services.google.drive_refresh_token'));
+        if ($env !== '') {
+            return $env;
+        }
+
+        $stored = $this->stored(self::ACCOUNT_KEY)['refresh_token'] ?? null;
+
+        return is_string($stored) ? trim($stored) : '';
     }
 
     private function clientSecret(): string

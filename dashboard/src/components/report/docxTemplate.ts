@@ -59,14 +59,22 @@ function field(code: string, placeholder: string) {
   return `<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> ${code} </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>${placeholder}</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r>`;
 }
 
-function templateBody(id: ReportTemplateId, input: ReportTemplateInput): Block[] {
-  const intro = [
-    para(input.title || "تقرير", "Title"),
-    input.client || input.date ? para([input.client, input.date].filter(Boolean).join(" · "), "Subtitle") : "",
+/** Page 1 is a cover. The report body starts after a page break. */
+function coverBlocks(input: ReportTemplateInput): Block[] {
+  const line = [input.client, input.date].filter(Boolean).join(" · ");
+  return [
+    para("", undefined, '<w:jc w:val="center"/><w:spacing w:before="3200" w:after="0"/>'),
+    para(input.title || "تقرير", "Title", '<w:jc w:val="center"/>'),
+    line ? para(line, "Subtitle", '<w:jc w:val="center"/>') : "",
+    para("دار الإبداع", "Heading1", '<w:jc w:val="center"/><w:spacing w:before="1400" w:after="40"/>'),
+    para("Home of Creativity", "Subtitle", '<w:jc w:val="center"/>'),
+    '<w:p><w:r><w:br w:type="page"/></w:r></w:p>',
   ];
+}
+
+function templateBody(id: ReportTemplateId): Block[] {
   if (id === "social") {
     return [
-      ...intro,
       para("الملخص التنفيذي", "Heading1"),
       para("اكتب هنا أهم ما حدث خلال الفترة وأبرز النتائج."),
       para("مؤشرات الأداء", "Heading1"),
@@ -93,7 +101,6 @@ function templateBody(id: ReportTemplateId, input: ReportTemplateInput): Block[]
   }
   if (id === "campaign") {
     return [
-      ...intro,
       para("هدف الحملة", "Heading1"),
       para("صف هدف الحملة والجمهور المستهدف."),
       para("الميزانية والنتائج", "Heading1"),
@@ -115,7 +122,6 @@ function templateBody(id: ReportTemplateId, input: ReportTemplateInput): Block[]
   }
   if (id === "minutes") {
     return [
-      ...intro,
       para("الحضور", "Heading1"),
       bullets(["الاسم — الجهة", "الاسم — الجهة"]),
       para("جدول الأعمال", "Heading1"),
@@ -128,7 +134,7 @@ function templateBody(id: ReportTemplateId, input: ReportTemplateInput): Block[]
       ]),
     ];
   }
-  return [...intro, para("")];
+  return [para("")];
 }
 
 const STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -190,15 +196,16 @@ const NUMBERING = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 
 /**
  * A Word document (.docx) for a new report: Arabic font, right-to-left paragraphs and tables,
- * A4 page, a header, and a footer with "page X of Y" fields. Built in the browser, no server.
+ * a cover on page 1 (no header or footer), then A4 body pages with a header and a footer
+ * with "page X of Y" fields. Built in the browser, no server.
  */
 export function buildReportDocx(id: ReportTemplateId, input: ReportTemplateInput): Uint8Array {
-  return pack(input, templateBody(id, input));
+  return pack(input, templateBody(id));
 }
 
 /** A report document whose body is the given plain paragraphs (used for reports saved before DOCX). */
 export function buildDocxFromParagraphs(input: ReportTemplateInput, paragraphs: string[]): Uint8Array {
-  return pack(input, [para(input.title || "تقرير", "Title"), ...paragraphs.map((line) => para(line))]);
+  return pack(input, paragraphs.map((line) => para(line)));
 }
 
 /** Turn a legacy HTML report body into plain paragraphs: one per block of text. */
@@ -210,25 +217,31 @@ export function legacyHtmlToParagraphs(html: string): string[] {
 }
 
 function pack(input: ReportTemplateInput, blocks: Block[]): Uint8Array {
-  const body = blocks.filter(Boolean).join("");
+  const body = [...coverBlocks(input), ...blocks].filter(Boolean).join("");
   const document = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document ${W}><w:body>${body}<w:sectPr><w:headerReference w:type="default" r:id="rIdHeader"/><w:footerReference w:type="default" r:id="rIdFooter"/><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1134" w:bottom="1304" w:left="1134" w:header="567" w:footer="567" w:gutter="0"/><w:bidi/></w:sectPr></w:body></w:document>`;
+<w:document ${W}><w:body>${body}<w:sectPr><w:headerReference w:type="first" r:id="rIdHeaderFirst"/><w:footerReference w:type="first" r:id="rIdFooterFirst"/><w:headerReference w:type="default" r:id="rIdHeader"/><w:footerReference w:type="default" r:id="rIdFooter"/><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1134" w:bottom="1304" w:left="1134" w:header="567" w:footer="567" w:gutter="0"/><w:titlePg/><w:bidi/></w:sectPr></w:body></w:document>`;
   const header = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:hdr ${W}><w:p><w:pPr><w:pStyle w:val="Header"/><w:bidi/></w:pPr>${run(input.header)}</w:p></w:hdr>`;
   const footer = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:ftr ${W}><w:p><w:pPr><w:pStyle w:val="Footer"/><w:bidi/><w:tabs><w:tab w:val="right" w:pos="9638"/></w:tabs></w:pPr>${run(input.footer)}<w:r><w:tab/></w:r>${run("صفحة ")}${field("PAGE", "1")}${run(" من ")}${field("NUMPAGES", "1")}</w:p></w:ftr>`;
+  const blankHeader = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:hdr ${W}><w:p><w:pPr><w:bidi/></w:pPr></w:p></w:hdr>`;
+  const blankFooter = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:ftr ${W}><w:p><w:pPr><w:bidi/></w:pPr></w:p></w:ftr>`;
 
   return zipSync({
     "[Content_Types].xml": strToU8(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/><Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/><Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/></Types>`),
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/><Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/><Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/><Override PartName="/word/header2.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/><Override PartName="/word/footer2.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/></Types>`),
     "_rels/.rels": strToU8(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`),
     "word/_rels/document.xml.rels": strToU8(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rIdNumbering" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/><Relationship Id="rIdHeader" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/><Relationship Id="rIdFooter" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/></Relationships>`),
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rIdNumbering" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/><Relationship Id="rIdHeader" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/><Relationship Id="rIdFooter" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/><Relationship Id="rIdHeaderFirst" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header2.xml"/><Relationship Id="rIdFooterFirst" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer2.xml"/></Relationships>`),
     "word/document.xml": strToU8(document),
     "word/styles.xml": strToU8(stylesDocument()),
     "word/numbering.xml": strToU8(NUMBERING),
     "word/header1.xml": strToU8(header),
     "word/footer1.xml": strToU8(footer),
+    "word/header2.xml": strToU8(blankHeader),
+    "word/footer2.xml": strToU8(blankFooter),
   });
 }

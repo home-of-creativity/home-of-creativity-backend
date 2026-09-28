@@ -48,7 +48,9 @@ class ProfilePdfTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.name', 'company-profile.pdf');
         $this->assertNotNull($this->getJson('/api/profile-pdf')->json('data.url'));
-        $this->get('/api/profile-pdf/file')->assertOk();
+        $this->get('/api/profile-pdf/file')
+            ->assertOk()
+            ->assertHeader('Content-Security-Policy', "frame-ancestors 'self' https://hoc.agency https://www.hoc.agency");
         $this->assertNotNull(ProfilePdf::absolutePath());
 
         $this->post('/api/admin/ops-settings/profile-pdf', [

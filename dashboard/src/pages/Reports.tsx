@@ -1,9 +1,7 @@
 import { useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
-import { toast } from "sonner";
+import { Link } from "react-router-dom";
 import { api, type Client, type PageMeta } from "../api";
 import { DriveFolderPicker } from "../components/DriveFolderPicker";
-import { DriveStorageCard } from "../components/DriveStorageCard";
 import { LoadingTableRow } from "../components/LoadingTableRow";
 import { PageHeader } from "../components/PageHeader";
 import { Pagination } from "../components/Pagination";
@@ -16,19 +14,6 @@ export function Reports({ t }: { locale: Locale; t: (c: { ar: string; en: string
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [folderClient, setFolderClient] = useState<Client | null>(null);
-  const [searchParams, setSearchParams] = useSearchParams();
-
-  // Google sends staff back here after connecting the Drive storage account.
-  useEffect(() => {
-    const connected = searchParams.get("drive") === "connected";
-    const failure = searchParams.get("drive_error");
-    if (!connected && !failure) return;
-    if (connected) toast.success(t(copy.driveStorageConnectedToast));
-    else if (failure === "denied") toast.error(t(copy.driveStorageErrorDenied));
-    else if (failure === "scope") toast.error(t(copy.driveStorageErrorScope));
-    else toast.error(t(copy.driveStorageErrorGeneric).replace("{code}", failure ?? ""));
-    setSearchParams({}, { replace: true });
-  }, [searchParams, setSearchParams, t]);
 
   useEffect(() => {
     setLoading(true);
@@ -45,7 +30,6 @@ export function Reports({ t }: { locale: Locale; t: (c: { ar: string; en: string
     <section>
       <PageHeader title={t(copy.reportsTitle)} lede={t(copy.reportsLede)} />
       {error ? <p className="error">{error}</p> : null}
-      <DriveStorageCard t={t} />
       {folderClient ? (
         <DriveFolderPicker
           client={folderClient}

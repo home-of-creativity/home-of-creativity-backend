@@ -27,12 +27,17 @@ export type ReportDocHandle = {
   /** Replace the current selection (or insert at the caret) with plain text. */
   replaceSelection(text: string): boolean;
   /** Put plain text at the start of a page. */
-  insertOnPage(page: number, text: string): boolean;
+  insertOnPage(page: number, text: string): Promise<boolean>;
   /**
    * Insert a picture as its own block (text does not run through it) at the chosen width.
    * `widthPercent` is a share of the page's text width.
    */
-  insertImage(bytes: Uint8Array, widthPercent: number, page: number): Promise<"ok" | "unsupported" | "refused">;
+  insertImage(
+    bytes: Uint8Array,
+    widthPercent: number,
+    page: number,
+    wrap?: "square" | "topAndBottom",
+  ): Promise<"ok" | "unsupported" | "refused">;
   focus(): void;
 };
 
@@ -110,43 +115,63 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
     [onSave, renderPdf],
   );
 
-  const placeCaret = useCallback((page: number) => {
+  const placeCaret = useCallback(async (page: number) => {
     const current = editor.current?.getEditor();
     const host = root.current;
     if (!current || !host) return;
     const total = Math.max(1, current.getTotalPages());
     const targetPage = Math.min(Math.max(1, page), total);
-    current.setActiveScope({ kind: "body" });
-    current.scrollToPage(targetPage);
-    const outline = current.getOutline();
-    const blockId = outline.find((item) => {
-      current.scrollToBlock(item.blockId);
-      return current.getCurrentPage("viewport") === targetPage;
-    })?.blockId ?? outline[0]?.blockId;
-    if (blockId) {
-      const caret = { paragraphId: blockId, offset: 0 };
+    const caretOnPage = () => current.getCurrentPage("caret") === targetPage;
+    const collapseAt = (blockId: string, offset: number) => {
+      const caret = { paragraphId: blockId, offset };
       const moved = current.exec({ type: "setSelection", range: { anchor: caret, head: caret } });
-      if (moved.ok) return;
-      current.exec({ type: "setSelection", anchor: { paraId: blockId } });
-      return;
-    }
+      if (!moved.ok) current.exec({ type: "setSelection", anchor: { paraId: blockId } });
+    };
+    current.setActiveScope({ kind: "body" });
+    current.focus();
+    current.scrollToPage(targetPage);
+    const frame = () => new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+    await frame();
+    await frame();
     const pageNode = host.querySelector<HTMLElement>(`.docx-page[data-page-index="${targetPage - 1}"]`)
       ?? host.querySelectorAll<HTMLElement>(".docx-page")[targetPage - 1];
     const content = pageNode?.querySelector<HTMLElement>(".docx-page-content") ?? pageNode;
+    const body = content ? pagePlainText(content).replace(/\s+/g, " ").trim() : "";
+    if (body.length >= 3) {
+      const start = Math.min(12, Math.max(0, body.length - 24));
+      const needle = body.slice(start, start + 40).trim();
+      if (needle.length >= 3) {
+        for (const match of current.findMatches(needle)) {
+          current.selectMatch(match);
+          collapseAt(match.blockId, match.start);
+          if (caretOnPage()) return;
+        }
+      }
+    }
+    if (content) {
+      const rect = content.getBoundingClientRect();
+      const x = Math.min(window.innerWidth - 8, Math.max(8, rect.left + rect.width / 2));
+      const y = Math.min(window.innerHeight - 8, Math.max(8, rect.top + 72));
+      const hit = document.elementFromPoint(x, y) ?? content;
+      const point = { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0 };
+      hit.dispatchEvent(new PointerEvent("pointerdown", { ...point, pointerId: 1, pointerType: "mouse" }));
+      hit.dispatchEvent(new MouseEvent("mousedown", point));
+      hit.dispatchEvent(new PointerEvent("pointerup", { ...point, pointerId: 1, pointerType: "mouse" }));
+      hit.dispatchEvent(new MouseEvent("mouseup", point));
+      if (caretOnPage()) return;
+    }
+    for (const item of current.getOutline()) {
+      collapseAt(item.blockId, 0);
+      if (caretOnPage()) return;
+    }
     if (!content) return;
-    const rect = content.getBoundingClientRect();
-    const x = rect.left + Math.min(48, rect.width / 3);
-    const y = rect.top + Math.min(56, rect.height / 4);
-    const hit = document.elementFromPoint(x, y) ?? content;
-    hit.dispatchEvent(new PointerEvent("pointerdown", {
-      bubbles: true,
-      cancelable: true,
-      clientX: x,
-      clientY: y,
-      pointerId: 1,
-      pointerType: "mouse",
-      button: 0,
-    }));
+    const again = content.getBoundingClientRect();
+    const clickX = Math.min(window.innerWidth - 8, Math.max(8, again.left + again.width / 2));
+    const clickY = Math.min(window.innerHeight - 8, Math.max(8, again.top + 72));
+    const target = document.elementFromPoint(clickX, clickY) ?? content;
+    const click = { bubbles: true, cancelable: true, clientX: clickX, clientY: clickY, button: 0 };
+    target.dispatchEvent(new PointerEvent("pointerdown", { ...click, pointerId: 1, pointerType: "mouse" }));
+    target.dispatchEvent(new MouseEvent("mousedown", click));
   }, []);
 
   useEffect(() => {
@@ -223,18 +248,18 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
       current.focus();
       return current.exec({ type: "paste", text, html: paragraphHtml(text) }).ok;
     },
-    insertOnPage(page, text) {
-      placeCaret(page);
+    async insertOnPage(page, text) {
+      await placeCaret(page);
       const current = editor.current?.getEditor();
       if (!current) return false;
       return current.exec({ type: "paste", text, html: paragraphHtml(text) }).ok;
     },
-    async insertImage(bytes, widthPercent, page) {
+    async insertImage(bytes, widthPercent, page, wrap = "square") {
       const current = editor.current?.getEditor();
       if (!current) return "refused";
       const normalized = normalizeImageBytes(bytes);
       if (!normalized.ok) return "unsupported";
-      placeCaret(page);
+      await placeCaret(page);
       const percent = Math.min(100, Math.max(15, widthPercent));
       const width = PAGE_TEXT_WIDTH_PT * (percent / 100);
       const height = Math.max(1, normalized.heightPoints * (width / Math.max(1, normalized.widthPoints)));
@@ -247,16 +272,16 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
       };
       let result = await current.executeImageCommand(command);
       if (!result.ok) {
-        placeCaret(page);
+        await placeCaret(page);
         result = await current.executeImageCommand(command);
       }
       if (!result.ok) return "refused";
-      current.exec({ type: "setImageWrapType", target: "topAndBottom" });
+      current.exec({ type: "setImageWrapType", target: wrap });
       current.exec({
         type: "setImageProperties",
         widthEmu: Math.round(width * EMU_PER_POINT),
         heightEmu: Math.round(height * EMU_PER_POINT),
-        wrap: "topAndBottom",
+        wrap,
       });
       return "ok";
     },

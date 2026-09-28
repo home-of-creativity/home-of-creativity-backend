@@ -81,7 +81,7 @@ return [
         [
             'category_slug' => 'media',
             'title_en' => 'Social, film & campaigns',
-            'title_ar' => 'السوشل والمحتوى والحملات',
+            'title_ar' => 'السوشيال والمحتوى والحملات',
             'summary_en' => 'Disciplined grids, cinematic motion, photography, and paid campaigns — proof, not stock.',
             'summary_ar' => 'شبكات منضبطة وتحريك سينمائي وتصوير وحملات ممولة: برهان لا صور جاهزة.',
             'featured' => true,

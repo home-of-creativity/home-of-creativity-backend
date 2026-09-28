@@ -99,9 +99,11 @@ return [
         'credentials_json' => env('GOOGLE_CREDENTIALS_JSON', env('GOOGLE_SERVICE_ACCOUNT_JSON', env('GOOGLE_APPLICATION_CREDENTIALS'))),
         'drive_parent_folder_id' => env('GOOGLE_DRIVE_PARENT_FOLDER_ID'),
         'drive_watch_token' => env('GOOGLE_DRIVE_WATCH_TOKEN'),
-        // Optional: the dashboard (Reports › Drive storage) stores the OAuth client when these are empty.
+        // Report uploads run as this Google account. Set all three in .env; the dashboard does not connect it.
         'drive_oauth_client_id' => env('GOOGLE_DRIVE_OAUTH_CLIENT_ID'),
         'drive_oauth_client_secret' => env('GOOGLE_DRIVE_OAUTH_CLIENT_SECRET'),
+        'drive_refresh_token' => env('GOOGLE_DRIVE_REFRESH_TOKEN'),
+        'drive_storage_email' => env('GOOGLE_DRIVE_STORAGE_EMAIL'),
         'drive_oauth_redirect_uri' => env('GOOGLE_DRIVE_OAUTH_REDIRECT_URI'),
         'drive_dashboard_url' => env('GOOGLE_DRIVE_DASHBOARD_URL'),
         'calendar_id' => env('GOOGLE_CALENDAR_ID', 'primary'),
