@@ -140,6 +140,7 @@ return [
             'content' => env('CLICKUP_LIST_CONTENT'),
             'design' => env('CLICKUP_LIST_DESIGN'),
             'programming' => env('CLICKUP_LIST_PROGRAMMING'),
+            'revision' => env('CLICKUP_LIST_REVISION'),
         ],
         'timeout' => (int) env('CLICKUP_TIMEOUT', 12),
         'statuses' => [

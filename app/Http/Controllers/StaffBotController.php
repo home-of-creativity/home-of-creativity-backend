@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Actions\BookPhotographySlot;
 use App\Actions\CompleteRequest;
 use App\Actions\ConfirmRequestPayment;
+use App\Actions\ConfirmWorkPlan;
 use App\Actions\DispatchStatusWorkflow;
 use App\Actions\RecordDelivery;
 use App\Actions\RequestStaffJoin;
@@ -18,6 +20,7 @@ use App\Http\Requests\StaffSendQuotationRequest;
 use App\Http\Resources\EmployeeResource;
 use App\Http\Resources\ServiceRequestResource;
 use App\Models\DriveDelivery;
+use App\Models\PhotographyBooking;
 use App\Models\Employee;
 use App\Models\ServiceRequest;
 use App\Services\RequestStatusTransitionService;
@@ -434,6 +437,47 @@ class StaffBotController extends Controller
             ],
             'message' => 'Payment confirmed.',
         ]);
+    }
+
+    public function confirmPlan(
+        Request $request,
+        ConfirmWorkPlan $confirmWorkPlan,
+        ResolveServiceRequest $resolveServiceRequest,
+    ): ServiceRequestResource {
+        $this->approvedEmployee($request);
+        $validated = $request->validate([
+            'telegram_user_id' => ['required', 'string'],
+            'request_number' => ['required', 'string'],
+        ]);
+        $serviceRequest = $resolveServiceRequest->byReference($validated['request_number']);
+
+        return new ServiceRequestResource($confirmWorkPlan->handle($serviceRequest));
+    }
+
+    public function approvePhotography(
+        Request $request,
+        PhotographyBooking $booking,
+        BookPhotographySlot $bookPhotographySlot,
+    ): JsonResponse {
+        $this->approvedEmployee($request);
+        $updated = $bookPhotographySlot->approveSameTime($booking);
+
+        return response()->json(['data' => ['status' => $updated->status], 'message' => 'ok']);
+    }
+
+    public function proposePhotography(
+        Request $request,
+        PhotographyBooking $booking,
+        BookPhotographySlot $bookPhotographySlot,
+    ): JsonResponse {
+        $this->approvedEmployee($request);
+        $validated = $request->validate([
+            'telegram_user_id' => ['required', 'string'],
+            'starts_at' => ['required', 'date'],
+        ]);
+        $updated = $bookPhotographySlot->propose($booking, $validated['starts_at']);
+
+        return response()->json(['data' => ['status' => $updated->status], 'message' => 'ok']);
     }
 
     /**

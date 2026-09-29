@@ -266,8 +266,8 @@ class BotFlowchartTest extends TestCase
             'work_type' => WorkType::Design,
             'briefs' => [['type' => 'design', 'brief' => 'Design the identity.']],
         ];
-        $gemini->shouldReceive('classificationFromWorkPlan')->once()->andReturn($classified);
-        $gemini->shouldReceive('classify')->never();
+        $gemini->shouldReceive('classificationFromWorkPlan')->never();
+        $gemini->shouldReceive('classify')->once()->andReturn($classified);
         $gemini->shouldReceive('persistBriefs')->once()->andReturnUsing(
             fn (ServiceRequest $request, array $briefs): mixed => $persistGemini->persistBriefs($request, $briefs),
         );
@@ -346,6 +346,7 @@ class BotFlowchartTest extends TestCase
             'services.clickup.lists.content' => 'list-content',
             'services.clickup.lists.programming' => 'list-code',
             'services.clickup.lists.photography' => 'list-photo',
+            'services.clickup.lists.revision' => '',
         ]);
         Http::fake([
             'https://api.clickup.com/api/v2/team/team-1/guest' => Http::response(['guest' => ['id' => 'g1']], 200),

@@ -53,6 +53,7 @@ class ProcessPaymentRemindersCommand extends Command
                     continue;
                 }
                 if ($request->subscription_ends_at && $request->subscription_ends_at->isPast()) {
+                    $this->voidUnpaidRenewal($request);
                     $reminder->forceFill(['completed_at' => now()])->save();
 
                     continue;
@@ -75,12 +76,15 @@ class ProcessPaymentRemindersCommand extends Command
                         "تذكير بسداد المتبقي للطلب #{$ref}.\nالمتبقي: ".Money::format($request->amount_remaining),
                     );
                 } else {
+                    $waiting = $request->subscriptions()->where('status', 'pending_renewal')->exists();
                     $telegram->sendInlineKeyboard(
                         (string) $chatId,
-                        "اقترب موعد تجديد الاشتراك للطلب #{$ref}.",
+                        $waiting
+                            ? "بانتظار دفع فاتورة تجديد الاشتراك للطلب #{$ref}."
+                            : "اقترب موعد تجديد الاشتراك للطلب #{$ref}.",
                         [
                             [
-                                ['text' => 'تجديد الاشتراك', 'callback_data' => "renew:{$ref}"],
+                                ['text' => $waiting ? 'إعادة الفاتورة' : 'تجديد الاشتراك', 'callback_data' => "renew:{$ref}"],
                                 ['text' => 'لن أجدد', 'callback_data' => "norenew:{$ref}"],
                             ],
                         ],
@@ -102,6 +106,17 @@ class ProcessPaymentRemindersCommand extends Command
         }
 
         return self::SUCCESS;
+    }
+
+    private function voidUnpaidRenewal(ServiceRequest $request): void
+    {
+        $pending = $request->subscriptions()->where('status', 'pending_renewal')->latest('id')->first();
+        if ($pending === null) {
+            return;
+        }
+
+        $pending->forceFill(['status' => 'void'])->save();
+        $request->invoices()->where('kind', 'renewal')->where('status', 'issued')->update(['status' => 'void']);
     }
 
     private function ensureCalendarEvent(

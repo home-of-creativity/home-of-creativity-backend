@@ -33,10 +33,14 @@ class SchedulePaymentReminders
         }
 
         if ($request->allows_renewal && BillingPeriod::isSubscription((string) $request->billing_period)) {
+            $renewAt = $ends->copy()->subDays(8);
+            if ($renewAt->lt($starts)) {
+                $renewAt = $starts->copy();
+            }
             $this->ensureReminder(
                 $request,
                 PaymentReminder::KIND_RENEWAL,
-                $starts->copy()->addSeconds((int) floor($duration * 0.75)),
+                $renewAt,
                 'تجديد الاشتراك — '.$request->number,
             );
         }

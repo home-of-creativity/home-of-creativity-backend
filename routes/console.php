@@ -23,6 +23,7 @@ Schedule::command('ops:process-bot-sla')->everyMinute()->timezone('Asia/Damascus
 Schedule::command('ops:poll-drive', ['--limit' => 200])->everyMinute()->timezone('Asia/Damascus')->withoutOverlapping();
 Schedule::command('ops:renew-drive-watch')->hourly()->timezone('Asia/Damascus')->withoutOverlapping();
 Schedule::command('ops:clickup-due-alerts')->hourly()->timezone('Asia/Damascus')->withoutOverlapping();
+Schedule::command('ops:photography-day-before')->hourly()->timezone('Asia/Damascus')->withoutOverlapping();
 Schedule::command('seo:submit-sitemap')->dailyAt('06:15')->timezone('Asia/Damascus')->withoutOverlapping();
 Schedule::command('ops:watch-health')->everyMinute()->withoutOverlapping();
 Schedule::command('ops:watch-signals')->everyFifteenMinutes()->withoutOverlapping();

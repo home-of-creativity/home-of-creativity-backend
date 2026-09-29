@@ -12,17 +12,28 @@ use Illuminate\Validation\ValidationException;
 class RenewSubscription
 {
     public function __construct(
-        private SendQuotation $sendQuotation,
-        private SchedulePaymentReminders $schedulePaymentReminders,
+        private IssueInvoice $issueInvoice,
+        private NotifyClientChannels $notifyClientChannels,
     ) {}
 
     public function handle(ServiceRequest $request): ServiceRequest
     {
         if (! $request->canRenew()) {
-            throw ValidationException::withMessages(['renewal' => 'Renewal is only available after the request is completed.']);
+            throw ValidationException::withMessages(['renewal' => 'Renewal is only available near the end of the subscription.']);
+        }
+
+        $pending = $request->subscriptions()->where('status', 'pending_renewal')->latest('id')->first();
+        if ($pending) {
+            $this->deliverInvoice($request, (float) $pending->amount);
+
+            return $request->fresh(['client', 'subscriptions', 'pricingPackage', 'invoices']) ?? $request;
         }
 
         $period = $request->billing_period ?: 'monthly';
+        if (! BillingPeriod::isSubscription($period)) {
+            throw ValidationException::withMessages(['renewal' => 'This request is not a subscription.']);
+        }
+
         $amount = (float) ($request->quotation_amount ?? $request->amount_total ?? 0);
         if ($amount <= 0 && $request->pricingPackage) {
             $prices = $request->pricingPackage->prices ?? [];
@@ -30,27 +41,21 @@ class RenewSubscription
                 $amount = (float) $prices[$period];
             }
         }
-
         if ($amount <= 0) {
             throw ValidationException::withMessages(['amount' => 'No renewal amount available.']);
         }
 
-        $fresh = DB::transaction(function () use ($request, $period, $amount): ServiceRequest {
-            $previousEnd = $request->subscription_ends_at && $request->subscription_ends_at->isFuture()
-                ? $request->subscription_ends_at->copy()
-                : now();
-            $newEnd = BillingPeriod::addPeriod($previousEnd, $period);
+        $proposedStart = $request->subscription_ends_at && $request->subscription_ends_at->isFuture()
+            ? $request->subscription_ends_at->copy()
+            : now();
+        $proposedEnd = BillingPeriod::addPeriod($proposedStart, $period);
 
-            $request->forceFill([
-                'subscription_starts_at' => $request->subscription_starts_at ?? now(),
-                'subscription_ends_at' => $newEnd,
-            ])->save();
-
+        $fresh = DB::transaction(function () use ($request, $period, $amount, $proposedStart, $proposedEnd): ServiceRequest {
             Subscription::query()->create([
                 'request_id' => $request->id,
                 'billing_period' => $period,
-                'starts_at' => $previousEnd,
-                'ends_at' => $newEnd,
+                'starts_at' => $proposedStart,
+                'ends_at' => $proposedEnd,
                 'amount' => $amount,
                 'amount_paid' => 0,
                 'amount_remaining' => $amount,
@@ -68,18 +73,14 @@ class RenewSubscription
             return $request->fresh(['client', 'pricingPackage', 'subscriptions']) ?? $request;
         });
 
-        $this->sendQuotation->handle(
-            $fresh,
-            $amount,
-            'تجديد اشتراك — '.BillingPeriod::labelAr($period),
-            'client:renewal',
-            null,
-            null,
-            true,
-        );
+        $this->deliverInvoice($fresh, $amount);
 
-        $this->schedulePaymentReminders->handle($fresh->fresh(['subscriptions']) ?? $fresh);
+        return $fresh->fresh(['client', 'subscriptions', 'pricingPackage', 'invoices']) ?? $fresh;
+    }
 
-        return $fresh->fresh(['client', 'subscriptions', 'pricingPackage', 'quotations']) ?? $fresh;
+    private function deliverInvoice(ServiceRequest $request, float $amount): void
+    {
+        $this->issueInvoice->handle($request, $amount, 'renewal', false);
+        $this->notifyClientChannels->send($request, 'تجديد الاشتراك. أُرسل ملف الفاتورة بالمبلغ المتفق عليه.');
     }
 }

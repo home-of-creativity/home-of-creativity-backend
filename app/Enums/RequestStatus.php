@@ -27,7 +27,8 @@ enum RequestStatus: string
             self::InProgress => [self::ReadyForReview, self::RevisionRequested, self::Cancelled],
             self::ReadyForReview => [self::Completed, self::RevisionRequested, self::Cancelled],
             self::RevisionRequested => [self::InProgress, self::ReadyForReview, self::Cancelled],
-            self::Completed, self::Cancelled => [],
+            self::Completed => [self::InProgress],
+            self::Cancelled => [],
         };
     }
 

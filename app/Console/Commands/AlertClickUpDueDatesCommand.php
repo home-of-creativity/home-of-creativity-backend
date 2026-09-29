@@ -79,6 +79,8 @@ class AlertClickUpDueDatesCommand extends Command
 
         [$bot, $chatIds] = $this->alertRecipients($telegram);
 
+        $bundle = [];
+        $bundleKeys = [];
         foreach ($dueTasks as $task) {
             $local = $locals->get($task['id']);
             $line = "قرب التسليم ({$task['department']}): {$task['name']}";
@@ -90,19 +92,9 @@ class AlertClickUpDueDatesCommand extends Command
             $telegramKey = "ops:clickup-due:tg:{$task['id']}:{$dueKey}";
             $calendarKey = "ops:clickup-due:cal:{$task['id']}:{$dueKey}";
 
-            if ($bot !== null && $chatIds !== [] && Cache::add($telegramKey, true, now()->addDays(2))) {
-                foreach ($chatIds as $chatId) {
-                    try {
-                        $telegram->send((string) $chatId, $line, $bot);
-                    } catch (Throwable $exception) {
-                        Cache::forget($telegramKey);
-                        Log::warning('Admin due alert failed.', [
-                            'task' => $task['id'],
-                            'error' => $exception->getMessage(),
-                        ]);
-                        break;
-                    }
-                }
+            if ($bot !== null && $chatIds !== [] && ! Cache::has($telegramKey)) {
+                $bundle[] = $line;
+                $bundleKeys[] = $telegramKey;
             }
 
             if ($calendar->configured() && Cache::add($calendarKey, true, now()->addDays(2))) {
@@ -118,6 +110,22 @@ class AlertClickUpDueDatesCommand extends Command
                         'error' => $exception->getMessage(),
                     ]);
                 }
+            }
+        }
+
+        if ($bundle !== [] && $bot !== null) {
+            $text = implode("\n", $bundle);
+            foreach ($chatIds as $chatId) {
+                try {
+                    $telegram->send((string) $chatId, $text, $bot);
+                } catch (Throwable $exception) {
+                    Log::warning('Admin due alert failed.', ['error' => $exception->getMessage()]);
+                    $bundleKeys = [];
+                    break;
+                }
+            }
+            foreach ($bundleKeys as $telegramKey) {
+                Cache::put($telegramKey, true, now()->addDays(2));
             }
         }
 

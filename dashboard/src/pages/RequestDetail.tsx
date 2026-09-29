@@ -250,6 +250,32 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
     }
   }
 
+  async function confirmPlan() {
+    if (!item) return;
+    setError("");
+    try {
+      const res = await api.confirmWorkPlan(item.id);
+      setItem(res.data);
+      setNotice(res.message ?? "");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t(copy.saveFailed));
+    }
+  }
+
+  async function extendSchedule() {
+    if (!item) return;
+    const reason = window.prompt("سبب زيادة المدة") ?? "";
+    if (!reason.trim()) return;
+    setError("");
+    try {
+      const res = await api.extendSchedule(item.id, 8, reason.trim());
+      setItem(res.data);
+      setNotice(res.message ?? "");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t(copy.saveFailed));
+    }
+  }
+
   async function renew() {
     if (!item) return;
     setError("");
@@ -727,6 +753,12 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
               {t(copy.renewSubscription)}
             </button>
           ) : null}
+          <button className="btn" type="button" onClick={() => void confirmPlan()}>
+            تأكيد الخطة
+          </button>
+          <button className="btn" type="button" onClick={() => void extendSchedule()}>
+            زيادة المدة
+          </button>
           {item.gemini_status === "failed" ? (
             <button className="btn" type="button" onClick={() => void api.retryGemini(item.id).then((res) => setItem(res.data))}>
               {t(copy.retryGemini)}

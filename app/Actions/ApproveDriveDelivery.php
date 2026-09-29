@@ -3,6 +3,7 @@
 namespace App\Actions;
 
 use App\Enums\RequestStatus;
+use App\Actions\SyncClickUpReview;
 use App\Models\DriveDelivery;
 use App\Models\ServiceRequest;
 use App\Support\ResolveServiceRequest;
@@ -34,6 +35,8 @@ class ApproveDriveDelivery
         if ($delivery->client_approved_at === null) {
             $delivery->forceFill(['client_approved_at' => now()])->save();
         }
+
+        app(SyncClickUpReview::class)->markApproved($request->fresh() ?? $request);
 
         $fresh = $request->fresh(['client']) ?? $request;
         $ref = ResolveServiceRequest::displayNumber($fresh);

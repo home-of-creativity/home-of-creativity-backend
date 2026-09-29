@@ -31,6 +31,31 @@ class NotifyEmployees
         return $this->notifyProfession($profession, $text, 'staff-join');
     }
 
+    public function handleAdmins(string $text): int
+    {
+        $ids = array_values(array_filter(array_map(
+            strval(...),
+            (array) config('services.telegram.admin_telegram_ids', []),
+        )));
+        if ($ids === [] || ! $this->telegram->configured('admin')) {
+            return 0;
+        }
+
+        $sent = 0;
+        foreach ($ids as $id) {
+            try {
+                $this->telegram->send($id, $text, 'admin');
+                $sent++;
+            } catch (\Throwable $exception) {
+                Log::warning('Admin Telegram notify failed.', [
+                    'error' => $exception->getMessage(),
+                ]);
+            }
+        }
+
+        return $sent;
+    }
+
     /**
      * @param  list<array{text: string, callback_data: string}>|null  $inlineButtons
      * @param  array{path: string, mime?: string|null, name?: string|null}|null  $attachment

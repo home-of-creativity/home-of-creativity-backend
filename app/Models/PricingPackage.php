@@ -27,6 +27,7 @@ class PricingPackage extends Model
         'sort_order',
         'is_published',
         'allows_partial_payment',
+        'work_lines',
     ];
 
     /**
@@ -44,6 +45,7 @@ class PricingPackage extends Model
             'sort_order' => 'integer',
             'is_published' => 'boolean',
             'allows_partial_payment' => 'boolean',
+            'work_lines' => 'array',
         ];
     }
 

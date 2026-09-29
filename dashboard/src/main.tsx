@@ -8,7 +8,11 @@ import "./styles.css";
 
 const sentryDsn = import.meta.env.VITE_SENTRY_DSN;
 if (typeof sentryDsn === "string" && sentryDsn !== "") {
-  Sentry.init({ dsn: sentryDsn, tracesSampleRate: 0 });
+  Sentry.init({
+    dsn: sentryDsn,
+    tracesSampleRate: 0,
+    ignoreErrors: [/navrix\.art/i, /selnor\.fun/i, /Failed to fetch dynamically imported module/i],
+  });
 }
 
 applyLocale(readLocale());

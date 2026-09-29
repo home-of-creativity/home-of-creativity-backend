@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Actions\ApproveDriveDelivery;
+use App\Actions\BookPhotographySlot;
 use App\Actions\ApproveQuotation;
 use App\Actions\CompleteRequest;
 use App\Actions\CreateCatalogRequest;
@@ -38,6 +39,7 @@ use App\Support\PricingCatalog;
 use App\Support\ResolveServiceRequest;
 use App\Support\ShamCashQr;
 use App\Support\StatusLabel;
+use App\Support\WorkCalendar;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -157,6 +159,7 @@ class TelegramBotController extends Controller
             ->withCount('driveDeliveries')
             ->latest('id')
             ->get()
+            ->reject(fn (ServiceRequest $item) => $item->hiddenFromClient())
             ->map(fn (ServiceRequest $item) => [
                 'number' => $item->number,
                 'display_number' => ResolveServiceRequest::displayNumber($item),
@@ -172,6 +175,8 @@ class TelegramBotController extends Controller
                 'amount_total' => $item->amount_total ?? $item->quotation_amount,
                 'allows_renewal' => (bool) $item->allows_renewal,
                 'can_renew' => $item->canRenew(),
+                'duration_label' => $item->durationLabel(),
+                'show_subscription' => ! $item->renewalDeclined(),
                 'can_edit' => $item->status->allowsClientEdit(),
                 'can_revise' => $item->allowsClientRevision(),
                 'can_complete' => $item->status === RequestStatus::ReadyForReview,
@@ -428,7 +433,19 @@ class TelegramBotController extends Controller
             ->additional(['message' => 'Completed.']);
     }
 
-    public function support(Request $request, NotifyEmployees $notifyEmployees): JsonResponse
+    public function supportBrief(WorkCalendar $calendar): JsonResponse
+    {
+        return response()->json([
+            'data' => [
+                'phone' => '0947823488',
+                'email' => 'info@hoc.agency',
+                'calendar' => $calendar->holidaySummary(),
+            ],
+            'message' => 'ok',
+        ]);
+    }
+
+    public function support(Request $request, NotifyEmployees $notifyEmployees, WorkCalendar $calendar): JsonResponse
     {
         $validated = $request->validate([
             'telegram_user_id' => ['required', 'string'],
@@ -461,7 +478,12 @@ class TelegramBotController extends Controller
             $notifyEmployees->handlePlain(EmployeeProfession::Sales, $text);
         }
 
-        return response()->json(['data' => ['stored' => true], 'message' => 'Support message saved.']);
+        $reply = 'Support message saved.';
+        if (preg_match('/عطل|عطلة|دوام|جمعة/u', $validated['message']) === 1) {
+            $reply = "رقم الدعم: 0947823488\n".$calendar->holidaySummary();
+        }
+
+        return response()->json(['data' => ['stored' => true], 'message' => $reply]);
     }
 
     public function catalog(Request $request, PricingCatalog $catalog): JsonResponse
@@ -566,6 +588,45 @@ class TelegramBotController extends Controller
             writeExisting: filled($fresh->odoo_lead_id),
             classifyIndustry: false,
         );
+    }
+
+    public function photographySlots(Request $request, ServiceRequest $serviceRequest, BookPhotographySlot $bookPhotographySlot): JsonResponse
+    {
+        $this->assertClientOwns($request, $serviceRequest);
+
+        return response()->json(['data' => $bookPhotographySlot->freeSlots(), 'message' => 'ok']);
+    }
+
+    public function bookPhotography(Request $request, ServiceRequest $serviceRequest, BookPhotographySlot $bookPhotographySlot): JsonResponse
+    {
+        $this->assertClientOwns($request, $serviceRequest);
+        $validated = $request->validate([
+            'telegram_user_id' => ['required', 'string'],
+            'starts_at' => ['required', 'date'],
+        ]);
+        $booking = $bookPhotographySlot->hold($serviceRequest, $validated['starts_at']);
+
+        return response()->json([
+            'data' => [
+                'status' => $booking->status,
+                'starts_at' => $booking->starts_at?->toIso8601String(),
+                'message' => $bookPhotographySlot->clientMessage($booking),
+            ],
+            'message' => 'ok',
+        ]);
+    }
+
+    public function decidePhotography(Request $request, ServiceRequest $serviceRequest, BookPhotographySlot $bookPhotographySlot): JsonResponse
+    {
+        $this->assertClientOwns($request, $serviceRequest);
+        $validated = $request->validate([
+            'telegram_user_id' => ['required', 'string'],
+            'accept' => ['required', 'boolean'],
+        ]);
+
+        $booking = $bookPhotographySlot->decide($serviceRequest, (bool) $validated['accept']);
+
+        return response()->json(['data' => ['status' => $booking->status], 'message' => 'ok']);
     }
 
     private function assertClientOwns(Request $request, ServiceRequest $serviceRequest): void

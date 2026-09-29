@@ -128,6 +128,23 @@ class ClickUpClient
             ->throw();
     }
 
+    public function addTaskToList(string $taskId, string $listId): void
+    {
+        if ($taskId === '' || $listId === '') {
+            return;
+        }
+
+        Http::timeout((int) config('services.clickup.timeout', 12))
+            ->connectTimeout(3)
+            ->retry(2, 200)
+            ->acceptJson()
+            ->withHeaders([
+                'Authorization' => (string) config('services.clickup.token'),
+            ])
+            ->post('https://api.clickup.com/api/v2/list/'.$listId.'/task/'.$taskId)
+            ->throw();
+    }
+
     public function addTaskComment(string $taskId, string $comment): void
     {
         Http::timeout((int) config('services.clickup.timeout', 12))
@@ -168,6 +185,7 @@ class ClickUpClient
             'content', 'محتوى' => 'content',
             'programming', 'web', 'development', 'dev', 'البرمجة', 'برمجة', 'ويب' => 'programming',
             'photography', 'media', 'التصوير', 'تصوير', 'photo' => 'photography',
+            'revision', 'مراجعة' => 'revision',
             default => 'sales',
         };
 
@@ -452,7 +470,7 @@ class ClickUpClient
     public function departmentLists(): array
     {
         $lists = [];
-        foreach (['sales', 'design', 'content', 'programming', 'photography'] as $key) {
+        foreach (['sales', 'design', 'content', 'programming', 'photography', 'revision'] as $key) {
             $id = config("services.clickup.lists.{$key}");
             if (is_string($id) && $id !== '') {
                 $lists[$key] = $id;

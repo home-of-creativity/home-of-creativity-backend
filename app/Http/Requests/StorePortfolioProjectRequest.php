@@ -13,7 +13,7 @@ class StorePortfolioProjectRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
-        foreach (['summary_en', 'summary_ar'] as $field) {
+        foreach (['summary_en', 'summary_ar', 'body_en', 'body_ar'] as $field) {
             if ($this->input($field) === '') {
                 $this->merge([$field => null]);
             }
@@ -71,6 +71,12 @@ class StorePortfolioProjectRequest extends FormRequest
             'title_ar' => ['required', 'string', 'max:160'],
             'summary_en' => ['nullable', 'string', 'max:500'],
             'summary_ar' => ['nullable', 'string', 'max:500'],
+            'body_en' => ['nullable', 'string', 'max:100000'],
+            'body_ar' => ['nullable', 'string', 'max:100000'],
+            // Multipart forms cannot send an empty array: `related_sync=1` with no ids clears the list.
+            'related_sync' => ['sometimes', 'boolean'],
+            'related_ids' => ['sometimes', 'array', 'max:12'],
+            'related_ids.*' => ['integer', 'distinct', 'exists:portfolio_projects,id'],
             'sort_order' => ['sometimes', 'integer', 'min:0', 'max:9999'],
             'is_published' => ['sometimes', 'boolean'],
             'featured' => ['sometimes', 'boolean'],

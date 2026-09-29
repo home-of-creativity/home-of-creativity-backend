@@ -66,6 +66,8 @@ class PaymentReminder extends Model
             return true;
         }
 
-        return $this->last_sent_at->copy()->addDays(3)->lte(now());
+        $gap = $this->kind === self::KIND_RENEWAL ? 2 : 3;
+
+        return $this->last_sent_at->copy()->addDays($gap)->lte(now());
     }
 }

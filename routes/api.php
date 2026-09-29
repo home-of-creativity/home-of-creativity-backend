@@ -27,6 +27,7 @@ use App\Http\Controllers\Admin\SocialInboxController as AdminSocialInboxControll
 use App\Http\Controllers\Admin\SocialPostController as AdminSocialPostController;
 use App\Http\Controllers\Admin\SocialStaffController as AdminSocialStaffController;
 use App\Http\Controllers\Admin\StaffAccessController;
+use App\Http\Controllers\Admin\WorkScheduleController as AdminWorkScheduleController;
 use App\Http\Controllers\AdminBotController;
 use App\Http\Controllers\ArticleController;
 use App\Http\Controllers\AuthController;
@@ -170,6 +171,9 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::post('requests/{service_request}/poll-drive', [AdminServiceRequestController::class, 'pollDrive']);
         Route::post('requests/{service_request}/re-request-receipt', [AdminServiceRequestController::class, 'reRequestReceipt']);
         Route::post('requests/{service_request}/renew', [AdminServiceRequestController::class, 'renew']);
+        Route::post('requests/{service_request}/confirm-plan', [AdminWorkScheduleController::class, 'confirmPlan']);
+        Route::put('requests/{service_request}/draft-work-lines', [AdminWorkScheduleController::class, 'draftLines']);
+        Route::post('requests/{service_request}/extend-schedule', [AdminWorkScheduleController::class, 'extendSchedule']);
         Route::get('requests/{service_request}/files/{file}/receipt', [AdminServiceRequestController::class, 'receipt']);
         Route::post('integration-events/{integrationEvent}/retry', [AdminServiceRequestController::class, 'retryIntegrationEvent']);
     });
@@ -196,6 +200,8 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
 
     Route::middleware('ability:ops.channels')->group(function () {
         Route::put('ops-settings/client-channels', [AdminClientChannelController::class, 'update']);
+        Route::get('ops-settings/work-calendar', [AdminWorkScheduleController::class, 'showCalendar']);
+        Route::put('ops-settings/work-calendar', [AdminWorkScheduleController::class, 'updateCalendar']);
     });
 
     Route::middleware('crud:site.categories')->group(function () {
@@ -325,7 +331,11 @@ Route::prefix('bot/telegram')->middleware(['shared.secret:services.telegram.bot_
     Route::post('requests/{service_request}/revision', [TelegramBotController::class, 'revision']);
     Route::post('requests/{service_request}/approve-file', [TelegramBotController::class, 'approveFile']);
     Route::post('requests/{service_request}/renew', [TelegramBotController::class, 'renew']);
+    Route::get('requests/{service_request}/photography-slots', [TelegramBotController::class, 'photographySlots']);
+    Route::post('requests/{service_request}/photography-bookings', [TelegramBotController::class, 'bookPhotography']);
+    Route::post('requests/{service_request}/photography-decision', [TelegramBotController::class, 'decidePhotography']);
     Route::post('requests/{service_request}/decline-renewal', [TelegramBotController::class, 'declineRenewal']);
+    Route::get('support-brief', [TelegramBotController::class, 'supportBrief']);
     Route::post('support', [TelegramBotController::class, 'support']);
 });
 
@@ -350,6 +360,9 @@ Route::prefix('bot/staff')->middleware('shared.secret:services.telegram.staff_bo
     Route::get('progressable-requests', [StaffBotController::class, 'progressableRequests']);
     Route::get('completable-requests', [StaffBotController::class, 'completableRequests']);
     Route::post('confirm-payment', [StaffBotController::class, 'confirmPayment']);
+    Route::post('confirm-plan', [StaffBotController::class, 'confirmPlan']);
+    Route::post('photography-bookings/{booking}/approve', [StaffBotController::class, 'approvePhotography']);
+    Route::post('photography-bookings/{booking}/propose', [StaffBotController::class, 'proposePhotography']);
 });
 
 Route::prefix('bot/dev')->middleware('shared.secret:services.telegram.dev_bot_secret')->group(function () {

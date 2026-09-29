@@ -581,6 +581,7 @@ export type PricingPackage = {
   price_usd: number | null;
   prices: PricingPackagePrices | null;
   features: Array<{ en: string; ar: string }>;
+  work_lines?: Array<{ department: string; hours: number }>;
   reach: PricingPackageReach | null;
   featured: boolean;
   badge_en: string | null;
@@ -628,6 +629,11 @@ export type PortfolioProject = {
   title_ar: string;
   summary_en: string | null;
   summary_ar: string | null;
+  /** Rich text shown on the project page under the summary (cleaned on the server). */
+  body_en: string | null;
+  body_ar: string | null;
+  /** Other projects listed under "related projects", in order. */
+  related_ids?: number[];
   website_url: string | null;
   social_links: PortfolioSocialLinks;
   image_path: string | null;
@@ -879,6 +885,30 @@ export const api = {
   },
   renewRequest(id: number) {
     return request<Envelope<ServiceRequest>>(`/admin/requests/${id}/renew`, { method: "POST" });
+  },
+  confirmWorkPlan(id: number) {
+    return request<Envelope<ServiceRequest>>(`/admin/requests/${id}/confirm-plan`, { method: "POST" });
+  },
+  saveDraftWorkLines(id: number, lines: Array<{ department: string; hours: number }>) {
+    return request<Envelope<ServiceRequest>>(`/admin/requests/${id}/draft-work-lines`, {
+      method: "PUT",
+      body: JSON.stringify({ lines }),
+    });
+  },
+  extendSchedule(id: number, hours: number, reason: string) {
+    return request<Envelope<ServiceRequest>>(`/admin/requests/${id}/extend-schedule`, {
+      method: "POST",
+      body: JSON.stringify({ hours, reason }),
+    });
+  },
+  workCalendar() {
+    return request<Envelope<{ hours_per_day: number; holidays: string[] }>>("/admin/ops-settings/work-calendar");
+  },
+  saveWorkCalendar(payload: { hours_per_day: number; holidays: string[] }) {
+    return request<Envelope<{ hours_per_day: number; holidays: string[] }>>("/admin/ops-settings/work-calendar", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
   },
   opsSettings() {
     return request<Envelope<OpsSettings>>("/admin/ops-settings");
