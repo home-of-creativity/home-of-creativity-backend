@@ -1,7 +1,7 @@
 # Telegram bots
 
 Path: `backend/bot/`  
-Python 3, `python-telegram-bot==21.6`, httpx, dotenv. Shared runner: `telegram_http.py` (polling default, webhook if `TELEGRAM_WEBHOOK_URL`).
+Python 3, `python-telegram-bot==21.6`, httpx, dotenv. Shared runner: `telegram_http.py` (polling default, webhook if `TELEGRAM_WEBHOOK_URL`). Every bot registers an error handler there: Telegram `NetworkError` / `TimedOut` (Bad Gateway on `getUpdates`) is ignored; any other error is sent to Sentry.
 
 | File | Role | Webhook port |
 | --- | --- | --- |

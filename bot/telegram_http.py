@@ -15,6 +15,23 @@ from telegram.request import HTTPXRequest
 from telegram.ext import Application
 
 
+async def _on_bot_error(_update: object, context: object) -> None:
+    """Polling Bad Gateway is transient. Other errors still go to Sentry."""
+    from telegram.error import NetworkError, TimedOut
+
+    err = getattr(context, "error", None)
+    if isinstance(err, (NetworkError, TimedOut)):
+        return
+    if err is None:
+        return
+    try:
+        import sentry_sdk
+
+        sentry_sdk.capture_exception(err)
+    except Exception:
+        return
+
+
 def run_application(
     application: Application,
     *,
@@ -26,6 +43,7 @@ def run_application(
     from telegram import Update
 
     init_sentry()
+    application.add_error_handler(_on_bot_error)
     public = (webhook_url or os.environ.get("TELEGRAM_WEBHOOK_URL") or "").strip().rstrip("/")
     listen_port = int(os.environ.get("TELEGRAM_WEBHOOK_PORT") or port)
     path = url_path.strip().strip("/")

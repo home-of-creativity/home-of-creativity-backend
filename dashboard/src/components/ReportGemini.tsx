@@ -4,6 +4,15 @@ import { api } from "../api";
 import { copy } from "../i18n";
 
 type Memory = { id: number; body: string };
+
+function asMemories(value: unknown): Memory[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is Memory => {
+    if (item === null || typeof item !== "object") return false;
+    const row = item as { id?: unknown; body?: unknown };
+    return typeof row.id === "number" && typeof row.body === "string";
+  });
+}
 type Scope = "selection" | "write";
 
 async function rasterToPng(bytes: Uint8Array, mime: string) {
@@ -117,7 +126,7 @@ export function ReportGemini({
   pageText,
   onApply,
   onInsertImage,
-  fonts,
+  fonts = [],
   onInstallFont,
 }: {
   t: (c: { ar: string; en: string }) => string;
@@ -158,7 +167,7 @@ export function ReportGemini({
 
   useEffect(() => {
     api.reportMemories()
-      .then((res) => setMemories(res.data))
+      .then((res) => setMemories(asMemories(res.data)))
       .catch(() => setMemories([]));
   }, []);
 
@@ -182,7 +191,7 @@ export function ReportGemini({
         save_memory: saveMemory,
         ...(attachment ? { image_mime: attachment.mime, image_base64: attachment.base64 } : {}),
       });
-      setMemories(res.data.memories);
+      setMemories(asMemories(res.data.memories));
       setDraft({ reply: res.data.reply, previous: source, next: htmlToText(res.data.body) });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t(copy.saveFailed));
@@ -314,7 +323,7 @@ export function ReportGemini({
     setBusy(true);
     try {
       const res = await api.saveReportMemory(text);
-      setMemories(res.data);
+      setMemories(asMemories(res.data));
       setMemoryNote("");
       toast.success(t(copy.reportMemorySaved));
     } catch (err) {
@@ -474,7 +483,7 @@ export function ReportGemini({
           {memories.map((memory) => (
             <li key={memory.id}>
               <span>{memory.body}</span>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => void api.deleteReportMemory(memory.id).then((res) => setMemories(res.data))}>{t(copy.delete)}</button>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => void api.deleteReportMemory(memory.id).then((res) => setMemories(asMemories(res.data)))}>{t(copy.delete)}</button>
             </li>
           ))}
         </ul>
