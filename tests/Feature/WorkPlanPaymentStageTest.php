@@ -65,15 +65,14 @@ class WorkPlanPaymentStageTest extends TestCase
             ])->assertOk();
 
         $serviceRequest->refresh();
-        $this->assertNotEmpty($serviceRequest->work_plan['operations'] ?? []);
-        $this->assertSame('مصمم أول', $serviceRequest->work_plan['operations'][0]['employee_name'] ?? null);
+        $this->assertEmpty($serviceRequest->work_plan['operations'] ?? []);
 
         Http::assertSent(function (Request $request): bool {
             $body = $request->body();
 
             return str_contains($request->url(), 'botstaff-token/sendPhoto')
                 && str_contains($body, 'رفع الزبون وصل دفع')
-                && str_contains($body, 'خطة العمل')
+                && str_contains($body, 'تُؤكد بعد الدفع')
                 && str_contains($body, 'payok:');
         });
     }
@@ -250,7 +249,7 @@ class WorkPlanPaymentStageTest extends TestCase
 
         Http::assertSent(fn (Request $request): bool => str_contains($request->url(), 'botstaff-token/sendMessage')
             && str_contains((string) $request['text'], 'وافق الزبون على عرض السعر')
-            && str_contains((string) $request['text'], 'خطة العمل')
+            && str_contains((string) $request['text'], 'تُؤكد بعد الدفع')
             && str_contains(json_encode($request['reply_markup'], JSON_UNESCAPED_UNICODE) ?: '', 'payok:'));
     }
 

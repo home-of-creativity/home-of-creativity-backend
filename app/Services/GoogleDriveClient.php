@@ -60,8 +60,10 @@ class GoogleDriveClient
         }
 
         $parent = trim((string) $parentId);
+        // Without a parent, only top-level folders: the account's own root and folders shared with
+        // it. Their subfolders are listed when the parent is opened, not as separate entries.
         $query = $parent === ''
-            ? "mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+            ? "mimeType = 'application/vnd.google-apps.folder' and trashed = false and ('root' in parents or sharedWithMe = true)"
             : sprintf(
                 "'%s' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
                 str_replace("'", "\\'", $parent),
@@ -99,6 +101,11 @@ class GoogleDriveClient
             $next = $response->json('nextPageToken');
             usort($folders, fn (array $a, array $b): int => strcasecmp($a['name'], $b['name']));
 
+            // Shared drives are top-level too; their root folders are listed with the drive id as parent.
+            if ($parent === '' && ! filled($pageToken)) {
+                $folders = [...$this->sharedDrives($token), ...$folders];
+            }
+
             return [
                 'folders' => $folders,
                 'next_page_token' => filled($next) ? (string) $next : null,
@@ -106,6 +113,37 @@ class GoogleDriveClient
         } catch (Throwable $exception) {
             return $this->fail('Google Drive listFolders failed: '.$exception->getMessage());
         }
+    }
+
+    /**
+     * Shared drives the account can open, as folder entries (a shared drive's id is also the parent
+     * id of its top-level folders). A failure here leaves the regular folder list usable.
+     *
+     * @return list<array{id: string, name: string}>
+     */
+    private function sharedDrives(string $token): array
+    {
+        try {
+            $response = Http::withToken($token)
+                ->timeout(20)
+                ->acceptJson()
+                ->get(self::API.'/drives', ['pageSize' => 100, 'fields' => 'drives(id,name)']);
+        } catch (Throwable) {
+            return [];
+        }
+        if (! $response->successful()) {
+            return [];
+        }
+
+        $drives = [];
+        foreach ($response->json('drives') ?? [] as $drive) {
+            if (is_array($drive) && filled($drive['id'] ?? null)) {
+                $drives[] = ['id' => (string) $drive['id'], 'name' => (string) ($drive['name'] ?? '')];
+            }
+        }
+        usort($drives, fn (array $a, array $b): int => strcasecmp($a['name'], $b['name']));
+
+        return $drives;
     }
 
     public function createFolder(string $name, ?string $parentId = null): ?string

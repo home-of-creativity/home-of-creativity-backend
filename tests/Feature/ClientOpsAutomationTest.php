@@ -365,15 +365,16 @@ class ClientOpsAutomationTest extends TestCase
             'amount_paid' => 400,
             'amount_remaining' => 0,
             'subscription_starts_at' => now()->subDays(20),
-            'subscription_ends_at' => now()->addDays(10),
+            'subscription_ends_at' => now()->addDays(5),
             'allows_renewal' => true,
             'billing_period' => 'monthly',
         ])->save();
 
         $previousEnd = $request->subscription_ends_at->copy();
         $renewed = app(RenewSubscription::class)->handle($request->fresh() ?? $request);
-        $this->assertTrue($renewed->subscription_ends_at->greaterThan($previousEnd));
-        $this->assertEqualsWithDelta(30, $previousEnd->diffInDays($renewed->subscription_ends_at), 2);
+        $this->assertTrue($renewed->subscription_ends_at->equalTo($previousEnd));
+        $paid = app(ConfirmRequestPayment::class)->handle($renewed->fresh() ?? $renewed, PaymentMethod::Cash, 400);
+        $this->assertEqualsWithDelta(30, $previousEnd->diffInDays($paid->subscription_ends_at), 2);
 
         $blocked = $request->fresh() ?? $request;
         $blocked->forceFill(['allows_renewal' => false])->save();
@@ -1166,14 +1167,10 @@ class ClientOpsAutomationTest extends TestCase
                 'telegram_user_id' => 'tg-revfile',
                 'reason' => 'أعد كل الملفات',
             ])
-            ->assertOk()
-            ->assertJsonPath('data.status', 'revision_requested');
+            ->assertStatus(422)
+            ->assertJsonPath('errors.revision.0', 'التعديل متاح مرة واحدة. للدعم اتصل +963 968 862 822 أو راسل info@hoc.agency.');
 
-        $this->assertSame(2, Revision::query()->where('request_id', $request->id)->count());
-        $this->assertStringContainsString(
-            'الطلب بالكامل',
-            (string) Revision::query()->where('request_id', $request->id)->latest('id')->value('comments'),
-        );
+        $this->assertSame(1, Revision::query()->where('request_id', $request->id)->count());
 
         $keyboard = $delivery->clientRevisionKeyboard('12');
         $this->assertCount(1, $keyboard['inline_keyboard']);

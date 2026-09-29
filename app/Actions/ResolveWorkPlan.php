@@ -6,6 +6,8 @@ use App\Enums\EmployeeProfession;
 use App\Models\Employee;
 use App\Models\ServiceRequest;
 use App\Services\GeminiService;
+use App\Support\WorkCalendar;
+use App\Support\WorkLines;
 use Illuminate\Support\Facades\Cache;
 
 class ResolveWorkPlan
@@ -14,14 +16,21 @@ class ResolveWorkPlan
 
     public const MANUAL_TTL_SECONDS = 60 * 60 * 24 * 7;
 
-    public function __construct(private GeminiService $gemini) {}
+    public function __construct(
+        private GeminiService $gemini,
+        private WorkCalendar $calendar,
+    ) {}
 
     /**
      * @return array{source: string, cache_key: string, operations: list<array<string, mixed>>}
      */
-    public function handle(ServiceRequest $request): array
+    public function handle(ServiceRequest $request, bool $rebuild = false): array
     {
-        $request->loadMissing(['pricingPackage.subcategory.category', 'client']);
+        $request->loadMissing(['pricingPackage.subcategory.category', 'client', 'clickupTasks']);
+
+        if (! $rebuild && $request->clickupTasks->isNotEmpty() && is_array($request->work_plan) && ($request->work_plan['operations'] ?? []) !== []) {
+            return $request->work_plan;
+        }
 
         $key = $this->cacheKey($request);
         $ttl = $request->pricing_package_id ? self::PACKAGE_TTL_SECONDS : self::MANUAL_TTL_SECONDS;
@@ -29,10 +38,16 @@ class ResolveWorkPlan
 
         $template = Cache::remember($key, $ttl, fn (): array => $this->planTemplate($request));
 
-        $operations = $this->assignEmployees(is_array($template) ? $template : []);
+        $templateList = is_array($template) ? $template : [];
+        $operations = $this->assignEmployees($templateList);
+        $parallel = $this->calendar->parallelHours($operations);
         $plan = [
-            'source' => $fromCache ? 'cache' : 'ai',
+            'source' => WorkLines::fromRequest($request) !== [] ? 'lines' : ($fromCache ? 'cache' : 'ai'),
             'cache_key' => $key,
+            'period_key' => (string) data_get($request->work_plan, 'period_key', 'initial'),
+            'parallel_hours' => $parallel,
+            'period_end' => $request->subscription_ends_at?->toIso8601String(),
+            'client_due_at' => $this->calendar->addWorkHours(now(), $parallel)->toIso8601String(),
             'operations' => $operations,
         ];
 
@@ -43,6 +58,11 @@ class ResolveWorkPlan
 
     public function cacheKey(ServiceRequest $request): string
     {
+        $lines = WorkLines::fromRequest($request);
+        if ($lines !== []) {
+            return 'hoc:work-plan:v2:lines:'.sha1((string) json_encode($lines));
+        }
+
         if ($request->pricing_package_id) {
             return 'hoc:work-plan:v1:pkg:'.$request->pricing_package_id;
         }
@@ -71,6 +91,11 @@ class ResolveWorkPlan
             );
         }
 
+        $lines = WorkLines::fromRequest($request);
+        if ($lines !== []) {
+            return $lines;
+        }
+
         return $this->gemini->planWork(
             (string) $request->title,
             (string) $request->description,
@@ -89,12 +114,13 @@ class ResolveWorkPlan
         foreach ($template as $operation) {
             $profession = $this->professionFor((string) ($operation['department'] ?? ''));
             $employee = $profession ? $this->pickEmployee($profession) : null;
-            $due = now()->addHours((int) ($operation['hours'] ?? 24));
+            $hours = (int) ($operation['hours'] ?? 24);
+            $due = $this->calendar->addWorkHours(now(), $hours);
 
             $assigned[] = [
                 'department' => $operation['department'],
                 'brief' => $operation['brief'],
-                'hours' => (int) ($operation['hours'] ?? 24),
+                'hours' => $hours,
                 'priority' => (int) ($operation['priority'] ?? 3),
                 'priority_label' => $this->priorityLabel((int) ($operation['priority'] ?? 3)),
                 'due_at' => $due->toIso8601String(),
@@ -109,12 +135,18 @@ class ResolveWorkPlan
 
     private function pickEmployee(EmployeeProfession $profession): ?Employee
     {
+        $finished = ['complete', 'closed', 'done', 'completed'];
+
         return Employee::query()
             ->approved()
             ->where('profession', $profession)
-            ->withCount('clickupTasks')
+            ->withSum(['clickupTasks as remaining_hours' => function ($query) use ($finished): void {
+                $query->where(function ($inner) use ($finished): void {
+                    $inner->whereNull('status')->orWhereNotIn('status', $finished);
+                });
+            }], 'planned_hours')
             ->orderByRaw('clickup_user_id is null')
-            ->orderBy('clickup_tasks_count')
+            ->orderByRaw('coalesce(remaining_hours, 0)')
             ->orderBy('id')
             ->first();
     }

@@ -21,6 +21,8 @@ class ClickUpTask extends Model
         'clickup_url',
         'status',
         'integration_key',
+        'planned_hours',
+        'period_key',
     ];
 
     protected function casts(): array

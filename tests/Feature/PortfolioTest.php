@@ -338,4 +338,66 @@ class PortfolioTest extends TestCase
         $this->assertNotNull($project->image_path);
         Storage::disk('public')->assertExists($project->image_path);
     }
+
+    private function project(PortfolioCategory $category, string $title, bool $published = true): PortfolioProject
+    {
+        return PortfolioProject::query()->create([
+            'category_id' => $category->id,
+            'title_en' => $title,
+            'title_ar' => $title,
+            'sort_order' => 1,
+            'is_published' => $published,
+            'featured' => false,
+        ]);
+    }
+
+    public function test_admin_saves_project_body_html_and_related_projects(): void
+    {
+        Sanctum::actingAs(User::factory()->create(['is_admin' => true]));
+        $category = PortfolioCategory::query()->create([
+            'slug' => 'identity', 'name_en' => 'Identity', 'name_ar' => 'الهوية', 'sort_order' => 1, 'is_published' => true,
+        ]);
+        $project = $this->project($category, 'Main');
+        $first = $this->project($category, 'First');
+        $second = $this->project($category, 'Second');
+
+        $this->post('/api/admin/portfolio/projects/'.$project->id, [
+            '_method' => 'PUT',
+            'body_ar' => '<h2>التحدي</h2><p onclick="x()">نص <a href="javascript:alert(1)">رابط</a></p><script>alert(1)</script>',
+            'body_en' => '<h2>Challenge</h2><p>Text</p>',
+            'related_ids' => [(string) $second->id, (string) $first->id, (string) $project->id],
+        ])->assertOk()
+            ->assertJsonPath('data.related_ids', [$second->id, $first->id]);
+
+        $project->refresh();
+        $this->assertSame('<h2>التحدي</h2><p>نص <a>رابط</a></p>', $project->body_ar);
+        $this->assertSame('<h2>Challenge</h2><p>Text</p>', $project->body_en);
+
+        // An empty list clears the related projects; leaving the field out keeps them.
+        $this->post('/api/admin/portfolio/projects/'.$project->id, ['_method' => 'PUT', 'title_en' => 'Main 2'])->assertOk();
+        $this->assertSame([$second->id, $first->id], $project->related()->pluck('portfolio_projects.id')->all());
+        $this->post('/api/admin/portfolio/projects/'.$project->id, ['_method' => 'PUT', 'related_sync' => '1'])
+            ->assertOk()
+            ->assertJsonPath('data.related_ids', []);
+    }
+
+    public function test_public_project_details_include_body_and_published_related_projects(): void
+    {
+        $category = PortfolioCategory::query()->create([
+            'slug' => 'identity', 'name_en' => 'Identity', 'name_ar' => 'الهوية', 'sort_order' => 1, 'is_published' => true,
+        ]);
+        $project = $this->project($category, 'Main');
+        $project->forceFill(['body_ar' => '<p>تفاصيل</p>'])->save();
+        $shown = $this->project($category, 'Shown');
+        $hidden = $this->project($category, 'Hidden', false);
+        $project->related()->sync([$hidden->id => ['sort_order' => 0], $shown->id => ['sort_order' => 1]]);
+
+        $this->getJson('/api/portfolio/projects/'.$project->id)
+            ->assertOk()
+            ->assertJsonPath('data.body_ar', '<p>تفاصيل</p>')
+            ->assertJsonCount(1, 'data.related')
+            ->assertJsonPath('data.related.0.id', $shown->id)
+            ->assertJsonPath('data.related.0.title_en', 'Shown')
+            ->assertJsonPath('data.related.0.category.slug', 'identity');
+    }
 }

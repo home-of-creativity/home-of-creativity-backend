@@ -8,7 +8,9 @@ use App\Models\ServiceRequest;
 use App\Services\ClickUpClient;
 use App\Services\GoogleTranslateService;
 use App\Support\ResolveServiceRequest;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class ProvisionClickUpTasks
 {
@@ -28,7 +30,12 @@ class ProvisionClickUpTasks
             return $request;
         }
 
+        $allowNewPeriod = (bool) data_get($request->work_plan, 'allow_new_period');
         if ($this->executionTasksExist($request)) {
+            if ($allowNewPeriod) {
+                $this->updateExistingTasks($request, $briefPayloads);
+            }
+
             return $request;
         }
 
@@ -42,6 +49,9 @@ class ProvisionClickUpTasks
                         'clickup_user_id' => $brief['clickup_user_id'] ?? null,
                         'due_at' => $brief['due_at'] ?? null,
                         'priority' => $brief['priority'] ?? null,
+                        'hours' => $brief['hours'] ?? null,
+                        'period_key' => data_get($request->work_plan, 'period_key'),
+                        'employee_id' => $brief['employee_id'] ?? null,
                     ], $briefPayloads),
                 );
 
@@ -63,6 +73,8 @@ class ProvisionClickUpTasks
                         'brief_id' => $brief['id'] ?? null,
                         'clickup_user_id' => $brief['clickup_user_id'] ?? null,
                         'status' => 'to do',
+                        'planned_hours' => $brief['hours'] ?? null,
+                        'period_key' => data_get($request->work_plan, 'period_key', 'initial'),
                     ]);
                 }
 
@@ -111,6 +123,8 @@ class ProvisionClickUpTasks
                     'clickup_user_id' => $operation['clickup_user_id'] ?? null,
                     'due_at' => $operation['due_at'] ?? null,
                     'priority' => isset($operation['priority']) ? (int) $operation['priority'] : null,
+                    'hours' => isset($operation['hours']) ? (int) $operation['hours'] : null,
+                    'employee_id' => $operation['employee_id'] ?? null,
                 ];
             }
 
@@ -128,6 +142,53 @@ class ProvisionClickUpTasks
                 'brief' => $this->translator->toArabic((string) $brief->brief),
             ])
             ->all();
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $briefPayloads
+     */
+    private function updateExistingTasks(ServiceRequest $request, array $briefPayloads): void
+    {
+        $request->loadMissing('clickupTasks');
+        foreach ($briefPayloads as $brief) {
+            $taskType = ClickUpTaskType::fromDepartment((string) ($brief['department'] ?? ''));
+            if (! $taskType) {
+                continue;
+            }
+            $task = $request->clickupTasks->first(
+                fn ($row): bool => $row->task_type === $taskType,
+            );
+            if ($task === null) {
+                continue;
+            }
+            $task->forceFill([
+                'planned_hours' => $brief['hours'] ?? $task->planned_hours,
+                'employee_id' => $brief['employee_id'] ?? $task->employee_id,
+                'clickup_user_id' => $brief['clickup_user_id'] ?? $task->clickup_user_id,
+                'period_key' => (string) data_get($request->work_plan, 'period_key', $task->period_key),
+            ])->save();
+
+            if (! $this->clickUp->configured() || ! filled($task->clickup_task_id)) {
+                continue;
+            }
+            try {
+                $due = filled($brief['due_at'] ?? null)
+                    ? Carbon::parse((string) $brief['due_at'])->getTimestampMs()
+                    : null;
+                $this->clickUp->updateTask(
+                    (string) $task->clickup_task_id,
+                    null,
+                    filled($brief['clickup_user_id'] ?? null) ? (string) $brief['clickup_user_id'] : null,
+                    $due,
+                    isset($brief['priority']) ? (int) $brief['priority'] : null,
+                );
+            } catch (Throwable $exception) {
+                Log::warning('ClickUp task update failed.', [
+                    'task' => $task->clickup_task_id,
+                    'error' => $exception->getMessage(),
+                ]);
+            }
+        }
     }
 
     private function executionTasksExist(ServiceRequest $request): bool

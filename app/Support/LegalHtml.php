@@ -7,7 +7,7 @@ use Illuminate\Support\Str;
 class LegalHtml
 {
     /**
-     * Allow a small HTML subset for legal sections edited in the dashboard.
+     * Allow a small HTML subset for rich text edited in the dashboard (legal sections, project details).
      */
     public static function clean(string $html): string
     {

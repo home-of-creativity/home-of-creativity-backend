@@ -129,8 +129,8 @@ class FullWorkflowTest extends TestCase
             'work_type' => WorkType::Design,
             'briefs' => [['type' => 'design', 'brief' => 'Design the booth signage.']],
         ];
-        $gemini->shouldReceive('classificationFromWorkPlan')->once()->andReturn($classified);
-        $gemini->shouldReceive('classify')->never();
+        $gemini->shouldReceive('classificationFromWorkPlan')->never();
+        $gemini->shouldReceive('classify')->once()->andReturn($classified);
         $gemini->shouldReceive('persistBriefs')->once()->andReturnUsing(
             fn (ServiceRequest $request, array $briefs): mixed => $persistGemini->persistBriefs($request, $briefs),
         );

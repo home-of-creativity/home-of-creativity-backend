@@ -57,19 +57,27 @@ class ApplyClickUpMapping
                     ->value('id');
             }
 
+            $attributes = [
+                'request_id' => $request->id,
+                'brief_id' => $briefId,
+                'task_type' => $taskType,
+                'clickup_task_id' => (string) ($payload['clickup_task_id'] ?? ''),
+                'clickup_list_id' => $payload['clickup_list_id'] ?? null,
+                'clickup_user_id' => $payload['clickup_user_id'] ?? null,
+                'employee_id' => $employeeId,
+                'clickup_url' => $payload['clickup_url'] ?? null,
+                'status' => $payload['status'] ?? null,
+            ];
+            if (array_key_exists('planned_hours', $payload) && $payload['planned_hours'] !== null) {
+                $attributes['planned_hours'] = (int) $payload['planned_hours'];
+            }
+            if (array_key_exists('period_key', $payload) && filled($payload['period_key'])) {
+                $attributes['period_key'] = (string) $payload['period_key'];
+            }
+
             ClickUpTask::query()->updateOrCreate(
                 ['integration_key' => $integrationKey],
-                [
-                    'request_id' => $request->id,
-                    'brief_id' => $briefId,
-                    'task_type' => $taskType,
-                    'clickup_task_id' => (string) ($payload['clickup_task_id'] ?? ''),
-                    'clickup_list_id' => $payload['clickup_list_id'] ?? null,
-                    'clickup_user_id' => $payload['clickup_user_id'] ?? null,
-                    'employee_id' => $employeeId,
-                    'clickup_url' => $payload['clickup_url'] ?? null,
-                    'status' => $payload['status'] ?? null,
-                ],
+                $attributes,
             );
 
             if ($taskType === ClickUpTaskType::Sales) {

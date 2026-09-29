@@ -15,10 +15,22 @@ class DeclineRenewal
             ->whereNull('completed_at')
             ->update(['completed_at' => now()]);
 
-        $request->subscriptions()->latest('id')->first()?->forceFill([
-            'renewal_declined' => true,
-            'status' => 'expiring',
-        ])->save();
+        $latest = $request->subscriptions()->latest('id')->first();
+        if ($latest) {
+            $latest->forceFill([
+                'renewal_declined' => true,
+                'status' => $latest->status === 'pending_renewal' ? 'pending_renewal' : 'expiring',
+            ])->save();
+        } else {
+            $request->subscriptions()->create([
+                'billing_period' => $request->billing_period ?: 'monthly',
+                'starts_at' => $request->subscription_starts_at ?? now(),
+                'ends_at' => $request->subscription_ends_at ?? now(),
+                'amount' => (float) ($request->amount_total ?? 0),
+                'status' => 'expiring',
+                'renewal_declined' => true,
+            ]);
+        }
 
         return $request->fresh(['subscriptions', 'paymentReminders']) ?? $request;
     }

@@ -57,7 +57,11 @@ class PortfolioController extends Controller
             abort(404);
         }
 
-        $portfolioProject->load(['category', 'images']);
+        $portfolioProject->load([
+            'category',
+            'images',
+            'related' => fn ($query) => $query->where('is_published', true)->with('category'),
+        ]);
 
         return PortfolioProjectResource::make($portfolioProject)
             ->additional(['message' => 'ok']);

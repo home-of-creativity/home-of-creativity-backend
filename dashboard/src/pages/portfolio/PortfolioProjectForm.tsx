@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
+import { Controller } from "react-hook-form";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { z } from "zod";
 import { FileDropzone } from "../../components/FileDropzone";
 import { FormPage } from "../../components/FormPage";
 import { FormSection } from "../../components/FormSection";
+import { HtmlEditorField } from "../../components/HtmlEditorField";
 import { LoadingLottie } from "../../components/LoadingLottie";
 import { useZodForm } from "../../lib/useZodForm";
 import { api, type PortfolioCategory, type PortfolioProject } from "../../api";
@@ -25,6 +27,8 @@ export function PortfolioProjectForm({ locale, t }: { locale: Locale; t: (c: { a
   const [galleryFiles, setGalleryFiles] = useState<File[]>([]);
   const [existingGallery, setExistingGallery] = useState<NonNullable<PortfolioProject["images"]>>([]);
   const [removeGalleryIds, setRemoveGalleryIds] = useState<number[]>([]);
+  const [otherProjects, setOtherProjects] = useState<PortfolioProject[]>([]);
+  const [relatedIds, setRelatedIds] = useState<number[]>([]);
   const [loading, setLoading] = useState(Boolean(editingId));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -37,6 +41,8 @@ export function PortfolioProjectForm({ locale, t }: { locale: Locale; t: (c: { a
         title_ar: z.string().trim().min(1, t(copy.fieldRequired)),
         summary_en: z.string().trim(),
         summary_ar: z.string().trim(),
+        body_en: z.string(),
+        body_ar: z.string(),
         website_url: urlField(t),
         social: z.object({
           instagram: urlField(t),
@@ -56,6 +62,7 @@ export function PortfolioProjectForm({ locale, t }: { locale: Locale; t: (c: { a
   const {
     register,
     handleSubmit,
+    control,
     reset,
     setValue,
     watch,
@@ -67,6 +74,8 @@ export function PortfolioProjectForm({ locale, t }: { locale: Locale; t: (c: { a
       title_ar: "",
       summary_en: "",
       summary_ar: "",
+      body_en: "",
+      body_ar: "",
       website_url: "",
       social: { instagram: "", facebook: "", linkedin: "", x: "", tiktok: "", youtube: "" },
       sort_order: "",
@@ -84,6 +93,14 @@ export function PortfolioProjectForm({ locale, t }: { locale: Locale; t: (c: { a
       })
       .catch(() => setCategories([]));
   }, [editingId, setValue, watch]);
+
+  useEffect(() => {
+    // Candidates for "related projects": every project except this one.
+    api
+      .portfolioProjects(1)
+      .then((res) => setOtherProjects(res.data.filter((row) => row.id !== editingId)))
+      .catch(() => setOtherProjects([]));
+  }, [editingId]);
 
   useEffect(() => {
     if (!editingId) {
@@ -105,6 +122,8 @@ export function PortfolioProjectForm({ locale, t }: { locale: Locale; t: (c: { a
           title_ar: item.title_ar,
           summary_en: item.summary_en ?? "",
           summary_ar: item.summary_ar ?? "",
+          body_en: item.body_en ?? "",
+          body_ar: item.body_ar ?? "",
           website_url: item.website_url ?? "",
           social: {
             instagram: item.social_links?.instagram ?? "",
@@ -120,6 +139,7 @@ export function PortfolioProjectForm({ locale, t }: { locale: Locale; t: (c: { a
         });
         setCurrentImageUrl(item.image_url);
         setExistingGallery(item.images ?? []);
+        setRelatedIds(item.related_ids ?? []);
       })
       .catch(() => setError(t(copy.savePortfolioFailed)))
       .finally(() => setLoading(false));
@@ -131,6 +151,8 @@ export function PortfolioProjectForm({ locale, t }: { locale: Locale; t: (c: { a
     title_ar: string;
     summary_en: string;
     summary_ar: string;
+    body_en: string;
+    body_ar: string;
     website_url: string;
     social: Record<string, string>;
     sort_order: string;
@@ -145,6 +167,10 @@ export function PortfolioProjectForm({ locale, t }: { locale: Locale; t: (c: { a
     payload.set("title_ar", values.title_ar.trim());
     payload.set("summary_en", values.summary_en.trim());
     payload.set("summary_ar", values.summary_ar.trim());
+    payload.set("body_en", values.body_en.trim());
+    payload.set("body_ar", values.body_ar.trim());
+    payload.set("related_sync", "1");
+    for (const id of relatedIds) payload.append("related_ids[]", String(id));
     payload.set("website_url", values.website_url.trim());
     for (const [platform, value] of Object.entries(values.social)) {
       payload.set(`social_links[${platform}]`, value.trim());
@@ -232,6 +258,62 @@ export function PortfolioProjectForm({ locale, t }: { locale: Locale; t: (c: { a
           <input type="checkbox" {...register("featured")} />
           {t(copy.featured)}
         </label>
+      </FormSection>
+
+      <FormSection title={t(copy.projectDetails)} span>
+        <Controller
+          name="body_ar"
+          control={control}
+          render={({ field }) => (
+            <HtmlEditorField
+              label={t(copy.projectBodyAr)}
+              value={field.value}
+              onChange={field.onChange}
+              dir="rtl"
+              placeholder="<h2>التحدي</h2><p>…</p>"
+              hint={t(copy.projectBodyHint)}
+              toolbarLabel={t(copy.htmlEditorToolbar)}
+            />
+          )}
+        />
+        <Controller
+          name="body_en"
+          control={control}
+          render={({ field }) => (
+            <HtmlEditorField
+              label={t(copy.projectBodyEn)}
+              value={field.value}
+              onChange={field.onChange}
+              dir="ltr"
+              placeholder="<h2>The challenge</h2><p>…</p>"
+              hint={t(copy.projectBodyHint)}
+              toolbarLabel={t(copy.htmlEditorToolbar)}
+            />
+          )}
+        />
+      </FormSection>
+
+      <FormSection title={t(copy.relatedProjects)} span>
+        <p className="muted field-span">{t(copy.relatedProjectsHint)}</p>
+        {otherProjects.length === 0 ? <p className="muted field-span">{t(copy.relatedProjectsEmpty)}</p> : null}
+        <div className="gallery-preview-grid field-span">
+          {otherProjects.map((item) => {
+            const position = relatedIds.indexOf(item.id);
+            return (
+              <label key={item.id} className={position >= 0 ? "gallery-preview-item is-picked" : "gallery-preview-item"}>
+                {item.image_url ? <img src={item.image_url} alt="" referrerPolicy="no-referrer" className="gallery-preview-thumb" /> : null}
+                <input
+                  type="checkbox"
+                  checked={position >= 0}
+                  onChange={() =>
+                    setRelatedIds((prev) => (prev.includes(item.id) ? prev.filter((id) => id !== item.id) : [...prev, item.id]))
+                  }
+                />
+                <span>{position >= 0 ? `${position + 1}. ` : ""}{locale === "ar" ? item.title_ar : item.title_en}</span>
+              </label>
+            );
+          })}
+        </div>
       </FormSection>
 
       <FormSection title={t(copy.socialLinks)}>

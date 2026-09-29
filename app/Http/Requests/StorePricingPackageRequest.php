@@ -75,6 +75,9 @@ class StorePricingPackageRequest extends FormRequest
             'sort_order' => ['sometimes', 'integer', 'min:0', 'max:9999'],
             'is_published' => ['sometimes', 'boolean'],
             'allows_partial_payment' => ['nullable', 'boolean'],
+            'work_lines' => ['nullable', 'array'],
+            'work_lines.*.department' => ['required_with:work_lines', 'in:design,content,programming,photography'],
+            'work_lines.*.hours' => ['required_with:work_lines', 'integer', 'min:1', 'max:400'],
         ];
     }
 }

@@ -67,6 +67,48 @@ class TelegramNotifier
     /**
      * @param  array<string, mixed>|null  $replyMarkup
      */
+    public function sendAudio(string $chatId, string $absolutePath, ?string $caption = null, string $bot = 'client'): void
+    {
+        if ($this->clientDeliveryBlocked($chatId, $bot)) {
+            return;
+        }
+
+        if (Client::isWhatsAppKey($chatId)) {
+            $this->whatsApp->sendDocument(
+                Client::whatsappPhoneFromKey($chatId),
+                $absolutePath,
+                $caption,
+                'photography-chime.wav',
+            );
+
+            return;
+        }
+
+        $token = $this->token($bot);
+        if ($token === '') {
+            throw new RuntimeException('Telegram bot is not configured.');
+        }
+
+        if (! is_file($absolutePath)) {
+            throw new RuntimeException('Audio file not found.');
+        }
+
+        $fields = array_filter([
+            'chat_id' => $chatId,
+            'caption' => $caption,
+            'title' => 'تذكير التصوير',
+        ], fn ($value) => $value !== null && $value !== '');
+
+        $response = Http::timeout(30)
+            ->connectTimeout(5)
+            ->attach('audio', fopen($absolutePath, 'r'), 'photography-chime.wav')
+            ->post("https://api.telegram.org/bot{$token}/sendAudio", $fields);
+
+        if (! $response->successful() || $response->json('ok') !== true) {
+            throw new RuntimeException('Telegram did not accept the audio.');
+        }
+    }
+
     public function sendDocument(string $chatId, string $absolutePath, ?string $caption = null, string $bot = 'client', ?array $replyMarkup = null): ?string
     {
         if ($this->clientDeliveryBlocked($chatId, $bot)) {

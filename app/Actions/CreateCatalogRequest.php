@@ -51,6 +51,18 @@ class CreateCatalogRequest
             throw ValidationException::withMessages(['billing_period' => 'No price available for this package/period.']);
         }
 
+        $activeSubscription = ServiceRequest::query()
+            ->where('client_id', $client->id)
+            ->where('pricing_package_id', $package->id)
+            ->where('billing_period', $period)
+            ->where('allows_renewal', true)
+            ->where('subscription_ends_at', '>', now())
+            ->latest('id')
+            ->first();
+        if ($activeSubscription) {
+            return $activeSubscription;
+        }
+
         $recent = ServiceRequest::query()
             ->where('client_id', $client->id)
             ->where('pricing_package_id', $package->id)

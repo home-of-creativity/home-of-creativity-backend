@@ -538,10 +538,32 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
                     if (done) markChanged();
                     return done;
                   }}
-                  onInsertImage={async (bytes, widthPercent, page, wrap) => {
-                    const result = await editor.current?.insertImage(bytes, widthPercent, page, wrap) ?? "refused";
+                  onInsertImage={async (bytes, placement) => {
+                    const result = await editor.current?.insertImage(bytes, placement) ?? "refused";
                     if (result === "ok") markChanged();
                     return result;
+                  }}
+                  onInsertCover={async (bytes) => {
+                    const company = client?.company_name || client?.name || "";
+                    const date = new Date().toLocaleDateString("ar-SA-u-nu-latn", { year: "numeric", month: "long", day: "numeric" });
+                    const result = await editor.current?.insertCover(bytes, [title, company, date]) ?? "refused";
+                    if (result === "ok") markChanged();
+                    return result;
+                  }}
+                  onInsertTextBox={async (options) => {
+                    const done = await editor.current?.insertTextBox(options) ?? false;
+                    if (done) markChanged();
+                    return done;
+                  }}
+                  onInsertShape={async (shape) => {
+                    const done = await editor.current?.insertShape(shape) ?? false;
+                    if (done) markChanged();
+                    return done;
+                  }}
+                  onRemoveShape={async () => {
+                    const done = await editor.current?.removeLastShape() ?? false;
+                    if (done) markChanged();
+                    return done;
                   }}
                   fonts={extraFonts}
                   onInstallFont={async (family, file) => {

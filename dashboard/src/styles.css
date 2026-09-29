@@ -2121,6 +2121,13 @@ html[dir="ltr"] .report-panel {
   cursor: pointer;
 }
 
+.report-picture input[type="color"] {
+  width: 3.5rem;
+  height: 2.25rem;
+  padding: 0.2rem;
+  cursor: pointer;
+}
+
 .report-memory {
   border-top: 1px solid var(--brand-line);
   padding-top: 0.75rem;
@@ -2992,6 +2999,11 @@ html[dir="ltr"] .report-panel {
   border-radius: 0.75rem;
   background: var(--brand-surface);
   font-size: 0.78rem;
+}
+
+.gallery-preview-item.is-picked {
+  border-color: var(--brand-orange);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand-orange) 30%, transparent);
 }
 
 .gallery-preview-item.is-marked {

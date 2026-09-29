@@ -278,6 +278,12 @@ async def submit_new_request(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     description = (context.user_data.get("description") or "").strip()
     attachments = context.user_data.get("attachments") or []
+    if description and len(description) < 15 and not attachments:
+        await message.reply_text(
+            "صف الناتج المطلوب بجملة واحدة أوضح، ثم أعد الإرسال.",
+            reply_markup=body_keyboard(),
+        )
+        return WAITING_BODY
     if not description and not attachments:
         await message.reply_text(
             "أرسل وصفاً أو مرفقاً واحداً على الأقل قبل الإرسال.",
@@ -1104,7 +1110,12 @@ async def list_requests(update: Update, context: ContextTypes.DEFAULT_TYPE, offs
         lines = [
             f"#{item['number']} — {item['title']}",
             f"الحالة: {label}",
-            f"الباقة: {package}" + (f" — {period}" if period else ""),
+            f"الباقة: {package}"
+            + (
+                f" — {item.get('duration_label')}"
+                if item.get("duration_label")
+                else (f" — {period}" if period and item.get("show_subscription", True) else "")
+            ),
         ]
         if paid is not None or remaining is not None:
             lines.append(f"المدفوع: {paid or 0} USD — المتبقي: {remaining or 0} USD")
@@ -1199,10 +1210,23 @@ async def support_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     message = update.message or (update.callback_query.message if update.callback_query else None)
     if message is None:
         return ConversationHandler.END
-    await message.reply_text(
-        f"رقم الدعم: {SUPPORT_PHONE}",
-        reply_markup=main_keyboard(),
-    )
+    text = f"رقم الدعم: {SUPPORT_PHONE}"
+    try:
+        async with httpx.AsyncClient(timeout=12) as client:
+            response = await client.get(
+                f"{API_URL}/bot/telegram/support-brief",
+                headers=api_headers(),
+            )
+        if response.status_code < 400:
+            payload = response.json().get("data") or {}
+            phone = payload.get("phone") or SUPPORT_PHONE
+            calendar = (payload.get("calendar") or "").strip()
+            text = f"رقم الدعم: {phone}"
+            if calendar:
+                text = f"{text}\n{calendar}"
+    except Exception:
+        text = f"رقم الدعم: {SUPPORT_PHONE}"
+    await message.reply_text(text, reply_markup=main_keyboard())
     return ConversationHandler.END
 
 
@@ -1394,6 +1418,31 @@ async def client_request_action(update: Update, context: ContextTypes.DEFAULT_TY
             return
 
 
+async def photography_decision(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    user = update.effective_user
+    if query is None or query.data is None or user is None:
+        return
+    action, request_id = query.data.split(":", 1)
+    async with httpx.AsyncClient(timeout=12) as client:
+        response = await client.post(
+            f"{API_URL}/bot/telegram/requests/{request_id}/photography-decision",
+            headers=api_headers(),
+            json={"telegram_user_id": str(user.id), "accept": action == "photoyes"},
+        )
+    if response.status_code >= 400:
+        await api_error_alert(query, response)
+        return
+    await query.answer()
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    if query.message:
+        text = "تم تثبيت موعد التصوير." if action == "photoyes" else "أُبلغ موظف التصوير. سيرسل وقتاً آخر."
+        await query.message.reply_text(text, reply_markup=main_keyboard())
+
+
 async def post_reject(query, number: str, reason: str) -> None:
     user = query.from_user
     async with httpx.AsyncClient(timeout=12) as client:
@@ -1478,7 +1527,7 @@ async def quotation_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 await query.answer()
                 await query.edit_message_reply_markup(reply_markup=None)
                 await query.message.reply_text(
-                    f"تم بدء تجديد الاشتراك للطلب #{escape(number)}.",
+                    f"تم إرسال فاتورة تجديد الاشتراك للطلب #{escape(number)}.",
                     reply_markup=main_keyboard(),
                 )
             else:
@@ -1754,6 +1803,13 @@ def main() -> None:
         CallbackQueryHandler(
             quotation_action,
             pattern=r"^(approve|reject|rjprice|rjdelay|rjother|renew|norenew):",
+        ),
+        group=-1,
+    )
+    application.add_handler(
+        CallbackQueryHandler(
+            photography_decision,
+            pattern=r"^photo(yes|nno):",
         ),
         group=-1,
     )

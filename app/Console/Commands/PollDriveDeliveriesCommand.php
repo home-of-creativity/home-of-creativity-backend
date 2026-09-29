@@ -365,6 +365,10 @@ class PollDriveDeliveriesCommand extends Command
             'sent_at' => $sent ? now() : null,
         ])->save();
 
+        if ($sent) {
+            app(\App\Actions\SyncClickUpReview::class)->markDelivered($request);
+        }
+
         return $sent;
     }
 

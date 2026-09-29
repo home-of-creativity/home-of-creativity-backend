@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { api } from "../api";
 import { copy } from "../i18n";
+import type { ImagePlacement, ShapeRequest } from "./report/ReportDocEditor";
+import type { ShapeKind } from "./report/pageObjects";
 
 type Memory = { id: number; body: string };
 
@@ -126,6 +128,10 @@ export function ReportGemini({
   pageText,
   onApply,
   onInsertImage,
+  onInsertCover,
+  onInsertTextBox,
+  onInsertShape,
+  onRemoveShape,
   fonts = [],
   onInstallFont,
 }: {
@@ -136,12 +142,11 @@ export function ReportGemini({
   pageText: (page: number) => string;
   /** Apply the new text. `page` is set when writing onto a chosen page. */
   onApply: (text: string, page: number | null) => boolean | Promise<boolean>;
-  onInsertImage: (
-    bytes: Uint8Array,
-    widthPercent: number,
-    page: number,
-    wrap: "square" | "topAndBottom",
-  ) => Promise<"ok" | "unsupported" | "refused">;
+  onInsertImage: (bytes: Uint8Array, placement: ImagePlacement) => Promise<"ok" | "unsupported" | "refused">;
+  onInsertCover: (bytes: Uint8Array) => Promise<"ok" | "unsupported" | "refused">;
+  onInsertTextBox: (options: { widthPercent: number; border: boolean; text: string }) => Promise<boolean>;
+  onInsertShape: (shape: ShapeRequest) => Promise<boolean>;
+  onRemoveShape: () => Promise<boolean>;
   fonts: Array<{ family: string }>;
   onInstallFont: (family: string, file: File) => Promise<void>;
 }) {
@@ -153,8 +158,16 @@ export function ReportGemini({
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
   const [width, setWidth] = useState(55);
-  const [place, setPlace] = useState<"wrap" | "fill">("wrap");
+  // "wrap": the picture fills the page behind the text. "place": it goes where the caret is.
+  const [place, setPlace] = useState<"wrap" | "place">("place");
   const [imagePrompt, setImagePrompt] = useState("");
+  const [boxWidth, setBoxWidth] = useState(60);
+  const [boxBorder, setBoxBorder] = useState(false);
+  const [shapeKind, setShapeKind] = useState<ShapeKind>("rect");
+  const [shapeColor, setShapeColor] = useState("#2e0e5c");
+  const [shapeWidth, setShapeWidth] = useState(40);
+  const [shapeHeight, setShapeHeight] = useState(80);
+  const [shapeBehind, setShapeBehind] = useState(false);
   const [draft, setDraft] = useState<{ reply: string; previous: string; next: string } | null>(null);
   const [attachment, setAttachment] = useState<ChatImage | null>(null);
   const [source, setSource] = useState<ChatImage | null>(null);
@@ -212,14 +225,42 @@ export function ReportGemini({
     }
   }
 
+  function placement(): ImagePlacement {
+    return place === "wrap" ? { mode: "background", page } : { mode: "place", widthPercent: width };
+  }
+
   async function insertPicture(file: File | undefined) {
     if (!file) return;
     setBusy(true);
     try {
-      const result = await onInsertImage(new Uint8Array(await file.arrayBuffer()), place === "fill" ? 100 : width, page, "square");
+      const result = await onInsertImage(new Uint8Array(await file.arrayBuffer()), placement());
       if (result === "ok") toast.success(t(copy.reportImageInserted));
       else if (result === "unsupported") toast.error(t(copy.reportImageUnsupported));
       else toast.error(t(copy.reportImageRefused));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Runs one editor action with the panel disabled, and reports it. */
+  async function run(action: () => Promise<boolean>, done: { ar: string; en: string }, failed = copy.reportPlaceFailed) {
+    setBusy(true);
+    try {
+      if (await action()) toast.success(t(done));
+      else toast.error(t(failed));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function addCover(file: File | undefined) {
+    if (!file) return;
+    setBusy(true);
+    try {
+      const result = await onInsertCover(new Uint8Array(await file.arrayBuffer()));
+      if (result === "ok") toast.success(t(copy.reportCoverAdded));
+      else if (result === "unsupported") toast.error(t(copy.reportImageUnsupported));
+      else toast.error(t(copy.reportCoverFailed));
     } finally {
       setBusy(false);
     }
@@ -238,7 +279,7 @@ export function ReportGemini({
       const png = res.data.mime === "image/png" || res.data.mime === "image/jpeg" || res.data.mime === "image/gif"
         ? binary
         : await rasterToPng(binary, res.data.mime);
-      const result = await onInsertImage(png, place === "fill" ? 100 : width, page, "square");
+      const result = await onInsertImage(png, placement());
       if (result === "ok") toast.success(t(copy.reportImageGenerated));
       else if (result === "unsupported") toast.error(t(copy.reportImageUnsupported));
       else toast.error(t(copy.reportImageRefused));
@@ -333,6 +374,13 @@ export function ReportGemini({
     }
   }
 
+  const shapeKinds: Array<[ShapeKind, { ar: string; en: string }]> = [
+    ["rect", copy.reportShapeRect],
+    ["roundRect", copy.reportShapeRoundRect],
+    ["ellipse", copy.reportShapeEllipse],
+    ["line", copy.reportShapeLine],
+  ];
+
   const quick = [copy.reportGeminiProofread, copy.reportGeminiFormal, copy.reportGeminiShorten, copy.reportGeminiSummary, copy.reportGeminiTranslate];
 
   return (
@@ -342,22 +390,23 @@ export function ReportGemini({
         <p className="muted">{t(copy.reportImageHint)}</p>
         <div className="segmented" role="radiogroup" aria-label={t(copy.reportImagePlace)}>
           <button type="button" role="radio" aria-checked={place === "wrap"} className={place === "wrap" ? "is-active" : ""} onClick={() => setPlace("wrap")}>{t(copy.reportImageWrap)}</button>
-          <button type="button" role="radio" aria-checked={place === "fill"} className={place === "fill" ? "is-active" : ""} onClick={() => setPlace("fill")}>{t(copy.reportImageFill)}</button>
+          <button type="button" role="radio" aria-checked={place === "place"} className={place === "place" ? "is-active" : ""} onClick={() => setPlace("place")}>{t(copy.reportImageInPage)}</button>
         </div>
-        <label className="field-label">
-          {t(copy.reportGeminiPage)}
-          <select className="field" value={page} onChange={(event) => setPage(Number(event.target.value))}>
-            {Array.from({ length: pages }, (_, index) => (
-              <option key={index + 1} value={index + 1}>{index + 1}</option>
-            ))}
-          </select>
-        </label>
         {place === "wrap" ? (
           <label className="field-label">
-            {t(copy.reportImageWidth)} ({width}%)
-            <input className="field" type="range" min={20} max={80} step={5} value={width} onChange={(event) => setWidth(Number(event.target.value))} />
+            {t(copy.reportGeminiPage)}
+            <select className="field" value={page} onChange={(event) => setPage(Number(event.target.value))}>
+              {Array.from({ length: pages }, (_, index) => (
+                <option key={index + 1} value={index + 1}>{index + 1}</option>
+              ))}
+            </select>
           </label>
-        ) : null}
+        ) : (
+          <label className="field-label">
+            {t(copy.reportImageWidth)} ({width}%)
+            <input className="field" type="range" min={20} max={100} step={5} value={width} onChange={(event) => setWidth(Number(event.target.value))} />
+          </label>
+        )}
         <label className="btn btn-sm">
           {t(copy.reportImageInsert)}
           <input type="file" accept="image/png,image/jpeg,image/gif" hidden disabled={busy} onChange={(event) => { void insertPicture(event.target.files?.[0]); event.target.value = ""; }} />
@@ -383,6 +432,65 @@ export function ReportGemini({
           <textarea className="field field-area" rows={2} value={imagePrompt} onChange={(event) => setImagePrompt(event.target.value)} />
         </label>
         <button type="button" className="btn btn-sm" disabled={busy || imagePrompt.trim() === ""} onClick={() => void generatePicture()}>{t(copy.reportImageGenerate)}</button>
+      </fieldset>
+      <fieldset className="report-picture">
+        <legend>{t(copy.reportCover)}</legend>
+        <p className="muted">{t(copy.reportCoverHint)}</p>
+        <label className="btn btn-sm">
+          {t(copy.reportCoverAdd)}
+          <input type="file" accept="image/png,image/jpeg,image/gif" hidden disabled={busy} onChange={(event) => { void addCover(event.target.files?.[0]); event.target.value = ""; }} />
+        </label>
+      </fieldset>
+      <fieldset className="report-picture">
+        <legend>{t(copy.reportTextBox)}</legend>
+        <p className="muted">{t(copy.reportTextBoxHint)}</p>
+        <label className="field-label">
+          {t(copy.reportTextBoxWidth)} ({boxWidth}%)
+          <input className="field" type="range" min={20} max={100} step={5} value={boxWidth} onChange={(event) => setBoxWidth(Number(event.target.value))} />
+        </label>
+        <label className="checkbox-row">
+          <input type="checkbox" checked={boxBorder} onChange={(event) => setBoxBorder(event.target.checked)} />
+          {t(copy.reportTextBoxBorder)}
+        </label>
+        <button type="button" className="btn btn-sm" disabled={busy} onClick={() => void run(() => onInsertTextBox({ widthPercent: boxWidth, border: boxBorder, text: t(copy.reportTextBoxText) }), copy.reportTextBoxInserted)}>
+          {t(copy.reportTextBoxInsert)}
+        </button>
+      </fieldset>
+      <fieldset className="report-picture">
+        <legend>{t(copy.reportShapes)}</legend>
+        <p className="muted">{t(copy.reportShapesHint)}</p>
+        <label className="field-label">
+          {t(copy.reportShapeKind)}
+          <select className="field" value={shapeKind} onChange={(event) => setShapeKind(event.target.value as ShapeKind)}>
+            {shapeKinds.map(([kind, label]) => <option key={kind} value={kind}>{t(label)}</option>)}
+          </select>
+        </label>
+        <label className="field-label">
+          {t(copy.reportShapeColor)}
+          <input className="field" type="color" value={shapeColor} onChange={(event) => setShapeColor(event.target.value)} />
+        </label>
+        <label className="field-label">
+          {t(copy.reportShapeWidth)} ({shapeWidth}%)
+          <input className="field" type="range" min={5} max={100} step={5} value={shapeWidth} onChange={(event) => setShapeWidth(Number(event.target.value))} />
+        </label>
+        {shapeKind !== "line" ? (
+          <label className="field-label">
+            {t(copy.reportShapeHeight)} ({shapeHeight} pt)
+            <input className="field" type="range" min={10} max={500} step={10} value={shapeHeight} onChange={(event) => setShapeHeight(Number(event.target.value))} />
+          </label>
+        ) : null}
+        <div className="segmented" role="radiogroup" aria-label={t(copy.reportShapePlace)}>
+          <button type="button" role="radio" aria-checked={!shapeBehind} className={!shapeBehind ? "is-active" : ""} onClick={() => setShapeBehind(false)}>{t(copy.reportShapeFlow)}</button>
+          <button type="button" role="radio" aria-checked={shapeBehind} className={shapeBehind ? "is-active" : ""} onClick={() => setShapeBehind(true)}>{t(copy.reportShapeBehind)}</button>
+        </div>
+        <div className="chip-row">
+          <button type="button" className="btn btn-sm" disabled={busy} onClick={() => void run(() => onInsertShape({ kind: shapeKind, colorHex: shapeColor, widthPercent: shapeWidth, heightPt: shapeHeight, behind: shapeBehind }), copy.reportShapeInserted)}>
+            {t(copy.reportShapeInsert)}
+          </button>
+          <button type="button" className="btn btn-sm" disabled={busy} onClick={() => void run(onRemoveShape, copy.reportShapeRemoved, copy.reportShapeNone)}>
+            {t(copy.reportShapeRemove)}
+          </button>
+        </div>
       </fieldset>
       <div className="segmented" role="radiogroup">
         <button type="button" role="radio" aria-checked={scope === "selection"} className={scope === "selection" ? "is-active" : ""} onClick={() => setScope("selection")}>{t(copy.reportGeminiScopeSelection)}</button>

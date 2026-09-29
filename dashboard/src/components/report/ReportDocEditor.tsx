@@ -5,6 +5,8 @@ import harfbuzzWasm from "@docx-editor.dev/core/harfbuzz.wasm?url";
 import "@docx-editor.dev/core/styles/editor.css";
 import type { Locale } from "../../i18n";
 import { editorArabic } from "./editorArabic";
+import { addCover, addShape, addTextBox, removeLastShape, type ShapeKind } from "./pageObjects";
+import { bodyDrawings, layoutNewDrawing } from "./pictureLayout";
 import { reportFontConfiguration, type ExtraFont } from "./fonts";
 import { pagesToPdf } from "./pdf";
 
@@ -28,21 +30,55 @@ export type ReportDocHandle = {
   replaceSelection(text: string): boolean;
   /** Put plain text at the start of a page. */
   insertOnPage(page: number, text: string): Promise<boolean>;
-  /**
-   * Insert a picture as its own block (text does not run through it) at the chosen width.
-   * `widthPercent` is a share of the page's text width.
-   */
-  insertImage(
-    bytes: Uint8Array,
-    widthPercent: number,
-    page: number,
-    wrap?: "square" | "topAndBottom",
-  ): Promise<"ok" | "unsupported" | "refused">;
+  /** Insert a picture as a full-page background or at the caret (see `ImagePlacement`). */
+  insertImage(bytes: Uint8Array, placement: ImagePlacement): Promise<"ok" | "unsupported" | "refused">;
+  /** A box to type in (a one-cell table) after the caret's paragraph, at a share of the text width. */
+  insertTextBox(options: { widthPercent: number; border: boolean; text: string }): Promise<boolean>;
+  /** A filled shape (or a line) after the caret's paragraph; the panel sets its look and place. */
+  insertShape(options: ShapeRequest): Promise<boolean>;
+  /** Remove the most recently added shape. */
+  removeLastShape(): Promise<boolean>;
+  /** A new first page with the picture behind it, one text box per line and no header or footer. */
+  insertCover(bytes: Uint8Array, lines: string[]): Promise<"ok" | "unsupported" | "refused">;
   focus(): void;
 };
 
+/**
+ * `background`: the picture covers the whole page behind the text; the edges that do not fit
+ * are cropped, never stretched. `place`: the picture goes on its own centred line after the
+ * paragraph the caret is in (before it when the caret is at its start), at `widthPercent` of the
+ * page's text width, with the text above and below it.
+ */
+export type ImagePlacement =
+  | { mode: "background"; page: number }
+  | { mode: "place"; widthPercent: number };
+
+export type ShapeRequest = {
+  kind: ShapeKind;
+  colorHex: string;
+  /** Share of the page's text width. */
+  widthPercent: number;
+  /** Ignored for a line. */
+  heightPt: number;
+  /** Behind the text, or on its own band with the text above and below. */
+  behind: boolean;
+};
+
 const PAGE_TEXT_WIDTH_PT = 460;
-const EMU_PER_POINT = 12700;
+const A4_WIDTH_PT = 595.3;
+const A4_HEIGHT_PT = 841.9;
+
+/** Crop (in percent per edge) that makes a picture cover a box without stretching. */
+function coverCrop(imageWidth: number, imageHeight: number, boxWidth: number, boxHeight: number) {
+  const image = imageWidth / Math.max(1, imageHeight);
+  const box = boxWidth / Math.max(1, boxHeight);
+  if (image > box) {
+    const side = ((1 - box / image) / 2) * 100;
+    return { left: side, right: side, top: 0, bottom: 0 };
+  }
+  const edge = ((1 - image / box) / 2) * 100;
+  return { left: 0, right: 0, top: edge, bottom: edge };
+}
 
 function pagePlainText(page: HTMLElement) {
   const copy = page.cloneNode(true) as HTMLElement;
@@ -174,6 +210,40 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
     target.dispatchEvent(new MouseEvent("mousedown", click));
   }, []);
 
+  /** Load rewritten bytes, wait until they are painted, and return to the page the user was on. */
+  const reload = useCallback(async (next: Uint8Array, page: number) => {
+    const host = editor.current;
+    if (!host) return;
+    host.load(next);
+    for (let tries = 0; tries < 100; tries += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const snapshot = host.snapshot();
+      if (!snapshot.isLoading && snapshot.isOpening !== true && root.current?.querySelector(".docx-page")) break;
+    }
+    host.getEditor()?.scrollToPage(page);
+  }, []);
+
+  /**
+   * Save, rewrite the XML next to the caret's body paragraph, and reload. Without a caret in the
+   * body (nothing clicked yet, or it sits in a header), the page on screen is used.
+   */
+  const rewriteAtCaret = useCallback(async (edit: (docx: Uint8Array, paraId: string) => Uint8Array | null) => {
+    const host = editor.current;
+    const current = host?.getEditor();
+    if (!host || !current) return false;
+    const caretParagraph = () => {
+      const from = current.snapshot().selection?.from;
+      return current.snapshot().scope.kind === "body" && from && "paraId" in from ? from.paraId : null;
+    };
+    if (!caretParagraph() || current.getSelectedImage()) await placeCaret(current.getCurrentPage("viewport"));
+    const paraId = caretParagraph();
+    const saved = paraId ? await host.save() : null;
+    const next = paraId && saved ? edit(new Uint8Array(saved), paraId) : null;
+    if (!next) return false;
+    await reload(next, current.getCurrentPage("caret"));
+    return true;
+  }, [placeCaret, reload]);
+
   useEffect(() => {
     const host = root.current;
     if (!host) return;
@@ -254,15 +324,30 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
       if (!current) return false;
       return current.exec({ type: "paste", text, html: paragraphHtml(text) }).ok;
     },
-    async insertImage(bytes, widthPercent, page, wrap = "square") {
-      const current = editor.current?.getEditor();
-      if (!current) return "refused";
+    async insertImage(bytes, placement) {
+      const host = editor.current;
+      const current = host?.getEditor();
+      if (!host || !current) return "refused";
       const normalized = normalizeImageBytes(bytes);
       if (!normalized.ok) return "unsupported";
-      await placeCaret(page);
-      const percent = Math.min(100, Math.max(15, widthPercent));
-      const width = PAGE_TEXT_WIDTH_PT * (percent / 100);
-      const height = Math.max(1, normalized.heightPoints * (width / Math.max(1, normalized.widthPoints)));
+      const background = placement.mode === "background";
+      const setup = current.getPageSetup();
+      const pageWidth = setup ? setup.pageWidthTwips / 20 : A4_WIDTH_PT;
+      const pageHeight = setup ? setup.pageHeightTwips / 20 : A4_HEIGHT_PT;
+      const width = background
+        ? pageWidth
+        : PAGE_TEXT_WIDTH_PT * (Math.min(100, Math.max(15, placement.widthPercent)) / 100);
+      const height = background
+        ? pageHeight
+        : Math.max(1, normalized.heightPoints * (width / Math.max(1, normalized.widthPoints)));
+      const saved = await host.save();
+      if (!saved) return "refused";
+      const before = bodyDrawings(new Uint8Array(saved));
+      // A background is anchored to the chosen page; a placed picture goes where the user clicked.
+      if (background) await placeCaret(placement.page);
+      // A click on a picture selects it rather than placing the caret; use the page on screen then.
+      else if (current.getSelectedImage()) await placeCaret(current.getCurrentPage("viewport"));
+      else current.focus();
       const command = {
         type: "insertImage" as const,
         data: normalized.bytes,
@@ -272,17 +357,64 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
       };
       let result = await current.executeImageCommand(command);
       if (!result.ok) {
-        await placeCaret(page);
+        // No usable caret (nothing clicked yet): fall back to the page on screen.
+        await placeCaret(background ? placement.page : current.getCurrentPage("viewport"));
         result = await current.executeImageCommand(command);
       }
       if (!result.ok) return "refused";
-      current.exec({ type: "setImageWrapType", target: wrap });
-      current.exec({
-        type: "setImageProperties",
-        widthEmu: Math.round(width * EMU_PER_POINT),
-        heightEmu: Math.round(height * EMU_PER_POINT),
-        wrap,
-      });
+
+      const page = current.getCurrentPage("caret");
+      const inserted = await host.save();
+      const laidOut = inserted
+        ? layoutNewDrawing(before, new Uint8Array(inserted), background
+          ? { kind: "background", widthPt: pageWidth, heightPt: pageHeight, crop: coverCrop(normalized.widthPoints, normalized.heightPoints, pageWidth, pageHeight) }
+          : { kind: "place" })
+        : null;
+      // If the XML could not be rewritten the picture stays inline where it was inserted.
+      if (!laidOut) return "ok";
+      await reload(laidOut, page);
+      return "ok";
+    },
+    insertTextBox({ widthPercent, border, text }) {
+      const widthPt = PAGE_TEXT_WIDTH_PT * (Math.min(100, Math.max(15, widthPercent)) / 100);
+      return rewriteAtCaret((docx, paraId) => addTextBox(docx, paraId, { widthPt, border, text }));
+    },
+    insertShape({ widthPercent, ...shape }) {
+      const widthPt = PAGE_TEXT_WIDTH_PT * (Math.min(100, Math.max(5, widthPercent)) / 100);
+      return rewriteAtCaret((docx, paraId) => addShape(docx, paraId, { ...shape, widthPt }));
+    },
+    async removeLastShape() {
+      const host = editor.current;
+      const current = host?.getEditor();
+      if (!host || !current) return false;
+      const saved = await host.save();
+      const next = saved ? removeLastShape(new Uint8Array(saved)) : null;
+      if (!next) return false;
+      await reload(next, current.getCurrentPage("viewport"));
+      return true;
+    },
+    async insertCover(bytes, lines) {
+      const host = editor.current;
+      const current = host?.getEditor();
+      if (!host || !current) return "refused";
+      const normalized = normalizeImageBytes(bytes);
+      if (!normalized.ok) return "unsupported";
+      const mime = normalized.mime;
+      if (mime !== "image/png" && mime !== "image/jpeg" && mime !== "image/gif") return "unsupported";
+      const setup = current.getPageSetup();
+      const pageWidth = setup ? setup.pageWidthTwips / 20 : A4_WIDTH_PT;
+      const pageHeight = setup ? setup.pageHeightTwips / 20 : A4_HEIGHT_PT;
+      const saved = await host.save();
+      const next = saved
+        ? addCover(new Uint8Array(saved), {
+            image: { bytes: normalized.bytes, mime, crop: coverCrop(normalized.widthPoints, normalized.heightPoints, pageWidth, pageHeight) },
+            pageWidthPt: pageWidth,
+            pageHeightPt: pageHeight,
+            lines,
+          })
+        : null;
+      if (!next) return "refused";
+      await reload(next, 1);
       return "ok";
     },
     focus() {

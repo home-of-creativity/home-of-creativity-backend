@@ -40,6 +40,7 @@ export function PricingPackageForm({ locale, t }: { locale: Locale; t: (c: { ar:
           yearly: z.string().trim(),
           features_en: z.string(),
           features_ar: z.string(),
+          work_lines_text: z.string(),
           has_reach: z.boolean(),
           ad_budget_usd: z.string().trim(),
           ad_credit_usd: z.string().trim(),
@@ -93,6 +94,7 @@ export function PricingPackageForm({ locale, t }: { locale: Locale; t: (c: { ar:
       yearly: "",
       features_en: "",
       features_ar: "",
+      work_lines_text: "",
       has_reach: false,
       ad_budget_usd: "",
       ad_credit_usd: "",
@@ -165,6 +167,7 @@ export function PricingPackageForm({ locale, t }: { locale: Locale; t: (c: { ar:
           yearly: item.prices?.yearly != null ? String(item.prices.yearly) : "",
           features_en: featuresToText(item.features, "en"),
           features_ar: featuresToText(item.features, "ar"),
+          work_lines_text: (item.work_lines ?? []).map((line) => `${line.department} ${line.hours}`).join("\n"),
           has_reach: Boolean(item.reach),
           ad_budget_usd: item.reach?.adBudgetUsd != null ? String(item.reach.adBudgetUsd) : "",
           ad_credit_usd: item.reach?.adCreditUsd != null ? String(item.reach.adCreditUsd) : "",
@@ -208,6 +211,7 @@ export function PricingPackageForm({ locale, t }: { locale: Locale; t: (c: { ar:
     yearly: string;
     features_en: string;
     features_ar: string;
+    work_lines_text: string;
     has_reach: boolean;
     ad_budget_usd: string;
     ad_credit_usd: string;
@@ -233,6 +237,11 @@ export function PricingPackageForm({ locale, t }: { locale: Locale; t: (c: { ar:
       subtitle_en: values.subtitle_en.trim(),
       subtitle_ar: values.subtitle_ar.trim(),
       features: textToFeatures(values.features_en, values.features_ar),
+      work_lines: values.work_lines_text
+        .split(/\n/)
+        .map((row) => row.trim().match(/^(design|content|programming|photography)\s+(\d+)$/i))
+        .filter((match): match is RegExpMatchArray => match !== null)
+        .map((match) => ({ department: match[1].toLowerCase(), hours: Number(match[2]) })),
       featured: values.featured,
       badge_en: values.badge_en.trim() || null,
       badge_ar: values.badge_ar.trim() || null,
@@ -378,6 +387,10 @@ export function PricingPackageForm({ locale, t }: { locale: Locale; t: (c: { ar:
         <label className="field-label">
           {t(copy.pricingFeaturesAr)}
           <textarea className="field" rows={5} {...register("features_ar")} />
+        </label>
+        <label className="field-label">
+          أسطر العمل (قسم وساعات، مثل design 16)
+          <textarea className="field" rows={4} {...register("work_lines_text")} />
         </label>
       </FormSection>
 

@@ -2,6 +2,7 @@
 
 namespace App\Actions;
 
+use App\Enums\EmployeeProfession;
 use App\Enums\GeminiStatus;
 use App\Enums\PaymentMethod;
 use App\Enums\RequestStatus;
@@ -10,6 +11,7 @@ use App\Jobs\ClassifyWithGeminiJob;
 use App\Models\OpsFollowUp;
 use App\Models\PaymentReminder;
 use App\Models\ServiceRequest;
+use App\Models\Subscription;
 use App\Services\OdooClient;
 use App\Services\RequestStatusTransitionService;
 use App\Services\TelegramNotifier;
@@ -33,6 +35,11 @@ class ConfirmRequestPayment
     public function handle(ServiceRequest $request, PaymentMethod $method, float $receivedAmount): ServiceRequest
     {
         $isFirst = $request->paid_at === null;
+        $pendingRenewal = $request->subscriptions()->where('status', 'pending_renewal')->latest('id')->first();
+        if ($pendingRenewal && ! $isFirst) {
+            return $this->confirmRenewal($request, $pendingRenewal, $method, $receivedAmount);
+        }
+
         $remainingOnly = ! $isFirst && $request->hasRemainingBalance();
 
         if ($isFirst && $request->status !== RequestStatus::AwaitingPayment) {
@@ -140,6 +147,12 @@ class ConfirmRequestPayment
 
         if ($isFirst) {
             $this->schedulePaymentReminders->handle($updated->fresh() ?? $updated);
+            app(NotifyEmployees::class)->handle(
+                $updated,
+                EmployeeProfession::Sales,
+                "أكد خطة العمل للطلب #{$updated->number} بعد الدفع.",
+                [['text' => 'تأكيد الخطة', 'callback_data' => 'planok:'.$updated->number]],
+            );
 
             if ($updated->gemini_status !== GeminiStatus::Success) {
                 $updated->forceFill([
@@ -221,7 +234,7 @@ class ConfirmRequestPayment
                         $departments[] = $label;
                     }
                 }
-                $hours += (int) ($operation['hours'] ?? 0);
+                $hours = max($hours, (int) ($operation['hours'] ?? 0));
             }
         }
 
@@ -233,8 +246,69 @@ class ConfirmRequestPayment
             };
         }
 
+        if (BillingPeriod::isSubscription((string) $request->billing_period)) {
+            return 'بدأ التنفيذ';
+        }
+
         $expected = $hours > 0 ? "خلال {$hours} ساعة" : 'بأقرب وقت';
 
         return 'بدأ التنفيذ — '.implode('، ', $departments).' — المتوقع: '.$expected;
+    }
+
+    private function confirmRenewal(
+        ServiceRequest $request,
+        Subscription $pending,
+        PaymentMethod $method,
+        float $receivedAmount,
+    ): ServiceRequest {
+        if ($receivedAmount <= 0) {
+            throw ValidationException::withMessages([
+                'amount' => 'Enter the amount actually received.',
+            ]);
+        }
+
+        $period = $request->billing_period ?: 'monthly';
+        $alreadyApplied = $request->subscription_ends_at !== null
+            && $pending->ends_at !== null
+            && $request->subscription_ends_at->equalTo($pending->ends_at);
+
+        $newEnd = $alreadyApplied
+            ? $request->subscription_ends_at->copy()
+            : BillingPeriod::addPeriod(
+                $request->subscription_ends_at && $request->subscription_ends_at->isFuture()
+                    ? $request->subscription_ends_at->copy()
+                    : now(),
+                $period,
+            );
+
+        $amount = (float) $pending->amount;
+        $remaining = max(round($amount - $receivedAmount, 2), 0);
+
+        $request->forceFill([
+            'subscription_ends_at' => $newEnd,
+            'payment_method' => $method,
+            'amount_total' => $amount,
+            'amount_paid' => $receivedAmount,
+            'amount_remaining' => $remaining,
+        ])->save();
+
+        $pending->forceFill([
+            'status' => 'active',
+            'ends_at' => $newEnd,
+            'amount_paid' => $receivedAmount,
+            'amount_remaining' => $remaining,
+            'renewal_declined' => false,
+        ])->save();
+
+        if ($request->status === RequestStatus::Completed) {
+            $request = $this->transitions->transition($request, RequestStatus::InProgress, 'admin', 'Renewal paid.');
+        }
+
+        $fresh = $request->fresh(['client', 'subscriptions']) ?? $request;
+        $this->schedulePaymentReminders->handle($fresh);
+        $this->notifyClientSuccess($fresh, false);
+        app(NotifyClientChannels::class)->send($fresh, 'بدأ التنفيذ');
+
+        return $fresh->fresh(['client', 'files', 'invoices', 'subscriptions']) ?? $fresh;
     }
 }

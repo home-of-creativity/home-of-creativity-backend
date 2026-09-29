@@ -19,6 +19,7 @@ use App\Support\ClientProfileValue;
 use App\Support\PricingCatalog;
 use App\Support\ResolveServiceRequest;
 use App\Support\StatusLabel;
+use App\Support\WorkCalendar;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -61,6 +62,8 @@ class HandleWhatsAppInbound
         private PushClientLeadToOdoo $pushClientLeadToOdoo,
         private ResolveServiceRequest $resolveServiceRequest,
         private RequestStatusTransitionService $transitions,
+        private WorkCalendar $workCalendar,
+        private BookPhotographySlot $bookPhotography,
     ) {}
 
     /**
@@ -166,7 +169,7 @@ class HandleWhatsAppInbound
             if ($this->isNav($text, self::NAV_HELP)) {
                 $this->resetCompose($session);
                 $this->putSession($phone, $session);
-                $this->sendMenu($chatId, 'رقم الدعم: '.self::SUPPORT_PHONE);
+                $this->sendMenu($chatId, "رقم الدعم: ".self::SUPPORT_PHONE."\n".$this->workCalendar->holidaySummary());
 
                 return;
             }
@@ -360,7 +363,34 @@ class HandleWhatsAppInbound
             return;
         }
         if ($this->isNav($data, self::NAV_HELP) || $data === 'menu:help') {
-            $this->sendMenu($chatId, 'رقم الدعم: '.self::SUPPORT_PHONE);
+            $this->sendMenu($chatId, "رقم الدعم: ".self::SUPPORT_PHONE."\n".$this->workCalendar->holidaySummary());
+
+            return;
+        }
+        if (str_starts_with($data, 'photoyes:') || str_starts_with($data, 'photonno:')) {
+            $request = ServiceRequest::query()
+                ->whereKey((int) substr($data, strpos($data, ':') + 1))
+                ->where('client_id', $client->id)
+                ->first();
+            if ($request === null) {
+                $this->safeSend($chatId, 'لا يوجد موعد تصوير بهذا الرقم.');
+
+                return;
+            }
+            try {
+                $booking = $this->bookPhotography->decide($request, str_starts_with($data, 'photoyes:'));
+            } catch (ValidationException $exception) {
+                $message = collect($exception->errors())->flatten()->first();
+                $this->safeSend($chatId, is_string($message) ? $message : 'تعذر تثبيت الموعد.');
+
+                return;
+            }
+            $this->safeSend(
+                $chatId,
+                $booking->status === 'confirmed'
+                    ? 'تم تثبيت موعد التصوير، وأُرسلت الدعوة إلى تقويمك.'
+                    : 'أُبلغ موظف التصوير. سيرسل وقتاً آخر.',
+            );
 
             return;
         }
@@ -511,7 +541,7 @@ class HandleWhatsAppInbound
         if (str_starts_with($data, 'renew:')) {
             $this->runOwned($client, substr($data, 6), function (ServiceRequest $request) use ($chatId): void {
                 $this->renewSubscription->handle($request);
-                $this->safeSend($chatId, 'بدأ تجديد الاشتراك. سيصلك عرض السعر.');
+                $this->safeSend($chatId, 'تجديد الاشتراك. أُرسل ملف الفاتورة بالمبلغ المتفق عليه.');
             });
 
             return;
@@ -724,7 +754,8 @@ class HandleWhatsAppInbound
         $items = $client->requests()
             ->with('pricingPackage')
             ->latest('id')
-            ->get();
+            ->get()
+            ->reject(fn (ServiceRequest $item) => $item->hiddenFromClient());
 
         if ($items->isEmpty()) {
             $this->sendMenu($chatId, 'لا توجد طلبات بعد.');
@@ -743,10 +774,12 @@ class HandleWhatsAppInbound
             $label = StatusLabel::requestAr($item->status->value);
             $package = $item->pricingPackage?->name_ar ?: $item->pricingPackage?->name_en ?: 'طلب يدوي';
             $period = filled($item->billing_period) ? BillingPeriod::labelAr((string) $item->billing_period) : '';
+            $duration = $item->durationLabel();
+            $suffix = $duration ?: ($period !== '' && ! $item->renewalDeclined() ? $period : '');
             $lines = [
                 "#{$item->number} — {$item->title}",
                 'الحالة: '.$label,
-                'الباقة: '.$package.($period !== '' ? " — {$period}" : ''),
+                'الباقة: '.$package.($suffix !== '' ? " — {$suffix}" : ''),
             ];
             if ($item->amount_paid !== null || $item->amount_remaining !== null) {
                 $lines[] = 'المدفوع: '.($item->amount_paid ?: 0).' USD — المتبقي: '.($item->amount_remaining ?: 0).' USD';

@@ -720,6 +720,32 @@ async def on_select_complete(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return ConversationHandler.END
 
 
+async def on_confirm_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if query is None or query.data is None or query.from_user is None:
+        return
+    employee = await ensure_approved(update)
+    if employee is None:
+        await query.answer("حسابك غير مفعّل.", show_alert=True)
+        return
+    request_ref = query.data.split(":", 1)[1]
+    async with httpx.AsyncClient(timeout=API_TIMEOUT) as client:
+        response = await client.post(
+            f"{API_URL}/bot/staff/confirm-plan",
+            headers=api_headers(),
+            json={"telegram_user_id": str(query.from_user.id), "request_number": request_ref},
+        )
+        if response.status_code >= 400:
+            await api_staff_error(query, response)
+            return
+    await query.answer("تم تأكيد الخطة.")
+    if query.message:
+        await query.message.reply_text(
+            f"تم تأكيد خطة العمل للطلب #{escape(request_ref)}.",
+            reply_markup=staff_keyboard(employee),
+        )
+
+
 async def on_confirm_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if query is None or query.data is None or query.from_user is None:
@@ -765,10 +791,63 @@ async def api_staff_error(query, response: httpx.Response) -> None:
     await query.answer(str(detail)[:200], show_alert=True)
 
 
+async def on_photo_approve(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if query is None or query.data is None or query.from_user is None:
+        return
+    employee = await ensure_approved(update)
+    if employee is None:
+        await query.answer("حسابك غير مفعّل.", show_alert=True)
+        return
+    booking_id = query.data.split(":", 1)[1]
+    async with httpx.AsyncClient(timeout=API_TIMEOUT) as client:
+        response = await client.post(
+            f"{API_URL}/bot/staff/photography-bookings/{booking_id}/approve",
+            headers=api_headers(),
+            json={"telegram_user_id": str(query.from_user.id)},
+        )
+        if response.status_code >= 400:
+            await api_staff_error(query, response)
+            return
+    await query.answer("تمت الموافقة على الموعد.")
+    if query.message:
+        await query.message.reply_text("تم تثبيت موعد التصوير. أي موعد أقرب من 5 ساعات يُعرض على العميل بوقت أبعد.", reply_markup=staff_keyboard(employee))
+
+
+async def on_photo_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if query is None or query.data is None or query.from_user is None:
+        return
+    employee = await ensure_approved(update)
+    if employee is None:
+        await query.answer("حسابك غير مفعّل.", show_alert=True)
+        return
+    context.user_data["photo_booking_id"] = query.data.split(":", 1)[1]
+    await query.answer()
+    if query.message:
+        await query.message.reply_text("أرسل الوقت الذي يناسبك بصيغة 2026-10-05 16:00")
+
+
 async def route_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.message is None or not update.message.text:
         return
     text = update.message.text.strip()
+    booking_id = context.user_data.get("photo_booking_id")
+    if booking_id and update.effective_user is not None:
+        context.user_data.pop("photo_booking_id", None)
+        async with httpx.AsyncClient(timeout=API_TIMEOUT) as client:
+            response = await client.post(
+                f"{API_URL}/bot/staff/photography-bookings/{booking_id}/propose",
+                headers=api_headers(),
+                json={"telegram_user_id": str(update.effective_user.id), "starts_at": text},
+            )
+        if response.status_code >= 400:
+            detail = response.text or "تعذر إرسال الوقت."
+            await update.message.reply_text(detail[:300])
+            return
+        employee = await lookup_employee(update.effective_user.id)
+        await update.message.reply_text("أُرسل الوقت المقترح للعميل.", reply_markup=staff_keyboard(employee))
+        return
     if text == BTN_TASKS:
         await list_tasks(update, context)
     elif text == BTN_NEW:
@@ -802,6 +881,9 @@ def main() -> None:
     application.add_handler(CommandHandler("join", start))
     application.add_handler(CommandHandler("reply", reply_menu))
     application.add_handler(CallbackQueryHandler(on_confirm_payment, pattern=r"^payok:"))
+    application.add_handler(CallbackQueryHandler(on_confirm_plan, pattern=r"^planok:"))
+    application.add_handler(CallbackQueryHandler(on_photo_approve, pattern=r"^photook:"))
+    application.add_handler(CallbackQueryHandler(on_photo_time, pattern=r"^phototime:"))
     application.add_handler(CallbackQueryHandler(on_select_request, pattern=r"^rsel:"))
     application.add_handler(CallbackQueryHandler(on_send_template, pattern=r"^rtpl:"))
     application.add_handler(MessageHandler(filters.Regex(f"^{BTN_TASKS}$"), list_tasks))

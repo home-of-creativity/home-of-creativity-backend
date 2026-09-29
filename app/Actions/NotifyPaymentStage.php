@@ -11,14 +11,13 @@ use Illuminate\Support\Facades\Storage;
 class NotifyPaymentStage
 {
     public function __construct(
-        private ResolveWorkPlan $resolveWorkPlan,
         private NotifyEmployees $notifyEmployees,
     ) {}
 
     public function handle(ServiceRequest $request, ?RequestFile $receipt = null, ?string $prefix = null): array
     {
         $request->loadMissing(['client', 'pricingPackage']);
-        $plan = $this->resolveWorkPlan->handle($request);
+        $plan = is_array($request->work_plan) ? $request->work_plan : ['operations' => []];
         $ref = ResolveServiceRequest::displayNumber($request);
         $due = number_format($request->expectedDue(), 2);
         $text = $this->message($request, $plan, $ref, $due, $prefix);
@@ -67,12 +66,12 @@ class NotifyPaymentStage
             "النوع: {$kind}",
             "المبلغ المتوقع: {$due} USD",
             '',
-            'خطة العمل (ClickUp):',
+            'خطة العمل تُؤكد بعد الدفع.',
         ]);
 
         $operations = $plan['operations'] ?? [];
         if ($operations === []) {
-            $lines[] = 'لم يُحدد إسناد بعد.';
+            $lines[] = 'بانتظار تأكيد صاحب صلاحية الطلب.';
         }
 
         foreach ($operations as $operation) {

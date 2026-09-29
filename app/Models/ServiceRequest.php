@@ -39,6 +39,12 @@ class ServiceRequest extends Model
         'execution_status',
         'ai_analysis',
         'work_plan',
+        'draft_work_lines',
+        'plan_confirmed_at',
+        'client_due_at',
+        'schedule_extension_reason',
+        'edit_rounds',
+        'edit_estimate_hours',
         'odoo_quotation_id',
         'odoo_invoice_id',
         'paid_at',
@@ -75,6 +81,11 @@ class ServiceRequest extends Model
             'gemini_status' => GeminiStatus::class,
             'ai_analysis' => 'array',
             'work_plan' => 'array',
+            'draft_work_lines' => 'array',
+            'plan_confirmed_at' => 'datetime',
+            'client_due_at' => 'datetime',
+            'edit_rounds' => 'integer',
+            'edit_estimate_hours' => 'integer',
             'paid_at' => 'datetime',
             'gemini_processed_at' => 'datetime',
             'quotation_amount' => 'decimal:2',
@@ -253,7 +264,45 @@ class ServiceRequest extends Model
 
     public function canRenew(): bool
     {
-        return (bool) $this->allows_renewal && $this->status === RequestStatus::Completed;
+        if (! $this->allows_renewal || $this->renewalDeclined()) {
+            return false;
+        }
+
+        $period = (string) $this->billing_period;
+        if ($period !== '' && ! BillingPeriod::isSubscription($period)) {
+            return false;
+        }
+
+        if ($this->subscription_ends_at !== null) {
+            return $this->subscription_ends_at->lte(now()->addDays(8));
+        }
+
+        return $this->status === RequestStatus::Completed;
+    }
+
+    public function renewalDeclined(): bool
+    {
+        if ($this->relationLoaded('subscriptions')) {
+            return (bool) $this->subscriptions->contains(fn ($row) => (bool) $row->renewal_declined);
+        }
+
+        return $this->subscriptions()->where('renewal_declined', true)->exists();
+    }
+
+    public function hiddenFromClient(): bool
+    {
+        return $this->renewalDeclined()
+            && $this->subscription_ends_at !== null
+            && $this->subscription_ends_at->isPast();
+    }
+
+    public function durationLabel(): ?string
+    {
+        if (! $this->renewalDeclined() || $this->subscription_ends_at === null || $this->subscription_ends_at->isPast()) {
+            return null;
+        }
+
+        return 'حتى '.$this->subscription_ends_at->timezone('Asia/Damascus')->format('Y-m-d');
     }
 
     public function isLiveForDrivePoll(): bool

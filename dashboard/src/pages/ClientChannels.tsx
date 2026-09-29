@@ -11,6 +11,8 @@ export function ClientChannelsPage({ t }: { locale: Locale; t: (c: { ar: string;
   const [channels, setChannels] = useState<ClientChannels>(defaults);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<"telegram" | "whatsapp" | null>(null);
+  const [hours, setHours] = useState("8");
+  const [holidays, setHolidays] = useState("");
 
   useEffect(() => {
     api
@@ -22,7 +24,32 @@ export function ClientChannelsPage({ t }: { locale: Locale; t: (c: { ar: string;
         });
       })
       .catch((err) => setError(err instanceof Error ? err.message : t(copy.saveFailed)));
+    api
+      .workCalendar()
+      .then((res) => {
+        setHours(String(res.data.hours_per_day));
+        setHolidays(res.data.holidays.join("\n"));
+      })
+      .catch(() => undefined);
   }, [t]);
+
+  async function saveCalendar() {
+    setError("");
+    try {
+      const res = await api.saveWorkCalendar({
+        hours_per_day: Number(hours) || 8,
+        holidays: holidays
+          .split(/\n/)
+          .map((row) => row.trim())
+          .filter(Boolean),
+      });
+      setHours(String(res.data.hours_per_day));
+      setHolidays(res.data.holidays.join("\n"));
+      toast.success(t(copy.channelsSaved));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t(copy.saveFailed));
+    }
+  }
 
   async function save(next: ClientChannels, which: "telegram" | "whatsapp") {
     setBusy(which);
@@ -62,6 +89,25 @@ export function ClientChannelsPage({ t }: { locale: Locale; t: (c: { ar: string;
           onResume={() => void save({ ...channels, whatsapp_enabled: true }, "whatsapp")}
         />
       </div>
+      <form
+        className="form-grid"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void saveCalendar();
+        }}
+      >
+        <label className="field-label">
+          ساعات يوم العمل
+          <input className="field" value={hours} onChange={(event) => setHours(event.target.value)} />
+        </label>
+        <label className="field-label">
+          أيام العطل (YYYY-MM-DD)
+          <textarea className="field" rows={4} value={holidays} onChange={(event) => setHolidays(event.target.value)} />
+        </label>
+        <button className="btn btn-teal" type="submit">
+          حفظ التقويم
+        </button>
+      </form>
     </>
   );
 }

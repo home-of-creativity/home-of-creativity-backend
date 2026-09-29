@@ -17,7 +17,7 @@ class DriveFolderBrowserTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_listing_without_a_parent_returns_every_visible_folder(): void
+    public function test_listing_without_a_parent_returns_only_top_level_folders_and_shared_drives(): void
     {
         config(['services.google.drive_parent_folder_id' => 'parent-hoc']);
         $this->mock(GoogleServiceAccount::class, function ($mock): void {
@@ -33,26 +33,32 @@ class DriveFolderBrowserTest extends TestCase
                 ],
                 'nextPageToken' => 'next',
             ]),
+            'https://www.googleapis.com/drive/v3/drives*' => Http::response([
+                'drives' => [['id' => 'shared-drive', 'name' => 'Team']],
+            ]),
         ]);
 
         Sanctum::actingAs(User::factory()->admin()->create());
 
         $this->getJson('/api/admin/drive/folders')
             ->assertOk()
-            ->assertJsonPath('data.0.id', 'a')
-            ->assertJsonPath('data.0.name', 'Alpha')
-            ->assertJsonPath('data.1.id', 'b')
+            ->assertJsonPath('data.0.id', 'shared-drive')
+            ->assertJsonPath('data.0.name', 'Team')
+            ->assertJsonPath('data.1.id', 'a')
+            ->assertJsonPath('data.1.name', 'Alpha')
+            ->assertJsonPath('data.2.id', 'b')
             ->assertJsonPath('meta.parent_id', null)
             ->assertJsonPath('meta.next_page_token', 'next');
 
         Http::assertSent(function ($request): bool {
-            $query = $request['q'];
+            $query = (string) ($request->data()['q'] ?? '');
 
-            return str_contains((string) $query, "mimeType = 'application/vnd.google-apps.folder'")
-                && ! str_contains((string) $query, 'in parents')
+            return str_contains($query, "mimeType = 'application/vnd.google-apps.folder'")
+                && str_contains($query, "('root' in parents or sharedWithMe = true)")
                 && ($request['corpora'] ?? null) === 'allDrives'
                 && ($request['includeItemsFromAllDrives'] ?? null) === 'true';
         });
+        Http::assertSent(fn ($request): bool => str_starts_with($request->url(), 'https://www.googleapis.com/drive/v3/drives'));
     }
 
     public function test_listing_a_parent_returns_only_its_children(): void
