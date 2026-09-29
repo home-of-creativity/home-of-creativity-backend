@@ -42,7 +42,7 @@ services:
     command: >
       sh -c "composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
       && php artisan migrate --force
-      && php artisan storage:link || true
+      && if [ ! -e public/storage ]; then php artisan storage:link; fi
       && php-fpm -F -R"
     depends_on:
       mysql:

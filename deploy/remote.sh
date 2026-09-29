@@ -51,7 +51,7 @@ done
 # hoc-api stays running across deploys (bind-mounted code). Always migrate
 # here — `up -d --build` does not recreate php-fpm, so the start command
 # would skip new columns such as clients.deleted_at.
-"${COMPOSE[@]}" exec -T hoc-api php artisan storage:link || true
+"${COMPOSE[@]}" exec -T hoc-api sh -c 'if [ ! -L public/storage ] && [ ! -e public/storage ]; then php artisan storage:link; fi'
 echo "Running migrations..."
 "${COMPOSE[@]}" exec -T hoc-api php artisan migrate --force
 
