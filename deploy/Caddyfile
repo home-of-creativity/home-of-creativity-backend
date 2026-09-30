@@ -134,6 +134,17 @@
 			Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
 		}
 
+		# Caddy's automatic directory redirect is a relative 308. Google Search Console
+		# records that as a redirect error for URLs without a trailing slash
+		# (https://hoc.agency/social, https://hoc.agency/locations). One absolute 301.
+		@indexWithoutSlash {
+			not path */
+			file {
+				try_files {path}/index.html
+			}
+		}
+		redir @indexWithoutSlash https://hoc.agency{path}/ 301
+
 		# Old query URLs. Unknown /articles/{slug}/ has no file and falls through to 404.
 		@legacyArticleDetail {
 			path /articles/detail /articles/detail/
