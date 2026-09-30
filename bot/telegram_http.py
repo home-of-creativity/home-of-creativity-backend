@@ -10,7 +10,19 @@ def init_sentry() -> None:
         return
     import sentry_sdk
 
-    sentry_sdk.init(dsn=dsn, send_default_pii=False, traces_sample_rate=0.0)
+    def _drop_transient(event, hint):
+        error = (hint or {}).get("exc_info", (None, None))[1]
+        message = str(getattr(error, "message", "") or error or "")
+        if "Bad Gateway" in message or "NetworkError" in message or "Timed out" in message:
+            return None
+        return event
+
+    sentry_sdk.init(
+        dsn=dsn,
+        send_default_pii=False,
+        traces_sample_rate=0.0,
+        before_send=_drop_transient,
+    )
 from telegram.request import HTTPXRequest
 from telegram.ext import Application
 
