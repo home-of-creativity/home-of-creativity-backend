@@ -149,4 +149,33 @@ class GoogleCalendarClient
             return null;
         }
     }
+
+    public function deleteEvent(?string $eventId): void
+    {
+        if (! $this->configured() || ! filled($eventId)) {
+            return;
+        }
+
+        $token = $this->auth->accessToken();
+        if ($token === null) {
+            return;
+        }
+
+        try {
+            $calendarId = rawurlencode((string) config('services.google.calendar_id', 'primary'));
+            $response = Http::withToken($token)
+                ->timeout(20)
+                ->delete(self::API.'/calendars/'.$calendarId.'/events/'.rawurlencode((string) $eventId));
+
+            if (! $response->successful() && ! in_array($response->status(), [404, 410], true)) {
+                Log::warning('Google Calendar deleteEvent failed.', [
+                    'status' => $response->status(),
+                ]);
+            }
+        } catch (Throwable $exception) {
+            Log::warning('Google Calendar deleteEvent exception.', [
+                'error' => $exception->getMessage(),
+            ]);
+        }
+    }
 }

@@ -809,6 +809,10 @@ async def on_photo_approve(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         if response.status_code >= 400:
             await api_staff_error(query, response)
             return
+        status = response.json().get("data", {}).get("status")
+    if status == "needs_client":
+        await query.answer("هذا الوقت محجوز. عُرض على العميل وقت يبعد 5 ساعات.", show_alert=True)
+        return
     await query.answer("تمت الموافقة على الموعد.")
     if query.message:
         await query.message.reply_text("تم تثبيت موعد التصوير. أي موعد أقرب من 5 ساعات يُعرض على العميل بوقت أبعد.", reply_markup=staff_keyboard(employee))

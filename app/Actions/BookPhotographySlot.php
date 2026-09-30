@@ -11,6 +11,7 @@ use App\Services\GoogleCalendarClient;
 use App\Services\TelegramNotifier;
 use App\Support\WorkCalendar;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Validation\ValidationException;
@@ -44,7 +45,7 @@ class BookPhotographySlot
             $start = $local->copy()->setTime(WorkCalendar::DAY_START_HOUR, 0);
             $dayEnd = $start->copy()->addHours($this->calendar->hoursPerDay());
             for ($cursor = $start->copy(); $cursor->copy()->addHours(self::SHOOT_HOURS)->lte($dayEnd); $cursor->addHour()) {
-                if ($this->confirmedConflict($cursor, 0) !== null) {
+                if ($this->confirmedConflict($cursor) !== null) {
                     continue;
                 }
                 $slots[] = [
@@ -60,7 +61,6 @@ class BookPhotographySlot
     public function hold(ServiceRequest $request, string $startsAt): PhotographyBooking
     {
         $start = $this->guardStart($startsAt);
-        $conflict = $this->confirmedConflict($start, $request->id);
         $booking = PhotographyBooking::query()->updateOrCreate(
             ['request_id' => $request->id, 'starts_at' => $start],
             [
@@ -71,6 +71,7 @@ class BookPhotographySlot
             ],
         );
 
+        $conflict = $this->confirmedConflict($start, $booking->id);
         if ($conflict instanceof PhotographyBooking) {
             return $this->offer($booking, $this->offerAfter($conflict->starts_at ?? $start));
         }
@@ -126,30 +127,92 @@ class BookPhotographySlot
             return $booking;
         }
 
-        return $this->confirm($booking, $booking->proposed_starts_at);
+        return $this->exclusive(function () use ($booking): PhotographyBooking {
+            $booking = $booking->fresh() ?? $booking;
+            if ($booking->status !== 'needs_client' || $booking->proposed_starts_at === null) {
+                throw ValidationException::withMessages(['booking' => 'لا يوجد وقت مقترح بانتظار موافقتك.']);
+            }
+            $start = $this->clock($booking->proposed_starts_at);
+            $conflict = $this->confirmedConflict($start, $booking->id);
+            if ($conflict instanceof PhotographyBooking) {
+                return $this->offer($booking, $this->offerAfter($this->clock($conflict->starts_at ?? $start)));
+            }
+
+            return $this->confirm($booking, $start);
+        });
     }
 
     public function approveSameTime(PhotographyBooking $booking): PhotographyBooking
     {
-        $confirmed = $this->confirm(
-            $booking,
-            $booking->starts_at ?? now('Asia/Damascus'),
-        );
-        $this->offerNearby($confirmed);
+        return $this->exclusive(function () use ($booking): PhotographyBooking {
+            $booking = $booking->fresh() ?? $booking;
+            if ($booking->status === 'confirmed') {
+                return $booking;
+            }
+            $start = $this->clock($booking->starts_at ?? now('Asia/Damascus'));
+            $conflict = $this->confirmedConflict($start, $booking->id);
+            if ($conflict instanceof PhotographyBooking) {
+                return $this->offer($booking, $this->offerAfter($this->clock($conflict->starts_at ?? $start)));
+            }
+            $confirmed = $this->confirm($booking, $start);
+            $this->offerNearby($confirmed);
 
-        return $confirmed;
+            return $confirmed;
+        });
+    }
+
+    /**
+     * Keep one confirmed shoot inside each 5-hour window and move the rest off the calendar.
+     */
+    public function separateSameDayClashes(): int
+    {
+        return (int) $this->exclusive(function (): int {
+            $confirmed = PhotographyBooking::query()
+                ->where('status', 'confirmed')
+                ->whereNotNull('starts_at')
+                ->orderBy('id')
+                ->get();
+            $kept = [];
+            $released = 0;
+            foreach ($confirmed as $booking) {
+                $start = $this->clock($booking->starts_at);
+                $clash = null;
+                foreach ($kept as $other) {
+                    $otherStart = $this->clock($other->starts_at);
+                    if ($otherStart->toDateString() !== $start->toDateString()) {
+                        continue;
+                    }
+                    if (abs($start->getTimestamp() - $otherStart->getTimestamp()) < self::GAP_HOURS * 3600) {
+                        $clash = $other;
+                        break;
+                    }
+                }
+                if (! $clash instanceof PhotographyBooking) {
+                    $kept[] = $booking;
+
+                    continue;
+                }
+                $this->offer($booking, $this->offerAfter($this->clock($clash->starts_at)));
+                $released++;
+            }
+
+            return $released;
+        });
     }
 
     public function propose(PhotographyBooking $booking, string $startsAt): PhotographyBooking
     {
-        $start = $this->guardStart($startsAt);
-        if ($this->confirmedConflict($start, $booking->request_id) !== null) {
-            throw ValidationException::withMessages([
-                'starts_at' => 'هذا الوقت أقرب من 5 ساعات لموعد مثبت. اختر وقتاً أبعد.',
-            ]);
-        }
+        return $this->exclusive(function () use ($booking, $startsAt): PhotographyBooking {
+            $start = $this->guardStart($startsAt);
+            $booking = $booking->fresh() ?? $booking;
+            if ($this->confirmedConflict($start, $booking->id) !== null) {
+                throw ValidationException::withMessages([
+                    'starts_at' => 'هذا الوقت أقرب من 5 ساعات لموعد مثبت. اختر وقتاً أبعد.',
+                ]);
+            }
 
-        return $this->offer($booking, $start);
+            return $this->offer($booking, $start);
+        });
     }
 
     private function offerNearby(PhotographyBooking $confirmed): void
@@ -159,16 +222,18 @@ class BookPhotographySlot
             return;
         }
         $start = $this->clock($start);
-        $bounds = $this->dayBounds($start);
         $others = PhotographyBooking::query()
             ->with('request.client')
             ->where('id', '!=', $confirmed->id)
             ->whereIn('status', ['pending_staff', 'held', 'needs_client'])
-            ->whereBetween('starts_at', [$bounds[0], $bounds[1]])
+            ->whereNotNull('starts_at')
             ->get();
         foreach ($others as $other) {
             $otherStart = $other->starts_at === null ? null : $this->clock($other->starts_at);
-            if ($otherStart === null || abs($start->getTimestamp() - $otherStart->getTimestamp()) >= self::GAP_HOURS * 3600) {
+            if ($otherStart === null || $otherStart->toDateString() !== $start->toDateString()) {
+                continue;
+            }
+            if (abs($start->getTimestamp() - $otherStart->getTimestamp()) >= self::GAP_HOURS * 3600) {
                 continue;
             }
             $this->offer($other, $this->offerAfter($start));
@@ -177,9 +242,13 @@ class BookPhotographySlot
 
     private function offer(PhotographyBooking $booking, Carbon $proposed): PhotographyBooking
     {
+        if (filled($booking->google_event_id)) {
+            $this->googleCalendar->deleteEvent($booking->google_event_id);
+        }
         $booking->forceFill([
             'status' => 'needs_client',
             'proposed_starts_at' => $this->stored($proposed),
+            'google_event_id' => null,
         ])->save();
         $request = $booking->request ?? ServiceRequest::query()->find($booking->request_id);
         if ($request instanceof ServiceRequest) {
@@ -195,7 +264,7 @@ class BookPhotographySlot
     private function confirm(PhotographyBooking $booking, Carbon $start): PhotographyBooking
     {
         $start = $this->clock($start);
-        if ($this->confirmedConflict($start, $booking->request_id) !== null) {
+        if ($this->confirmedConflict($start, $booking->id) !== null) {
             throw ValidationException::withMessages([
                 'starts_at' => 'هذا الوقت أقرب من 5 ساعات لموعد مثبت.',
             ]);
@@ -311,17 +380,20 @@ class BookPhotographySlot
         return $start;
     }
 
-    private function confirmedConflict(Carbon $start, int $exceptRequestId): ?PhotographyBooking
+    private function confirmedConflict(Carbon $start, ?int $exceptBookingId = null): ?PhotographyBooking
     {
-        $bounds = $this->dayBounds($start);
+        $start = $this->clock($start);
         $rows = PhotographyBooking::query()
             ->where('status', 'confirmed')
-            ->when($exceptRequestId > 0, fn ($query) => $query->where('request_id', '!=', $exceptRequestId))
-            ->whereBetween('starts_at', [$bounds[0], $bounds[1]])
+            ->when($exceptBookingId !== null, fn ($query) => $query->where('id', '!=', $exceptBookingId))
+            ->whereNotNull('starts_at')
             ->get();
         foreach ($rows as $row) {
             $other = $row->starts_at === null ? null : $this->clock($row->starts_at);
-            if ($other !== null && abs($start->getTimestamp() - $other->getTimestamp()) < self::GAP_HOURS * 3600) {
+            if ($other === null || $other->toDateString() !== $start->toDateString()) {
+                continue;
+            }
+            if (abs($start->getTimestamp() - $other->getTimestamp()) < self::GAP_HOURS * 3600) {
                 return $row;
             }
         }
@@ -330,16 +402,14 @@ class BookPhotographySlot
     }
 
     /**
-     * @return array{0: Carbon, 1: Carbon}
+     * @template T
+     *
+     * @param  callable(): T  $callback
+     * @return T
      */
-    private function dayBounds(Carbon $start): array
+    private function exclusive(callable $callback): mixed
     {
-        $local = $this->clock($start);
-
-        return [
-            Carbon::parse($local->copy()->startOfDay()->format('Y-m-d H:i:s'), 'UTC'),
-            Carbon::parse($local->copy()->endOfDay()->format('Y-m-d H:i:s'), 'UTC'),
-        ];
+        return Cache::lock('photography-bookings', 15)->block(10, $callback);
     }
 
     private function clock(Carbon $time): Carbon

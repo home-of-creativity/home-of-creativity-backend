@@ -397,6 +397,51 @@ class WorkScenarioCoverageTest extends TestCase
         $this->assertFalse(collect($slots)->contains(fn (array $slot): bool => str_starts_with($slot['label'], '2026-10-04')));
     }
 
+    public function test_three_photography_bookings_at_the_same_time_keep_one_calendar_event(): void
+    {
+        Http::fake();
+        Carbon::setTestNow(Carbon::parse('2026-10-03 08:00:00', 'Asia/Damascus'));
+        $this->mock(\App\Services\GoogleCalendarClient::class, function ($mock): void {
+            $mock->shouldReceive('createShoot')->once()->andReturn('evt-one');
+            $mock->shouldReceive('deleteEvent')->twice();
+        });
+        $book = app(BookPhotographySlot::class);
+        $start = Carbon::parse('2026-10-04 09:00:00', 'Asia/Damascus')->toIso8601String();
+        $bookings = [];
+        foreach ([1, 2, 3] as $ignored) {
+            $bookings[] = $book->hold(ServiceRequest::factory()->create(), $start);
+        }
+
+        $first = $book->approveSameTime($bookings[0]);
+        $this->assertSame('confirmed', $first->status);
+        $this->assertSame('evt-one', $first->google_event_id);
+        $this->assertSame('confirmed', $book->approveSameTime($first)->status);
+
+        $second = $book->approveSameTime($bookings[1]->fresh() ?? $bookings[1]);
+        $third = $book->approveSameTime($bookings[2]->fresh() ?? $bookings[2]);
+        $this->assertSame('needs_client', $second->status);
+        $this->assertSame('needs_client', $third->status);
+        $this->assertSame('14:00', $second->proposed_starts_at?->format('H:i'));
+        $this->assertSame('14:00', $third->proposed_starts_at?->format('H:i'));
+        $this->assertSame(1, PhotographyBooking::query()->where('status', 'confirmed')->count());
+
+        PhotographyBooking::query()->whereKey([$second->id, $third->id])->update([
+            'status' => 'confirmed',
+            'starts_at' => $first->starts_at,
+            'ends_at' => $first->ends_at,
+            'proposed_starts_at' => null,
+        ]);
+        PhotographyBooking::query()->whereKey($second->id)->update(['google_event_id' => 'evt-two']);
+        PhotographyBooking::query()->whereKey($third->id)->update(['google_event_id' => 'evt-three']);
+
+        $this->assertSame(2, $book->separateSameDayClashes());
+        $this->assertSame(1, PhotographyBooking::query()->where('status', 'confirmed')->count());
+        $this->assertSame('evt-one', $first->fresh()?->google_event_id);
+        $this->assertNull($second->fresh()?->google_event_id);
+        $this->assertSame('needs_client', $second->fresh()?->status);
+        $this->assertSame('needs_client', $third->fresh()?->status);
+    }
+
     public function test_one_edit_then_support_and_company_extension_needs_a_reason(): void
     {
         Http::fake();
