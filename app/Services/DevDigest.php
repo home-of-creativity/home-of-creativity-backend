@@ -27,7 +27,7 @@ class DevDigest
             'الطابور الفاشل: '.$this->failedJobs(),
             'تكامل عالق: '.$this->stuckOutbox(),
             'مراقبة Drive: '.$this->driveLine($expires),
-            'Sentry: '.($secret !== '' ? 'POST /api/integrations/sentry' : 'SENTRY_WEBHOOK_SECRET غير مضبوط'),
+            $this->sentryLine($secret),
             'آخر نشر: '.($deployed ?? 'غير مسجل'),
         ];
 
@@ -79,6 +79,31 @@ class DevDigest
             ->where('status', IntegrationEventStatus::Failed)
             ->where('attempts', '>=', 5)
             ->count();
+    }
+
+    private function sentryLine(string $secret): string
+    {
+        if ($secret === '') {
+            return 'Sentry: SENTRY_WEBHOOK_SECRET غير مضبوط';
+        }
+
+        $items = Cache::get('dev.sentry.recent', []);
+        if (! is_array($items) || $items === []) {
+            return 'Sentry: لم تصل مشاكل';
+        }
+
+        $lines = ['Sentry:'];
+        foreach (array_slice($items, 0, 5) as $item) {
+            if (! is_array($item)) {
+                continue;
+            }
+            $title = trim((string) ($item['title'] ?? ''));
+            if ($title !== '') {
+                $lines[] = '- '.$title;
+            }
+        }
+
+        return count($lines) > 1 ? implode("\n", $lines) : 'Sentry: لم تصل مشاكل';
     }
 
     private function driveLine(?string $expires): string

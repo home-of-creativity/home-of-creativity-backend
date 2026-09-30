@@ -13,11 +13,24 @@ class DevHealth
 
     public function up(): bool
     {
-        $internal = (string) config('services.dev.health_internal_url');
-        $url = $internal !== '' ? $internal : $this->labelUrl();
+        $internal = trim((string) config('services.dev.health_internal_url'));
+        $public = trim($this->labelUrl());
 
+        if ($internal !== '' && $this->probe($internal)) {
+            return true;
+        }
+
+        if ($public !== '' && $public !== $internal) {
+            return $this->probe($public);
+        }
+
+        return false;
+    }
+
+    private function probe(string $url): bool
+    {
         try {
-            return Http::timeout(4)->connectTimeout(2)->get($url)->successful();
+            return Http::timeout(8)->connectTimeout(3)->get($url)->successful();
         } catch (\Throwable) {
             return false;
         }

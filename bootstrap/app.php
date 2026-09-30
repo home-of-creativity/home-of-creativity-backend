@@ -5,6 +5,7 @@ use App\Http\Middleware\EnsureAdmin;
 use App\Http\Middleware\EnsureClientTelegramEnabled;
 use App\Http\Middleware\EnsureCrudAbility;
 use App\Http\Middleware\StripPoweredByHeader;
+use App\Http\Middleware\VerifySentryWebhook;
 use App\Http\Middleware\VerifySharedSecret;
 use App\Http\Middleware\VerifyWhatsAppSignature;
 use Illuminate\Foundation\Application;
@@ -23,6 +24,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->append(StripPoweredByHeader::class);
         $middleware->alias([
             'shared.secret' => VerifySharedSecret::class,
+            'sentry.webhook' => VerifySentryWebhook::class,
             'whatsapp.signature' => VerifyWhatsAppSignature::class,
             'telegram.client' => EnsureClientTelegramEnabled::class,
             'admin' => EnsureAdmin::class,

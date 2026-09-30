@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Enums\IntegrationEventStatus;
 use App\Models\IntegrationEvent;
+use App\Services\DevAlert;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Http\Client\ConnectionException;
@@ -84,13 +85,23 @@ class DispatchIntegrationEventJob implements ShouldQueue
 
     private function markFailed(IntegrationEvent $event, string $error): void
     {
+        $event->last_error = $error;
+        $giveUp = $event->stopsRetry();
         $delayMinutes = min(60, 2 ** min($event->attempts, 6));
 
         $event->forceFill([
-            'status' => IntegrationEventStatus::Failed,
+            'status' => $giveUp ? IntegrationEventStatus::Abandoned : IntegrationEventStatus::Failed,
             'last_error' => $error,
-            'next_retry_at' => now()->addMinutes($delayMinutes),
+            'next_retry_at' => $giveUp ? null : now()->addMinutes($delayMinutes),
         ])->save();
+
+        if ($giveUp) {
+            app(DevAlert::class)->once(
+                'outbox-'.$event->event_uuid,
+                'تكامل توقف '.$event->request_number.' '.$event->event_type->value.' محاولات '.$event->attempts."\n".$error,
+                10080,
+            );
+        }
 
         Log::warning('Integration event dispatch failed.', [
             'event_uuid' => $event->event_uuid,

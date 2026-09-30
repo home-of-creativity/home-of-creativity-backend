@@ -34,7 +34,7 @@ class WatchHealthCommand extends Command
 
         $misses = ((int) Cache::get('dev.health.misses')) + 1;
         Cache::put('dev.health.misses', $misses, now()->addMinutes(10));
-        if ($wasDown || $misses < 2) {
+        if ($wasDown || $misses < 3) {
             return self::SUCCESS;
         }
 

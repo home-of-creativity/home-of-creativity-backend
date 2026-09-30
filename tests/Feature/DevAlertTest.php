@@ -49,12 +49,13 @@ class DevAlertTest extends TestCase
         ]);
 
         $this->artisan('ops:watch-health')->assertSuccessful();
+        $this->artisan('ops:watch-health')->assertSuccessful();
         $this->assertFalse((bool) Cache::get('dev.health.down'));
 
         $this->artisan('ops:watch-health')->assertSuccessful();
 
         $this->assertTrue(Cache::get('dev.health.down'));
-        Http::assertSentCount(2);
+        Http::assertSentCount(3);
         $this->assertFileExists(app(DevBeat::class)->path('scheduler'));
     }
 
@@ -74,6 +75,26 @@ class DevAlertTest extends TestCase
 
         $this->assertFalse((bool) Cache::get('dev.health.down'));
         Http::assertSent(fn ($request): bool => $request->url() === 'http://hoc-edge/up');
+    }
+
+    public function test_health_watch_ignores_an_internal_miss_when_the_public_site_answers(): void
+    {
+        config([
+            'services.dev.health_internal_url' => 'http://hoc-edge/up',
+            'services.telegram.dev_bot_token' => 'test-token',
+            'services.telegram.dev_chat_id' => '1',
+        ]);
+        Http::fake([
+            'http://hoc-edge/up' => Http::response('down', 500),
+            'https://api.hoc.agency/up' => Http::response('ok', 200),
+        ]);
+
+        $this->artisan('ops:watch-health')->assertSuccessful();
+        $this->artisan('ops:watch-health')->assertSuccessful();
+        $this->artisan('ops:watch-health')->assertSuccessful();
+
+        $this->assertFalse((bool) Cache::get('dev.health.down'));
+        Http::assertSent(fn ($request): bool => $request->url() === 'https://api.hoc.agency/up');
     }
 
     public function test_dev_bot_ping_requires_the_webhook_secret(): void
@@ -198,6 +219,67 @@ class DevAlertTest extends TestCase
             ->assertOk();
 
         $this->assertStringContainsString('ملخص المطورين', (string) $response->json('data.text'));
-        $this->assertStringContainsString('POST /api/integrations/sentry', (string) $response->json('data.text'));
+        $this->assertStringContainsString('Sentry: لم تصل مشاكل', (string) $response->json('data.text'));
+    }
+
+    public function test_sentry_signature_is_accepted_and_the_digest_lists_the_issue(): void
+    {
+        config([
+            'services.sentry.webhook_secret' => 'sentry-secret',
+            'services.telegram.dev_bot_token' => 'test-token',
+            'services.telegram.dev_chat_id' => '1',
+        ]);
+        Http::fake();
+        $body = json_encode([
+            'action' => 'created',
+            'data' => ['issue' => [
+                'id' => '42',
+                'title' => 'Null portfolio',
+                'permalink' => 'https://sentry.example/issues/42',
+            ]],
+        ], JSON_THROW_ON_ERROR);
+
+        $this->call('POST', '/api/integrations/sentry', [], [], [], [
+            'HTTP_SENTRY_HOOK_SIGNATURE' => hash_hmac('sha256', $body, 'sentry-secret'),
+            'CONTENT_TYPE' => 'application/json',
+        ], $body)->assertOk();
+
+        $response = $this->withHeaders(['X-Webhook-Secret' => 'change-me-dev'])
+            ->getJson('/api/bot/dev/digest')
+            ->assertOk();
+
+        $this->assertStringContainsString('Null portfolio', (string) $response->json('data.text'));
+        Http::assertSentCount(1);
+    }
+
+    public function test_a_permanent_outbox_failure_is_abandoned_and_not_alerted_again(): void
+    {
+        Cache::flush();
+        Http::fake();
+        config([
+            'services.telegram.dev_bot_token' => 'test-token',
+            'services.telegram.dev_chat_id' => '1',
+        ]);
+        $request = ServiceRequest::factory()->create();
+        IntegrationEvent::query()->create([
+            'event_uuid' => 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+            'event_type' => WorkflowEventType::RequestSubmitted,
+            'request_uuid' => $request->uuid,
+            'request_number' => $request->number,
+            'correlation_id' => 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+            'status' => IntegrationEventStatus::Failed,
+            'attempts' => 69,
+            'last_error' => 'HTTP 404',
+            'next_retry_at' => now()->subMinute(),
+        ]);
+
+        $this->artisan('integration:process-outbox')->assertSuccessful();
+        $this->artisan('ops:watch-signals')->assertSuccessful();
+
+        $this->assertDatabaseHas('integration_events', [
+            'event_uuid' => 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+            'status' => IntegrationEventStatus::Abandoned->value,
+        ]);
+        Http::assertNothingSent();
     }
 }

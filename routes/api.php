@@ -310,7 +310,7 @@ Route::post('integrations/drive/changed', [IntegrationController::class, 'driveC
     ->middleware('throttle:60,1');
 
 Route::post('integrations/sentry', SentryWebhookController::class)
-    ->middleware(['shared.secret:services.sentry.webhook_secret', 'throttle:60,1']);
+    ->middleware(['sentry.webhook', 'throttle:60,1']);
 
 Route::prefix('bot/telegram')->middleware(['shared.secret:services.telegram.bot_secret', 'telegram.client'])->group(function () {
     Route::post('link', [TelegramBotController::class, 'link']);

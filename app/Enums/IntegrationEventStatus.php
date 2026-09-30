@@ -8,4 +8,5 @@ enum IntegrationEventStatus: string
     case Processing = 'processing';
     case Dispatched = 'dispatched';
     case Failed = 'failed';
+    case Abandoned = 'abandoned';
 }

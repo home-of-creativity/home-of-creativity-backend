@@ -3,8 +3,6 @@
 namespace Database\Seeders;
 
 use App\Models\PortfolioCategory;
-use App\Models\PortfolioProject;
-use App\Models\PortfolioProjectImage;
 use App\Models\ShowcaseClient;
 use Illuminate\Database\Seeder;
 
@@ -47,52 +45,5 @@ class PortfolioSeeder extends Seeder
             );
         }
 
-        $drive = require database_path('data/portfolio-drive-images.php');
-        $files = $drive['files'];
-
-        foreach ($drive['projects'] as $projectData) {
-            $category = PortfolioCategory::query()->where('slug', $projectData['category_slug'])->first();
-            if (! $category) {
-                continue;
-            }
-
-            $cover = collect($projectData['gallery'])->firstWhere('featured', true)
-                ?? $projectData['gallery'][0];
-            $coverUrl = $files[$cover['file']]['url'] ?? null;
-
-            $project = PortfolioProject::query()->updateOrCreate(
-                [
-                    'category_id' => $category->id,
-                    'title_en' => $projectData['title_en'],
-                ],
-                [
-                    'title_ar' => $projectData['title_ar'],
-                    'summary_en' => $projectData['summary_en'],
-                    'summary_ar' => $projectData['summary_ar'],
-                    'image_path' => $coverUrl,
-                    'sort_order' => $projectData['sort_order'],
-                    'is_published' => true,
-                    'featured' => $projectData['featured'],
-                ],
-            );
-
-            $project->images()->delete();
-
-            foreach ($projectData['gallery'] as $index => $imageData) {
-                $url = $files[$imageData['file']]['url'] ?? null;
-                if (! $url) {
-                    continue;
-                }
-
-                PortfolioProjectImage::query()->create([
-                    'portfolio_project_id' => $project->id,
-                    'image_path' => $url,
-                    'alt_en' => $imageData['alt_en'],
-                    'alt_ar' => $imageData['alt_ar'],
-                    'sort_order' => $index + 1,
-                    'featured' => $imageData['featured'],
-                ]);
-            }
-        }
     }
 }

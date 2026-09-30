@@ -51,6 +51,15 @@ class WatchDevSignalsCommand extends Command
             ->get(['event_uuid', 'event_type', 'request_number', 'attempts', 'last_error']);
 
         foreach ($stuck as $event) {
+            if ($event->stopsRetry()) {
+                $event->forceFill([
+                    'status' => IntegrationEventStatus::Abandoned,
+                    'next_retry_at' => null,
+                ])->save();
+
+                continue;
+            }
+
             $error = mb_substr((string) $event->last_error, 0, 160);
             $alert->once(
                 'outbox-'.$event->event_uuid,
