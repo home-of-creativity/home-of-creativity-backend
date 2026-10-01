@@ -129,13 +129,15 @@ class PortfolioProjectController extends Controller
 
     private function syncGallery(PortfolioProject $project, Request $request): void
     {
+        $changed = false;
+
         if ($request->has('remove_gallery_ids')) {
             $ids = collect($request->input('remove_gallery_ids'))
                 ->map(fn ($id) => (int) $id)
                 ->filter()
                 ->all();
 
-            PortfolioProjectImage::query()
+            $removed = PortfolioProjectImage::query()
                 ->where('portfolio_project_id', $project->id)
                 ->whereIn('id', $ids)
                 ->get()
@@ -143,19 +145,25 @@ class PortfolioProjectController extends Controller
                     Storage::disk('public')->delete($image->image_path);
                     $image->delete();
                 });
+
+            $changed = $removed->isNotEmpty();
         }
 
-        if (! $request->hasFile('gallery')) {
-            return;
+        if ($request->hasFile('gallery')) {
+            $maxOrder = (int) $project->images()->max('sort_order');
+
+            foreach ($request->file('gallery') as $index => $file) {
+                $project->images()->create([
+                    'image_path' => $file->store('portfolio/projects/gallery', 'public'),
+                    'sort_order' => $maxOrder + $index + 1,
+                ]);
+            }
+
+            $changed = true;
         }
 
-        $maxOrder = (int) $project->images()->max('sort_order');
-
-        foreach ($request->file('gallery') as $index => $file) {
-            $project->images()->create([
-                'image_path' => $file->store('portfolio/projects/gallery', 'public'),
-                'sort_order' => $maxOrder + $index + 1,
-            ]);
+        if ($changed) {
+            $project->touch();
         }
     }
 

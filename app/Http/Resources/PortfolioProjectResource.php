@@ -38,12 +38,14 @@ class PortfolioProjectResource extends JsonResource
                 'summary_en' => $project->summary_en,
                 'summary_ar' => $project->summary_ar,
                 'image_url' => PortfolioMedia::url($project->image_path),
+                'updated_at' => $project->updated_at?->toIso8601String(),
                 'category' => $project->relationLoaded('category') ? PortfolioCategoryResource::make($project->category) : null,
             ])->values()),
             'sort_order' => $this->sort_order,
             'is_published' => $this->is_published,
             'featured' => $this->featured,
             'created_at' => $this->created_at?->toIso8601String(),
+            'updated_at' => $this->updated_at?->toIso8601String(),
         ];
     }
 }

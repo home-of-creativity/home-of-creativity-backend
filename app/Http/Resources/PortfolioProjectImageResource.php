@@ -23,6 +23,7 @@ class PortfolioProjectImageResource extends JsonResource
             'alt_ar' => $this->alt_ar,
             'sort_order' => $this->sort_order,
             'featured' => $this->featured,
+            'updated_at' => $this->updated_at?->toIso8601String(),
         ];
     }
 }

@@ -34,8 +34,21 @@
 		php_fastcgi hoc-api:9000
 	}
 
-	# Staff replace these files. A long cache would keep the previous logo.
+	# Staff replace these files. A long cache would keep the previous picture.
 	handle /storage/portfolio/clients* {
+		root * /var/www/hoc/storage/app/public
+		uri strip_prefix /storage
+		encode zstd gzip
+		header {
+			Accept-Ranges bytes
+			Cache-Control "no-cache"
+			Access-Control-Allow-Origin *
+			Access-Control-Allow-Methods "GET, HEAD, OPTIONS"
+		}
+		file_server
+	}
+
+	handle /storage/portfolio/projects* {
 		root * /var/www/hoc/storage/app/public
 		uri strip_prefix /storage
 		encode zstd gzip
