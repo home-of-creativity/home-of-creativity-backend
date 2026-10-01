@@ -34,6 +34,20 @@
 		php_fastcgi hoc-api:9000
 	}
 
+	# Staff replace these files. A long cache would keep the previous logo.
+	handle /storage/portfolio/clients* {
+		root * /var/www/hoc/storage/app/public
+		uri strip_prefix /storage
+		encode zstd gzip
+		header {
+			Accept-Ranges bytes
+			Cache-Control "no-cache"
+			Access-Control-Allow-Origin *
+			Access-Control-Allow-Methods "GET, HEAD, OPTIONS"
+		}
+		file_server
+	}
+
 	handle /storage* {
 		root * /var/www/hoc/storage/app/public
 		uri strip_prefix /storage
@@ -114,9 +128,17 @@
 		file_server
 	}
 
+	@clientLogos path /generated/clients/*
+	handle @clientLogos {
+		root * /var/www/design
+		encode zstd gzip
+		header Cache-Control "no-cache"
+		file_server
+	}
+
 	@siteAsset {
 		path *.css *.js *.mjs *.map *.woff *.woff2 *.ttf *.png *.jpg *.jpeg *.webp *.avif *.svg *.ico *.txt *.xml *.webmanifest *.mp4 *.webm
-		not path /dashboard /dashboard/* /sw.js /robots.txt /manifest.webmanifest
+		not path /dashboard /dashboard/* /sw.js /robots.txt /manifest.webmanifest /generated/clients /generated/clients/*
 	}
 	handle @siteAsset {
 		root * /var/www/design

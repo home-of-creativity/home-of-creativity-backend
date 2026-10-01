@@ -1,5 +1,6 @@
 # Laravel API
 
+Last updated: 1 October 2026 (client logo files under `/storage/portfolio/clients` are `Cache-Control: no-cache`)
 Last updated: 30 September 2026 (portfolio seeder keeps categories only; migration drops collage projects whose images are Google Drive URLs)
 Last updated: 29 September 2026 (public CSP allows Google fonts; sw.js, robots.txt, and the web manifest are no-cache; `/articles/detail/?slug=` and `/articles/?slug=` 301 to `/articles/{slug}/`)
 

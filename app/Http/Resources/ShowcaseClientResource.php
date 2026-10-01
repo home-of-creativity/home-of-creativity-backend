@@ -24,6 +24,7 @@ class ShowcaseClientResource extends JsonResource
             'sort_order' => $this->sort_order,
             'is_published' => $this->is_published,
             'created_at' => $this->created_at?->toIso8601String(),
+            'updated_at' => $this->updated_at?->toIso8601String(),
         ];
     }
 }
