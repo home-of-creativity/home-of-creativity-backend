@@ -125,6 +125,13 @@
 		file_server
 	}
 
+	# Seeded collage projects 1–6 stay on disk from an older export. 410 tells crawlers they are gone.
+	@removedProjects path_regexp ^/projects/[1-6]/?$
+	handle @removedProjects {
+		header Cache-Control "no-cache"
+		respond "Gone" 410
+	}
+
 	handle {
 		root * /var/www/design
 		encode zstd gzip
@@ -157,6 +164,16 @@
 			query slug=*
 		}
 		redir @legacyArticleQuery /articles/{query.slug}/ 301
+
+		# A project published after the last export has no /projects/{id}/index.html.
+		# Keep the address and serve the live page, which loads that project from the API.
+		@missingProject {
+			path_regexp ^/projects/[0-9]+/?$
+			not file {
+				try_files {path}/index.html {path}index.html
+			}
+		}
+		rewrite @missingProject /projects/view/index.html
 
 		@static file {
 			try_files {path} {path}/index.html
