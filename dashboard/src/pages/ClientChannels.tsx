@@ -21,6 +21,7 @@ export function ClientChannelsPage({ t }: { locale: Locale; t: (c: { ar: string;
         setChannels({
           telegram_enabled: res.data.telegram_enabled !== false,
           whatsapp_enabled: res.data.whatsapp_enabled !== false,
+          whatsapp_locked: res.data.whatsapp_locked === true,
         });
       })
       .catch((err) => setError(err instanceof Error ? err.message : t(copy.saveFailed)));
@@ -81,8 +82,9 @@ export function ClientChannelsPage({ t }: { locale: Locale; t: (c: { ar: string;
         />
         <ChannelCard
           title={t(copy.channelsWhatsapp)}
-          help={t(copy.channelsWhatsappHelp)}
+          help={t(channels.whatsapp_locked ? copy.channelsWhatsappLockedHelp : copy.channelsWhatsappHelp)}
           running={channels.whatsapp_enabled}
+          locked={channels.whatsapp_locked === true}
           busy={busy === "whatsapp"}
           t={t}
           onPause={() => void save({ ...channels, whatsapp_enabled: false }, "whatsapp")}
@@ -116,6 +118,7 @@ function ChannelCard({
   title,
   help,
   running,
+  locked = false,
   busy,
   t,
   onPause,
@@ -124,6 +127,7 @@ function ChannelCard({
   title: string;
   help: string;
   running: boolean;
+  locked?: boolean;
   busy: boolean;
   t: (c: { ar: string; en: string }) => string;
   onPause: () => void;
@@ -134,11 +138,11 @@ function ChannelCard({
       <div className="channel-card-head">
         <h2 className="form-title">{title}</h2>
         <span className={running ? "channel-status is-on" : "channel-status is-off"}>
-          {running ? t(copy.channelsRunning) : t(copy.channelsPaused)}
+          {locked ? t(copy.channelsLocked) : running ? t(copy.channelsRunning) : t(copy.channelsPaused)}
         </span>
       </div>
       <p className="muted">{help}</p>
-      {running ? (
+      {locked ? null : running ? (
         <ConfirmAction
           label={t(copy.channelsPause)}
           confirmLabel={t(copy.channelsPauseConfirm)}

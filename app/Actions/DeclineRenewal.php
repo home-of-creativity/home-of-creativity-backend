@@ -4,9 +4,12 @@ namespace App\Actions;
 
 use App\Models\PaymentReminder;
 use App\Models\ServiceRequest;
+use App\Services\OdooLeadLog;
 
 class DeclineRenewal
 {
+    public function __construct(private OdooLeadLog $leadLog) {}
+
     public function handle(ServiceRequest $request): ServiceRequest
     {
         PaymentReminder::query()
@@ -31,6 +34,8 @@ class DeclineRenewal
                 'renewal_declined' => true,
             ]);
         }
+
+        $this->leadLog->renewal($request, false);
 
         return $request->fresh(['subscriptions', 'paymentReminders']) ?? $request;
     }

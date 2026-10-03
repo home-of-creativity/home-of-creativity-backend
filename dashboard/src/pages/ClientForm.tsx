@@ -25,6 +25,7 @@ export function ClientForm({ t }: { locale: Locale; t: (c: { ar: string; en: str
         email: z.union([z.literal(""), z.string().trim().email(t(copy.invalidEmail))]),
         phone: z.string().trim(),
         companyName: z.string().trim(),
+        companyActivity: z.string().trim().max(60),
       }),
     [t],
   );
@@ -35,7 +36,7 @@ export function ClientForm({ t }: { locale: Locale; t: (c: { ar: string; en: str
     reset,
     formState: { errors },
   } = useZodForm(schema, {
-    defaultValues: { name: "", email: "", phone: "", companyName: "" },
+    defaultValues: { name: "", email: "", phone: "", companyName: "", companyActivity: "" },
   });
 
   useEffect(() => {
@@ -57,13 +58,14 @@ export function ClientForm({ t }: { locale: Locale; t: (c: { ar: string; en: str
           email: item.email ?? "",
           phone: item.phone ?? "",
           companyName: item.company_name ?? "",
+          companyActivity: item.company_activity ?? "",
         });
       })
       .catch(() => setError(t(copy.saveFailed)))
       .finally(() => setLoading(false));
   }, [editingId, reset, t]);
 
-  async function onValid(values: { name: string; email: string; phone: string; companyName: string }) {
+  async function onValid(values: { name: string; email: string; phone: string; companyName: string; companyActivity: string }) {
     setError("");
     setBusy(true);
     try {
@@ -72,6 +74,7 @@ export function ClientForm({ t }: { locale: Locale; t: (c: { ar: string; en: str
         email: values.email || undefined,
         phone: values.phone || undefined,
         company_name: values.companyName || undefined,
+        company_activity: values.companyActivity || undefined,
       };
       if (editingId) await api.updateClient(editingId, payload);
       else await api.createClient(payload);
@@ -114,9 +117,13 @@ export function ClientForm({ t }: { locale: Locale; t: (c: { ar: string; en: str
           {t(copy.phone)}
           <input className="field" dir="ltr" {...register("phone")} />
         </label>
-        <label className="field-label field-span">
+        <label className="field-label">
           {t(copy.company)}
           <input className="field" {...register("companyName")} />
+        </label>
+        <label className="field-label">
+          {t(copy.companyActivity)}
+          <input className="field" maxLength={60} {...register("companyActivity")} />
         </label>
       </FormSection>
     </FormPage>

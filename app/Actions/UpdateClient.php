@@ -12,7 +12,7 @@ class UpdateClient
     ) {}
 
     /**
-     * @param  array{name?: string, email?: string|null, phone?: string|null, telegram_user_id?: string|null, locale?: string|null, company_name?: string|null}  $data
+     * @param  array{name?: string, email?: string|null, phone?: string|null, telegram_user_id?: string|null, locale?: string|null, company_name?: string|null, company_activity?: string|null}  $data
      */
     public function handle(Client $client, array $data): Client
     {

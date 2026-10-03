@@ -11,7 +11,11 @@ class ClientChannelGate
 
     public const WHATSAPP_KEY = 'client_whatsapp_enabled';
 
+    public const SUPPORT_PHONE = '0947823488';
+
     public const TELEGRAM_PAUSED_MESSAGE = 'بوت تيليجرام متوقف مؤقتاً. يمكنك التواصل عبر واتساب، أو أعد المحاولة لاحقاً.';
+
+    public const TELEGRAM_PAUSED_PHONE_MESSAGE = 'بوت تيليجرام متوقف مؤقتاً. أعد المحاولة لاحقاً، أو اتصل على '.self::SUPPORT_PHONE.'.';
 
     public const WHATSAPP_PAUSED_MESSAGE = 'بوت واتساب متوقف مؤقتاً. يمكنك التواصل عبر تيليجرام، أو أعد المحاولة لاحقاً.';
 
@@ -20,9 +24,18 @@ class ClientChannelGate
         return self::flag(self::TELEGRAM_KEY);
     }
 
+    /**
+     * WhatsApp Cloud API stays closed until WHATSAPP_ENABLED is set on the server,
+     * whatever the dashboard switch says.
+     */
+    public static function whatsappLocked(): bool
+    {
+        return ! filter_var(config('services.whatsapp.enabled', false), FILTER_VALIDATE_BOOL);
+    }
+
     public static function whatsappEnabled(): bool
     {
-        return self::flag(self::WHATSAPP_KEY);
+        return ! self::whatsappLocked() && self::flag(self::WHATSAPP_KEY);
     }
 
     public static function enabledForChatId(mixed $chatId): bool
@@ -34,6 +47,11 @@ class ClientChannelGate
         return self::telegramEnabled();
     }
 
+    public static function telegramPausedMessage(): string
+    {
+        return self::whatsappEnabled() ? self::TELEGRAM_PAUSED_MESSAGE : self::TELEGRAM_PAUSED_PHONE_MESSAGE;
+    }
+
     public static function setTelegramEnabled(bool $enabled): void
     {
         OpsSetting::setValue(self::TELEGRAM_KEY, $enabled ? '1' : '0');
@@ -41,17 +59,22 @@ class ClientChannelGate
 
     public static function setWhatsAppEnabled(bool $enabled): void
     {
+        if (self::whatsappLocked()) {
+            return;
+        }
+
         OpsSetting::setValue(self::WHATSAPP_KEY, $enabled ? '1' : '0');
     }
 
     /**
-     * @return array{telegram_enabled: bool, whatsapp_enabled: bool}
+     * @return array{telegram_enabled: bool, whatsapp_enabled: bool, whatsapp_locked: bool}
      */
     public static function payload(): array
     {
         return [
             'telegram_enabled' => self::telegramEnabled(),
             'whatsapp_enabled' => self::whatsappEnabled(),
+            'whatsapp_locked' => self::whatsappLocked(),
         ];
     }
 

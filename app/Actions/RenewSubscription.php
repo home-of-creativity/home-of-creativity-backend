@@ -5,6 +5,7 @@ namespace App\Actions;
 use App\Models\PaymentReminder;
 use App\Models\ServiceRequest;
 use App\Models\Subscription;
+use App\Services\OdooLeadLog;
 use App\Support\BillingPeriod;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -14,6 +15,7 @@ class RenewSubscription
     public function __construct(
         private IssueInvoice $issueInvoice,
         private NotifyClientChannels $notifyClientChannels,
+        private OdooLeadLog $leadLog,
     ) {}
 
     public function handle(ServiceRequest $request): ServiceRequest
@@ -73,6 +75,7 @@ class RenewSubscription
             return $request->fresh(['client', 'pricingPackage', 'subscriptions']) ?? $request;
         });
 
+        $this->leadLog->renewal($fresh, true);
         $this->deliverInvoice($fresh, $amount);
 
         return $fresh->fresh(['client', 'subscriptions', 'pricingPackage', 'invoices']) ?? $fresh;

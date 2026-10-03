@@ -127,6 +127,7 @@ class WorkScenarioEdgesTest extends TestCase
         $this->fakeOutbound();
         config([
             'services.telegram.bot_token' => 'client-token',
+            'services.whatsapp.enabled' => true,
             'services.whatsapp.token' => 'wa-token',
             'services.whatsapp.phone_number_id' => '123',
         ]);
@@ -137,7 +138,7 @@ class WorkScenarioEdgesTest extends TestCase
             'status' => RequestStatus::InProgress,
             'client_due_at' => now(),
         ]);
-        $this->postJson("/api/admin/requests/{$request->id}/extend-schedule", [
+        $this->postJson("/api/admin/requests/{$request->number}/extend-schedule", [
             'hours' => 4,
             'reason' => 'تأخير مطبعة',
         ])->assertOk();
@@ -151,7 +152,7 @@ class WorkScenarioEdgesTest extends TestCase
             'status' => RequestStatus::InProgress,
             'client_due_at' => now(),
         ]);
-        $this->postJson("/api/admin/requests/{$mailRequest->id}/extend-schedule", [
+        $this->postJson("/api/admin/requests/{$mailRequest->number}/extend-schedule", [
             'hours' => 4,
             'reason' => 'بريد فقط',
         ])->assertOk();

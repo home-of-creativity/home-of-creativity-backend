@@ -33,6 +33,7 @@ use App\Models\RequestFile;
 use App\Models\ServiceRequest;
 use App\Models\SupportMessage;
 use App\Services\ClickUpStatusMapper;
+use App\Services\OdooLeadLog;
 use App\Services\RequestStatusTransitionService;
 use App\Support\ClientProfileValue;
 use App\Support\PricingCatalog;
@@ -68,10 +69,7 @@ class TelegramBotController extends Controller
         );
 
         return response()->json([
-            'data' => array_merge(ClientResource::make($client)->resolve(), [
-                'profile_complete' => $client->profileComplete(),
-                'missing_fields' => $client->missingProfileFields(),
-            ]),
+            'data' => $this->profilePayload($client),
             'message' => 'Linked.',
         ]);
     }
@@ -81,10 +79,7 @@ class TelegramBotController extends Controller
         $client = $this->resolveTelegramClient->handle($request->query('telegram_user_id'));
 
         return response()->json([
-            'data' => array_merge(ClientResource::make($client)->resolve(), [
-                'profile_complete' => $client->profileComplete(),
-                'missing_fields' => $client->missingProfileFields(),
-            ]),
+            'data' => $this->profilePayload($client),
             'message' => 'ok',
         ]);
     }
@@ -96,35 +91,79 @@ class TelegramBotController extends Controller
             'name' => ['sometimes', 'string', 'max:120'],
             'phone' => ['sometimes', 'string', 'max:40'],
             'company_name' => ['sometimes', 'string', 'max:160'],
+            'email' => ['sometimes', 'string', 'max:255'],
+            'email_skipped' => ['sometimes', 'boolean'],
+            'company_activity' => ['sometimes', 'string', 'max:255'],
         ]);
-
-        foreach (['name', 'phone', 'company_name'] as $field) {
-            if (isset($validated[$field]) && ClientProfileValue::isKeyboardLabel($validated[$field])) {
-                throw ValidationException::withMessages([
-                    $field => 'Send the real value, not a menu button.',
-                ]);
-            }
-        }
 
         $client = $this->resolveTelegramClient->handle($validated['telegram_user_id']);
 
-        $client->forceFill(array_filter([
-            'name' => $validated['name'] ?? null,
-            'phone' => $validated['phone'] ?? null,
-            'company_name' => $validated['company_name'] ?? null,
-        ], fn ($value) => $value !== null && $value !== ''))->save();
+        $client->forceFill($this->profileValues($validated, $client))->save();
 
         $client = $client->fresh() ?? $client;
         $this->pushCompletedClientToOdoo($client, $pushClientToOdoo, $pushClientLeadToOdoo);
         $client = $client->fresh() ?? $client;
 
         return response()->json([
-            'data' => array_merge(ClientResource::make($client)->resolve(), [
-                'profile_complete' => $client->profileComplete(),
-                'missing_fields' => $client->missingProfileFields(),
-            ]),
+            'data' => $this->profilePayload($client),
             'message' => 'Updated.',
         ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function profilePayload(Client $client): array
+    {
+        return array_merge(ClientResource::make($client)->resolve(), [
+            'profile_complete' => $client->profileComplete(),
+            'missing_fields' => $client->pendingProfileFields(),
+        ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $validated
+     * @return array<string, mixed>
+     */
+    private function profileValues(array $validated, Client $client): array
+    {
+        $values = [];
+
+        if (array_key_exists('name', $validated)) {
+            $values['name'] = ClientProfileValue::usableName(trim((string) $validated['name']))
+                ?? throw ValidationException::withMessages(['name' => 'أرسل اسمك الكامل، وليس رقماً أو زر قائمة.']);
+        }
+
+        if (array_key_exists('phone', $validated)) {
+            $values['phone'] = ClientProfileValue::usablePhone(trim((string) $validated['phone']))
+                ?? throw ValidationException::withMessages(['phone' => 'أرسل رقم هاتف صالح، مثل 0991234567.']);
+        }
+
+        if (array_key_exists('company_name', $validated)) {
+            $values['company_name'] = ClientProfileValue::usableCompanyName(trim((string) $validated['company_name']), $client->telegram_user_id)
+                ?? throw ValidationException::withMessages(['company_name' => 'أرسل اسم الشركة الحقيقي.']);
+        }
+
+        if (array_key_exists('email', $validated)) {
+            if (ClientProfileValue::isNoEmailAnswer((string) $validated['email'])) {
+                $values['email_skipped_at'] = $client->email_skipped_at ?? now();
+            } else {
+                $values['email'] = ClientProfileValue::usableEmail((string) $validated['email'])
+                    ?? throw ValidationException::withMessages(['email' => 'أرسل بريداً إلكترونياً صالحاً، أو اضغط «لا يوجد بريد».']);
+                $values['email_skipped_at'] = null;
+            }
+        }
+
+        if (($validated['email_skipped'] ?? false) === true && ! filled($client->email)) {
+            $values['email_skipped_at'] = $client->email_skipped_at ?? now();
+        }
+
+        if (array_key_exists('company_activity', $validated)) {
+            $values['company_activity'] = ClientProfileValue::usableActivity((string) $validated['company_activity'])
+                ?? throw ValidationException::withMessages(['company_activity' => 'اكتب نشاط الشركة بكلمات قليلة، مثل: مطعم أو عيادة.']);
+        }
+
+        return $values;
     }
 
     public function submit(TelegramSubmitRequest $request, SubmitServiceRequest $submitServiceRequest): JsonResponse
@@ -310,6 +349,7 @@ class TelegramBotController extends Controller
         );
 
         $provisionSalesClickUpTask->appendReceipt($serviceRequest, $receiptFile);
+        app(OdooLeadLog::class)->receiptUploaded($serviceRequest);
 
         return response()->json([
             'data' => ['stored' => true],
@@ -577,12 +617,12 @@ class TelegramBotController extends Controller
         PushClientToOdoo $pushClientToOdoo,
         PushClientLeadToOdoo $pushClientLeadToOdoo,
     ): void {
-        if (! $client->readyForOdoo()) {
+        if (! $client->readyForOdoo() && ! filled($client->odoo_lead_id)) {
             return;
         }
 
         $fresh = $client->fresh() ?? $client;
-        $fresh = $pushClientToOdoo->handle($fresh);
+        $fresh = $pushClientToOdoo->handle($fresh, writeExisting: true);
         $pushClientLeadToOdoo->handle(
             $fresh,
             writeExisting: filled($fresh->odoo_lead_id),

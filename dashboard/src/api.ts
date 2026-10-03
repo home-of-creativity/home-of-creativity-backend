@@ -73,11 +73,23 @@ export type OpsSettings = {
   sham_cash_qr_updated_at?: string | null;
   telegram_enabled: boolean;
   whatsapp_enabled: boolean;
+  whatsapp_locked?: boolean;
+};
+
+export type FinanceSummary = {
+  revenue_paid: number;
+  revenue_open: number;
+  expenses: number;
+  net: number;
+  invoices: { id: number; amount: number; request_number: string | null; title: string | null; issued_at: string | null }[];
+  expense_rows: { id: number; amount: number; category: string; note: string | null; spent_at: string | null }[];
+  categories: string[];
 };
 
 export type ClientChannels = {
   telegram_enabled: boolean;
   whatsapp_enabled: boolean;
+  whatsapp_locked?: boolean;
 };
 
 export type ProfilePdf = {
@@ -418,6 +430,10 @@ export type ServiceRequest = {
   odoo_invoice_live?: OdooInvoice | null;
   gemini_status?: string | null;
   gemini_error?: string | null;
+  clickup_error?: string | null;
+  clickup_attempts?: number;
+  client_bot_reachable?: boolean;
+  manual_decisions?: { to_status: string; note: string | null; created_at: string | null }[];
   quotation_amount?: string | null;
   quotation_notes?: string | null;
   billing_period?: string | null;
@@ -871,6 +887,24 @@ export const api = {
   retryGemini(id: number) {
     return request<Envelope<ServiceRequest>>(`/admin/requests/${id}/retry-gemini`, { method: "POST" });
   },
+  provisionClickUp(id: number) {
+    return request<Envelope<ServiceRequest>>(`/admin/requests/${id}/provision-clickup`, { method: "POST" });
+  },
+  recordClientDecision(id: number, decision: "approve" | "reject" | "revision" | "complete", reason?: string) {
+    return request<Envelope<ServiceRequest>>(`/admin/requests/${id}/client-decision`, {
+      method: "POST",
+      body: JSON.stringify({ decision, reason: reason || undefined }),
+    });
+  },
+  finance() {
+    return request<Envelope<FinanceSummary>>("/admin/finance");
+  },
+  addExpense(payload: { amount: number; category: string; note?: string }) {
+    return request<Envelope<FinanceSummary>>("/admin/finance/expenses", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
   ensureDriveFolder(id: number) {
     return request<Envelope<ServiceRequest>>(`/admin/requests/${id}/ensure-drive-folder`, { method: "POST" });
   },
@@ -1044,7 +1078,7 @@ export const api = {
       body: JSON.stringify(body),
     });
   },
-  createClient(payload: { name: string; email?: string; phone?: string; telegram_user_id?: string; company_name?: string }) {
+  createClient(payload: { name: string; email?: string; phone?: string; telegram_user_id?: string; company_name?: string; company_activity?: string }) {
     return request<Envelope<Client>>("/admin/clients", {
       method: "POST",
       body: JSON.stringify(payload),
@@ -1052,7 +1086,14 @@ export const api = {
   },
   updateClient(
     id: number,
-    payload: { name: string; email?: string | null; phone?: string | null; telegram_user_id?: string | null; company_name?: string | null },
+    payload: {
+      name: string;
+      email?: string | null;
+      phone?: string | null;
+      telegram_user_id?: string | null;
+      company_name?: string | null;
+      company_activity?: string | null;
+    },
   ) {
     return request<Envelope<Client>>(`/admin/clients/${id}`, {
       method: "PUT",

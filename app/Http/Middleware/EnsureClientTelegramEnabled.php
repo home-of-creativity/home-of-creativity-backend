@@ -17,7 +17,7 @@ class EnsureClientTelegramEnabled
 
         return response()->json([
             'data' => null,
-            'message' => ClientChannelGate::TELEGRAM_PAUSED_MESSAGE,
+            'message' => ClientChannelGate::telegramPausedMessage(),
             'code' => 'channel_paused',
         ], 503);
     }

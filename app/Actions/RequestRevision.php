@@ -26,7 +26,7 @@ class RequestRevision
         private ClickUpClient $clickUp,
     ) {}
 
-    public function handle(ServiceRequest $request, string $reason, ?DriveDelivery $delivery = null): ServiceRequest
+    public function handle(ServiceRequest $request, string $reason, ?DriveDelivery $delivery = null, string $actor = 'client'): ServiceRequest
     {
         if (! $request->allowsClientRevision()) {
             throw ValidationException::withMessages([
@@ -44,11 +44,11 @@ class RequestRevision
             ? 'تعديل الصورة «'.((string) ($delivery->name ?: $delivery->drive_file_id)).'»: '.$reason
             : 'تعديل الطلب بالكامل: '.$reason;
 
-        $updated = DB::transaction(function () use ($request, $reason, $delivery, $comment): ServiceRequest {
+        $updated = DB::transaction(function () use ($request, $reason, $delivery, $comment, $actor): ServiceRequest {
             $updated = $this->transitions->transition(
                 $request,
                 RequestStatus::RevisionRequested,
-                'client',
+                $actor,
                 $comment,
             );
 

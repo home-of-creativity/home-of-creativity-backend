@@ -8,6 +8,7 @@ use App\Models\Client;
 use App\Models\PricingPackage;
 use App\Models\RequestStatusHistory;
 use App\Models\ServiceRequest;
+use App\Services\OdooLeadLog;
 use App\Support\BillingPeriod;
 use App\Support\PaymentPlanResolver;
 use App\Support\ResolveServiceRequest;
@@ -24,6 +25,7 @@ class CreateCatalogRequest
         private NotifyEmployees $notifyEmployees,
         private ProvisionSalesClickUpTask $provisionSalesClickUpTask,
         private EnsureRequestDriveFolder $ensureRequestDriveFolder,
+        private OdooLeadLog $leadLog,
     ) {}
 
     public function handle(Client $client, PricingPackage $package, ?string $billingPeriod = null): ServiceRequest
@@ -104,7 +106,10 @@ class CreateCatalogRequest
                 'note' => 'Catalog request submitted.',
             ]);
 
-            return $request->fresh(['client', 'pricingPackage']) ?? $request;
+            $fresh = $request->fresh(['client', 'pricingPackage']) ?? $request;
+            $this->leadLog->requestCreated($fresh);
+
+            return $fresh;
         });
 
         $displayNumber = ResolveServiceRequest::displayNumber($serviceRequest);

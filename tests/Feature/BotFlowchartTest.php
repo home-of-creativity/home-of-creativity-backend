@@ -15,6 +15,7 @@ use App\Models\PricingSubcategory;
 use App\Models\ServiceRequest;
 use App\Models\SupportMessage;
 use App\Models\User;
+use App\Services\DevBeat;
 use App\Services\GeminiService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -67,21 +68,79 @@ class BotFlowchartTest extends TestCase
             'company_name' => 'شركة نون',
         ])->assertOk()
             ->assertJsonPath('data.profile_complete', true)
-            ->assertJsonPath('data.company_name', 'شركة نون');
+            ->assertJsonPath('data.company_name', 'شركة نون')
+            ->assertJsonPath('data.missing_fields.0', 'email');
 
         $this->clientBot()->postJson('/api/bot/telegram/profile', [
             'telegram_user_id' => 'tg-stairs',
             'phone' => '🆕 طلب جديد',
         ])->assertUnprocessable();
 
+        $this->clientBot()->postJson('/api/bot/telegram/profile', [
+            'telegram_user_id' => 'tg-stairs',
+            'email' => 'nour-at-mail',
+        ])->assertUnprocessable()
+            ->assertJsonPath('errors.email.0', 'أرسل بريداً إلكترونياً صالحاً، أو اضغط «لا يوجد بريد».');
+
+        $this->clientBot()->postJson('/api/bot/telegram/profile', [
+            'telegram_user_id' => 'tg-stairs',
+            'email' => 'لا يوجد',
+        ])->assertOk()
+            ->assertJsonPath('data.missing_fields.0', 'company_activity');
+
+        $this->clientBot()->postJson('/api/bot/telegram/profile', [
+            'telegram_user_id' => 'tg-stairs',
+            'company_activity' => '0999111222',
+        ])->assertUnprocessable();
+
+        $this->clientBot()->postJson('/api/bot/telegram/profile', [
+            'telegram_user_id' => 'tg-stairs',
+            'company_activity' => 'مطعم',
+        ])->assertOk()
+            ->assertJsonPath('data.missing_fields', []);
+
         $this->clientBot()->getJson('/api/bot/telegram/me?telegram_user_id=tg-stairs')
             ->assertOk()
             ->assertJsonPath('data.profile_complete', true)
             ->assertJsonPath('data.phone', '+963911111111')
-            ->assertJsonPath('data.company_name', 'شركة نون');
+            ->assertJsonPath('data.company_name', 'شركة نون')
+            ->assertJsonPath('data.company_activity', 'مطعم');
 
         $client = Client::query()->where('telegram_user_id', 'tg-stairs')->firstOrFail();
         $this->assertSame('شركة نون', $client->company_name);
+        $this->assertNull($client->email);
+        $this->assertNotNull($client->email_skipped_at);
+        $this->assertTrue($client->profileFinished());
+    }
+
+    public function test_existing_client_is_asked_only_the_new_questions_and_the_skip_button_works(): void
+    {
+        $client = Client::factory()->create([
+            'telegram_user_id' => 'tg-legacy',
+            'name' => 'Rami',
+            'phone' => '+963933333333',
+            'company_name' => 'مخبز رامي',
+            'email' => null,
+        ]);
+
+        $this->clientBot()->getJson('/api/bot/telegram/me?telegram_user_id=tg-legacy')
+            ->assertOk()
+            ->assertJsonPath('data.profile_complete', true)
+            ->assertJsonPath('data.missing_fields', ['email', 'company_activity']);
+
+        $this->clientBot()->postJson('/api/bot/telegram/profile', [
+            'telegram_user_id' => 'tg-legacy',
+            'email_skipped' => true,
+        ])->assertOk()
+            ->assertJsonPath('data.missing_fields', ['company_activity']);
+
+        $this->clientBot()->postJson('/api/bot/telegram/profile', [
+            'telegram_user_id' => 'tg-legacy',
+            'company_activity' => 'مخابز',
+        ])->assertOk()
+            ->assertJsonPath('data.missing_fields', []);
+
+        $this->assertTrue($client->fresh()->profileFinished());
     }
 
     public function test_unknown_staff_and_non_admin_are_rejected(): void
@@ -335,6 +394,80 @@ class BotFlowchartTest extends TestCase
             ->assertJsonPath('data.status', 'completed');
     }
 
+    public function test_bot_down_flow_reaches_completion_from_the_dashboard(): void
+    {
+        $this->fakeBotIntegrations();
+        Http::preventStrayRequests();
+        $this->mock(DevBeat::class, fn ($mock) => $mock->shouldReceive('ageSeconds')->andReturn(null));
+        $designer = Employee::factory()->create([
+            'telegram_user_id' => 'design-down',
+            'profession' => EmployeeProfession::Design,
+            'clickup_user_id' => 'cu-design-down',
+        ]);
+        $client = Client::factory()->create([
+            'telegram_user_id' => '880011',
+            'company_name' => 'مكتب الهاتف',
+            'company_activity' => 'خدمات',
+        ]);
+        $request = ServiceRequest::factory()->for($client)->create(['status' => RequestStatus::Submitted]);
+        Sanctum::actingAs($this->adminUser());
+
+        $this->postJson("/api/admin/requests/{$request->number}/quotation", [
+            'lines' => [['title' => 'بطاقة أعمال', 'amount' => 100, 'units' => 1]],
+        ])->assertOk()
+            ->assertJsonPath('data.status', 'quotation_sent');
+
+        $this->getJson("/api/admin/requests/{$request->number}")
+            ->assertOk()
+            ->assertJsonPath('data.client_bot_reachable', false);
+
+        $this->postJson("/api/admin/requests/{$request->number}/client-decision", ['decision' => 'approve'])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'awaiting_payment');
+
+        $this->postJson("/api/admin/requests/{$request->number}/confirm-payment", [
+            'payment_method' => 'cash',
+            'amount' => 100,
+        ])->assertOk();
+
+        $this->patchJson("/api/admin/requests/{$request->number}", ['status' => 'in_progress'])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'in_progress');
+
+        ClickUpTask::query()->create([
+            'request_id' => $request->id,
+            'task_type' => ClickUpTaskType::Design,
+            'employee_id' => $designer->id,
+            'integration_key' => $request->uuid.':down:design',
+            'clickup_task_id' => 'cu-design-down',
+        ]);
+
+        $this->staffBot()->postJson('/api/bot/staff/deliver', [
+            'telegram_user_id' => 'design-down',
+            'request_number' => $request->number,
+            'notes' => 'التسليم الأول',
+        ])->assertOk()
+            ->assertJsonPath('data.status', 'ready_for_review');
+
+        $this->postJson("/api/admin/requests/{$request->number}/client-decision", [
+            'decision' => 'revision',
+            'reason' => 'تكبير الشعار',
+        ])->assertOk()
+            ->assertJsonPath('data.status', 'revision_requested');
+
+        $this->staffBot()->postJson('/api/bot/staff/deliver', [
+            'telegram_user_id' => 'design-down',
+            'request_number' => $request->number,
+            'notes' => 'التسليم بعد التعديل',
+        ])->assertOk()
+            ->assertJsonPath('data.status', 'ready_for_review');
+
+        $this->postJson("/api/admin/requests/{$request->number}/client-decision", ['decision' => 'complete'])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonCount(3, 'data.manual_decisions');
+    }
+
     public function test_admin_bot_lists_departments_invites_guest_and_assigns_members(): void
     {
         config([
@@ -434,7 +567,7 @@ class BotFlowchartTest extends TestCase
             ->assertJsonPath('data.id', $client->id)
             ->assertJsonPath('data.profile_complete', true)
             ->assertJsonPath('data.phone', '+963900000001')
-            ->assertJsonPath('data.company_name', 'شركة tg-restore');
+            ->assertJsonPath('data.company_name', 'شركة restore');
 
         $this->assertNull($client->fresh()->deleted_at);
         $this->assertSame(1, Client::query()->withTrashed()->where('telegram_user_id', 'tg-restore')->count());
@@ -511,7 +644,7 @@ class BotFlowchartTest extends TestCase
 
         $this->clientBot()->postJson('/api/bot/telegram/profile', [
             'telegram_user_id' => $telegramId,
-            'company_name' => 'شركة '.$telegramId,
+            'company_name' => 'شركة '.str_replace('tg-', '', $telegramId),
         ])->assertOk()
             ->assertJsonPath('data.profile_complete', true);
     }

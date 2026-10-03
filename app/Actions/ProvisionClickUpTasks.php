@@ -21,7 +21,7 @@ class ProvisionClickUpTasks
         private GoogleTranslateService $translator,
     ) {}
 
-    public function handle(ServiceRequest $request, string $eventUuid): ServiceRequest
+    public function handle(ServiceRequest $request, string $eventUuid, bool $notifyOnFailure = true): ServiceRequest
     {
         $request->loadMissing(['briefs', 'client', 'clickupTasks']);
 
@@ -35,65 +35,124 @@ class ProvisionClickUpTasks
             if ($allowNewPeriod) {
                 $this->updateExistingTasks($request, $briefPayloads);
             }
+            $this->clearFailure($request);
 
             return $request;
         }
 
-        if ($this->clickUp->configured()) {
-            try {
-                $created = $this->clickUp->createTasks(
-                    $request->number,
-                    array_map(fn (array $brief): array => [
-                        'department' => $brief['department'],
-                        'brief' => $brief['brief'],
-                        'clickup_user_id' => $brief['clickup_user_id'] ?? null,
-                        'due_at' => $brief['due_at'] ?? null,
-                        'priority' => $brief['priority'] ?? null,
-                        'hours' => $brief['hours'] ?? null,
-                        'period_key' => data_get($request->work_plan, 'period_key'),
-                        'employee_id' => $brief['employee_id'] ?? null,
-                    ], $briefPayloads),
-                );
-
-                foreach ($created as $index => $task) {
-                    $brief = $briefPayloads[$index] ?? null;
-                    $taskType = ClickUpTaskType::fromDepartment($task['department']);
-                    if (! $taskType || $taskType === ClickUpTaskType::Sales) {
-                        continue;
-                    }
-
-                    $request = $this->applyClickUpMapping->handle($request, [
-                        'event_uuid' => $eventUuid,
-                        'request_uuid' => $request->uuid,
-                        'task_type' => $taskType->value,
-                        'integration_key' => "{$eventUuid}:{$taskType->value}",
-                        'clickup_task_id' => $task['clickup_task_id'],
-                        'clickup_list_id' => $this->clickUp->listIdForDepartment($task['department']),
-                        'clickup_url' => 'https://app.clickup.com/t/'.$task['clickup_task_id'],
-                        'brief_id' => $brief['id'] ?? null,
-                        'clickup_user_id' => $brief['clickup_user_id'] ?? null,
-                        'status' => 'to do',
-                        'planned_hours' => $brief['hours'] ?? null,
-                        'period_key' => data_get($request->work_plan, 'period_key', 'initial'),
-                    ]);
-                }
-
-                return $request;
-            } catch (\Throwable $exception) {
-                Log::warning('ClickUp provisioning failed; notifying teams without tasks.', [
-                    'request' => $request->number,
-                    'error' => $exception->getMessage(),
-                ]);
-            }
-        } else {
+        if (! $this->clickUp->configured()) {
             Log::info('ClickUp is not configured; notifying execution teams only.', [
                 'request' => $request->number,
             ]);
+            if ($notifyOnFailure) {
+                $this->notifyExecutionTeamsOnly($request);
+            }
+
+            return $request;
         }
 
-        $this->notifyExecutionTeamsOnly($request);
+        foreach ($this->missingPayloads($request, $briefPayloads) as $brief) {
+            try {
+                $created = $this->clickUp->createTasks($request->number, [[
+                    'department' => $brief['department'],
+                    'brief' => $brief['brief'],
+                    'clickup_user_id' => $brief['clickup_user_id'] ?? null,
+                    'due_at' => $brief['due_at'] ?? null,
+                    'priority' => $brief['priority'] ?? null,
+                    'hours' => $brief['hours'] ?? null,
+                    'period_key' => data_get($request->work_plan, 'period_key'),
+                    'employee_id' => $brief['employee_id'] ?? null,
+                ]]);
+            } catch (Throwable $exception) {
+                Log::warning('ClickUp provisioning failed; the scheduler retries the missing tasks.', [
+                    'request' => $request->number,
+                    'department' => $brief['department'],
+                    'error' => $exception->getMessage(),
+                ]);
+                $firstFailure = (int) $request->clickup_attempts === 0;
+                $this->recordFailure($request, $exception->getMessage());
+                if ($notifyOnFailure && $firstFailure) {
+                    $this->notifyExecutionTeamsOnly($request);
+                }
+
+                return $request->fresh(['briefs', 'client', 'clickupTasks']) ?? $request;
+            }
+
+            $task = $created[0] ?? null;
+            $taskType = ClickUpTaskType::fromDepartment((string) ($task['department'] ?? ''));
+            if ($task === null || ! $taskType) {
+                continue;
+            }
+
+            $request = $this->applyClickUpMapping->handle($request, [
+                'event_uuid' => $eventUuid,
+                'request_uuid' => $request->uuid,
+                'task_type' => $taskType->value,
+                'integration_key' => "{$eventUuid}:{$taskType->value}",
+                'clickup_task_id' => $task['clickup_task_id'],
+                'clickup_list_id' => $this->clickUp->listIdForDepartment($task['department']),
+                'clickup_url' => 'https://app.clickup.com/t/'.$task['clickup_task_id'],
+                'brief_id' => $brief['id'] ?? null,
+                'clickup_user_id' => $brief['clickup_user_id'] ?? null,
+                'status' => 'to do',
+                'planned_hours' => $brief['hours'] ?? null,
+                'period_key' => data_get($request->work_plan, 'period_key', 'initial'),
+            ]);
+        }
+
+        $this->clearFailure($request);
 
         return $request;
+    }
+
+    /**
+     * One payload per execution department that has no ClickUp task yet, so a
+     * retry after a partial failure never creates a second task for a department.
+     *
+     * @param  list<array<string, mixed>>  $briefPayloads
+     * @return list<array<string, mixed>>
+     */
+    private function missingPayloads(ServiceRequest $request, array $briefPayloads): array
+    {
+        $request->loadMissing('clickupTasks');
+        $existing = $request->clickupTasks
+            ->filter(fn ($task): bool => filled($task->clickup_task_id))
+            ->map(fn ($task): string => $task->task_type->value)
+            ->all();
+
+        $missing = [];
+        foreach ($briefPayloads as $brief) {
+            $type = ClickUpTaskType::fromDepartment((string) ($brief['department'] ?? ''));
+            if (! $type || $type === ClickUpTaskType::Sales || in_array($type->value, $existing, true)) {
+                continue;
+            }
+            $existing[] = $type->value;
+            $missing[] = $brief;
+        }
+
+        return $missing;
+    }
+
+    private function recordFailure(ServiceRequest $request, string $error): void
+    {
+        $request->forceFill([
+            'clickup_error' => mb_substr($error, 0, 1000),
+            'clickup_attempts' => (int) $request->clickup_attempts + 1,
+            'clickup_failed_at' => now(),
+        ])->save();
+    }
+
+    private function clearFailure(ServiceRequest $request): void
+    {
+        if ($request->clickup_error === null && (int) $request->clickup_attempts === 0) {
+            return;
+        }
+
+        $request->forceFill([
+            'clickup_error' => null,
+            'clickup_attempts' => 0,
+            'clickup_failed_at' => null,
+        ])->save();
     }
 
     /**

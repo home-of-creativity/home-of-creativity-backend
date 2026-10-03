@@ -16,7 +16,7 @@ class PushClientLeadToOdoo
 
     public function handle(Client $client, bool $writeExisting = false, bool $classifyIndustry = true): Client
     {
-        if (! $client->readyForOdoo()) {
+        if (! $client->readyForOdoo() && ! (filled($client->odoo_lead_id) && $client->profileComplete())) {
             return $client;
         }
 
@@ -90,8 +90,7 @@ class PushClientLeadToOdoo
                 'mobile' => $client->phone,
                 'email_from' => $client->email,
                 'partner_id' => filled($client->odoo_partner_id) ? (int) $client->odoo_partner_id : null,
-                'description' => ($client->isWhatsApp() ? 'Lead from Home of Creativity (WhatsApp)' : 'Lead from Home of Creativity')
-                    .($industry ? "\nالنشاط: {$industry}" : ''),
+                'description' => $this->leadDescription($client, $industry),
                 'tag_ids' => $tagIds !== [] ? $tagIds : null,
             ]);
 
@@ -137,6 +136,12 @@ class PushClientLeadToOdoo
             if ($telegramTagId) {
                 $tagCommands[] = [4, $telegramTagId];
             }
+            if (filled($client->company_activity)) {
+                $activityTagId = $this->odoo->ensureCrmTagId((string) $client->company_activity);
+                if ($activityTagId && $activityTagId !== $telegramTagId) {
+                    $tagCommands[] = [4, $activityTagId];
+                }
+            }
             if ($client->isWhatsApp()) {
                 $whatsAppTagId = $this->odoo->ensureCrmTagId('واتساب');
                 if ($whatsAppTagId) {
@@ -154,6 +159,23 @@ class PushClientLeadToOdoo
                 'error' => $exception->getMessage(),
             ]);
         }
+    }
+
+    private function leadDescription(Client $client, ?string $industry): string
+    {
+        $lines = [$client->isWhatsApp() ? 'Lead from Home of Creativity (WhatsApp)' : 'Lead from Home of Creativity'];
+        if (filled($industry)) {
+            $lines[] = "النشاط: {$industry}";
+        }
+        if (! filled($client->email) && $client->email_skipped_at !== null) {
+            $lines[] = 'البريد: لا يوجد';
+        }
+        $chat = $client->telegramPrivateUrl();
+        if (filled($chat)) {
+            $lines[] = ($client->isWhatsApp() ? 'واتساب: ' : 'تيليجرام: ').$chat;
+        }
+
+        return implode("\n", $lines);
     }
 
     private function leadName(Client $client): string

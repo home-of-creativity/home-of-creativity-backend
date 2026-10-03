@@ -10,6 +10,8 @@ use Illuminate\Validation\ValidationException;
 
 class RequestStatusTransitionService
 {
+    public function __construct(private OdooLeadLog $leadLog) {}
+
     public function transition(
         ServiceRequest $request,
         RequestStatus $to,
@@ -33,13 +35,15 @@ class RequestStatusTransitionService
                 'aggregate_version' => $request->aggregate_version + 1,
             ])->save();
 
-            RequestStatusHistory::query()->create([
+            $history = RequestStatusHistory::query()->create([
                 'request_id' => $request->id,
                 'from_status' => $from->value,
                 'to_status' => $to->value,
                 'actor' => $actor,
                 'note' => $note,
             ]);
+
+            $this->leadLog->statusChanged($request, $to, $actor, $note, (int) $history->id);
 
             return $request->fresh() ?? $request;
         });

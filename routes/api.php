@@ -7,6 +7,7 @@ use App\Http\Controllers\Admin\ClientReportController as AdminClientReportContro
 use App\Http\Controllers\Admin\ContactChannelController as AdminContactChannelController;
 use App\Http\Controllers\Admin\DriveFolderController as AdminDriveFolderController;
 use App\Http\Controllers\Admin\EmployeeController as AdminEmployeeController;
+use App\Http\Controllers\Admin\FinanceController as AdminFinanceController;
 use App\Http\Controllers\Admin\LandingReelController as AdminLandingReelController;
 use App\Http\Controllers\Admin\LegalPageController as AdminLegalPageController;
 use App\Http\Controllers\Admin\LiveController;
@@ -31,6 +32,7 @@ use App\Http\Controllers\Admin\WorkScheduleController as AdminWorkScheduleContro
 use App\Http\Controllers\AdminBotController;
 use App\Http\Controllers\ArticleController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\BotDraftController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\DevBotController;
 use App\Http\Controllers\GoogleDriveAccountController;
@@ -167,6 +169,8 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::post('requests/{service_request}/quotation', [AdminServiceRequestController::class, 'sendQuotation']);
         Route::post('requests/{service_request}/confirm-payment', [AdminServiceRequestController::class, 'confirmPayment']);
         Route::post('requests/{service_request}/retry-gemini', [AdminServiceRequestController::class, 'retryGemini']);
+        Route::post('requests/{service_request}/provision-clickup', [AdminServiceRequestController::class, 'provisionClickUp']);
+        Route::post('requests/{service_request}/client-decision', [AdminServiceRequestController::class, 'clientDecision']);
         Route::post('requests/{service_request}/ensure-drive-folder', [AdminServiceRequestController::class, 'ensureDriveFolder']);
         Route::post('requests/{service_request}/poll-drive', [AdminServiceRequestController::class, 'pollDrive']);
         Route::post('requests/{service_request}/re-request-receipt', [AdminServiceRequestController::class, 'reRequestReceipt']);
@@ -185,6 +189,8 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
     Route::middleware('ability:ops.payments')->group(function () {
         Route::get('ops-settings/sham-cash-qr', [AdminServiceRequestController::class, 'shamCashQrPreview']);
         Route::post('ops-settings/sham-cash-qr', [AdminServiceRequestController::class, 'uploadShamCashQr']);
+        Route::get('finance', [AdminFinanceController::class, 'index']);
+        Route::post('finance/expenses', [AdminFinanceController::class, 'storeExpense']);
     });
 
     Route::middleware('ability:site.profile_pdf')->group(function () {
@@ -339,6 +345,11 @@ Route::prefix('bot/telegram')->middleware(['shared.secret:services.telegram.bot_
     Route::post('support', [TelegramBotController::class, 'support']);
 });
 
+Route::prefix('bot/telegram')->middleware('shared.secret:services.telegram.bot_secret')->group(function () {
+    Route::get('drafts', [BotDraftController::class, 'index']);
+    Route::put('drafts/{telegramUserId}', [BotDraftController::class, 'update']);
+});
+
 Route::prefix('bot/whatsapp')->group(function () {
     Route::get('webhook', [WhatsAppWebhookController::class, 'verify']);
     Route::post('webhook', [WhatsAppWebhookController::class, 'incoming'])
@@ -352,6 +363,9 @@ Route::prefix('bot/staff')->middleware('shared.secret:services.telegram.staff_bo
     Route::get('replyable-requests', [StaffBotController::class, 'replyableRequests']);
     Route::get('quotable-requests', [StaffBotController::class, 'quotableRequests']);
     Route::post('quotation', [StaffBotController::class, 'sendQuotation']);
+    Route::post('quotation/preview', [StaffBotController::class, 'previewQuotation']);
+    Route::post('quotation/confirm', [StaffBotController::class, 'confirmQuotationPreview']);
+    Route::post('quotation/discard', [StaffBotController::class, 'discardQuotationPreview']);
     Route::get('tasks', [StaffBotController::class, 'tasks']);
     Route::get('new-requests', [StaffBotController::class, 'newRequests']);
     Route::post('deliver', [StaffBotController::class, 'deliver']);

@@ -32,6 +32,7 @@ WAITING_TASKS_DEPT = 7
 WAITING_DUE_HOURS = 8
 WAITING_EXPENSE_AMOUNT = 9
 WAITING_EXPENSE_NOTE = 10
+WAITING_EXPENSE_CONFIRM = 11
 
 BTN_GUEST = "👤 إضافة ضيف"
 BTN_DEPTS = "🏢 الأقسام"
@@ -100,7 +101,9 @@ async def ensure_admin(update: Update) -> bool:
     if response.status_code < 400:
         return True
     if message:
-        await message.reply_text("هذا البوت للأدمن المعتمدين فقط. أضف معرفك إلى TELEGRAM_ADMIN_IDS.")
+        await message.reply_text(
+            f"هذا البوت للإدارة فقط، وحسابك غير مضاف.\nأرسل هذا الرقم للمطوّر ليضيفك: {user.id}"
+        )
     return False
 
 
@@ -800,24 +803,52 @@ async def capture_expense_note(update: Update, context: ContextTypes.DEFAULT_TYP
     note = update.message.text.strip()
     if note == "-":
         note = ""
+    context.user_data["expense_note"] = note
+    summary = (
+        f"المبلغ: {context.user_data.get('expense_amount')} USD\n"
+        f"البند: {context.user_data.get('expense_category')}"
+        + (f"\nالملاحظة: {note}" if note else "")
+    )
+    rows = [
+        [InlineKeyboardButton("سجّل", callback_data="esave:yes")],
+        [InlineKeyboardButton("إلغاء", callback_data="esave:no")],
+    ]
+    await update.message.reply_text(escape(summary), reply_markup=InlineKeyboardMarkup(rows))
+    return WAITING_EXPENSE_CONFIRM
+
+
+async def on_expense_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    user = update.effective_user
+    if query is None or query.data is None or query.message is None or user is None:
+        return ConversationHandler.END
+    await query.answer()
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    amount = context.user_data.pop("expense_amount", None)
+    category = context.user_data.pop("expense_category", None)
+    note = context.user_data.pop("expense_note", "")
+    if query.data != "esave:yes" or amount is None or category is None:
+        await query.message.reply_text("لم يُسجَّل المصروف.", reply_markup=admin_keyboard())
+        return ConversationHandler.END
     response = await request_json(
         "POST",
         "/bot/admin/expenses",
         json={
             "telegram_user_id": str(user.id),
-            "amount": context.user_data.get("expense_amount"),
-            "category": context.user_data.get("expense_category"),
+            "amount": amount,
+            "category": category,
             "note": note or None,
         },
     )
-    context.user_data.pop("expense_amount", None)
-    context.user_data.pop("expense_category", None)
     if response.status_code >= 400:
         detail = response.json().get("message", response.text)
-        await update.message.reply_text(f"تعذر حفظ المصروف: {escape(str(detail))}", reply_markup=admin_keyboard())
+        await query.message.reply_text(f"تعذر حفظ المصروف: {escape(str(detail))}", reply_markup=admin_keyboard())
         return ConversationHandler.END
     finance = (response.json().get("data") or {}).get("finance") or {}
-    await update.message.reply_text(
+    await query.message.reply_text(
         f"تم تسجيل المصروف. الصافي الآن {finance.get('net', 0)} USD.",
         reply_markup=admin_keyboard(),
     )
@@ -924,6 +955,7 @@ def main() -> None:
                     CallbackQueryHandler(on_expense_category, pattern=r"^ecat:"),
                     MessageHandler(filters.TEXT & ~filters.COMMAND, capture_expense_note),
                 ],
+                WAITING_EXPENSE_CONFIRM: [CallbackQueryHandler(on_expense_confirm, pattern=r"^esave:")],
             },
             fallbacks=[CommandHandler("cancel", cancel)],
         )

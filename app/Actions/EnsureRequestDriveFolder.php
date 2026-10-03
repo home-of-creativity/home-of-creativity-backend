@@ -4,13 +4,17 @@ namespace App\Actions;
 
 use App\Models\ServiceRequest;
 use App\Services\GoogleDriveClient;
+use App\Services\OdooLeadLog;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 use Throwable;
 
 class EnsureRequestDriveFolder
 {
-    public function __construct(private GoogleDriveClient $drive) {}
+    public function __construct(
+        private GoogleDriveClient $drive,
+        private OdooLeadLog $leadLog,
+    ) {}
 
     public function handle(ServiceRequest $request): ServiceRequest
     {
@@ -22,8 +26,10 @@ class EnsureRequestDriveFolder
         $folderId = $this->drive->ensureFolderPath($parent, $request->driveFolderSegments());
         if ($folderId) {
             $request->forceFill(['google_drive_folder_id' => $folderId])->save();
+            $fresh = $request->fresh() ?? $request;
+            $this->leadLog->driveFolderReady($fresh);
 
-            return $request->fresh() ?? $request;
+            return $fresh;
         }
 
         $reason = $this->drive->lastError() ?? 'Google Drive folder could not be created.';

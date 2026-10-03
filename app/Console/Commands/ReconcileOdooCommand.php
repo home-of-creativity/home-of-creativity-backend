@@ -11,6 +11,7 @@ use App\Actions\SyncOdooEmployees;
 use App\Models\Client;
 use App\Models\Employee;
 use App\Services\OdooClient;
+use App\Services\OdooLeadLog;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Cache;
@@ -30,6 +31,7 @@ class ReconcileOdooCommand extends Command
         HydrateEmployeeFromOdoo $hydrateEmployeeFromOdoo,
         PushEmployeeToOdoo $pushEmployeeToOdoo,
         SyncClientExpectedRevenue $syncClientExpectedRevenue,
+        OdooLeadLog $leadLog,
     ): int {
         if (! $odoo->configured()) {
             return self::SUCCESS;
@@ -83,6 +85,14 @@ class ReconcileOdooCommand extends Command
                     'error' => $exception->getMessage(),
                 ]);
             }
+        }
+
+        try {
+            $leadLog->flush(100);
+        } catch (\Throwable $exception) {
+            Log::warning('odoo:reconcile lead notes failed.', [
+                'error' => $exception->getMessage(),
+            ]);
         }
 
         return self::SUCCESS;

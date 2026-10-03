@@ -11,11 +11,13 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton,
 from telegram.error import BadRequest, NetworkError, TimedOut
 from telegram.ext import (
     Application,
+    BasePersistence,
     CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
     ConversationHandler,
     MessageHandler,
+    PersistenceInput,
     filters,
 )
 
@@ -59,7 +61,16 @@ PROFILE_PROMPTS = {
     "name": "ما اسمك الكامل؟",
     "phone": "نطلب رقم الهاتف لنتواصل معك عند صدور العرض أو أي استفسار عن الطلب.\nما رقم هاتفك؟",
     "company_name": "نطلب اسم الشركة لنصدر العرض والفاتورة باسم جهتك ونحفظ الطلب في ملفك.\nما اسم الشركة؟",
+    "email": "نطلب البريد الإلكتروني لنضعه على العرض والفاتورة، ونراسلك عليه إن تعذّر الوصول عبر تيليجرام.\nما بريدك الإلكتروني؟",
+    "company_activity": "نطلب نشاط الشركة ليعرف الفريق مجال عملك قبل العرض.\nما نشاط شركتك؟ مثال: مطعم، عيادة، متجر ملابس.",
 }
+PROFILE_REASONS = {
+    "phone": "• رقم الهاتف — لنتواصل معك عند صدور العرض أو أي استفسار عن الطلب.",
+    "company_name": "• اسم الشركة — لنصدر العرض والفاتورة باسم جهتك ونحفظ الطلب في ملفك.",
+    "email": "• البريد الإلكتروني — لنضعه على العرض والفاتورة، ونراسلك عليه إن تعذّر تيليجرام.",
+    "company_activity": "• نشاط الشركة — ليعرف الفريق مجال عملك قبل العرض.",
+}
+BTN_NO_EMAIL = "لا يوجد بريد"
 REJECT_REASONS = {
     "rjprice": "السعر غالي",
     "rjdelay": "تأخير بالرد",
@@ -95,23 +106,151 @@ def api_headers() -> dict[str, str]:
     }
 
 
-def welcome_text(user, *, need_profile: bool) -> str:
+DRAFT_KEYS = {
+    "title",
+    "description",
+    "attachments",
+    "composing_request",
+    "revision_number",
+    "revision_delivery_id",
+    "reject_number",
+    "receipt_number",
+    "profile_field",
+    "catalog_stack",
+    "edit_number",
+    "edit_title",
+}
+
+
+class LaravelPersistence(BasePersistence):
+    """Keeps half-written client conversations in Laravel so a bot restart resumes the same step."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            store_data=PersistenceInput(bot_data=False, chat_data=False, user_data=True, callback_data=False),
+            update_interval=3,
+        )
+        self._rows: dict[int, dict] | None = None
+        self._user_data: dict[int, dict] = {}
+        self._conversations: dict[str, dict[tuple, object]] = {}
+
+    async def _load(self) -> dict[int, dict]:
+        if self._rows is not None:
+            return self._rows
+        rows: dict[int, dict] = {}
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                response = await client.get(f"{API_URL}/bot/telegram/drafts", headers=api_headers())
+            if response.status_code < 400:
+                for row in response.json().get("data") or []:
+                    try:
+                        rows[int(row.get("telegram_user_id"))] = row.get("payload") or {}
+                    except (TypeError, ValueError):
+                        continue
+        except (httpx.HTTPError, ValueError):
+            rows = {}
+        self._rows = rows
+        return rows
+
+    async def _push(self, user_id: int) -> None:
+        conversations = {
+            name: state
+            for name, items in self._conversations.items()
+            for key, state in items.items()
+            if isinstance(key, tuple) and key and key[-1] == user_id
+        }
+        payload = {"user_data": self._user_data.get(user_id) or {}, "conversations": conversations}
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                await client.put(
+                    f"{API_URL}/bot/telegram/drafts/{user_id}",
+                    headers=api_headers(),
+                    json={"payload": payload},
+                )
+        except httpx.HTTPError:
+            pass
+
+    async def get_user_data(self) -> dict[int, dict]:
+        rows = await self._load()
+        self._user_data = {uid: dict(payload.get("user_data") or {}) for uid, payload in rows.items()}
+        return {uid: dict(data) for uid, data in self._user_data.items()}
+
+    async def update_user_data(self, user_id: int, data: dict) -> None:
+        kept = {key: value for key, value in data.items() if key in DRAFT_KEYS and value not in (None, "", [], {})}
+        if kept == (self._user_data.get(user_id) or {}):
+            return
+        self._user_data[user_id] = kept
+        await self._push(user_id)
+
+    async def refresh_user_data(self, user_id: int, user_data: dict) -> None:
+        return None
+
+    async def drop_user_data(self, user_id: int) -> None:
+        self._user_data.pop(user_id, None)
+        await self._push(user_id)
+
+    async def get_conversations(self, name: str) -> dict:
+        rows = await self._load()
+        states: dict[tuple, object] = {}
+        for uid, payload in rows.items():
+            state = (payload.get("conversations") or {}).get(name)
+            if state is not None:
+                states[(uid, uid)] = state
+        self._conversations[name] = dict(states)
+        return states
+
+    async def update_conversation(self, name: str, key: tuple, new_state: object | None) -> None:
+        states = self._conversations.setdefault(name, {})
+        if new_state is None:
+            states.pop(key, None)
+        else:
+            states[key] = new_state
+        user_id = key[-1] if isinstance(key, tuple) and key else None
+        if isinstance(user_id, int):
+            await self._push(user_id)
+
+    async def get_chat_data(self) -> dict:
+        return {}
+
+    async def update_chat_data(self, chat_id: int, data: dict) -> None:
+        return None
+
+    async def refresh_chat_data(self, chat_id: int, chat_data: dict) -> None:
+        return None
+
+    async def drop_chat_data(self, chat_id: int) -> None:
+        return None
+
+    async def get_bot_data(self) -> dict:
+        return {}
+
+    async def update_bot_data(self, data: dict) -> None:
+        return None
+
+    async def refresh_bot_data(self, bot_data: dict) -> None:
+        return None
+
+    async def get_callback_data(self):
+        return None
+
+    async def update_callback_data(self, data) -> None:
+        return None
+
+    async def flush(self) -> None:
+        return None
+
+
+def welcome_text(user, *, missing: list[str]) -> str:
     raw_name = (getattr(user, "first_name", None) or getattr(user, "full_name", None) or "").strip()
     name = escape(raw_name) if raw_name else "بك"
     lines = [
         f"أهلاً {name} في Home of Creativity.",
         "هذا بوت العملاء: تطلب الخدمة، تستلم عرض السعر، وتتابع حالة طلبك من هنا.",
     ]
-    if need_profile:
-        lines.extend(
-            [
-                "",
-                "قبل أول طلب نحتاج رقم هاتفك واسم الشركة:",
-                "• رقم الهاتف — لنتواصل معك عند صدور العرض أو أي استفسار عن الطلب.",
-                "• اسم الشركة — لنصدر العرض والفاتورة باسم جهتك ونحفظ الطلب في ملفك.",
-            ]
-        )
-    else:
+    reasons = [PROFILE_REASONS[field] for field in missing if field in PROFILE_REASONS]
+    if reasons:
+        lines.extend(["", "قبل أول طلب نحتاج هذه البيانات:", *reasons])
+    elif not missing:
         lines.append("اختر من الأزرار أدناه لطلب جديد أو متابعة طلباتك.")
     return "\n".join(lines)
 
@@ -193,7 +332,7 @@ def body_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup([[KeyboardButton(BTN_SUBMIT)]], resize_keyboard=True)
 
 
-async def download_message_attachment(message) -> dict[str, str] | None:
+def describe_message_attachment(message) -> dict[str, str] | None:
     file_obj = None
     file_name = "attachment"
     mime_type = "application/octet-stream"
@@ -221,13 +360,32 @@ async def download_message_attachment(message) -> dict[str, str] | None:
     else:
         return None
 
-    telegram_file = await file_obj.get_file()
-    content = await telegram_file.download_as_bytearray()
     return {
+        "file_id": file_obj.file_id,
         "file_name": file_name,
-        "file_base64": base64.b64encode(bytes(content)).decode("ascii"),
         "mime_type": mime_type,
     }
+
+
+async def materialize_attachments(bot, attachments: list[dict]) -> list[dict[str, str]]:
+    ready: list[dict[str, str]] = []
+    for item in attachments:
+        if item.get("file_base64"):
+            ready.append(item)
+            continue
+        file_id = item.get("file_id")
+        if not file_id:
+            continue
+        telegram_file = await bot.get_file(file_id)
+        content = await telegram_file.download_as_bytearray()
+        ready.append(
+            {
+                "file_name": str(item.get("file_name") or "attachment"),
+                "file_base64": base64.b64encode(bytes(content)).decode("ascii"),
+                "mime_type": str(item.get("mime_type") or "application/octet-stream"),
+            }
+        )
+    return ready
 
 
 def attachment_status_text(count: int, has_description: bool) -> str:
@@ -300,7 +458,15 @@ async def submit_new_request(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "description": description or "انظر المرفقات.",
     }
     if attachments:
-        payload["attachments"] = attachments
+        try:
+            payload["attachments"] = await materialize_attachments(context.bot, attachments)
+        except (NetworkError, TimedOut, BadRequest):
+            context.user_data["submitting"] = False
+            await message.reply_text(
+                "تعذر تحميل المرفقات من تيليجرام. أعد الضغط على «✅ تم الإرسال» بعد لحظات.",
+                reply_markup=body_keyboard(),
+            )
+            return WAITING_BODY
 
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.post(
@@ -370,7 +536,7 @@ async def fetch_me(telegram_id: int, name: str | None = None) -> dict:
         return response.json().get("data") or {}
 
 
-async def patch_profile(telegram_id: int, field: str, value: str, name: str | None = None) -> dict:
+async def patch_profile(telegram_id: int, field: str, value: object, name: str | None = None) -> dict:
     payload = {"telegram_user_id": str(telegram_id), field: value}
     async with httpx.AsyncClient(timeout=20) as client:
         response = await client.post(
@@ -573,9 +739,26 @@ def next_profile_field(me: dict) -> str | None:
     return None
 
 
-async def ask_profile_field(message, context: ContextTypes.DEFAULT_TYPE, field: str) -> None:
+def profile_missing(me: dict) -> list[str]:
+    missing = [str(item) for item in (me.get("missing_fields") or [])]
+    if missing:
+        return missing
+    field = next_profile_field(me)
+    return [field] if field else []
+
+
+def profile_field_markup(field: str):
+    if field == "email":
+        return InlineKeyboardMarkup([[InlineKeyboardButton(BTN_NO_EMAIL, callback_data="noemail")]])
+    return main_keyboard()
+
+
+async def ask_profile_field(message, context: ContextTypes.DEFAULT_TYPE, field: str, text: str | None = None) -> None:
     context.user_data["profile_field"] = field
-    await message.reply_text(PROFILE_PROMPTS.get(field, "أكمل بياناتك:"), reply_markup=main_keyboard())
+    await message.reply_text(
+        text or PROFILE_PROMPTS.get(field, "أكمل بياناتك:"),
+        reply_markup=profile_field_markup(field),
+    )
 
 
 async def notify_api_failure(message) -> None:
@@ -627,11 +810,14 @@ async def capture_profile_field(update: Update, context: ContextTypes.DEFAULT_TY
         return False
     value = update.message.text.strip()
     if not value:
-        await update.message.reply_text(PROFILE_PROMPTS.get(field, "أكمل بياناتك:"))
+        await ask_profile_field(update.message, context, field)
         return True
     try:
         me = await patch_profile(user.id, field, value, user.full_name)
-    except httpx.HTTPStatusError:
+    except httpx.HTTPStatusError as exc:
+        if exc.response is not None and exc.response.status_code == 422:
+            await ask_profile_field(update.message, context, field, api_error_text(exc.response))
+            return True
         await notify_api_failure(update.message)
         return True
     except (httpx.TimeoutException, httpx.RequestError):
@@ -891,13 +1077,38 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await notify_api_failure(update.message)
         return
     me = payload.get("data") or {}
-    need_profile = next_profile_field(me) is not None
     await update.message.reply_text(
-        welcome_text(user, need_profile=need_profile),
+        welcome_text(user, missing=profile_missing(me)),
         reply_markup=main_keyboard(),
     )
     if not await apply_profile_gate(update, context, me):
         return
+
+
+async def skip_email_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    user = update.effective_user
+    if query is None or user is None or query.message is None:
+        return
+    try:
+        await query.answer()
+    except Exception:
+        pass
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    try:
+        me = await patch_profile(user.id, "email_skipped", True, user.full_name)
+    except (httpx.TimeoutException, httpx.HTTPStatusError, httpx.RequestError):
+        await safe_callback_reply(query, "تعذر الاتصال بالخادم حالياً. أعد المحاولة بعد ثوانٍ.")
+        return
+    nxt = next_profile_field(me)
+    if nxt:
+        await ask_profile_field(query.message, context, nxt)
+        return
+    context.user_data.pop("profile_field", None)
+    await safe_callback_reply(query, "تم حفظ بياناتك. يمكنك الآن اختيار خدمة من القائمة.")
 
 
 async def begin_manual_request(message, context: ContextTypes.DEFAULT_TYPE, *, replace: bool = False) -> int:
@@ -1029,7 +1240,7 @@ async def capture_body(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     if message.text and message.text.strip() in {BTN_SUBMIT, "تم"}:
         return await submit_new_request(update, context)
 
-    attachment = await download_message_attachment(message)
+    attachment = describe_message_attachment(message)
     if attachment is not None:
         attachments: list[dict[str, str]] = context.user_data["attachments"]
         if len(attachments) >= MAX_ATTACHMENTS:
@@ -1768,9 +1979,11 @@ def main() -> None:
         .token(token)
         .request(telegram_request())
         .get_updates_request(telegram_request(long_polling=True))
+        .persistence(LaravelPersistence())
         .build()
     )
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CallbackQueryHandler(skip_email_callback, pattern=r"^noemail$"), group=-2)
     application.add_handler(
         CallbackQueryHandler(
             revision_callback,
@@ -1842,6 +2055,8 @@ def main() -> None:
                 ],
             },
             fallbacks=[CommandHandler("cancel", cancel)],
+            name="client_compose",
+            persistent=True,
         )
     )
     application.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, upload_receipt), group=1)
@@ -1853,6 +2068,8 @@ def main() -> None:
                 WAITING_EDIT_BODY: [MessageHandler(filters.TEXT & ~filters.COMMAND, capture_edit_body)],
             },
             fallbacks=[CommandHandler("cancel", cancel)],
+            name="client_edit",
+            persistent=True,
         )
     )
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, route_text))

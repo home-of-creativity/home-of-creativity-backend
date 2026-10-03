@@ -13,6 +13,7 @@ use App\Models\PaymentReminder;
 use App\Models\ServiceRequest;
 use App\Models\Subscription;
 use App\Services\OdooClient;
+use App\Services\OdooLeadLog;
 use App\Services\RequestStatusTransitionService;
 use App\Services\TelegramNotifier;
 use App\Support\BillingPeriod;
@@ -30,6 +31,7 @@ class ConfirmRequestPayment
         private SchedulePaymentReminders $schedulePaymentReminders,
         private IssueInvoice $issueInvoice,
         private SyncClientExpectedRevenue $syncClientExpectedRevenue,
+        private OdooLeadLog $leadLog,
     ) {}
 
     public function handle(ServiceRequest $request, PaymentMethod $method, float $receivedAmount): ServiceRequest
@@ -119,6 +121,8 @@ class ConfirmRequestPayment
 
             return $request->fresh(['client', 'files', 'pricingPackage', 'subscriptions']) ?? $request;
         });
+
+        $this->leadLog->paymentReceived($updated, $appliedAmount, $method);
 
         if ($updated->status === RequestStatus::AwaitingPayment) {
             $updated = $this->transitions->transition(
@@ -299,6 +303,7 @@ class ConfirmRequestPayment
             'amount_remaining' => $remaining,
             'renewal_declined' => false,
         ])->save();
+        $this->leadLog->paymentReceived($request, $receivedAmount, $method);
 
         if ($request->status === RequestStatus::Completed) {
             $request = $this->transitions->transition($request, RequestStatus::InProgress, 'admin', 'Renewal paid.');

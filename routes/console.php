@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\BotDraft;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -23,8 +24,14 @@ Schedule::command('ops:process-bot-sla')->everyMinute()->timezone('Asia/Damascus
 Schedule::command('ops:poll-drive', ['--limit' => 200])->everyMinute()->timezone('Asia/Damascus')->withoutOverlapping();
 Schedule::command('ops:renew-drive-watch')->hourly()->timezone('Asia/Damascus')->withoutOverlapping();
 Schedule::command('ops:clickup-due-alerts')->hourly()->timezone('Asia/Damascus')->withoutOverlapping();
+Schedule::command('clickup:retry-tasks')->everyFiveMinutes()->withoutOverlapping();
 Schedule::command('ops:photography-day-before')->hourly()->timezone('Asia/Damascus')->withoutOverlapping();
 Schedule::command('seo:submit-sitemap')->dailyAt('06:15')->timezone('Asia/Damascus')->withoutOverlapping();
 Schedule::command('ops:watch-health')->everyMinute()->withoutOverlapping();
 Schedule::command('ops:watch-signals')->everyFifteenMinutes()->withoutOverlapping();
 Schedule::command('ops:dev-digest')->dailyAt('09:00')->timezone('Asia/Damascus')->withoutOverlapping();
+Schedule::call(fn () => BotDraft::query()->where('updated_at', '<', now()->subDays(BotDraft::KEEP_DAYS))->delete())
+    ->name('bot-drafts:prune')
+    ->dailyAt('04:30')
+    ->timezone('Asia/Damascus')
+    ->withoutOverlapping();

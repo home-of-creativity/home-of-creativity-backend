@@ -65,6 +65,11 @@ echo "Reloading API workers and scheduler..."
 "${COMPOSE[@]}" exec -T hoc-api sh -c 'ps -e -o pid,comm | awk '\''$2=="php-fpm"{print $1; exit}'\'' | xargs -r kill -USR2' || true
 "${COMPOSE[@]}" restart hoc-scheduler || true
 
+# Bot containers bind-mount the code and keep the old Python in memory; restart
+# them after migrations so they load the new handlers and the drafts table exists.
+echo "Restarting Telegram bots..."
+"${COMPOSE[@]}" restart hoc-client-bot hoc-staff-bot hoc-admin-bot hoc-dev-bot || true
+
 echo "Pushing missing Odoo CRM leads onto the Telegram pipeline..."
 "${COMPOSE[@]}" exec -T hoc-api php artisan odoo:push-telegram || true
 

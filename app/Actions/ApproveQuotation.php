@@ -23,7 +23,7 @@ class ApproveQuotation
         private NotifyPaymentStage $notifyPaymentStage,
     ) {}
 
-    public function handle(ServiceRequest $request, ?Quotation $quotation = null): ServiceRequest
+    public function handle(ServiceRequest $request, ?Quotation $quotation = null, string $actor = 'client'): ServiceRequest
     {
         if ($request->status !== RequestStatus::QuotationSent) {
             return $request;
@@ -34,7 +34,7 @@ class ApproveQuotation
             throw ValidationException::withMessages(['quotation' => 'No quotation found.']);
         }
 
-        $updated = DB::transaction(function () use ($request, $quotation): ServiceRequest {
+        $updated = DB::transaction(function () use ($request, $quotation, $actor): ServiceRequest {
             QuotationDecision::query()->firstOrCreate(
                 [
                     'request_id' => $request->id,
@@ -44,7 +44,7 @@ class ApproveQuotation
                 ['reason' => null],
             );
 
-            $updated = $this->transitions->transition($request, RequestStatus::AwaitingPayment, 'client', 'Quotation approved.');
+            $updated = $this->transitions->transition($request, RequestStatus::AwaitingPayment, $actor, 'Quotation approved.');
 
             return $updated->fresh(['client', 'pricingPackage']) ?? $updated;
         });

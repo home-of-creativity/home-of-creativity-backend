@@ -12,6 +12,7 @@ use App\Models\DriveDelivery;
 use App\Models\ServiceRequest;
 use App\Services\DevAlert;
 use App\Services\GoogleDriveClient;
+use App\Services\OdooLeadLog;
 use App\Services\RequestStatusTransitionService;
 use App\Services\TelegramNotifier;
 use App\Support\ResolveServiceRequest;
@@ -367,6 +368,7 @@ class PollDriveDeliveriesCommand extends Command
 
         if ($sent) {
             app(\App\Actions\SyncClickUpReview::class)->markDelivered($request);
+            app(OdooLeadLog::class)->fileSent($request, $delivery);
         }
 
         return $sent;

@@ -30,7 +30,7 @@ class HandleWhatsAppInbound
 {
     private const SESSION_TTL_SECONDS = 7 * 24 * 3600;
 
-    private const SUPPORT_PHONE = '0947823488';
+    private const SUPPORT_PHONE = ClientChannelGate::SUPPORT_PHONE;
 
     /** @var list<string> */
     private const NAV_NEW = ['طلب جديد', '🆕 طلب جديد', 'menu:new'];
@@ -71,6 +71,10 @@ class HandleWhatsAppInbound
      */
     public function handle(array $payload): void
     {
+        if (ClientChannelGate::whatsappLocked()) {
+            return;
+        }
+
         foreach ($this->messagesFrom($payload) as $item) {
             $this->processMessage($item['phone'], $item['profile_name'], $item['message']);
         }

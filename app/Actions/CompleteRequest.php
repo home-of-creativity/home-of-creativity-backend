@@ -25,7 +25,8 @@ class CompleteRequest
 
     public function handle(ServiceRequest $request, ?string $actor = 'admin', ?Employee $employee = null): ServiceRequest
     {
-        if ($actor !== 'client' && $this->hasUnapprovedSentFiles($request)) {
+        $byClient = $actor === 'client' || str_starts_with((string) $actor, 'manual:');
+        if (! $byClient && $this->hasUnapprovedSentFiles($request)) {
             throw ValidationException::withMessages([
                 'status' => 'انتظر موافقة الزبون على الملفات المنجزة.',
             ]);
@@ -48,7 +49,7 @@ class CompleteRequest
         });
 
         $fresh = $updated->fresh(['client']) ?? $updated;
-        if ($actor === 'client') {
+        if ($byClient) {
             DriveDelivery::query()
                 ->where('request_id', $fresh->id)
                 ->whereNotNull('sent_at')

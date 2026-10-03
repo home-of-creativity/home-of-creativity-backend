@@ -613,6 +613,27 @@ class OdooClient
         }
     }
 
+    public function postLeadNote(int $leadId, string $body): void
+    {
+        if ($leadId <= 0 || trim($body) === '') {
+            return;
+        }
+
+        $html = implode('<br/>', array_map(
+            fn (string $line): string => htmlspecialchars($line, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
+            preg_split('/\R/u', trim($body)) ?: [],
+        ));
+
+        $this->call('crm.lead', 'message_post', [
+            'ids' => [$leadId],
+            'body' => $html,
+            'body_html' => $html,
+            'body_is_html' => true,
+            'message_type' => 'comment',
+            'subtype_xmlid' => 'mail.mt_note',
+        ]);
+    }
+
     public function markLeadRejected(int $leadId, string $noteHtml): void
     {
         if ($leadId <= 0) {

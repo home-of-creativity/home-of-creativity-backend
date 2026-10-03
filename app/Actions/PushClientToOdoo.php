@@ -13,7 +13,7 @@ class PushClientToOdoo
 
     public function handle(Client $client, bool $writeExisting = false): Client
     {
-        if (! $client->readyForOdoo()) {
+        if (! $client->readyForOdoo() && ! (filled($client->odoo_partner_id) && $client->profileComplete())) {
             return $client;
         }
 

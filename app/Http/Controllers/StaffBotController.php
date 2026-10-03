@@ -7,6 +7,7 @@ use App\Actions\CompleteRequest;
 use App\Actions\ConfirmRequestPayment;
 use App\Actions\ConfirmWorkPlan;
 use App\Actions\DispatchStatusWorkflow;
+use App\Actions\PrepareQuotationPreview;
 use App\Actions\RecordDelivery;
 use App\Actions\RequestStaffJoin;
 use App\Actions\SendQuotation;
@@ -194,6 +195,86 @@ class StaffBotController extends Controller
             ],
             'message' => 'Quotation sent.',
         ]);
+    }
+
+    public function previewQuotation(
+        StaffSendQuotationRequest $request,
+        PrepareQuotationPreview $preview,
+        ResolveServiceRequest $resolveServiceRequest,
+    ): JsonResponse {
+        $employee = $this->salesEmployee((string) $request->validated('telegram_user_id'));
+        $serviceRequest = $resolveServiceRequest->byReference($request->validated('request_number'));
+
+        return response()->json([
+            'data' => $preview->prepare(
+                $serviceRequest,
+                (float) $request->validated('amount'),
+                $request->validated('notes'),
+                $employee,
+            ),
+            'message' => 'Preview ready.',
+        ]);
+    }
+
+    public function confirmQuotationPreview(Request $request, PrepareQuotationPreview $preview, SendQuotation $sendQuotation): JsonResponse
+    {
+        $validated = $request->validate([
+            'telegram_user_id' => ['required', 'string'],
+            'token' => ['required', 'string', 'max:64'],
+        ]);
+        $employee = $this->salesEmployee($validated['telegram_user_id']);
+
+        $prepared = $preview->take($validated['token']);
+        if ($prepared === null) {
+            throw ValidationException::withMessages([
+                'token' => 'انتهت صلاحية المعاينة. أدخل المبلغ من جديد.',
+            ]);
+        }
+
+        $serviceRequest = ServiceRequest::query()->with('client')->findOrFail((int) $prepared['request_id']);
+        $quotation = $sendQuotation->handle(
+            $serviceRequest,
+            (float) $prepared['amount'],
+            $prepared['notes'] ?? null,
+            'staff:'.$employee->code,
+            $employee,
+            prepared: $prepared,
+        );
+
+        return response()->json([
+            'data' => [
+                'sent' => true,
+                'request_number' => $serviceRequest->number,
+                'display_number' => ResolveServiceRequest::displayNumber($serviceRequest),
+                'quotation_version' => $quotation->version,
+                'amount' => $quotation->amount,
+            ],
+            'message' => 'Quotation sent.',
+        ]);
+    }
+
+    public function discardQuotationPreview(Request $request, PrepareQuotationPreview $preview): JsonResponse
+    {
+        $validated = $request->validate([
+            'telegram_user_id' => ['required', 'string'],
+            'token' => ['required', 'string', 'max:64'],
+        ]);
+        $this->salesEmployee($validated['telegram_user_id']);
+        $preview->discard($validated['token']);
+
+        return response()->json(['data' => ['discarded' => true], 'message' => 'Preview discarded.']);
+    }
+
+    private function salesEmployee(string $telegramUserId): Employee
+    {
+        $employee = Employee::query()
+            ->approved()
+            ->where('telegram_user_id', $telegramUserId)
+            ->firstOrFail();
+
+        abort_unless($employee->isSales(), 403, 'إرسال عرض السعر متاح للمبيعات فقط.');
+
+        return $employee;
     }
 
     public function tasks(Request $request): JsonResponse

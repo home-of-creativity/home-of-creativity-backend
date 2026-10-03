@@ -5,6 +5,7 @@ namespace App\Http\Resources;
 use App\Models\ServiceRequest;
 use App\Services\ClickUpStatusMapper;
 use App\Services\OdooClient;
+use App\Support\ClientReachability;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -49,6 +50,8 @@ class ServiceRequestResource extends JsonResource
             'gemini_attempts' => $this->gemini_attempts,
             'gemini_error' => $this->gemini_error,
             'gemini_processed_at' => $this->gemini_processed_at?->toIso8601String(),
+            'clickup_error' => $this->clickup_error,
+            'clickup_attempts' => (int) $this->clickup_attempts,
             'quotation_amount' => $this->quotation_amount,
             'quotation_notes' => $this->quotation_notes,
             'pricing_package_id' => $this->pricing_package_id,
@@ -84,6 +87,16 @@ class ServiceRequestResource extends JsonResource
             'invoices' => $this->whenLoaded('invoices'),
             'clickup_tasks' => $this->whenLoaded('clickupTasks'),
             'status_history' => $this->whenLoaded('statusHistory'),
+            'client_bot_reachable' => app(ClientReachability::class)->botReachable($this->relationLoaded('client') ? $this->client : null),
+            'manual_decisions' => $this->whenLoaded('statusHistory', fn () => $this->statusHistory
+                ->filter(fn ($row): bool => str_starts_with((string) $row->actor, 'manual:'))
+                ->map(fn ($row): array => [
+                    'to_status' => $row->to_status,
+                    'note' => $row->note,
+                    'created_at' => $row->created_at?->toIso8601String(),
+                ])
+                ->values()
+                ->all()),
             'integration_events' => $this->whenLoaded('integrationEvents'),
             'created_at' => $this->created_at?->toIso8601String(),
         ];

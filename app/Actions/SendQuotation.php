@@ -8,6 +8,7 @@ use App\Models\Employee;
 use App\Models\Quotation;
 use App\Models\ServiceRequest;
 use App\Services\OdooClient;
+use App\Services\OdooLeadLog;
 use App\Services\RequestStatusTransitionService;
 use App\Services\TelegramNotifier;
 use App\Support\Money;
@@ -27,6 +28,7 @@ class SendQuotation
         private RequestStatusTransitionService $transitions,
         private OdooClient $odoo,
         private AlertTelegramDeliveryFailure $alertTelegramDeliveryFailure,
+        private OdooLeadLog $leadLog,
     ) {}
 
     /**
@@ -41,6 +43,7 @@ class SendQuotation
         ?array $lines = null,
         bool $skipStatusTransition = false,
         ?bool $requiresFullPayment = null,
+        ?array $prepared = null,
     ): Quotation {
         $this->deliveredToClient = false;
 
@@ -57,9 +60,11 @@ class SendQuotation
             $notes = $this->formatQuotationLines($lines);
         }
 
-        $quotation = DB::transaction(function () use ($request, $amount, $notes, $actor, $lines, $skipStatusTransition, $requiresFullPayment): Quotation {
+        $quotation = DB::transaction(function () use ($request, $amount, $notes, $actor, $lines, $skipStatusTransition, $requiresFullPayment, $prepared): Quotation {
             $version = ((int) $request->quotations()->max('version')) + 1;
-            $pdfPath = $this->resolveQuotationPdf($request, $amount, $notes, $version, $lines);
+            $pdfPath = $prepared !== null
+                ? $this->adoptPreparedPdf($request, $prepared, $version)
+                : $this->resolveQuotationPdf($request, $amount, $notes, $version, $lines);
 
             $quotation = Quotation::query()->create([
                 'request_id' => $request->id,
@@ -83,6 +88,7 @@ class SendQuotation
             if (! $skipStatusTransition) {
                 $this->transitions->transition($request, RequestStatus::QuotationSent, $actor, "Quotation v{$version} sent.");
             }
+            $this->leadLog->quotationSent($request, $amount, $version);
 
             try {
                 $caption = $this->quotationCaption($request, $amount, $notes, $version);
@@ -137,6 +143,29 @@ class SendQuotation
         );
 
         return $quotation;
+    }
+
+    /**
+     * @param  array<string, mixed>  $prepared
+     */
+    private function adoptPreparedPdf(ServiceRequest $request, array $prepared, int $version): string
+    {
+        if (filled($prepared['odoo_quotation_id'] ?? null)) {
+            $request->forceFill(['odoo_quotation_id' => (string) $prepared['odoo_quotation_id']])->save();
+        }
+        if (filled($prepared['odoo_partner_id'] ?? null)) {
+            $request->client?->forceFill(['odoo_partner_id' => (string) $prepared['odoo_partner_id']])->save();
+        }
+
+        $previewPath = (string) ($prepared['pdf_path'] ?? '');
+        if ($previewPath === '' || ! Storage::disk('local')->exists($previewPath)) {
+            return '';
+        }
+
+        $finalPath = "quotations/{$request->number}-v{$version}-odoo.pdf";
+        Storage::disk('local')->move($previewPath, $finalPath);
+
+        return $finalPath;
     }
 
     /**

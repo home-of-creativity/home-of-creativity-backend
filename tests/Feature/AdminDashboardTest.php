@@ -448,6 +448,7 @@ class AdminDashboardTest extends TestCase
         Client::factory()->create([
             'name' => 'AmmarHeroo',
             'company_name' => 'Prodesign',
+            'company_activity' => 'تصميم',
             'phone' => '0950000700',
             'telegram_user_id' => '213309826',
             'odoo_partner_id' => null,

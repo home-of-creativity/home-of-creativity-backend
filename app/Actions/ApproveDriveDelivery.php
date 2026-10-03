@@ -6,6 +6,7 @@ use App\Enums\RequestStatus;
 use App\Actions\SyncClickUpReview;
 use App\Models\DriveDelivery;
 use App\Models\ServiceRequest;
+use App\Services\OdooLeadLog;
 use App\Support\ResolveServiceRequest;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
@@ -16,6 +17,7 @@ class ApproveDriveDelivery
     public function __construct(
         private NotifyStaffDriveFile $notifyStaffDriveFile,
         private OpenRequestForClientReview $openRequestForClientReview,
+        private OdooLeadLog $leadLog,
     ) {}
 
     public function handle(ServiceRequest $request, DriveDelivery $delivery): DriveDelivery
@@ -34,6 +36,7 @@ class ApproveDriveDelivery
 
         if ($delivery->client_approved_at === null) {
             $delivery->forceFill(['client_approved_at' => now()])->save();
+            $this->leadLog->fileApproved($request, $delivery);
         }
 
         app(SyncClickUpReview::class)->markApproved($request->fresh() ?? $request);

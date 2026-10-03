@@ -23,7 +23,7 @@ class RejectQuotation
         private OdooClient $odoo,
     ) {}
 
-    public function handle(ServiceRequest $request, string $reason, ?Quotation $quotation = null): ServiceRequest
+    public function handle(ServiceRequest $request, string $reason, ?Quotation $quotation = null, string $actor = 'client'): ServiceRequest
     {
         if ($request->status !== RequestStatus::QuotationSent) {
             return $request;
@@ -34,7 +34,7 @@ class RejectQuotation
             throw ValidationException::withMessages(['quotation' => 'No quotation found.']);
         }
 
-        $updated = DB::transaction(function () use ($request, $quotation, $reason): ServiceRequest {
+        $updated = DB::transaction(function () use ($request, $quotation, $reason, $actor): ServiceRequest {
             $packageName = $request->pricingPackage?->name_ar
                 ?: $request->pricingPackage?->name_en
                 ?: $request->title;
@@ -49,7 +49,7 @@ class RejectQuotation
                 ['reason' => $storedReason],
             );
 
-            $updated = $this->transitions->transition($request, RequestStatus::QuotationRejected, 'client', $storedReason);
+            $updated = $this->transitions->transition($request, RequestStatus::QuotationRejected, $actor, $storedReason);
 
             $fresh = $updated->fresh(['client', 'pricingPackage']) ?? $updated;
             $displayNumber = ResolveServiceRequest::displayNumber($fresh);
@@ -95,7 +95,7 @@ class RejectQuotation
         try {
             $leadId = (int) ($request->client?->odoo_lead_id ?? 0);
             if ($leadId > 0) {
-                $this->odoo->markLeadRejected($leadId, $html);
+                $this->odoo->markLeadRejected($leadId, '');
             }
 
             $orderId = (int) ($request->odoo_quotation_id ?? 0);

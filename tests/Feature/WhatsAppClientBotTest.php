@@ -21,6 +21,7 @@ class WhatsAppClientBotTest extends TestCase
         parent::setUp();
 
         config([
+            'services.whatsapp.enabled' => true,
             'services.whatsapp.token' => 'wa-token',
             'services.whatsapp.phone_number_id' => '555',
             'services.whatsapp.verify_token' => 'verify-me',

@@ -8,6 +8,8 @@ use App\Actions\DispatchStatusWorkflow;
 use App\Actions\EnqueueIntegrationEvent;
 use App\Actions\EnsureRequestDriveFolder;
 use App\Actions\HydrateServiceRequestFromOdoo;
+use App\Actions\ProvisionClickUpTasks;
+use App\Actions\RecordClientDecision;
 use App\Actions\RenewSubscription;
 use App\Actions\ReRequestReceipt;
 use App\Actions\SendQuotation;
@@ -25,6 +27,7 @@ use App\Models\IntegrationEvent;
 use App\Models\OpsSetting;
 use App\Models\RequestFile;
 use App\Models\ServiceRequest;
+use App\Services\ClickUpClient;
 use App\Services\RequestStatusTransitionService;
 use App\Support\ClientChannelGate;
 use App\Support\ShamCashQr;
@@ -32,6 +35,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -188,6 +192,39 @@ class ServiceRequestController extends Controller
 
         return ServiceRequestResource::make($serviceRequest->fresh(['client', 'briefs']))
             ->additional(['message' => 'Gemini retry queued.']);
+    }
+
+    public function clientDecision(Request $request, ServiceRequest $serviceRequest, RecordClientDecision $recordClientDecision): ServiceRequestResource
+    {
+        $validated = $request->validate([
+            'decision' => ['required', 'string', 'in:'.implode(',', RecordClientDecision::DECISIONS)],
+            'reason' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        $updated = $recordClientDecision->handle(
+            $serviceRequest,
+            $validated['decision'],
+            $validated['reason'] ?? null,
+            $request->user(),
+        );
+
+        return ServiceRequestResource::make($updated->fresh(['client', 'statusHistory', 'quotationDecisions.quotation', 'clickupTasks']) ?? $updated)
+            ->additional(['message' => 'سُجّل قرار الزبون يدوياً.']);
+    }
+
+    public function provisionClickUp(ServiceRequest $serviceRequest, ProvisionClickUpTasks $provision, ClickUpClient $clickUp): ServiceRequestResource
+    {
+        abort_unless($clickUp->configured(), 422, 'ClickUp غير مضبوط على السيرفر.');
+        abort_unless($serviceRequest->paid_at !== null, 422, 'تُنشأ المهام بعد تأكيد الدفع.');
+
+        $fresh = $provision->handle($serviceRequest, (string) Str::uuid(), notifyOnFailure: false);
+
+        return ServiceRequestResource::make($fresh->fresh(['client', 'briefs', 'clickupTasks']) ?? $fresh)
+            ->additional([
+                'message' => $fresh->clickup_error === null
+                    ? 'تم إنشاء مهام ClickUp.'
+                    : 'ما زال ClickUp لا يرد. ستُعاد المحاولة تلقائياً.',
+            ]);
     }
 
     public function ensureDriveFolder(ServiceRequest $serviceRequest, EnsureRequestDriveFolder $ensureRequestDriveFolder): ServiceRequestResource

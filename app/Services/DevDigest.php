@@ -5,12 +5,16 @@ namespace App\Services;
 use App\Enums\IntegrationEventStatus;
 use App\Models\IntegrationEvent;
 use App\Models\OpsSetting;
+use App\Models\ServiceRequest;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class DevDigest
 {
-    public function __construct(private DevBeat $beats) {}
+    public function __construct(
+        private DevBeat $beats,
+        private OdooLeadLog $leadLog,
+    ) {}
 
     public function text(): string
     {
@@ -26,6 +30,8 @@ class DevDigest
             'البوتات: '.$this->botLine(),
             'الطابور الفاشل: '.$this->failedJobs(),
             'تكامل عالق: '.$this->stuckOutbox(),
+            'سجل أودو بانتظار الرفع: '.$this->leadLog->pendingCount(),
+            'طلبات بلا مهام ClickUp: '.$this->clickupMissing(),
             'مراقبة Drive: '.$this->driveLine($expires),
             $this->sentryLine($secret),
             'آخر نشر: '.($deployed ?? 'غير مسجل'),
@@ -41,7 +47,10 @@ class DevDigest
 
     public function queueText(): string
     {
-        return 'الطابور الفاشل: '.$this->failedJobs();
+        return implode("\n", [
+            'الطابور الفاشل: '.$this->failedJobs(),
+            'سجل أودو بانتظار الرفع: '.$this->leadLog->pendingCount(),
+        ]);
     }
 
     private function botLine(): string
@@ -71,6 +80,11 @@ class DevDigest
     private function failedJobs(): int
     {
         return (int) DB::table('failed_jobs')->count();
+    }
+
+    private function clickupMissing(): int
+    {
+        return ServiceRequest::query()->whereNotNull('clickup_error')->count();
     }
 
     private function stuckOutbox(): int

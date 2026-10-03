@@ -35,6 +35,16 @@ class Client extends Model
         'google_drive_folder_id',
     ];
 
+    /**
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'email_skipped_at' => 'datetime',
+        ];
+    }
+
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
@@ -143,9 +153,40 @@ class Client extends Model
         return filled($url) ? 'تواصل خاص: '.$url : null;
     }
 
+    /**
+     * A bot client gets its Odoo partner and opportunity only after every
+     * profile question is answered, so Odoo never holds a half-filled lead.
+     */
     public function readyForOdoo(): bool
     {
-        return ! filled($this->telegram_user_id) || $this->profileComplete();
+        return ! filled($this->telegram_user_id) || $this->profileFinished();
+    }
+
+    public function profileFinished(): bool
+    {
+        return $this->pendingProfileFields() === [];
+    }
+
+    /**
+     * Questions the Telegram bot still asks, in order. WhatsApp keeps the first three.
+     *
+     * @return list<string>
+     */
+    public function pendingProfileFields(): array
+    {
+        $missing = $this->missingProfileFields();
+        if ($this->isWhatsApp()) {
+            return $missing;
+        }
+
+        if (! filled($this->email) && $this->email_skipped_at === null) {
+            $missing[] = 'email';
+        }
+        if (! filled($this->company_activity)) {
+            $missing[] = 'company_activity';
+        }
+
+        return $missing;
     }
 
     /**

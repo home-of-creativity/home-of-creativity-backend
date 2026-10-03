@@ -68,6 +68,9 @@ class ServiceRequest extends Model
         'receipt_reupload_required',
         'receipt_reupload_reason',
         'odoo_won_at',
+        'clickup_error',
+        'clickup_attempts',
+        'clickup_failed_at',
     ];
 
     protected function casts(): array
@@ -99,6 +102,8 @@ class ServiceRequest extends Model
             'drive_last_activity_at' => 'datetime',
             'receipt_reupload_required' => 'boolean',
             'odoo_won_at' => 'datetime',
+            'clickup_attempts' => 'integer',
+            'clickup_failed_at' => 'datetime',
         ];
     }
 

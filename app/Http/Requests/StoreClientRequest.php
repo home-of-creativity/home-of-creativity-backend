@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Support\ClientProfileValue;
 use Illuminate\Foundation\Http\FormRequest;
 
 class StoreClientRequest extends FormRequest
@@ -22,6 +23,7 @@ class StoreClientRequest extends FormRequest
             'phone' => ['nullable', 'string', 'max:40'],
             'telegram_user_id' => ['nullable', 'string', 'max:40'],
             'company_name' => ['nullable', 'string', 'max:160'],
+            'company_activity' => ['nullable', 'string', 'max:'.ClientProfileValue::ACTIVITY_MAX_LENGTH],
             'locale' => ['nullable', 'string', 'in:ar,en'],
         ];
     }

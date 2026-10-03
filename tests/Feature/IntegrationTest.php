@@ -88,7 +88,7 @@ class IntegrationTest extends TestCase
         Http::assertSentCount(6);
     }
 
-    public function test_clickup_programming_tasks_use_programming_list(): void
+    public function test_clickup_tasks_endpoint_provisions_from_the_laravel_plan_once(): void
     {
         Http::preventStrayRequests();
         config([
@@ -103,52 +103,43 @@ class IntegrationTest extends TestCase
         ]);
 
         $number = $this->createTelegramRequest();
+        ServiceRequest::query()->where('number', $number)->firstOrFail()->forceFill([
+            'status' => RequestStatus::PaymentConfirmed,
+            'paid_at' => now(),
+            'work_plan' => ['operations' => [['department' => 'programming', 'brief' => 'Build landing page', 'hours' => 8]]],
+        ])->save();
 
-        $this->withHeaders(['X-N8N-Secret' => 'change-me'])
-            ->postJson('/api/integrations/clickup/tasks', [
-                'request_number' => $number,
-                'briefs' => [
-                    ['department' => 'programming', 'brief' => 'Build landing page'],
-                ],
-            ])->assertOk()
-            ->assertJsonPath('data.briefs.0.clickup_task_id', 'cu-prog');
+        foreach ([1, 2] as $call) {
+            $this->withHeaders(['X-N8N-Secret' => 'change-me'])
+                ->postJson('/api/integrations/clickup/tasks', [
+                    'request_number' => $number,
+                    'briefs' => [['department' => 'programming', 'brief' => 'Ignored n8n brief']],
+                ])->assertOk()
+                ->assertJsonPath('data.briefs.0.clickup_task_id', 'cu-prog')
+                ->assertJsonPath('data.briefs.0.department', 'programming');
+        }
 
-        Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/list/prog-list/task'));
+        Http::assertSentCount(1);
+        Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/list/prog-list/task')
+            && $request->hasHeader('Authorization', 'pk_test')
+            && $request['description'] === 'Build landing page'
+            && str_contains((string) $request['name'], $number));
     }
 
-    public function test_clickup_tasks_are_created_per_department(): void
+    public function test_clickup_tasks_endpoint_creates_nothing_before_payment(): void
     {
         Http::preventStrayRequests();
-        config([
-            'services.clickup.token' => 'pk_test',
-            'services.clickup.list_id' => '12345',
-            'services.clickup.lists.sales' => '12345',
-            'services.clickup.lists.design' => '12345',
-            'services.clickup.lists.content' => '12345',
-            'services.clickup.lists.photography' => '12345',
-        ]);
-
-        Http::fake([
-            'https://api.clickup.com/api/v2/list/12345/task' => Http::sequence()
-                ->push(['id' => 'cu-brand'], 200)
-                ->push(['id' => 'cu-3d'], 200),
-        ]);
-
+        config(['services.clickup.token' => 'pk_test', 'services.clickup.list_id' => '12345']);
         $number = $this->createTelegramRequest();
 
         $this->withHeaders(['X-N8N-Secret' => 'change-me'])
             ->postJson('/api/integrations/clickup/tasks', [
                 'request_number' => $number,
-                'briefs' => [
-                    ['department' => 'branding', 'brief' => 'Identity'],
-                    ['department' => '3d_visualization', 'brief' => 'Booth'],
-                ],
+                'briefs' => [['department' => 'design', 'brief' => 'Identity']],
             ])->assertOk()
-            ->assertJsonPath('data.briefs.0.clickup_task_id', 'cu-brand')
-            ->assertJsonPath('data.briefs.1.clickup_task_id', 'cu-3d');
+            ->assertJsonPath('data.briefs', []);
 
-        Http::assertSent(fn (Request $request): bool => $request->hasHeader('Authorization', 'pk_test')
-            && str_contains((string) $request['name'], $number));
+        Http::assertNothingSent();
     }
 
     public function test_odoo_invoice_uses_existing_partner(): void

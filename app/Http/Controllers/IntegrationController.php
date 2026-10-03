@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Actions\ApplyClickUpMapping;
 use App\Actions\ProcessDriveChangeNotification;
+use App\Actions\ProvisionClickUpTasks;
+use App\Enums\ClickUpTaskType;
 use App\Enums\RequestStatus;
 use App\Http\Requests\ClickUpMappingRequest;
 use App\Http\Requests\ClickUpTasksRequest;
@@ -14,7 +16,6 @@ use App\Http\Requests\TelegramNotifyRequest;
 use App\Http\Resources\ServiceRequestResource;
 use App\Models\OpsSetting;
 use App\Models\ServiceRequest;
-use App\Services\ClickUpClient;
 use App\Services\GoogleDriveClient;
 use App\Services\OdooClient;
 use App\Services\TelegramNotifier;
@@ -23,6 +24,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class IntegrationController extends Controller
 {
@@ -115,49 +117,35 @@ class IntegrationController extends Controller
         ]);
     }
 
-    public function tasks(ClickUpTasksRequest $request, ClickUpClient $clickUp): JsonResponse
+    /**
+     * Laravel is the only place that creates execution tasks. An n8n call here
+     * provisions from the confirmed work plan (idempotent) and returns the
+     * stored tasks; the briefs in the payload are ignored.
+     */
+    public function tasks(ClickUpTasksRequest $request, ProvisionClickUpTasks $provision): JsonResponse
     {
-        $briefs = array_map(fn (array $brief): array => [
-            'department' => $brief['department'],
-            'brief' => (string) ($brief['brief'] ?? ''),
-        ], $request->validated('briefs'));
+        $serviceRequest = ServiceRequest::query()
+            ->with(['briefs', 'client', 'clickupTasks'])
+            ->where('number', $request->validated('request_number'))
+            ->firstOrFail();
 
-        if (! $clickUp->configured()) {
-            return response()->json([
-                'data' => [
-                    'briefs' => array_map(fn (array $brief): array => [
-                        ...$brief,
-                        'clickup_task_id' => 'CU-'.$request->validated('request_number').'-'.$brief['department'],
-                    ], $briefs),
-                ],
-                'message' => 'ClickUp is not configured; placeholder IDs returned.',
-            ]);
+        if ($serviceRequest->paid_at !== null) {
+            $serviceRequest = $provision->handle($serviceRequest, (string) Str::uuid(), notifyOnFailure: false);
         }
 
-        try {
-            $created = $clickUp->createTasks($request->validated('request_number'), $briefs);
-        } catch (\Throwable $exception) {
-            Log::warning('ClickUp tasks failed.', [
-                'request' => $request->validated('request_number'),
-                'error' => $exception->getMessage(),
-            ]);
-
-            return response()->json([
-                'data' => [
-                    'briefs' => array_map(fn (array $brief): array => [
-                        ...$brief,
-                        'clickup_task_id' => 'CU-'.$request->validated('request_number').'-'.$brief['department'],
-                    ], $briefs),
-                ],
-                'message' => 'ClickUp tasks failed; placeholder IDs returned.',
-            ]);
-        }
+        $tasks = ($serviceRequest->fresh('clickupTasks') ?? $serviceRequest)->clickupTasks
+            ->filter(fn ($task): bool => filled($task->clickup_task_id) && $task->task_type !== ClickUpTaskType::Sales)
+            ->map(fn ($task): array => [
+                'department' => $task->task_type->value,
+                'clickup_task_id' => (string) $task->clickup_task_id,
+                'clickup_url' => $task->clickup_url,
+            ])
+            ->values()
+            ->all();
 
         return response()->json([
-            'data' => [
-                'briefs' => $created,
-            ],
-            'message' => 'ClickUp tasks created.',
+            'data' => ['briefs' => $tasks],
+            'message' => 'ClickUp tasks come from the Laravel work plan.',
         ]);
     }
 

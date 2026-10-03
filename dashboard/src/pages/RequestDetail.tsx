@@ -60,6 +60,8 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
   const [requiresFullPayment, setRequiresFullPayment] = useState(false);
   const [creatingDrive, setCreatingDrive] = useState(false);
   const [pollingDrive, setPollingDrive] = useState(false);
+  const [decisionReason, setDecisionReason] = useState("");
+  const [recordingDecision, setRecordingDecision] = useState(false);
 
   useEffect(() => {
     if (!receiptUrl) return;
@@ -262,6 +264,37 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
     }
   }
 
+  async function recordDecision(decision: "approve" | "reject" | "revision" | "complete") {
+    if (!item || recordingDecision) return;
+    setError("");
+    setNotice("");
+    setRecordingDecision(true);
+    try {
+      const res = await api.recordClientDecision(item.id, decision, decisionReason.trim());
+      setItem(res.data);
+      setStatus(res.data.status);
+      setDecisionReason("");
+      setNotice(res.message ?? "");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t(copy.saveFailed));
+    } finally {
+      setRecordingDecision(false);
+    }
+  }
+
+  async function provisionClickUp() {
+    if (!item) return;
+    setError("");
+    setNotice("");
+    try {
+      const res = await api.provisionClickUp(item.id);
+      setItem(res.data);
+      setNotice(res.message ?? "");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t(copy.saveFailed));
+    }
+  }
+
   async function extendSchedule() {
     if (!item) return;
     const reason = window.prompt("سبب زيادة المدة") ?? "";
@@ -309,6 +342,10 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
     return sum + amount * units;
   }, 0);
   const firstPaymentAmount = requiresFullPayment ? quotationTotal : Math.round(quotationTotal * 50) / 100;
+  const quoteDecisionOpen = item.status === "quotation_sent";
+  const revisionOpen = ["in_progress", "ready_for_review", "revision_requested"].includes(item.status);
+  const completionOpen = item.status === "ready_for_review";
+  const showClientFallback = item.client_bot_reachable === false && (quoteDecisionOpen || revisionOpen || completionOpen);
 
   return (
     <div className="detail">
@@ -764,8 +801,69 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
               {t(copy.retryGemini)}
             </button>
           ) : null}
+          {item.clickup_error ? (
+            <button className="btn" type="button" onClick={() => void provisionClickUp()}>
+              {t(copy.retryClickUp)}
+            </button>
+          ) : null}
         </form>
+        {item.clickup_error ? (
+          <p className="notice notice-info" role="status">
+            {t(copy.clickupMissing)} {item.clickup_attempts ? `(${item.clickup_attempts})` : ""}
+          </p>
+        ) : null}
       </section>
+      {showClientFallback ? (
+        <section className="card action-card">
+          <h2 className="form-title">{t(copy.clientDecisionTitle)}</h2>
+          <p className="muted">{t(copy.clientDecisionHelp)}</p>
+          <div className="toolbar">
+            {quoteDecisionOpen || revisionOpen ? (
+              <input
+                className="field"
+                value={decisionReason}
+                onChange={(e) => setDecisionReason(e.target.value)}
+                placeholder={t(copy.clientDecisionReason)}
+                aria-label={t(copy.clientDecisionReason)}
+              />
+            ) : null}
+            {quoteDecisionOpen ? (
+              <>
+                <button className="btn btn-teal" type="button" disabled={recordingDecision} onClick={() => void recordDecision("approve")}>
+                  {t(copy.clientDecisionApprove)}
+                </button>
+                <button className="btn" type="button" disabled={recordingDecision} onClick={() => void recordDecision("reject")}>
+                  {t(copy.clientDecisionReject)}
+                </button>
+              </>
+            ) : null}
+            {revisionOpen ? (
+              <button className="btn" type="button" disabled={recordingDecision} onClick={() => void recordDecision("revision")}>
+                {t(copy.clientDecisionRevision)}
+              </button>
+            ) : null}
+            {completionOpen ? (
+              <button className="btn btn-teal" type="button" disabled={recordingDecision} onClick={() => void recordDecision("complete")}>
+                {t(copy.clientDecisionComplete)}
+              </button>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
+      {item.manual_decisions?.length ? (
+        <section className="card action-card">
+          <h2 className="form-title">{t(copy.manualTag)}</h2>
+          <ul>
+            {item.manual_decisions.map((row, index) => (
+              <li key={`${row.to_status}-${index}`}>
+                <span className={`status status-${row.to_status}`}>{t(statuses[row.to_status] ?? { ar: row.to_status, en: row.to_status })}</span>
+                {row.created_at ? ` · ${formatWhen(row.created_at, locale)}` : ""}
+                {row.note && ["quotation_rejected", "revision_requested"].includes(row.to_status) ? ` — ${row.note}` : ""}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       {showReceipts ? (
         <section className="card action-card">
           <h2 className="form-title">{t(copy.receipts)}</h2>

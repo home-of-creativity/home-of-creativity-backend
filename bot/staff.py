@@ -1,5 +1,7 @@
+import base64
 import os
 from html import escape
+from io import BytesIO
 from pathlib import Path
 from typing import Any, Optional
 
@@ -21,6 +23,7 @@ WAITING_QUOTE_NOTES = 4
 WAITING_DELIVER_PICK = 5
 WAITING_PROGRESS_PICK = 6
 WAITING_COMPLETE_PICK = 7
+WAITING_QUOTE_CONFIRM = 8
 BTN_TASKS = "📌 مهامي"
 BTN_NEW = "🆕 طلبات جديدة"
 BTN_REPLY = "💬 رد على طلب"
@@ -28,6 +31,17 @@ BTN_QUOTE = "📄 إرسال عرض سعر"
 BTN_DELIVER = "📤 تسليم نتيجة"
 BTN_PROGRESS = "🚧 قيد التجهيز"
 BTN_COMPLETE = "✅ إكمال الطلب"
+PROFESSION_AR = {
+    "sales": "المبيعات",
+    "design": "التصميم",
+    "content": "المحتوى",
+    "branding": "الهوية البصرية",
+    "3d_visualization": "التصميم ثلاثي الأبعاد",
+    "media": "التصوير",
+    "web": "البرمجة",
+    "print": "الطباعة",
+    "creative_direction": "الإدارة الإبداعية",
+}
 STATUS_AR = {
     "in_progress": "قيد التجهيز",
     "revision_requested": "مطلوب تعديل",
@@ -227,6 +241,28 @@ async def capture_quote_amount(update: Update, context: ContextTypes.DEFAULT_TYP
     return WAITING_QUOTE_NOTES
 
 
+def quote_confirm_markup(token: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("✅ أرسل للزبون", callback_data=f"qsend:{token}")],
+            [InlineKeyboardButton("✏️ تعديل المبلغ", callback_data=f"qedit:{token}")],
+        ]
+    )
+
+
+def staff_api_error(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+    except Exception:
+        return (response.text or f"HTTP {response.status_code}")[:300]
+    errors = payload.get("errors")
+    if isinstance(errors, dict):
+        for value in errors.values():
+            if isinstance(value, list) and value:
+                return str(value[0])
+    return str(payload.get("message") or response.text)[:300]
+
+
 async def capture_quote_notes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user = update.effective_user
     if user is None or update.message is None or not update.message.text:
@@ -245,28 +281,88 @@ async def capture_quote_notes(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     async with httpx.AsyncClient(timeout=API_TIMEOUT) as client:
         response = await client.post(
-            f"{API_URL}/bot/staff/quotation",
+            f"{API_URL}/bot/staff/quotation/preview",
             headers=api_headers(),
             json=payload,
         )
-        if response.status_code >= 400:
-            detail = response.json().get("message", response.text)
-            await update.message.reply_text(f"تعذر إرسال العرض: {escape(str(detail))}", reply_markup=staff_keyboard(await lookup_employee(user.id)))
-            return ConversationHandler.END
+    if response.status_code >= 400:
+        await update.message.reply_text(
+            f"تعذر تجهيز المعاينة: {escape(staff_api_error(response))}",
+            reply_markup=staff_keyboard(await lookup_employee(user.id)),
+        )
+        return ConversationHandler.END
 
-        data = response.json().get("data", {})
+    data = response.json().get("data") or {}
+    token = str(data.get("token") or "")
+    card = str(data.get("card") or "")
+    encoded = data.get("pdf_base64")
+    if encoded:
+        buffer = BytesIO(base64.b64decode(encoded))
+        buffer.name = str(data.get("file_name") or "quotation.pdf")
+        await update.message.reply_document(document=buffer, caption=card[:1024], reply_markup=quote_confirm_markup(token))
+    else:
+        await update.message.reply_text(card, reply_markup=quote_confirm_markup(token))
+    return WAITING_QUOTE_CONFIRM
 
-    request_ref = str(context.user_data.get("quote_request") or data.get("request_number", ""))
+
+async def on_quote_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if query is None or query.data is None or query.from_user is None:
+        return ConversationHandler.END
+    token = query.data.split(":", 1)[1]
+    async with httpx.AsyncClient(timeout=API_TIMEOUT) as client:
+        response = await client.post(
+            f"{API_URL}/bot/staff/quotation/confirm",
+            headers=api_headers(),
+            json={"telegram_user_id": str(query.from_user.id), "token": token},
+        )
+    if response.status_code >= 400:
+        await query.answer(staff_api_error(response)[:200], show_alert=True)
+        return ConversationHandler.END
+
+    await query.answer("تم الإرسال.")
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    data = response.json().get("data") or {}
+    request_ref = str(data.get("display_number") or data.get("request_number") or "")
     context.user_data.pop("quote_request", None)
     context.user_data.pop("quote_amount", None)
-
-    await update.message.reply_text(
-        f"✅ تم إرسال عرض السعر v{escape(str(data.get('quotation_version', '')))} "
-        f"للطلب #{escape(request_ref)}.\n"
-        f"المبلغ: {escape(str(data.get('amount', '')))} USD",
-        reply_markup=staff_keyboard(await lookup_employee(user.id)),
-    )
+    if query.message:
+        await query.message.reply_text(
+            f"✅ تم إرسال عرض السعر v{escape(str(data.get('quotation_version', '')))} "
+            f"للطلب #{escape(request_ref)}.\n"
+            f"المبلغ: {escape(str(data.get('amount', '')))} USD",
+            reply_markup=staff_keyboard(await lookup_employee(query.from_user.id)),
+        )
     return ConversationHandler.END
+
+
+async def on_quote_edit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if query is None or query.data is None or query.from_user is None:
+        return ConversationHandler.END
+    token = query.data.split(":", 1)[1]
+    async with httpx.AsyncClient(timeout=API_TIMEOUT) as client:
+        await client.post(
+            f"{API_URL}/bot/staff/quotation/discard",
+            headers=api_headers(),
+            json={"telegram_user_id": str(query.from_user.id), "token": token},
+        )
+    await query.answer()
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    request_ref = context.user_data.get("quote_request")
+    if not request_ref:
+        if query.message:
+            await query.message.reply_text("أُلغيت المعاينة. اضغط «📄 إرسال عرض سعر» لإدخال مبلغ جديد.")
+        return ConversationHandler.END
+    if query.message:
+        await query.message.reply_text(f"الطلب #{escape(str(request_ref))} — ما مبلغ عرض السعر بالدولار؟")
+    return WAITING_QUOTE_AMOUNT
 
 
 async def fetch_assigned_tasks(telegram_id: int) -> list[dict[str, Any]]:
@@ -353,8 +449,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             hint = "للرد: 💬 رد على طلب | لعرض السعر: 📄 إرسال عرض سعر"
         else:
             hint = "ستظهر لك مهامك فقط. خذ المهمة ثم أرسل نتيجة التنفيذ. إذا طُلب تعديل ستراها هنا وتعيد التسليم."
+        profession = str(employee.get("profession") or "")
+        department = PROFESSION_AR.get(profession, profession or "غير محدد")
         await update.message.reply_text(
-            f"مرحباً {escape(employee['name'])}.\n{hint}",
+            f"مرحباً {escape(employee['name'])}.\nقسمك: {escape(department)}\n{hint}",
             reply_markup=staff_keyboard(employee),
         )
         return
@@ -903,10 +1001,16 @@ def main() -> None:
                 WAITING_QUOTE_PICK: [CallbackQueryHandler(on_select_quote_request, pattern=r"^qsel:")],
                 WAITING_QUOTE_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, capture_quote_amount)],
                 WAITING_QUOTE_NOTES: [MessageHandler(filters.TEXT & ~filters.COMMAND, capture_quote_notes)],
+                WAITING_QUOTE_CONFIRM: [
+                    CallbackQueryHandler(on_quote_confirm, pattern=r"^qsend:"),
+                    CallbackQueryHandler(on_quote_edit, pattern=r"^qedit:"),
+                ],
             },
             fallbacks=[CommandHandler("cancel", cancel)],
         )
     )
+    application.add_handler(CallbackQueryHandler(on_quote_confirm, pattern=r"^qsend:"))
+    application.add_handler(CallbackQueryHandler(on_quote_edit, pattern=r"^qedit:"))
     application.add_handler(
         ConversationHandler(
             entry_points=[

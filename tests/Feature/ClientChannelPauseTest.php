@@ -24,6 +24,7 @@ class ClientChannelPauseTest extends TestCase
             'services.telegram.bot_secret' => 'change-me-bot',
             'services.telegram.staff_bot_secret' => 'change-me-staff',
             'services.telegram.bot_token' => 'tg-token',
+            'services.whatsapp.enabled' => true,
             'services.whatsapp.token' => 'wa-token',
             'services.whatsapp.phone_number_id' => '555',
             'services.whatsapp.verify_token' => 'verify-me',
@@ -122,6 +123,45 @@ class ClientChannelPauseTest extends TestCase
         app(TelegramNotifier::class)->send('12345', 'should not send');
 
         Http::assertNothingSent();
+    }
+
+    public function test_locked_whatsapp_ignores_the_dashboard_switch_and_sends_nothing(): void
+    {
+        config(['services.whatsapp.enabled' => false]);
+
+        $this->actingAdmin()
+            ->putJson('/api/admin/ops-settings/client-channels', [
+                'telegram_enabled' => true,
+                'whatsapp_enabled' => true,
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.whatsapp_enabled', false)
+            ->assertJsonPath('data.whatsapp_locked', true);
+
+        $this->signedWhatsAppPost($this->textPayload('963911111111', 'Nour', 'مرحبا', 'wamid.locked-1'))
+            ->assertOk()
+            ->assertJsonPath('status', 'ok');
+
+        $this->assertNull(Client::query()->where('telegram_user_id', 'wa:963911111111')->first());
+
+        $existing = Client::factory()->create(['telegram_user_id' => 'wa:963922222222']);
+        $notifier = app(TelegramNotifier::class);
+        $this->assertFalse($notifier->canReachClient($existing->telegram_user_id));
+        $notifier->send((string) $existing->telegram_user_id, 'should not send');
+
+        Http::assertNothingSent();
+
+        $this->get('/api/bot/whatsapp/webhook?'.http_build_query([
+            'hub.mode' => 'subscribe',
+            'hub.verify_token' => 'verify-me',
+            'hub.challenge' => 'locked-ok',
+        ]))->assertOk()->assertSee('locked-ok');
+
+        ClientChannelGate::setTelegramEnabled(false);
+        $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot', 'Accept' => 'application/json'])
+            ->getJson('/api/bot/telegram/me?telegram_user_id=tg-paused')
+            ->assertStatus(503)
+            ->assertJsonPath('message', ClientChannelGate::TELEGRAM_PAUSED_PHONE_MESSAGE);
     }
 
     private function actingAdmin()

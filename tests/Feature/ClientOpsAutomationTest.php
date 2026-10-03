@@ -115,12 +115,38 @@ class ClientOpsAutomationTest extends TestCase
                 'name' => 'Sara',
                 'phone' => '+963911111111',
                 'company_name' => 'شركة الإبداع',
+                'email' => 'sara@hoc.test',
                 'locale' => 'ar',
             ])->assertOk()
-            ->assertJsonPath('data.profile_complete', true);
+            ->assertJsonPath('data.profile_complete', true)
+            ->assertJsonPath('data.missing_fields', ['company_activity']);
 
         $client = Client::query()->where('telegram_user_id', 'tg-lead')->firstOrFail();
+        $this->assertNull($client->odoo_lead_id);
+        $this->assertNull($client->odoo_partner_id);
+
+        $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
+            ->postJson('/api/bot/telegram/profile', [
+                'telegram_user_id' => 'tg-lead',
+                'company_activity' => 'تصميم داخلي',
+            ])->assertOk()
+            ->assertJsonPath('data.missing_fields', []);
+
+        $client->refresh();
         $this->assertSame('77', $client->odoo_lead_id);
+        $this->assertSame('44', $client->odoo_partner_id);
+
+        Http::assertSent(function (Request $request): bool {
+            $args = $request->data()['params']['args'] ?? [];
+            if (($args[3] ?? null) !== 'crm.lead' || ($args[4] ?? null) !== 'create') {
+                return false;
+            }
+            $vals = $args[5][0][0] ?? [];
+
+            return ($vals['email_from'] ?? null) === 'sara@hoc.test'
+                && ($vals['partner_id'] ?? null) === 44
+                && str_contains((string) ($vals['description'] ?? ''), 'النشاط: تصميم داخلي');
+        });
     }
 
     public function test_catalog_tree_hides_prices_and_quotes_published_package(): void

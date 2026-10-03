@@ -9,6 +9,7 @@ use App\Enums\WorkflowEventType;
 use App\Models\Client;
 use App\Models\RequestStatusHistory;
 use App\Models\ServiceRequest;
+use App\Services\OdooLeadLog;
 use App\Support\ResolveServiceRequest;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -22,6 +23,7 @@ class SubmitServiceRequest
         private StoreRequestAttachments $storeRequestAttachments,
         private ProvisionSalesClickUpTask $provisionSalesClickUpTask,
         private EnsureRequestDriveFolder $ensureRequestDriveFolder,
+        private OdooLeadLog $leadLog,
     ) {}
 
     /**
@@ -56,6 +58,7 @@ class SubmitServiceRequest
             }
 
             $fresh = $request->fresh(['client', 'files']) ?? $request;
+            $this->leadLog->requestCreated($fresh);
 
             $displayNumber = ResolveServiceRequest::displayNumber($fresh);
             $attachmentCount = $fresh->files?->count() ?? 0;

@@ -108,10 +108,19 @@ class OdooCrmPurgeTest extends TestCase
                 'name' => 'Sara',
                 'phone' => '+963911111111',
                 'company_name' => 'شركة الإبداع',
+                'email' => 'sara@hoc.test',
                 'locale' => 'ar',
             ])
             ->assertOk()
             ->assertJsonPath('data.profile_complete', true)
+            ->assertJsonPath('data.odoo_lead_id', null);
+
+        $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
+            ->postJson('/api/bot/telegram/profile', [
+                'telegram_user_id' => 'tg-lead-stage',
+                'company_activity' => 'تصميم',
+            ])
+            ->assertOk()
             ->assertJsonPath('data.odoo_lead_id', '77')
             ->assertJsonPath('data.odoo_stage_name', 'تلغرام');
 
@@ -203,6 +212,7 @@ class OdooCrmPurgeTest extends TestCase
             'name' => 'AmmarHeroo',
             'phone' => '0950000700',
             'company_name' => 'Prodesign',
+            'company_activity' => 'تصميم',
             'telegram_user_id' => '213309826',
             'odoo_lead_id' => null,
         ]);
