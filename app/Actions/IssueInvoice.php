@@ -7,6 +7,7 @@ use App\Models\Invoice;
 use App\Models\ServiceRequest;
 use App\Services\OdooClient;
 use App\Services\TelegramNotifier;
+use App\Support\CorrespondenceDocument;
 use App\Support\Money;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -20,6 +21,7 @@ class IssueInvoice
         private TelegramNotifier $telegram,
         private OdooClient $odoo,
         private AlertTelegramDeliveryFailure $alertTelegramDeliveryFailure,
+        private CorrespondenceDocument $letters,
     ) {}
 
     public function handle(
@@ -53,7 +55,7 @@ class IssueInvoice
             }
 
             $paymentMethod = $request->payment_method?->value ?? PaymentMethod::Cash->value;
-            [$pdfPath, $odooInvoiceId] = $this->resolveInvoicePdf($request, $invoiceNumber, $resolvedAmount, $paymentMethod);
+            [$pdfPath, $odooInvoiceId] = $this->resolveInvoicePdf($request, $invoiceNumber, $resolvedAmount, $kind, $paymentMethod);
 
             $invoice = Invoice::query()->create([
                 'request_id' => $request->id,
@@ -110,21 +112,14 @@ class IssueInvoice
         ServiceRequest $request,
         string $invoiceNumber,
         float $amount,
+        string $kind,
         string $paymentMethod,
     ): array {
         if (! $this->odoo->configured()) {
-            if ((bool) config('services.telegram.strict')) {
-                throw ValidationException::withMessages([
-                    'odoo' => 'Odoo integration is required to issue invoice PDFs.',
-                ]);
-            }
-
-            Log::warning('Odoo not configured; issuing local invoice without PDF.', [
-                'request' => $request->number,
-            ]);
-
-            return ['', null];
+            return [$this->localInvoicePdf($request, $invoiceNumber, $amount, $kind, $paymentMethod), null];
         }
+
+        $odooInvoiceId = null;
 
         try {
             $partnerId = $request->client?->odoo_partner_id;
@@ -173,30 +168,48 @@ class IssueInvoice
             Storage::disk('local')->put($relativePath, $pdfBinary);
 
             return [$relativePath, $odooInvoiceId];
-        } catch (ValidationException $exception) {
-            if ((bool) config('services.telegram.strict')) {
-                throw $exception;
-            }
-
-            Log::warning('Odoo invoice PDF skipped; continuing locally.', [
+        } catch (Throwable $exception) {
+            Log::warning('Odoo invoice PDF skipped; using the correspondence template.', [
                 'request' => $request->number,
                 'error' => $exception->getMessage(),
             ]);
 
-            return ['', null];
+            return [
+                $this->localInvoicePdf($request, $invoiceNumber, $amount, $kind, $paymentMethod),
+                filled($odooInvoiceId) ? (string) $odooInvoiceId : null,
+            ];
+        }
+    }
+
+    private function localInvoicePdf(
+        ServiceRequest $request,
+        string $invoiceNumber,
+        float $amount,
+        string $kind,
+        string $paymentMethod,
+    ): string {
+        try {
+            return $this->letters->invoice(
+                $request,
+                $invoiceNumber,
+                $amount,
+                $kind,
+                $paymentMethod,
+                "invoices/{$invoiceNumber}-local.pdf",
+            );
         } catch (Throwable $exception) {
-            Log::error('Odoo invoice PDF failed.', [
+            Log::error('Correspondence invoice PDF failed.', [
                 'request' => $request->number,
                 'error' => $exception->getMessage(),
             ]);
 
             if ((bool) config('services.telegram.strict')) {
                 throw ValidationException::withMessages([
-                    'odoo' => 'Failed to create or download the Odoo invoice PDF.',
+                    'pdf' => 'تعذر إنشاء ملف الفاتورة.',
                 ]);
             }
 
-            return ['', null];
+            return '';
         }
     }
 

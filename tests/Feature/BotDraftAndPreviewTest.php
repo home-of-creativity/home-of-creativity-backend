@@ -96,13 +96,16 @@ class BotDraftAndPreviewTest extends TestCase
         Employee::factory()->sales()->create(['telegram_user_id' => 'sales-edit']);
         $request = ServiceRequest::factory()->create(['status' => RequestStatus::Submitted]);
 
-        $token = $this->staffBot()->postJson('/api/bot/staff/quotation/preview', [
+        $preview = $this->staffBot()->postJson('/api/bot/staff/quotation/preview', [
             'telegram_user_id' => 'sales-edit',
             'request_number' => $request->number,
             'amount' => 150,
-        ])->assertOk()
-            ->assertJsonPath('data.pdf_base64', null)
-            ->json('data.token');
+        ])->assertOk()->json('data');
+
+        $this->assertIsString($preview['pdf_base64']);
+        $this->assertStringStartsWith('%PDF', base64_decode((string) $preview['pdf_base64'], true) ?: '');
+        $this->assertStringNotContainsString('أودو لم يرد', $preview['card']);
+        $token = $preview['token'];
 
         $this->staffBot()->postJson('/api/bot/staff/quotation/discard', [
             'telegram_user_id' => 'sales-edit',

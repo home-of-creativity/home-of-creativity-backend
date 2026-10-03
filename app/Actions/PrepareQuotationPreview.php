@@ -7,6 +7,7 @@ use App\Models\Employee;
 use App\Models\ServiceRequest;
 use App\Services\OdooClient;
 use App\Support\BillingPeriod;
+use App\Support\CorrespondenceDocument;
 use App\Support\Money;
 use App\Support\ResolveServiceRequest;
 use Illuminate\Support\Facades\Cache;
@@ -24,7 +25,10 @@ class PrepareQuotationPreview
 {
     private const TTL_MINUTES = 120;
 
-    public function __construct(private OdooClient $odoo) {}
+    public function __construct(
+        private OdooClient $odoo,
+        private CorrespondenceDocument $letters,
+    ) {}
 
     /**
      * @return array{token: string, card: string, pdf_base64: string|null, file_name: string|null}
@@ -83,6 +87,12 @@ class PrepareQuotationPreview
                     'error' => $exception->getMessage(),
                 ]);
             }
+        }
+
+        if (! filled($prepared['pdf_path'])) {
+            $path = "quotations/preview-{$request->number}-{$token}.pdf";
+            $this->letters->quotation($request, $amount, $notes, null, $path);
+            $prepared['pdf_path'] = $path;
         }
 
         Cache::put($this->key($token), $prepared, now()->addMinutes(self::TTL_MINUTES));

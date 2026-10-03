@@ -11,6 +11,7 @@ use App\Services\OdooClient;
 use App\Services\OdooLeadLog;
 use App\Services\RequestStatusTransitionService;
 use App\Services\TelegramNotifier;
+use App\Support\CorrespondenceDocument;
 use App\Support\Money;
 use App\Support\ResolveServiceRequest;
 use Illuminate\Support\Facades\DB;
@@ -29,6 +30,7 @@ class SendQuotation
         private OdooClient $odoo,
         private AlertTelegramDeliveryFailure $alertTelegramDeliveryFailure,
         private OdooLeadLog $leadLog,
+        private CorrespondenceDocument $letters,
     ) {}
 
     /**
@@ -162,7 +164,8 @@ class SendQuotation
             return '';
         }
 
-        $finalPath = "quotations/{$request->number}-v{$version}-odoo.pdf";
+        $suffix = filled($prepared['odoo_quotation_id'] ?? null) ? 'odoo' : 'local';
+        $finalPath = "quotations/{$request->number}-v{$version}-{$suffix}.pdf";
         Storage::disk('local')->move($previewPath, $finalPath);
 
         return $finalPath;
@@ -179,17 +182,7 @@ class SendQuotation
         ?array $lines = null,
     ): string {
         if (! $this->odoo->configured()) {
-            if ((bool) config('services.telegram.strict')) {
-                throw ValidationException::withMessages([
-                    'odoo' => 'Odoo integration is required to send quotation PDFs.',
-                ]);
-            }
-
-            Log::warning('Odoo not configured; sending quotation without PDF.', [
-                'request' => $request->number,
-            ]);
-
-            return '';
+            return $this->localQuotationPdf($request, $amount, $notes, $version, $lines);
         }
 
         try {
@@ -221,26 +214,43 @@ class SendQuotation
             Storage::disk('local')->put($relativePath, $pdfBinary);
 
             return $relativePath;
-        } catch (ValidationException $exception) {
-            if ((bool) config('services.telegram.strict')) {
-                throw $exception;
-            }
-
-            Log::warning('Odoo quotation PDF skipped; continuing locally.', [
+        } catch (Throwable $exception) {
+            Log::warning('Odoo quotation PDF skipped; using the correspondence template.', [
                 'request' => $request->number,
                 'error' => $exception->getMessage(),
             ]);
 
-            return '';
+            return $this->localQuotationPdf($request, $amount, $notes, $version, $lines);
+        }
+    }
+
+    /**
+     * @param  list<array{title: string, amount: float|int|string, notes?: string|null}>|null  $lines
+     */
+    private function localQuotationPdf(
+        ServiceRequest $request,
+        float $amount,
+        ?string $notes,
+        int $version,
+        ?array $lines,
+    ): string {
+        try {
+            return $this->letters->quotation(
+                $request,
+                $amount,
+                $notes,
+                $lines,
+                "quotations/{$request->number}-v{$version}-local.pdf",
+            );
         } catch (Throwable $exception) {
-            Log::error('Odoo quotation PDF failed.', [
+            Log::error('Correspondence quotation PDF failed.', [
                 'request' => $request->number,
                 'error' => $exception->getMessage(),
             ]);
 
             if ((bool) config('services.telegram.strict')) {
                 throw ValidationException::withMessages([
-                    'odoo' => 'Failed to create or download the Odoo quotation PDF.',
+                    'pdf' => 'تعذر إنشاء ملف عرض السعر.',
                 ]);
             }
 
