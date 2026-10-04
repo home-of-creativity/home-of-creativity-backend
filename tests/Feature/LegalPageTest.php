@@ -28,6 +28,32 @@ class LegalPageTest extends TestCase
             ->assertJsonPath('data.sections.0.id', 'intro');
     }
 
+    public function test_privacy_intro_migration_lists_every_office_and_keeps_other_text(): void
+    {
+        LegalPage::factory()->create([
+            'sections' => [
+                [
+                    'id' => 'intro',
+                    'heading_ar' => 'مقدمة',
+                    'heading_en' => 'Introduction',
+                    'html_ar' => '<p>بيت الإبداع وكالة هوية بصرية تعمل من دمشق. نص يحرره الفريق.</p>',
+                    'html_en' => '<p>Home of Creativity is a brand studio based in Damascus. Staff text.</p>',
+                ],
+                ['id' => 'contact', 'html_ar' => '<p>بيت الإبداع — دمشق، الحمراء.</p>', 'html_en' => '<p>Damascus, Al Hamra.</p>'],
+            ],
+        ]);
+
+        (require database_path('migrations/2026_10_04_090000_privacy_intro_lists_all_offices.php'))->up();
+
+        $sections = LegalPage::query()->where('slug', 'privacy')->firstOrFail()->sections;
+        $this->assertSame(
+            '<p>بيت الإبداع وكالة هوية بصرية بمكاتب في دمشق (الحمراء) والرياض (المربّع) والإمارات العربية المتحدة. نص يحرره الفريق.</p>',
+            $sections[0]['html_ar'],
+        );
+        $this->assertStringContainsString('with offices in Damascus (Al Hamra), Riyadh (Al Murabba) and the United Arab Emirates. Staff text.', $sections[0]['html_en']);
+        $this->assertSame('<p>بيت الإبداع — دمشق، الحمراء.</p>', $sections[1]['html_ar']);
+    }
+
     public function test_guest_cannot_update_legal_pages(): void
     {
         LegalPage::factory()->create();

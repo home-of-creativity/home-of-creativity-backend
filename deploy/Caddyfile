@@ -133,7 +133,7 @@
 		file_server
 	}
 
-	@siteFresh path /sw.js /robots.txt /manifest.webmanifest
+	@siteFresh path /sw.js /robots.txt /manifest.webmanifest /cms-version.txt
 	handle @siteFresh {
 		root * /var/www/design
 		encode zstd gzip
@@ -141,17 +141,27 @@
 		file_server
 	}
 
+	# Build-time 240px WebP logos named by content hash: a new logo is a new URL.
 	@clientLogos path /generated/clients/*
 	handle @clientLogos {
 		root * /var/www/design
 		encode zstd gzip
-		header Cache-Control "no-cache"
+		header Cache-Control "public, max-age=31536000, immutable"
+		file_server
+	}
+
+	# Rewritten with each build (prices, offices, articles); a month was too long.
+	@siteDaily path /llms.txt /llms-full.txt
+	handle @siteDaily {
+		root * /var/www/design
+		encode zstd gzip
+		header Cache-Control "public, max-age=86400"
 		file_server
 	}
 
 	@siteAsset {
 		path *.css *.js *.mjs *.map *.woff *.woff2 *.ttf *.png *.jpg *.jpeg *.webp *.avif *.svg *.ico *.txt *.xml *.webmanifest *.mp4 *.webm
-		not path /dashboard /dashboard/* /sw.js /robots.txt /manifest.webmanifest /generated/clients /generated/clients/*
+		not path /dashboard /dashboard/* /sw.js /robots.txt /manifest.webmanifest /cms-version.txt /llms.txt /llms-full.txt /generated/clients /generated/clients/*
 	}
 	handle @siteAsset {
 		root * /var/www/design
@@ -187,6 +197,10 @@
 		}
 		redir @indexWithoutSlash https://hoc.agency{path}/ 301
 
+		# /pricing/index.html is the same page as /pricing/. One URL per page.
+		@indexFile path_regexp indexfile ^(.*/)index.html$
+		redir @indexFile https://hoc.agency{re.indexfile.1} 301
+
 		# Old query URLs. Unknown /articles/{slug}/ has no file and falls through to 404.
 		@legacyArticleDetail {
 			path /articles/detail /articles/detail/
@@ -199,16 +213,6 @@
 			query slug=*
 		}
 		redir @legacyArticleQuery /articles/{query.slug}/ 301
-
-		# A project published after the last export has no /projects/{id}/index.html.
-		# Keep the address and serve the live page, which loads that project from the API.
-		@missingProject {
-			path_regexp ^/projects/[0-9]+/?$
-			not file {
-				try_files {path}/index.html {path}index.html
-			}
-		}
-		rewrite @missingProject /projects/view/index.html
 
 		@static file {
 			try_files {path} {path}/index.html
@@ -231,6 +235,11 @@
 
 :80 {
 	import hoc_app
+}
+
+# Without this block Caddy sends http://www to https://www first, then to https://hoc.agency.
+http://www.hoc.agency {
+	redir https://hoc.agency{uri} permanent
 }
 
 www.hoc.agency {

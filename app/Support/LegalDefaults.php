@@ -30,11 +30,11 @@ class LegalDefaults
                     'heading_ar' => 'من نحن',
                     'heading_en' => 'Who we are',
                     'html_ar' => <<<'HTML'
-<p>بيت الإبداع (Home of Creativity / HOC) وكالة هوية بصرية تعمل من دمشق. تشرح هذه السياسة كيف نجمع المعلومات الشخصية ونستخدمها ونحميها عند زيارة <a href="https://hoc.agency">hoc.agency</a> أو التواصل معنا عبر واتساب أو بوت تيليجرام أو لوحة الموظفين.</p>
+<p>بيت الإبداع (Home of Creativity / HOC) وكالة هوية بصرية بمكاتب في دمشق (الحمراء) والرياض (المربّع) والإمارات العربية المتحدة. تشرح هذه السياسة كيف نجمع المعلومات الشخصية ونستخدمها ونحميها عند زيارة <a href="https://hoc.agency">hoc.agency</a> أو التواصل معنا عبر واتساب أو بوت تيليجرام أو لوحة الموظفين.</p>
 <p>آخر تحديث: 21 سبتمبر 2026.</p>
 HTML,
                     'html_en' => <<<'HTML'
-<p>Home of Creativity (HOC / بيت الإبداع) is a brand studio based in Damascus. This policy explains how we collect, use, and protect personal information when you visit <a href="https://hoc.agency">hoc.agency</a>, message us on WhatsApp, use our Telegram client bot, or work with our staff tools.</p>
+<p>Home of Creativity (HOC / بيت الإبداع) is a brand studio with offices in Damascus (Al Hamra), Riyadh (Al Murabba) and the United Arab Emirates. This policy explains how we collect, use, and protect personal information when you visit <a href="https://hoc.agency">hoc.agency</a>, message us on WhatsApp, use our Telegram client bot, or work with our staff tools.</p>
 <p>Last updated: 21 September 2026.</p>
 HTML,
                 ],
