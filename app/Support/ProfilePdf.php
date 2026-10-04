@@ -49,7 +49,20 @@ class ProfilePdf
     }
 
     /**
-     * @return array{url: string|null, name: string|null, updated_at: string|null}
+     * Cache-busting value for the file URL: the file's own last-modified time (UTC, YmdHis),
+     * which is what the file response sends as Last-Modified. The settings date can be older
+     * than the file on disk.
+     */
+    public static function version(): ?string
+    {
+        $absolute = self::absolutePath();
+        $mtime = $absolute === null ? false : filemtime($absolute);
+
+        return $mtime === false ? null : gmdate('YmdHis', $mtime);
+    }
+
+    /**
+     * @return array{url: string|null, name: string|null, updated_at: string|null, version: string|null}
      */
     public static function payload(): array
     {
@@ -59,6 +72,7 @@ class ProfilePdf
             'url' => $path === null ? null : url('/api/profile-pdf/file'),
             'name' => $path === null ? null : self::originalName(),
             'updated_at' => $path === null ? null : OpsSetting::getValue('profile_pdf_updated_at'),
+            'version' => $path === null ? null : self::version(),
         ];
     }
 }

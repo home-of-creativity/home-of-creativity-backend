@@ -19,7 +19,8 @@ class ProfilePdfTest extends TestCase
         $this->getJson('/api/profile-pdf')
             ->assertOk()
             ->assertJsonPath('data.url', null)
-            ->assertJsonPath('data.name', null);
+            ->assertJsonPath('data.name', null)
+            ->assertJsonPath('data.version', null);
 
         $this->get('/api/profile-pdf/file')->assertNotFound();
     }
@@ -52,6 +53,10 @@ class ProfilePdfTest extends TestCase
             ->assertOk()
             ->assertHeader('Content-Security-Policy', "frame-ancestors 'self' https://hoc.agency https://www.hoc.agency");
         $this->assertNotNull(ProfilePdf::absolutePath());
+        $this->assertSame(
+            gmdate('YmdHis', filemtime(ProfilePdf::absolutePath())),
+            $this->getJson('/api/profile-pdf')->json('data.version'),
+        );
 
         $this->post('/api/admin/ops-settings/profile-pdf', [
             'file' => $this->fakePdf('profile-v2.pdf'),
