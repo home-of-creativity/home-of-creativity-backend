@@ -54,6 +54,35 @@ class LegalPageTest extends TestCase
         $this->assertSame('<p>بيت الإبداع — دمشق، الحمراء.</p>', $sections[1]['html_ar']);
     }
 
+    public function test_telegram_bot_migration_drops_only_that_contact_line(): void
+    {
+        LegalPage::factory()->create([
+            'sections' => [[
+                'id' => 'contact',
+                'html_ar' => "<ul>
+<li>واتساب: <a href=\"https://wa.me/963954187154\">+963</a></li>
+<li>تيليجرام: <a href=\"https://t.me/pro_design_perfect_bot\">بوت العملاء</a></li>
+<li>البريد: admin@hoc.agency</li>
+</ul>",
+                'html_en' => "<ul>
+<li>Telegram: <a href=\"https://t.me/pro_design_perfect_bot\">client bot</a></li>
+<li>Email: admin@hoc.agency</li>
+</ul>",
+            ]],
+        ]);
+
+        (require database_path('migrations/2026_10_04_130000_remove_telegram_bot_link_from_legal_pages.php'))->up();
+
+        $section = LegalPage::query()->where('slug', 'privacy')->firstOrFail()->sections[0];
+        $this->assertSame("<ul>
+<li>واتساب: <a href=\"https://wa.me/963954187154\">+963</a></li>
+<li>البريد: admin@hoc.agency</li>
+</ul>", $section['html_ar']);
+        $this->assertSame("<ul>
+<li>Email: admin@hoc.agency</li>
+</ul>", $section['html_en']);
+    }
+
     public function test_guest_cannot_update_legal_pages(): void
     {
         LegalPage::factory()->create();

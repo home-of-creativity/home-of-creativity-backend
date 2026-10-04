@@ -192,7 +192,6 @@ HTML,
 <p>بيت الإبداع — دمشق، الحمراء.</p>
 <ul>
 <li>واتساب: <a href="https://wa.me/963954187154">+963 954 187 154</a></li>
-<li>تيليجرام: <a href="https://t.me/pro_design_perfect_bot">بوت العملاء</a></li>
 <li>البريد: <a href="mailto:admin@hoc.agency">admin@hoc.agency</a></li>
 </ul>
 HTML,
@@ -200,7 +199,6 @@ HTML,
 <p>Home of Creativity — Damascus, Al Hamra.</p>
 <ul>
 <li>WhatsApp: <a href="https://wa.me/963954187154">+963 954 187 154</a></li>
-<li>Telegram: <a href="https://t.me/pro_design_perfect_bot">client bot</a></li>
 <li>Email: <a href="mailto:admin@hoc.agency">admin@hoc.agency</a></li>
 </ul>
 HTML,
@@ -405,7 +403,6 @@ HTML,
 <p>بيت الإبداع — دمشق، الحمراء.</p>
 <ul>
 <li>واتساب: <a href="https://wa.me/963954187154">+963 954 187 154</a></li>
-<li>تيليجرام: <a href="https://t.me/pro_design_perfect_bot">بوت العملاء</a></li>
 <li>البريد: <a href="mailto:admin@hoc.agency">admin@hoc.agency</a></li>
 </ul>
 HTML,
@@ -413,7 +410,6 @@ HTML,
 <p>Home of Creativity — Damascus, Al Hamra.</p>
 <ul>
 <li>WhatsApp: <a href="https://wa.me/963954187154">+963 954 187 154</a></li>
-<li>Telegram: <a href="https://t.me/pro_design_perfect_bot">client bot</a></li>
 <li>Email: <a href="mailto:admin@hoc.agency">admin@hoc.agency</a></li>
 </ul>
 HTML,
