@@ -15,14 +15,16 @@ use Illuminate\Support\Facades\Storage;
 
 class PortfolioProjectController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
+        $perPage = max(1, min((int) $request->integer('per_page', 50), 200));
+
         return PortfolioProjectResource::collection(
             PortfolioProject::query()
                 ->with(['category', 'images', 'related'])
                 ->orderBy('sort_order')
                 ->orderByDesc('id')
-                ->paginate(50)
+                ->paginate($perPage)
         )->additional(['message' => 'ok']);
     }
 

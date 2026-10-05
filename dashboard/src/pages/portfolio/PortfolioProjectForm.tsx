@@ -15,6 +15,19 @@ import { categoryLabel } from "./utils";
 
 const urlField = (t: (c: { ar: string; en: string }) => string) => z.union([z.literal(""), z.string().trim().url(t(copy.invalidUrl))]);
 
+async function loadPortfolioProjects(): Promise<PortfolioProject[]> {
+  const rows: PortfolioProject[] = [];
+  let page = 1;
+  let lastPage = 1;
+  do {
+    const res = await api.portfolioProjects(page, 200);
+    rows.push(...res.data);
+    lastPage = res.meta?.last_page ?? 1;
+    page += 1;
+  } while (page <= lastPage);
+  return rows;
+}
+
 export function PortfolioProjectForm({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
   const navigate = useNavigate();
   const params = useParams();
@@ -95,23 +108,18 @@ export function PortfolioProjectForm({ locale, t }: { locale: Locale; t: (c: { a
   }, [editingId, setValue, watch]);
 
   useEffect(() => {
-    // Candidates for "related projects": every project except this one.
-    api
-      .portfolioProjects(1)
-      .then((res) => setOtherProjects(res.data.filter((row) => row.id !== editingId)))
-      .catch(() => setOtherProjects([]));
-  }, [editingId]);
-
-  useEffect(() => {
-    if (!editingId) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    api
-      .portfolioProjects(1)
-      .then((res) => res.data.find((row) => row.id === editingId))
+    let active = true;
+    setLoading(Boolean(editingId));
+    // Every page, so a project past the first page can still be picked as related.
+    loadPortfolioProjects()
+      .then((rows) => {
+        if (!active) return;
+        setOtherProjects(rows.filter((row) => row.id !== editingId));
+        if (!editingId) return;
+        return rows.find((row) => row.id === editingId) ?? null;
+      })
       .then((item) => {
+        if (!active || !editingId) return;
         if (!item) {
           setError(t(copy.savePortfolioFailed));
           return;
@@ -141,8 +149,15 @@ export function PortfolioProjectForm({ locale, t }: { locale: Locale; t: (c: { a
         setExistingGallery(item.images ?? []);
         setRelatedIds(item.related_ids ?? []);
       })
-      .catch(() => setError(t(copy.savePortfolioFailed)))
-      .finally(() => setLoading(false));
+      .catch(() => {
+        if (active) setError(t(copy.savePortfolioFailed));
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, [editingId, reset, t]);
 
   async function onValid(values: {
@@ -296,12 +311,12 @@ export function PortfolioProjectForm({ locale, t }: { locale: Locale; t: (c: { a
       <FormSection title={t(copy.relatedProjects)} span>
         <p className="muted field-span">{t(copy.relatedProjectsHint)}</p>
         {otherProjects.length === 0 ? <p className="muted field-span">{t(copy.relatedProjectsEmpty)}</p> : null}
-        <div className="gallery-preview-grid field-span">
+        <div className="related-project-list field-span">
           {otherProjects.map((item) => {
             const position = relatedIds.indexOf(item.id);
+            const title = locale === "ar" ? item.title_ar : item.title_en;
             return (
-              <label key={item.id} className={position >= 0 ? "gallery-preview-item is-picked" : "gallery-preview-item"}>
-                {item.image_url ? <img src={item.image_url} alt="" referrerPolicy="no-referrer" className="gallery-preview-thumb" /> : null}
+              <label key={item.id} className={position >= 0 ? "related-pick is-picked" : "related-pick"}>
                 <input
                   type="checkbox"
                   checked={position >= 0}
@@ -309,7 +324,7 @@ export function PortfolioProjectForm({ locale, t }: { locale: Locale; t: (c: { a
                     setRelatedIds((prev) => (prev.includes(item.id) ? prev.filter((id) => id !== item.id) : [...prev, item.id]))
                   }
                 />
-                <span>{position >= 0 ? `${position + 1}. ` : ""}{locale === "ar" ? item.title_ar : item.title_en}</span>
+                <span>{position >= 0 ? `${position + 1}. ${title}` : title}</span>
               </label>
             );
           })}

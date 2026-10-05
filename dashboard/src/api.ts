@@ -1217,8 +1217,8 @@ export const api = {
   deleteAllShowcaseClients() {
     return request<Envelope<{ deleted: number }>>("/admin/portfolio/clients/bulk", { method: "DELETE" });
   },
-  portfolioProjects(page = 1) {
-    return request<Paginated<PortfolioProject>>(`/admin/portfolio/projects${queryString({ page })}`);
+  portfolioProjects(page = 1, perPage?: number) {
+    return request<Paginated<PortfolioProject>>(`/admin/portfolio/projects${queryString({ page, per_page: perPage })}`);
   },
   createPortfolioProject(form: FormData) {
     return submitForm<Envelope<PortfolioProject>>("/admin/portfolio/projects", "POST", form);
