@@ -150,6 +150,7 @@ export function ReportGemini({
   fonts: Array<{ family: string }>;
   onInstallFont: (family: string, file: File) => Promise<void>;
 }) {
+  const fontRows = Array.isArray(fonts) ? fonts : [];
   const [instruction, setInstruction] = useState("");
   const [scope, setScope] = useState<Scope>("selection");
   const [saveMemory, setSaveMemory] = useState(false);
@@ -573,9 +574,9 @@ export function ReportGemini({
           {t(copy.reportFontFile)}
           <input type="file" accept=".ttf,.otf,font/ttf,font/otf" hidden disabled={busy} onChange={(event) => { void installFont(event.target.files?.[0]); event.target.value = ""; }} />
         </label>
-        {fonts.length > 0 ? (
+        {fontRows.length > 0 ? (
           <ul className="report-font-list">
-            {fonts.map((font) => <li key={font.family}>{font.family}</li>)}
+            {fontRows.map((font) => <li key={font.family}>{font.family}</li>)}
           </ul>
         ) : null}
       </fieldset>

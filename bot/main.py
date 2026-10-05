@@ -921,13 +921,21 @@ async def show_catalog(
         parent = subcategory_id
         scope = "sub"
 
-    payload = await fetch_catalog(
-        telegram_id,
-        category_id=category_id,
-        subcategory_id=subcategory_id,
-        package_id=package_id,
-        offset=offset,
-    )
+    try:
+        payload = await fetch_catalog(
+            telegram_id,
+            category_id=category_id,
+            subcategory_id=subcategory_id,
+            package_id=package_id,
+            offset=offset,
+        )
+    except httpx.HTTPError:
+        await send_catalog_result(
+            message,
+            "تعذر تحميل القائمة الآن. أعد المحاولة بعد ثوانٍ.",
+            replace=replace,
+        )
+        return
     kind = str(payload.get("kind") or "")
     if kind == "periods":
         first = (payload.get("items") or [{}])[0]

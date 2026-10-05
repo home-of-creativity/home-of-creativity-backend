@@ -12,8 +12,9 @@ def init_sentry() -> None:
 
     def _drop_transient(event, hint):
         error = (hint or {}).get("exc_info", (None, None))[1]
-        message = str(getattr(error, "message", "") or error or "")
-        if "Bad Gateway" in message or "NetworkError" in message or "Timed out" in message:
+        name = type(error).__name__ if error is not None else ""
+        message = f"{name} {getattr(error, 'message', '') or error or ''}"
+        if any(token in message for token in ("Bad Gateway", "NetworkError", "Timed out", "ReadTimeout", "Timeout")):
             return None
         return event
 

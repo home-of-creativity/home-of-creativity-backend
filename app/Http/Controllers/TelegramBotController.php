@@ -536,7 +536,17 @@ class TelegramBotController extends Controller
             'offset' => ['nullable', 'integer', 'min:0'],
         ]);
 
-        $this->resolveTelegramClient->handle($validated['telegram_user_id']);
+        $client = Client::findForTelegram($validated['telegram_user_id']);
+        abort_if($client === null, 404);
+
+        // A missing Odoo lead is retried after the JSON is sent, so browsing the catalog
+        // does not wait on Odoo and the bot does not time out.
+        if ($client->readyForOdoo() && blank($client->odoo_lead_id)) {
+            $telegramUserId = (string) $client->telegram_user_id;
+            app()->terminating(function () use ($telegramUserId): void {
+                app(ResolveTelegramClient::class)->handle($telegramUserId);
+            });
+        }
 
         $offset = (int) ($validated['offset'] ?? 0);
         $items = [];
