@@ -4,7 +4,6 @@ namespace App\Support;
 
 use App\Enums\PaymentMethod;
 use App\Models\ServiceRequest;
-use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Storage;
 
@@ -82,9 +81,7 @@ class CorrespondenceDocument
      */
     private function put(string $relativePath, array $document): string
     {
-        $binary = Pdf::loadView('correspondence.letter', $document)
-            ->setPaper('a4')
-            ->output();
+        $binary = app(ArabicPdf::class)->render('correspondence.letter', $document);
         Storage::disk('local')->put($relativePath, $binary);
 
         return $relativePath;

@@ -57,7 +57,9 @@ class CorrespondenceDocumentTest extends TestCase
         $quotation = Quotation::query()->first();
         $this->assertNotNull($quotation);
         $this->assertSame("quotations/{$request->number}-v1-local.pdf", $quotation->pdf_path);
-        $this->assertStringStartsWith('%PDF', Storage::disk('local')->get($quotation->pdf_path));
+        $quotationPdf = Storage::disk('local')->get($quotation->pdf_path);
+        $this->assertStringStartsWith('%PDF', $quotationPdf);
+        $this->assertStringContainsString('IBMPlexSansArabic', $quotationPdf);
 
         $request->forceFill([
             'status' => RequestStatus::PaymentConfirmed,

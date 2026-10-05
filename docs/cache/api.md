@@ -1,6 +1,6 @@
 # Laravel API
 
-Last updated: 3 October 2026 (WhatsApp locked unless `WHATSAPP_ENABLED`; profile asks email + activity before the Odoo lead; `odoo_lead_notes` log on the lead; ClickUp created by Laravel only with retry; manual client decisions, finance, and bot drafts endpoints; staff quotation preview; quotation and invoice PDFs fall back to `correspondence.letter` when Odoo does not return a file)
+Last updated: 3 October 2026 (WhatsApp locked unless `WHATSAPP_ENABLED`; profile asks email + activity before the Odoo lead; `odoo_lead_notes` log on the lead; ClickUp created by Laravel only with retry; manual client decisions, finance, and bot drafts endpoints; staff quotation preview; quotation and invoice PDFs fall back to `correspondence.letter` (mPDF + IBM Plex Sans Arabic, so Arabic joins) when Odoo does not return a file)
 Last updated: 1 October 2026 (project gallery files under `/storage/portfolio/projects` are `Cache-Control: no-cache`, and each image includes `updated_at`)
 Last updated: 30 September 2026 (portfolio seeder keeps categories only; migration drops collage projects whose images are Google Drive URLs)
 Last updated: 29 September 2026 (public CSP allows Google fonts; sw.js, robots.txt, and the web manifest are no-cache; `/articles/detail/?slug=` and `/articles/?slug=` 301 to `/articles/{slug}/`)

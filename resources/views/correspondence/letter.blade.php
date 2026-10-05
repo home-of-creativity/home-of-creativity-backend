@@ -4,10 +4,10 @@
     <meta charset="utf-8">
     <style>
         @page { margin: 0; }
-        body { margin: 0; font-family: DejaVu Sans, sans-serif; color: #1a0838; font-size: 12px; }
+        body { margin: 0; font-family: ibmplexarabic, sans-serif; color: #1a0838; font-size: 12px; direction: rtl; }
         .band { background: #2e0e5c; color: #fff; padding: 18px 28px 16px; }
         .brand { font-size: 18px; letter-spacing: 0; }
-        .brand-en { font-size: 11px; color: #f0d8c4; margin-top: 2px; }
+        .brand-en { font-size: 11px; color: #f0d8c4; margin-top: 2px; text-align: right; }
         .kicker { font-size: 22px; margin-top: 14px; }
         .rule { height: 5px; background: #e07020; }
         .sheet { padding: 22px 28px 18px; }
@@ -29,7 +29,7 @@
 <body>
     <div class="band">
         <div class="brand">دار الإبداع</div>
-        <div class="brand-en">Home of Creativity</div>
+        <div class="brand-en" dir="ltr">Home of Creativity</div>
         <div class="kicker">{{ $kicker }}</div>
     </div>
     <div class="rule"></div>
@@ -38,11 +38,11 @@
             <tr>
                 <td>
                     <div class="label">الرقم</div>
-                    <div class="value">{{ $number }}</div>
+                    <div class="value" dir="ltr">{{ $number }}</div>
                 </td>
                 <td>
                     <div class="label">التاريخ</div>
-                    <div class="value">{{ $date }}</div>
+                    <div class="value" dir="ltr">&#x202A;{{ $date }}&#x202C;</div>
                 </td>
             </tr>
             <tr>
@@ -58,11 +58,11 @@
             <tr>
                 <td>
                     <div class="label">الهاتف</div>
-                    <div class="value">{{ $phone }}</div>
+                    <div class="value" dir="ltr">&#x202A;{{ $phone }}&#x202C;</div>
                 </td>
                 <td>
                     <div class="label">البريد</div>
-                    <div class="value">{{ $email }}</div>
+                    <div class="value" dir="ltr">&#x202A;{{ $email }}&#x202C;</div>
                 </td>
             </tr>
         </table>
@@ -71,7 +71,7 @@
             @foreach($rows as $row)
                 <tr>
                     <td>{{ $row['label'] }}</td>
-                    <td class="amount">{{ $row['value'] }}</td>
+                    <td class="amount" dir="ltr">{{ $row['value'] }}</td>
                 </tr>
             @endforeach
         </table>
@@ -80,12 +80,12 @@
         @endif
         <div class="total">
             المجموع
-            <span>{{ $total }}</span>
+            <span dir="ltr">{{ $total }}</span>
         </div>
         @if(filled($aside))
             <div class="aside">{{ $aside }}</div>
         @endif
     </div>
-    <div class="foot">hoc.agency · {{ \App\Support\ClientChannelGate::SUPPORT_PHONE }}</div>
+    <div class="foot" dir="ltr">hoc.agency · {{ \App\Support\ClientChannelGate::SUPPORT_PHONE }}</div>
 </body>
 </html>
