@@ -16,20 +16,19 @@ class HydrateEmployeeFromOdoo
             return $employee;
         }
 
-        $live = $this->odoo->employeeSnapshot((string) $employee->odoo_employee_id);
+        try {
+            $live = $this->odoo->employeeSnapshot((string) $employee->odoo_employee_id);
+        } catch (\Throwable $exception) {
+            Log::warning('Odoo employee snapshot failed. Local employee kept.', [
+                'employee_id' => $employee->id,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return $employee;
+        }
+
         if ($live === null) {
             $employee->forceFill(['odoo_employee_id' => null])->save();
-
-            if (! filled($employee->telegram_user_id)) {
-                try {
-                    $employee->delete();
-                } catch (\Throwable $exception) {
-                    Log::warning('Could not remove local employee after Odoo delete.', [
-                        'employee_id' => $employee->id,
-                        'error' => $exception->getMessage(),
-                    ]);
-                }
-            }
 
             return $employee;
         }

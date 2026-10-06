@@ -29,6 +29,8 @@ export function EmployeeForm({ t }: { locale: Locale; t: (c: { ar: string; en: s
         clickup_user_id: z.string().trim(),
         profession: z.string(),
         notes: z.string().trim(),
+        telegram_user_id: z.string().trim(),
+        telegram_username: z.string().trim(),
         is_active: z.boolean(),
       }),
     [t],
@@ -48,6 +50,8 @@ export function EmployeeForm({ t }: { locale: Locale; t: (c: { ar: string; en: s
       clickup_user_id: "",
       profession: "sales",
       notes: "",
+      telegram_user_id: "",
+      telegram_username: "",
       is_active: true,
     },
   });
@@ -66,13 +70,9 @@ export function EmployeeForm({ t }: { locale: Locale; t: (c: { ar: string; en: s
     }
     setLoading(true);
     api
-      .employees()
+      .employee(editingId)
       .then((res) => {
-        const item = res.data.find((row) => row.id === editingId);
-        if (!item) {
-          setError(t(copy.saveFailed));
-          return;
-        }
+        const item = res.data;
         if (isApprove) {
           reset({
             name: item.name,
@@ -81,6 +81,8 @@ export function EmployeeForm({ t }: { locale: Locale; t: (c: { ar: string; en: s
             clickup_user_id: item.clickup_user_id ?? "",
             profession: item.profession || "sales",
             notes: "",
+            telegram_user_id: "",
+            telegram_username: "",
             is_active: true,
           });
         } else {
@@ -91,6 +93,8 @@ export function EmployeeForm({ t }: { locale: Locale; t: (c: { ar: string; en: s
             clickup_user_id: item.clickup_user_id ?? "",
             profession: item.profession,
             notes: item.notes ?? "",
+            telegram_user_id: item.telegram_user_id ?? "",
+            telegram_username: item.telegram_username ?? "",
             is_active: item.is_active,
           });
         }
@@ -106,6 +110,8 @@ export function EmployeeForm({ t }: { locale: Locale; t: (c: { ar: string; en: s
     clickup_user_id: string;
     profession: string;
     notes: string;
+    telegram_user_id: string;
+    telegram_username: string;
     is_active: boolean;
   }) {
     setError("");
@@ -117,20 +123,27 @@ export function EmployeeForm({ t }: { locale: Locale; t: (c: { ar: string; en: s
       clickup_user_id: values.clickup_user_id.trim() || null,
       profession: values.profession,
       notes: values.notes.trim() || null,
+      telegram_user_id: values.telegram_user_id.trim() || null,
+      telegram_username: values.telegram_username.trim().replace(/^@/, "") || null,
       is_active: values.is_active,
     };
     try {
+      let odooError: string | null | undefined;
       if (isApprove && editingId) {
         await api.approveEmployee(editingId, {
           profession: payload.profession,
           clickup_user_id: payload.clickup_user_id,
         });
       } else if (editingId) {
-        await api.updateEmployee(editingId, payload);
+        odooError = (await api.updateEmployee(editingId, payload)).odoo_error;
       } else {
-        await api.createEmployee(payload);
+        odooError = (await api.createEmployee(payload)).odoo_error;
       }
-      toast.success(t(copy.saveSuccess));
+      if (odooError) {
+        toast.error(`${t(copy.employeeSavedOdooFailed)} ${odooError}`);
+      } else {
+        toast.success(t(copy.saveSuccess));
+      }
       navigate("/employees");
     } catch (err) {
       const message = err instanceof Error ? err.message : t(copy.saveFailed);
@@ -167,7 +180,6 @@ export function EmployeeForm({ t }: { locale: Locale; t: (c: { ar: string; en: s
           <label className="field-label">
             {t(copy.employeeCode)}
             <input className="field" dir="ltr" readOnly value={watch("code") ?? ""} />
-            <p className="muted">{t(copy.linkTelegramHint).replace("{code}", watch("code") || "—")}</p>
           </label>
         ) : null}
         {!isApprove ? (
@@ -176,6 +188,19 @@ export function EmployeeForm({ t }: { locale: Locale; t: (c: { ar: string; en: s
               {t(copy.phone)}
               <input className="field" dir="ltr" {...register("phone")} />
             </label>
+            <label className="field-label">
+              {t(copy.telegramUsername)}
+              <input className="field" dir="ltr" placeholder="@name" {...register("telegram_username")} />
+            </label>
+            <label className="field-label">
+              {t(copy.telegramUserId)}
+              <input className="field" dir="ltr" inputMode="numeric" {...register("telegram_user_id")} />
+            </label>
+            <p className="muted field-span">
+              {editingId
+                ? t(copy.linkTelegramHint).replace("{code}", watch("code") || "—")
+                : t(copy.linkTelegramLater)}
+            </p>
           </>
         ) : null}
       </FormSection>

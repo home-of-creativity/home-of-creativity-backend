@@ -26,13 +26,11 @@ class SyncOdooEmployees
         }
 
         $rows = $this->odoo->listEmployees($limit);
-        $seenIds = [];
         $created = 0;
         $updated = 0;
 
         foreach ($rows as $row) {
             $odooId = (string) $row['id'];
-            $seenIds[] = $odooId;
             $employee = Employee::query()->where('odoo_employee_id', $odooId)->first();
 
             if (! $employee && filled($row['email'])) {
@@ -81,29 +79,6 @@ class SyncOdooEmployees
                     'error' => $exception->getMessage(),
                 ]);
             }
-        }
-
-        if (count($rows) < $limit) {
-            $missing = Employee::query()->whereNotNull('odoo_employee_id');
-            if ($seenIds !== []) {
-                $missing->whereNotIn('odoo_employee_id', $seenIds);
-            }
-            $missing->each(function (Employee $employee): void {
-                $employee->forceFill(['odoo_employee_id' => null])->save();
-
-                if (filled($employee->telegram_user_id)) {
-                    return;
-                }
-
-                try {
-                    $employee->delete();
-                } catch (\Throwable $exception) {
-                    Log::warning('Could not remove local employee missing from Odoo list.', [
-                        'employee_id' => $employee->id,
-                        'error' => $exception->getMessage(),
-                    ]);
-                }
-            });
         }
 
         $pushed = 0;

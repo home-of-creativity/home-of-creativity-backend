@@ -9,13 +9,22 @@ use Illuminate\Support\Facades\Log;
 
 class PushEmployeeToOdoo
 {
+    private ?string $lastError = null;
+
     public function __construct(private OdooClient $odoo) {}
+
+    public function lastError(): ?string
+    {
+        return $this->lastError;
+    }
 
     public function handle(Employee $employee): Employee
     {
         if (! $this->odoo->configured() || $employee->status !== EmployeeStatus::Approved) {
             return $employee;
         }
+
+        $this->lastError = null;
 
         try {
             if (filled($employee->odoo_employee_id)) {
@@ -37,8 +46,14 @@ class PushEmployeeToOdoo
                 $employee->code,
                 $employee->is_active,
             );
-            $employee->forceFill(['odoo_employee_id' => $employeeId])->save();
+            if (! is_numeric($employeeId) || (int) $employeeId <= 0) {
+                $this->lastError = 'Odoo did not return an employee id.';
+
+                return $this->reload($employee);
+            }
+            $employee->forceFill(['odoo_employee_id' => (string) $employeeId])->save();
         } catch (\Throwable $exception) {
+            $this->lastError = $exception->getMessage();
             Log::warning('Odoo employee sync failed.', [
                 'employee_id' => $employee->id,
                 'error' => $exception->getMessage(),

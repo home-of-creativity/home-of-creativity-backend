@@ -1451,6 +1451,78 @@ class AdminDashboardTest extends TestCase
         ]);
     }
 
+    public function test_employee_sync_keeps_local_staff_when_odoo_returns_no_rows(): void
+    {
+        Http::preventStrayRequests();
+        config([
+            'services.odoo.enabled' => true,
+            'services.odoo.url' => 'https://odoo.test',
+            'services.odoo.db' => 'hoc',
+            'services.odoo.username' => 'admin',
+            'services.odoo.api_key' => 'secret-key',
+        ]);
+        Http::fake([
+            'https://odoo.test/jsonrpc' => Http::sequence()
+                ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => 2], 200)
+                ->push(['jsonrpc' => '2.0', 'id' => 2, 'result' => []], 200),
+        ]);
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        $employee = Employee::factory()->create([
+            'name' => 'Kept Staff',
+            'odoo_employee_id' => '40',
+            'telegram_user_id' => null,
+        ]);
+
+        $this->postJson('/api/admin/odoo/sync-employees')->assertOk();
+
+        $this->assertDatabaseHas('employees', [
+            'id' => $employee->id,
+            'name' => 'Kept Staff',
+            'odoo_employee_id' => '40',
+        ]);
+    }
+
+    public function test_employee_sync_keeps_local_staff_when_odoo_is_unavailable(): void
+    {
+        Http::preventStrayRequests();
+        config([
+            'services.odoo.enabled' => true,
+            'services.odoo.use_json2' => true,
+            'services.odoo.url' => 'https://odoo.test',
+            'services.odoo.db' => 'hoc',
+            'services.odoo.username' => 'admin',
+            'services.odoo.api_key' => 'secret-key',
+        ]);
+        Http::fake([
+            'https://odoo.test/json/2/*' => Http::response(
+                '<html><title>Database currently unavailable</title></html>',
+                200,
+                ['Content-Type' => 'text/html'],
+            ),
+        ]);
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        $employee = Employee::factory()->create([
+            'name' => 'Kept Staff',
+            'odoo_employee_id' => '40',
+            'telegram_user_id' => null,
+        ]);
+
+        $this->postJson('/api/admin/odoo/sync-employees')->assertStatus(502);
+
+        $this->assertDatabaseHas('employees', [
+            'id' => $employee->id,
+            'odoo_employee_id' => '40',
+        ]);
+    }
+
     public function test_admin_employees_index_imports_odoo_staff_without_a_sync_button(): void
     {
         Cache::flush();

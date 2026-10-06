@@ -1194,14 +1194,17 @@ export const api = {
   clickupMembers() {
     return request<{ data: ClickUpMember[] }>("/admin/clickup/members");
   },
+  employee(id: number) {
+    return request<Envelope<Employee>>(`/admin/employees/${id}`);
+  },
   createEmployee(payload: Partial<Employee> & { name: string; profession: string }) {
-    return request<Envelope<Employee>>("/admin/employees", {
+    return request<Envelope<Employee> & { odoo_error?: string | null }>("/admin/employees", {
       method: "POST",
       body: JSON.stringify(payload),
     });
   },
   updateEmployee(id: number, payload: Partial<Employee>) {
-    return request<Envelope<Employee>>(`/admin/employees/${id}`, {
+    return request<Envelope<Employee> & { odoo_error?: string | null }>(`/admin/employees/${id}`, {
       method: "PUT",
       body: JSON.stringify(payload),
     });

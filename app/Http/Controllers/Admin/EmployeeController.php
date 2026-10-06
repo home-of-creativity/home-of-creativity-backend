@@ -90,7 +90,12 @@ class EmployeeController extends Controller
         $employee = $pushEmployeeToOdoo->handle(Employee::query()->create($data));
 
         return EmployeeResource::make($employee)
-            ->additional(['message' => 'Employee created and linked to Odoo.'])
+            ->additional([
+                'message' => filled($employee->odoo_employee_id)
+                    ? 'Employee created and linked to Odoo.'
+                    : 'Employee created locally. Odoo did not store this employee.',
+                'odoo_error' => $pushEmployeeToOdoo->lastError(),
+            ])
             ->response()
             ->setStatusCode(201);
     }
@@ -106,8 +111,15 @@ class EmployeeController extends Controller
         $employee->fill($this->applyClickUpEmail($request->validated()))->save();
         $this->syncLoginEmail($employee);
 
-        return EmployeeResource::make($pushEmployeeToOdoo->handle($employee->refresh()))
-            ->additional(['message' => 'Employee updated in dashboard and Odoo.']);
+        $employee = $pushEmployeeToOdoo->handle($employee->refresh());
+
+        return EmployeeResource::make($employee)
+            ->additional([
+                'message' => filled($employee->odoo_employee_id)
+                    ? 'Employee updated in dashboard and Odoo.'
+                    : 'Employee updated locally. Odoo did not store this employee.',
+                'odoo_error' => $pushEmployeeToOdoo->lastError(),
+            ]);
     }
 
     public function destroy(Employee $employee, DeleteEmployee $deleteEmployee)

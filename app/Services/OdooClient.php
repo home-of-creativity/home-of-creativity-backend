@@ -1321,13 +1321,9 @@ class OdooClient
             return null;
         }
 
-        try {
-            $rows = $this->searchRead('hr.employee', [['id', '=', (int) $employeeId]], [
-                'id', 'name', 'work_email', 'work_phone', 'mobile_phone', 'barcode', 'active',
-            ], 1, 0, 'id desc');
-        } catch (Throwable) {
-            return null;
-        }
+        $rows = $this->searchRead('hr.employee', [['id', '=', (int) $employeeId]], [
+            'id', 'name', 'work_email', 'work_phone', 'mobile_phone', 'barcode', 'active',
+        ], 1, 0, 'id desc');
 
         if ($rows === []) {
             return null;
@@ -1455,7 +1451,11 @@ class OdooClient
             'order' => $order,
         ]);
 
-        return is_array($result) ? $result : [];
+        if (! is_array($result) || ! array_is_list($result)) {
+            throw new RuntimeException('Odoo did not return a record list.');
+        }
+
+        return $result;
     }
 
     /**
@@ -1752,6 +1752,10 @@ class OdooClient
         }
 
         $response->throw();
+
+        if (str_contains($response->body(), 'Database currently unavailable')) {
+            throw new RuntimeException('Odoo database is currently unavailable.');
+        }
 
         $body = $response->json();
         if (is_array($body) && isset($body['name'], $body['message']) && str_contains((string) $body['name'], 'Exception')) {
