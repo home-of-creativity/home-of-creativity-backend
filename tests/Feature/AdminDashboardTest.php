@@ -1311,7 +1311,8 @@ class AdminDashboardTest extends TestCase
                 ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => 2], 200)
                 ->push(['jsonrpc' => '2.0', 'id' => 2, 'result' => []], 200)
                 ->push(['jsonrpc' => '2.0', 'id' => 3, 'result' => []], 200)
-                ->push(['jsonrpc' => '2.0', 'id' => 4, 'result' => 91], 200),
+                ->push(['jsonrpc' => '2.0', 'id' => 4, 'result' => []], 200)
+                ->push(['jsonrpc' => '2.0', 'id' => 5, 'result' => 91], 200),
         ]);
 
         $admin = User::factory()->create();
@@ -1419,7 +1420,8 @@ class AdminDashboardTest extends TestCase
                 ]]], 200)
                 ->push(['jsonrpc' => '2.0', 'id' => 3, 'result' => []], 200)
                 ->push(['jsonrpc' => '2.0', 'id' => 4, 'result' => []], 200)
-                ->push(['jsonrpc' => '2.0', 'id' => 5, 'result' => 92], 200),
+                ->push(['jsonrpc' => '2.0', 'id' => 5, 'result' => []], 200)
+                ->push(['jsonrpc' => '2.0', 'id' => 6, 'result' => 92], 200),
         ]);
 
         $admin = User::factory()->create();
