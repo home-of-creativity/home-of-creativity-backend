@@ -7,6 +7,7 @@ use App\Actions\GenerateEmployeeCode;
 use App\Actions\HydrateEmployeeFromOdoo;
 use App\Actions\PushEmployeeToOdoo;
 use App\Actions\SyncOdooEmployees;
+use App\Enums\EmployeeProfession;
 use App\Enums\EmployeeStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\ApproveEmployeeRequest;
@@ -19,6 +20,7 @@ use App\Services\ClickUpClient;
 use App\Services\OdooClient;
 use App\Services\TelegramNotifier;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
@@ -27,6 +29,7 @@ use Throwable;
 class EmployeeController extends Controller
 {
     public function index(
+        Request $request,
         OdooClient $odoo,
         SyncOdooEmployees $syncOdooEmployees,
     ) {
@@ -44,7 +47,29 @@ class EmployeeController extends Controller
             }
         }
 
+        $search = trim((string) $request->query('search', ''));
+        $like = $search === '' ? '' : '%'.addcslashes($search, '%_\\').'%';
+        $status = (string) $request->query('status', '');
+        $profession = (string) $request->query('profession', '');
+
         $paginator = Employee::query()
+            ->when($like !== '', function ($query) use ($like) {
+                $query->where(function ($inner) use ($like) {
+                    $inner->where('name', 'like', $like)
+                        ->orWhere('code', 'like', $like)
+                        ->orWhere('phone', 'like', $like)
+                        ->orWhere('email', 'like', $like)
+                        ->orWhere('telegram_username', 'like', $like);
+                });
+            })
+            ->when(in_array($status, ['pending', 'approved', 'rejected'], true), fn ($query) => $query->where('status', $status))
+            ->when(in_array($profession, EmployeeProfession::values(), true), fn ($query) => $query->where('profession', $profession))
+            ->when($request->query('odoo') === 'linked', fn ($query) => $query->whereNotNull('odoo_employee_id')->where('odoo_employee_id', '!=', ''))
+            ->when($request->query('odoo') === 'unlinked', function ($query) {
+                $query->where(fn ($inner) => $inner->whereNull('odoo_employee_id')->orWhere('odoo_employee_id', ''));
+            })
+            ->when($request->query('active') === 'yes', fn ($query) => $query->where('is_active', true))
+            ->when($request->query('active') === 'no', fn ($query) => $query->where('is_active', false))
             ->orderByRaw("CASE status WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 ELSE 2 END")
             ->latest('id')
             ->paginate(50);

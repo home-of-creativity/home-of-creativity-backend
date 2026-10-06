@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Search } from "lucide-react";
 import { Link } from "react-router-dom";
 import { api, type PageMeta, type ServiceRequest } from "../api";
 import { LoadingTableRow } from "../components/LoadingTableRow";
@@ -11,6 +12,12 @@ export function Requests({ t }: { locale: Locale; t: (c: { ar: string; en: strin
   const [items, setItems] = useState<ServiceRequest[]>([]);
   const [meta, setMeta] = useState<PageMeta | null>(null);
   const [status, setStatus] = useState("");
+  const [source, setSource] = useState("");
+  const [quotation, setQuotation] = useState("");
+  const [invoice, setInvoice] = useState("");
+  const [drive, setDrive] = useState("");
+  const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
 
@@ -19,7 +26,15 @@ export function Requests({ t }: { locale: Locale; t: (c: { ar: string; en: strin
   const load = useCallback((silent = false) => {
     if (!silent) setLoading(true);
     api
-      .requests(status || undefined, page)
+      .requests({
+        status: status || undefined,
+        source: source || undefined,
+        search: debouncedQuery || undefined,
+        quotation: quotation || undefined,
+        invoice: invoice || undefined,
+        drive: drive || undefined,
+        page,
+      })
       .then((res) => {
         setItems(res.data);
         setMeta(res.meta);
@@ -33,7 +48,16 @@ export function Requests({ t }: { locale: Locale; t: (c: { ar: string; en: strin
       .finally(() => {
         if (!silent) setLoading(false);
       });
-  }, [status, page]);
+  }, [status, source, quotation, invoice, drive, debouncedQuery, page]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedQuery(query.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [status, source, quotation, invoice, drive, debouncedQuery]);
 
   useEffect(() => {
     load();
@@ -44,26 +68,65 @@ export function Requests({ t }: { locale: Locale; t: (c: { ar: string; en: strin
   return (
     <>
       <PageHeader eyebrow={t(copy.brandMark)} title={t(copy.requests)} lede={t(copy.requestsLede)} />
-      <div className="toolbar filter-bar">
-        <label className="filter-label" htmlFor="request-status-filter">
-          {t(copy.status)}
+      <div className="toolbar filter-bar filter-grid">
+        <label className="field-label">
+          {t(copy.search)}
+          <span className="search-bar">
+            <Search size={16} aria-hidden="true" />
+            <input
+              type="search"
+              className="field"
+              placeholder={t(copy.searchRequests)}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              aria-label={t(copy.search)}
+            />
+          </span>
         </label>
-        <select
-          id="request-status-filter"
-          className="field"
-          value={status}
-          onChange={(e) => {
-            setPage(1);
-            setStatus(e.target.value);
-          }}
-        >
-          <option value="">{t(copy.all)}</option>
-          {Object.entries(statuses).map(([key, label]) => (
-            <option key={key} value={key}>
-              {t(label)}
-            </option>
-          ))}
-        </select>
+        <label className="field-label">
+          {t(copy.status)}
+          <select className="field" value={status} onChange={(e) => setStatus(e.target.value)}>
+            <option value="">{t(copy.all)}</option>
+            {Object.entries(statuses).map(([key, label]) => (
+              <option key={key} value={key}>{t(label)}</option>
+            ))}
+          </select>
+        </label>
+        <label className="field-label">
+          {t(copy.source)}
+          <select className="field" value={source} onChange={(e) => setSource(e.target.value)}>
+            <option value="">{t(copy.all)}</option>
+            {Object.entries(sources).map(([key, label]) => (
+              <option key={key} value={key}>{t(label)}</option>
+            ))}
+          </select>
+        </label>
+        <label className="field-label">
+          {t(copy.filterQuotation)}
+          <select className="field" value={quotation} onChange={(e) => setQuotation(e.target.value)}>
+            <option value="">{t(copy.all)}</option>
+            <option value="yes">{t(copy.filterHas)}</option>
+            <option value="no">{t(copy.filterMissing)}</option>
+          </select>
+        </label>
+        <label className="field-label">
+          {t(copy.filterInvoice)}
+          <select className="field" value={invoice} onChange={(e) => setInvoice(e.target.value)}>
+            <option value="">{t(copy.all)}</option>
+            <option value="yes">{t(copy.filterHas)}</option>
+            <option value="no">{t(copy.filterMissing)}</option>
+          </select>
+        </label>
+        <label className="field-label">
+          {t(copy.filterDrive)}
+          <select className="field" value={drive} onChange={(e) => setDrive(e.target.value)}>
+            <option value="">{t(copy.all)}</option>
+            <option value="sent">{t(copy.filterDriveSent)}</option>
+            <option value="pending">{t(copy.filterDrivePending)}</option>
+            <option value="failed">{t(copy.filterDriveFailed)}</option>
+            <option value="none">{t(copy.filterMissing)}</option>
+          </select>
+        </label>
       </div>
       <div className="table-wrap">
         <table>

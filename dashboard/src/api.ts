@@ -855,8 +855,24 @@ export const api = {
   live() {
     return request<Envelope<LiveSnapshot>>("/admin/live");
   },
-  requests(status?: string, page = 1) {
-    return request<Paginated<ServiceRequest>>(`/admin/requests${queryString({ status, page })}`);
+  requests(filters: {
+    status?: string;
+    source?: string;
+    search?: string;
+    quotation?: string;
+    invoice?: string;
+    drive?: string;
+    page?: number;
+  } = {}) {
+    return request<Paginated<ServiceRequest>>(`/admin/requests${queryString({
+      status: filters.status,
+      source: filters.source,
+      search: filters.search,
+      quotation: filters.quotation,
+      invoice: filters.invoice,
+      drive: filters.drive,
+      page: filters.page,
+    })}`);
   },
   request(id: string) {
     return request<Envelope<ServiceRequest>>(`/admin/requests/${id}`);
@@ -995,11 +1011,33 @@ export const api = {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return response.blob();
   },
-  clients(page = 1, search?: string) {
-    return request<Paginated<Client>>(`/admin/clients${queryString({ page, search: search || undefined })}`);
+  clients(page = 1, filters: {
+    search?: string;
+    odoo?: string;
+    company?: string;
+    phone?: string;
+    channel?: string;
+    stage?: string;
+    drive?: string;
+  } = {}) {
+    return request<Paginated<Client> & { stages?: string[] }>(`/admin/clients${queryString({
+      page,
+      search: filters.search || undefined,
+      odoo: filters.odoo,
+      company: filters.company,
+      phone: filters.phone,
+      channel: filters.channel,
+      stage: filters.stage,
+      drive: filters.drive,
+    })}`);
   },
-  reportClients(page = 1) {
-    return request<Paginated<Client>>(`/admin/reports${queryString({ page })}`);
+  reportClients(page = 1, filters: { search?: string; reports?: string; drive?: string } = {}) {
+    return request<Paginated<Client>>(`/admin/reports${queryString({
+      page,
+      search: filters.search || undefined,
+      reports: filters.reports,
+      drive: filters.drive,
+    })}`);
   },
   clientReports(clientId: number) {
     return request<{ data: ClientReport[]; client: Client; message?: string }>(`/admin/clients/${clientId}/reports`);
@@ -1136,8 +1174,22 @@ export const api = {
   odooInvoices() {
     return request<{ data: OdooInvoice[] }>("/admin/odoo/invoices");
   },
-  employees() {
-    return request<{ data: Employee[] }>("/admin/employees");
+  employees(filters: {
+    search?: string;
+    status?: string;
+    profession?: string;
+    odoo?: string;
+    active?: string;
+    page?: number;
+  } = {}) {
+    return request<Paginated<Employee>>(`/admin/employees${queryString({
+      search: filters.search,
+      status: filters.status,
+      profession: filters.profession,
+      odoo: filters.odoo,
+      active: filters.active,
+      page: filters.page,
+    })}`);
   },
   clickupMembers() {
     return request<{ data: ClickUpMember[] }>("/admin/clickup/members");
@@ -1256,8 +1308,12 @@ export const api = {
   deleteAllLandingReels() {
     return request<Envelope<{ deleted: number }>>("/admin/reels/bulk", { method: "DELETE" });
   },
-  articles(page = 1) {
-    return request<Paginated<Article>>(`/admin/articles${queryString({ page })}`);
+  articles(page = 1, filters: { search?: string; published?: string } = {}) {
+    return request<Paginated<Article>>(`/admin/articles${queryString({
+      page,
+      search: filters.search || undefined,
+      published: filters.published,
+    })}`);
   },
   article(id: number) {
     return request<Envelope<Article>>(`/admin/articles/${id}`);

@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\ClickUpTaskType;
 use App\Enums\EmployeeProfession;
+use App\Enums\EmployeeStatus;
 use App\Enums\ExecutionStatus;
 use App\Enums\RequestStatus;
 use App\Enums\WorkflowEventType;
@@ -524,6 +525,29 @@ class EmployeeTest extends TestCase
                 'telegram_username' => 'nour',
             ])->assertOk()
             ->assertJsonPath('data.status', 'pending');
+
+        $this->assertDatabaseCount('employees', 1);
+    }
+
+    public function test_staff_links_telegram_with_the_employee_code(): void
+    {
+        $employee = Employee::factory()->create([
+            'code' => 'EMP-0042',
+            'status' => EmployeeStatus::Approved,
+            'is_active' => true,
+            'telegram_user_id' => null,
+        ]);
+
+        $this->withHeaders(['X-Webhook-Secret' => 'change-me-staff'])
+            ->postJson('/api/bot/staff/link', [
+                'telegram_user_id' => '777',
+                'code' => 'emp-0042',
+                'telegram_username' => 'sara',
+            ])->assertOk()
+            ->assertJsonPath('data.id', $employee->id)
+            ->assertJsonPath('data.telegram_user_id', '777')
+            ->assertJsonPath('data.telegram_username', 'sara')
+            ->assertJsonPath('data.status', 'approved');
 
         $this->assertDatabaseCount('employees', 1);
     }

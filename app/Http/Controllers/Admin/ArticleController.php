@@ -8,15 +8,28 @@ use App\Http\Requests\UpdateArticleRequest;
 use App\Http\Resources\ArticleResource;
 use App\Models\Article;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 
 class ArticleController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
+        $search = trim((string) $request->query('search', ''));
+        $like = $search === '' ? '' : '%'.addcslashes($search, '%_\\').'%';
+
         return ArticleResource::collection(
             Article::query()
+                ->when($like !== '', function ($query) use ($like) {
+                    $query->where(function ($inner) use ($like) {
+                        $inner->where('title_ar', 'like', $like)
+                            ->orWhere('title_en', 'like', $like)
+                            ->orWhere('slug', 'like', $like);
+                    });
+                })
+                ->when($request->query('published') === 'yes', fn ($query) => $query->where('is_published', true))
+                ->when($request->query('published') === 'no', fn ($query) => $query->where('is_published', false))
                 ->orderBy('sort_order')
                 ->orderByRaw('COALESCE(published_at, created_at) DESC')
                 ->orderByDesc('id')

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Search } from "lucide-react";
 import { toast } from "sonner";
 import { Link, useSearchParams } from "react-router-dom";
@@ -59,6 +59,18 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
   const excelInputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [odooFilter, setOdooFilter] = useState("");
+  const [companyFilter, setCompanyFilter] = useState("");
+  const [phoneFilter, setPhoneFilter] = useState("");
+  const [channelFilter, setChannelFilter] = useState("");
+  const [stageFilter, setStageFilter] = useState("");
+  const [driveFilter, setDriveFilter] = useState("");
+  const [stages, setStages] = useState<string[]>([]);
+  const [quoteQuery, setQuoteQuery] = useState("");
+  const [quoteState, setQuoteState] = useState("");
+  const [invoiceQuery, setInvoiceQuery] = useState("");
+  const [invoiceState, setInvoiceState] = useState("");
+  const [invoicePayment, setInvoicePayment] = useState("");
   const [folderClient, setFolderClient] = useState<Client | null>(null);
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedQuery(query.trim()), 300);
@@ -92,10 +104,19 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                 setOdooReady(true);
                 setError("");
               })
-            : api.clients(page, debouncedQuery).then((res) => {
+            : api.clients(page, {
+                search: debouncedQuery,
+                odoo: odooFilter,
+                company: companyFilter,
+                phone: phoneFilter,
+                channel: channelFilter,
+                stage: stageFilter,
+                drive: driveFilter,
+              }).then((res) => {
                 if (cancelled) return;
                 setItems(res.data);
                 setMeta(res.meta);
+                setStages(res.stages ?? []);
                 setError("");
               });
 
@@ -127,11 +148,11 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [tab, page, debouncedQuery, t]);
+  }, [tab, page, debouncedQuery, odooFilter, companyFilter, phoneFilter, channelFilter, stageFilter, driveFilter, t]);
 
   useEffect(() => {
     setPage(1);
-  }, [debouncedQuery]);
+  }, [debouncedQuery, odooFilter, companyFilter, phoneFilter, channelFilter, stageFilter, driveFilter]);
 
   async function importCrmExcel(file: File) {
     setError("");
@@ -165,7 +186,15 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
       await api.deleteClient(id);
       setNotice(t(copy.deleted));
       toast.success(t(copy.deleteSuccess));
-      const list = await api.clients(page, debouncedQuery);
+      const list = await api.clients(page, {
+        search: debouncedQuery,
+        odoo: odooFilter,
+        company: companyFilter,
+        phone: phoneFilter,
+        channel: channelFilter,
+        stage: stageFilter,
+        drive: driveFilter,
+      });
       setItems(list.data);
       setMeta(list.meta);
     } catch (err) {
@@ -174,6 +203,40 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
       toast.error(message);
     }
   }
+
+  const clientFiltersActive = Boolean(debouncedQuery || odooFilter || companyFilter || phoneFilter || channelFilter || stageFilter || driveFilter);
+
+  const filteredQuotations = useMemo(() => {
+    const needle = quoteQuery.trim().toLowerCase();
+    return quotations.filter((item) => {
+      if (quoteState && item.state !== quoteState) return false;
+      if (!needle) return true;
+      return [item.name, item.partner_name ?? "", item.client_order_ref ?? "", item.origin ?? ""].join(" ").toLowerCase().includes(needle);
+    });
+  }, [quotations, quoteQuery, quoteState]);
+
+  const filteredInvoices = useMemo(() => {
+    const needle = invoiceQuery.trim().toLowerCase();
+    return invoices.filter((item) => {
+      if (invoiceState && item.state !== invoiceState) return false;
+      if (invoicePayment && item.payment_state !== invoicePayment) return false;
+      if (!needle) return true;
+      return [item.name, item.partner_name ?? "", item.invoice_origin ?? "", item.ref ?? ""].join(" ").toLowerCase().includes(needle);
+    });
+  }, [invoices, invoiceQuery, invoiceState, invoicePayment]);
+
+  const quoteStateLabel: Record<string, { ar: string; en: string }> = {
+    draft: copy.quoteStateDraft,
+    sent: copy.quoteStateSent,
+    sale: copy.quoteStateSale,
+    cancel: copy.quoteStateCancel,
+  };
+  const paymentLabel: Record<string, { ar: string; en: string }> = {
+    not_paid: copy.payNotPaid,
+    partial: copy.payPartial,
+    paid: copy.payPaid,
+    in_payment: copy.payInPayment,
+  };
 
   return (
     <>
@@ -247,16 +310,71 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
 
       {tab === "clients" ? (
         <>
-          <div className="search-bar">
-            <Search size={16} aria-hidden="true" />
-            <input
-              type="search"
-              className="field"
-              placeholder={t(copy.searchClients)}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              aria-label={t(copy.search)}
-            />
+          <div className="toolbar filter-bar filter-grid">
+            <label className="field-label">
+              {t(copy.search)}
+              <span className="search-bar">
+                <Search size={16} aria-hidden="true" />
+                <input
+                  type="search"
+                  className="field"
+                  placeholder={t(copy.searchClients)}
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  aria-label={t(copy.search)}
+                />
+              </span>
+            </label>
+            <label className="field-label">
+              {t(copy.filterOdoo)}
+              <select className="field" value={odooFilter} onChange={(e) => setOdooFilter(e.target.value)}>
+                <option value="">{t(copy.all)}</option>
+                <option value="linked">{t(copy.filterLinked)}</option>
+                <option value="unlinked">{t(copy.filterUnlinked)}</option>
+              </select>
+            </label>
+            <label className="field-label">
+              {t(copy.filterStage)}
+              <select className="field" value={stageFilter} onChange={(e) => setStageFilter(e.target.value)}>
+                <option value="">{t(copy.all)}</option>
+                {stages.map((stage) => (
+                  <option key={stage} value={stage}>{stage}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field-label">
+              {t(copy.filterCompany)}
+              <select className="field" value={companyFilter} onChange={(e) => setCompanyFilter(e.target.value)}>
+                <option value="">{t(copy.all)}</option>
+                <option value="yes">{t(copy.filterHas)}</option>
+                <option value="no">{t(copy.filterMissing)}</option>
+              </select>
+            </label>
+            <label className="field-label">
+              {t(copy.filterPhone)}
+              <select className="field" value={phoneFilter} onChange={(e) => setPhoneFilter(e.target.value)}>
+                <option value="">{t(copy.all)}</option>
+                <option value="yes">{t(copy.filterHas)}</option>
+                <option value="no">{t(copy.filterMissing)}</option>
+              </select>
+            </label>
+            <label className="field-label">
+              {t(copy.filterChannel)}
+              <select className="field" value={channelFilter} onChange={(e) => setChannelFilter(e.target.value)}>
+                <option value="">{t(copy.all)}</option>
+                <option value="telegram">{t(copy.contactTelegram)}</option>
+                <option value="whatsapp">{t(copy.contactWhatsapp)}</option>
+                <option value="none">{t(copy.filterNoChannel)}</option>
+              </select>
+            </label>
+            <label className="field-label">
+              {t(copy.filterDrive)}
+              <select className="field" value={driveFilter} onChange={(e) => setDriveFilter(e.target.value)}>
+                <option value="">{t(copy.all)}</option>
+                <option value="yes">{t(copy.filterHas)}</option>
+                <option value="no">{t(copy.filterMissing)}</option>
+              </select>
+            </label>
           </div>
 
           <div className="table-wrap">
@@ -279,7 +397,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                   <LoadingTableRow colSpan={9} label={t(copy.loading)} />
                 ) : items.length === 0 ? (
                   <tr>
-                    <td colSpan={9}>{debouncedQuery ? t(copy.noSearchResults) : t(copy.empty)}</td>
+                    <td colSpan={9}>{clientFiltersActive ? t(copy.noSearchResults) : t(copy.empty)}</td>
                   </tr>
                 ) : (
                   items.map((item) => (
@@ -348,6 +466,25 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
       ) : null}
 
       {tab === "quotations" ? (
+        <>
+        <div className="toolbar filter-bar filter-grid">
+          <label className="field-label">
+            {t(copy.search)}
+            <span className="search-bar">
+              <Search size={16} aria-hidden="true" />
+              <input type="search" className="field" placeholder={t(copy.searchQuotations)} value={quoteQuery} onChange={(e) => setQuoteQuery(e.target.value)} aria-label={t(copy.search)} />
+            </span>
+          </label>
+          <label className="field-label">
+            {t(copy.odooState)}
+            <select className="field" value={quoteState} onChange={(e) => setQuoteState(e.target.value)}>
+              <option value="">{t(copy.all)}</option>
+              {["draft", "sent", "sale", "cancel"].map((state) => (
+                <option key={state} value={state}>{t(quoteStateLabel[state])}</option>
+              ))}
+            </select>
+          </label>
+        </div>
         <div className="table-wrap">
           <table>
             <thead>
@@ -368,17 +505,17 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                 <tr>
                   <td colSpan={7}>{t(copy.odooNotConfigured)}</td>
                 </tr>
-              ) : quotations.length === 0 ? (
+              ) : filteredQuotations.length === 0 ? (
                 <tr>
-                  <td colSpan={7}>{t(copy.empty)}</td>
+                  <td colSpan={7}>{quoteQuery || quoteState ? t(copy.noSearchResults) : t(copy.empty)}</td>
                 </tr>
               ) : (
-                quotations.map((item) => (
+                filteredQuotations.map((item) => (
                   <tr key={item.id}>
                     <td dir="ltr">{item.name}</td>
                     <td>{item.partner_name ?? "—"}</td>
                     <td dir="ltr">{item.amount_total}</td>
-                    <td>{item.state}</td>
+                    <td>{t(quoteStateLabel[item.state] ?? { ar: item.state, en: item.state })}</td>
                     <td dir="ltr">{item.client_order_ref ?? item.origin ?? "—"}</td>
                     <td dir="ltr">{item.date_order ?? "—"}</td>
                     <td>
@@ -392,9 +529,38 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
             </tbody>
           </table>
         </div>
+        </>
       ) : null}
 
       {tab === "invoices" ? (
+        <>
+        <div className="toolbar filter-bar filter-grid">
+          <label className="field-label">
+            {t(copy.search)}
+            <span className="search-bar">
+              <Search size={16} aria-hidden="true" />
+              <input type="search" className="field" placeholder={t(copy.searchQuotations)} value={invoiceQuery} onChange={(e) => setInvoiceQuery(e.target.value)} aria-label={t(copy.search)} />
+            </span>
+          </label>
+          <label className="field-label">
+            {t(copy.odooState)}
+            <select className="field" value={invoiceState} onChange={(e) => setInvoiceState(e.target.value)}>
+              <option value="">{t(copy.all)}</option>
+              {["draft", "posted", "cancel"].map((state) => (
+                <option key={state} value={state}>{t(quoteStateLabel[state] ?? { ar: state, en: state })}</option>
+              ))}
+            </select>
+          </label>
+          <label className="field-label">
+            {t(copy.filterPayment)}
+            <select className="field" value={invoicePayment} onChange={(e) => setInvoicePayment(e.target.value)}>
+              <option value="">{t(copy.all)}</option>
+              {Object.entries(paymentLabel).map(([key, label]) => (
+                <option key={key} value={key}>{t(label)}</option>
+              ))}
+            </select>
+          </label>
+        </div>
         <div className="table-wrap">
           <table>
             <thead>
@@ -415,19 +581,19 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                 <tr>
                   <td colSpan={7}>{t(copy.odooNotConfigured)}</td>
                 </tr>
-              ) : invoices.length === 0 ? (
+              ) : filteredInvoices.length === 0 ? (
                 <tr>
-                  <td colSpan={7}>{t(copy.empty)}</td>
+                  <td colSpan={7}>{invoiceQuery || invoiceState || invoicePayment ? t(copy.noSearchResults) : t(copy.empty)}</td>
                 </tr>
               ) : (
-                invoices.map((item) => (
+                filteredInvoices.map((item) => (
                   <tr key={item.id}>
                     <td dir="ltr">{item.name}</td>
                     <td>{item.partner_name ?? "—"}</td>
                     <td dir="ltr">{item.amount_total}</td>
                     <td>
-                      {item.state}
-                      {item.payment_state ? ` / ${item.payment_state}` : ""}
+                      {t(quoteStateLabel[item.state] ?? { ar: item.state, en: item.state })}
+                      {item.payment_state ? ` / ${t(paymentLabel[item.payment_state] ?? { ar: item.payment_state, en: item.payment_state })}` : ""}
                     </td>
                     <td dir="ltr">{item.ref ?? item.invoice_origin ?? "—"}</td>
                     <td dir="ltr">{item.invoice_date ?? "—"}</td>
@@ -442,6 +608,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
             </tbody>
           </table>
         </div>
+        </>
       ) : null}
     </>
   );

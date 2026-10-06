@@ -1145,6 +1145,30 @@ td[colspan] {
   max-width: 18rem;
 }
 
+.filter-grid {
+  align-items: end;
+}
+
+.filter-grid .field-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  flex: 1 1 11rem;
+  min-width: 10rem;
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.filter-grid .field {
+  max-width: none;
+  width: 100%;
+}
+
+.filter-grid .search-bar {
+  margin-bottom: 0;
+  width: 100%;
+}
+
 .search-bar {
   display: flex;
   align-items: center;

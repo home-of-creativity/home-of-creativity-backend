@@ -11,6 +11,7 @@ use App\Models\Client;
 use App\Models\ClientReport;
 use App\Models\ClientReportAttachment;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use Symfony\Component\HttpKernel\Exception\HttpException;
@@ -20,11 +21,27 @@ class ClientReportController extends Controller
     /** Report Word and PDF files are private: only staff with ops.reports read them through the API. */
     private const DISK = 'local';
 
-    public function clients()
+    public function clients(Request $request)
     {
+        $search = trim((string) $request->query('search', ''));
+        $like = $search === '' ? '' : '%'.addcslashes($search, '%_\\').'%';
+
         $clients = Client::query()
             ->visibleOnDashboard()
             ->withCount('reports')
+            ->when($like !== '', function ($query) use ($like) {
+                $query->where(function ($inner) use ($like) {
+                    $inner->where('name', 'like', $like)
+                        ->orWhere('company_name', 'like', $like)
+                        ->orWhere('phone', 'like', $like);
+                });
+            })
+            ->when($request->query('reports') === 'yes', fn ($query) => $query->has('reports'))
+            ->when($request->query('reports') === 'no', fn ($query) => $query->doesntHave('reports'))
+            ->when($request->query('drive') === 'yes', fn ($query) => $query->whereNotNull('google_drive_folder_id')->where('google_drive_folder_id', '!=', ''))
+            ->when($request->query('drive') === 'no', function ($query) {
+                $query->where(fn ($inner) => $inner->whereNull('google_drive_folder_id')->orWhere('google_drive_folder_id', ''));
+            })
             ->orderBy('name')
             ->paginate(30);
 

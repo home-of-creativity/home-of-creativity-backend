@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { Search } from "lucide-react";
 import { api, type Client, type PageMeta } from "../api";
 import { DriveFolderPicker } from "../components/DriveFolderPicker";
 import { LoadingTableRow } from "../components/LoadingTableRow";
@@ -11,25 +12,67 @@ export function Reports({ t }: { locale: Locale; t: (c: { ar: string; en: string
   const [items, setItems] = useState<Client[]>([]);
   const [meta, setMeta] = useState<PageMeta | null>(null);
   const [page, setPage] = useState(1);
+  const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [reportsFilter, setReportsFilter] = useState("");
+  const [driveFilter, setDriveFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [folderClient, setFolderClient] = useState<Client | null>(null);
 
   useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedQuery(query.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedQuery, reportsFilter, driveFilter]);
+
+  useEffect(() => {
     setLoading(true);
-    api.reportClients(page)
+    api.reportClients(page, {
+      search: debouncedQuery,
+      reports: reportsFilter,
+      drive: driveFilter,
+    })
       .then((res) => {
         setItems(res.data);
         setMeta(res.meta);
       })
       .catch((err) => setError(err instanceof Error ? err.message : t(copy.saveFailed)))
       .finally(() => setLoading(false));
-  }, [page, t]);
+  }, [page, debouncedQuery, reportsFilter, driveFilter, t]);
 
   return (
     <section>
       <PageHeader title={t(copy.reportsTitle)} lede={t(copy.reportsLede)} />
       {error ? <p className="error">{error}</p> : null}
+      <div className="toolbar filter-bar filter-grid">
+        <label className="field-label">
+          {t(copy.search)}
+          <span className="search-bar">
+            <Search size={16} aria-hidden="true" />
+            <input type="search" className="field" placeholder={t(copy.searchReports)} value={query} onChange={(e) => setQuery(e.target.value)} aria-label={t(copy.search)} />
+          </span>
+        </label>
+        <label className="field-label">
+          {t(copy.filterReports)}
+          <select className="field" value={reportsFilter} onChange={(e) => setReportsFilter(e.target.value)}>
+            <option value="">{t(copy.all)}</option>
+            <option value="yes">{t(copy.filterHas)}</option>
+            <option value="no">{t(copy.filterMissing)}</option>
+          </select>
+        </label>
+        <label className="field-label">
+          {t(copy.filterDrive)}
+          <select className="field" value={driveFilter} onChange={(e) => setDriveFilter(e.target.value)}>
+            <option value="">{t(copy.all)}</option>
+            <option value="yes">{t(copy.filterHas)}</option>
+            <option value="no">{t(copy.filterMissing)}</option>
+          </select>
+        </label>
+      </div>
       {folderClient ? (
         <DriveFolderPicker
           client={folderClient}
@@ -56,7 +99,7 @@ export function Reports({ t }: { locale: Locale; t: (c: { ar: string; en: string
             {loading ? <LoadingTableRow colSpan={5} /> : null}
             {!loading && items.length === 0 ? (
               <tr>
-                <td colSpan={5}>{t(copy.noReports)}</td>
+                <td colSpan={5}>{debouncedQuery || reportsFilter || driveFilter ? t(copy.noSearchResults) : t(copy.noReports)}</td>
               </tr>
             ) : null}
             {items.map((item) => (

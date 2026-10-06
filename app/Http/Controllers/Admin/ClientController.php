@@ -28,22 +28,72 @@ class ClientController extends Controller
         $this->pushPendingTelegramLeads($pushClient, $pushLead);
 
         $search = trim((string) $request->query('search', ''));
+        $like = $search === '' ? '' : '%'.addcslashes($search, '%_\\').'%';
 
         $paginator = Client::query()
             ->visibleOnDashboard()
             ->withCount('requests')
-            ->when($search !== '', function ($query) use ($search) {
-                $query->where(function ($inner) use ($search) {
-                    $inner->where('name', 'like', "%{$search}%")
-                        ->orWhere('email', 'like', "%{$search}%")
-                        ->orWhere('phone', 'like', "%{$search}%")
-                        ->orWhere('company_name', 'like', "%{$search}%");
+            ->when($like !== '', function ($query) use ($like) {
+                $query->where(function ($inner) use ($like) {
+                    $inner->where('name', 'like', $like)
+                        ->orWhere('email', 'like', $like)
+                        ->orWhere('phone', 'like', $like)
+                        ->orWhere('company_name', 'like', $like)
+                        ->orWhere('odoo_stage_name', 'like', $like);
                 });
+            })
+            ->when($request->query('odoo') === 'linked', function ($query) {
+                $query->where(function ($inner) {
+                    $inner->where(fn ($lead) => $lead->whereNotNull('odoo_lead_id')->where('odoo_lead_id', '!=', ''))
+                        ->orWhere(fn ($partner) => $partner->whereNotNull('odoo_partner_id')->where('odoo_partner_id', '!=', ''));
+                });
+            })
+            ->when($request->query('odoo') === 'unlinked', function ($query) {
+                $query->where(function ($inner) {
+                    $inner->whereNull('odoo_lead_id')->orWhere('odoo_lead_id', '');
+                })->where(function ($inner) {
+                    $inner->whereNull('odoo_partner_id')->orWhere('odoo_partner_id', '');
+                });
+            })
+            ->when($request->query('company') === 'yes', fn ($query) => $query->whereNotNull('company_name')->where('company_name', '!=', ''))
+            ->when($request->query('company') === 'no', function ($query) {
+                $query->where(fn ($inner) => $inner->whereNull('company_name')->orWhere('company_name', ''));
+            })
+            ->when($request->query('phone') === 'yes', fn ($query) => $query->whereNotNull('phone')->where('phone', '!=', ''))
+            ->when($request->query('phone') === 'no', function ($query) {
+                $query->where(fn ($inner) => $inner->whereNull('phone')->orWhere('phone', ''));
+            })
+            ->when($request->query('channel') === 'telegram', function ($query) {
+                $query->whereNotNull('telegram_user_id')
+                    ->where('telegram_user_id', '!=', '')
+                    ->where('telegram_user_id', 'not like', Client::WHATSAPP_PREFIX.'%');
+            })
+            ->when($request->query('channel') === 'whatsapp', fn ($query) => $query->where('telegram_user_id', 'like', Client::WHATSAPP_PREFIX.'%'))
+            ->when($request->query('channel') === 'none', function ($query) {
+                $query->where(fn ($inner) => $inner->whereNull('telegram_user_id')->orWhere('telegram_user_id', ''));
+            })
+            ->when(filled($request->query('stage')), fn ($query) => $query->where('odoo_stage_name', (string) $request->query('stage')))
+            ->when($request->query('drive') === 'yes', fn ($query) => $query->whereNotNull('google_drive_folder_id')->where('google_drive_folder_id', '!=', ''))
+            ->when($request->query('drive') === 'no', function ($query) {
+                $query->where(fn ($inner) => $inner->whereNull('google_drive_folder_id')->orWhere('google_drive_folder_id', ''));
             })
             ->latest('id')
             ->paginate($request->perPage());
 
-        return ClientResource::collection($paginator)->additional(['message' => 'ok']);
+        $stages = Client::query()
+            ->visibleOnDashboard()
+            ->whereNotNull('odoo_stage_name')
+            ->where('odoo_stage_name', '!=', '')
+            ->distinct()
+            ->orderBy('odoo_stage_name')
+            ->limit(100)
+            ->pluck('odoo_stage_name')
+            ->values();
+
+        return ClientResource::collection($paginator)->additional([
+            'message' => 'ok',
+            'stages' => $stages,
+        ]);
     }
 
     /**

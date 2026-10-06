@@ -58,6 +58,49 @@ class ServiceRequestController extends Controller
             $query->where('status', $request->string('status'));
         }
 
+        if ($request->filled('source')) {
+            $query->where('source', $request->string('source'));
+        }
+
+        $search = trim((string) $request->query('search', ''));
+        if ($search !== '') {
+            $like = '%'.addcslashes($search, '%_\\').'%';
+            $query->where(function ($inner) use ($like) {
+                $inner->where('number', 'like', $like)
+                    ->orWhere('title', 'like', $like)
+                    ->orWhereHas('client', function ($client) use ($like) {
+                        $client->where('name', 'like', $like)
+                            ->orWhere('company_name', 'like', $like);
+                    });
+            });
+        }
+
+        if ($request->query('quotation') === 'yes') {
+            $query->whereNotNull('odoo_quotation_id')->where('odoo_quotation_id', '!=', '');
+        } elseif ($request->query('quotation') === 'no') {
+            $query->where(function ($inner) {
+                $inner->whereNull('odoo_quotation_id')->orWhere('odoo_quotation_id', '');
+            });
+        }
+
+        if ($request->query('invoice') === 'yes') {
+            $query->whereNotNull('odoo_invoice_id')->where('odoo_invoice_id', '!=', '');
+        } elseif ($request->query('invoice') === 'no') {
+            $query->where(function ($inner) {
+                $inner->whereNull('odoo_invoice_id')->orWhere('odoo_invoice_id', '');
+            });
+        }
+
+        if ($request->query('drive') === 'none') {
+            $query->whereDoesntHave('driveDeliveries');
+        } elseif ($request->query('drive') === 'sent') {
+            $query->whereHas('driveDeliveries', fn ($deliveries) => $deliveries->whereNotNull('sent_at'));
+        } elseif ($request->query('drive') === 'pending') {
+            $query->whereHas('driveDeliveries', fn ($deliveries) => $deliveries->whereNull('sent_at')->whereNull('failed_at'));
+        } elseif ($request->query('drive') === 'failed') {
+            $query->whereHas('driveDeliveries', fn ($deliveries) => $deliveries->whereNotNull('failed_at'));
+        }
+
         return ServiceRequestResource::collection($query->paginate($request->perPage()))
             ->additional(['message' => 'ok']);
     }

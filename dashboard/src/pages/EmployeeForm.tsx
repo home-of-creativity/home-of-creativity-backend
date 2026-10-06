@@ -101,7 +101,7 @@ export function EmployeeForm({ t }: { locale: Locale; t: (c: { ar: string; en: s
 
   async function onValid(values: {
     name: string;
-    code: string;
+    code?: string;
     phone: string;
     clickup_user_id: string;
     profession: string;
@@ -167,6 +167,7 @@ export function EmployeeForm({ t }: { locale: Locale; t: (c: { ar: string; en: s
           <label className="field-label">
             {t(copy.employeeCode)}
             <input className="field" dir="ltr" readOnly value={watch("code") ?? ""} />
+            <p className="muted">{t(copy.linkTelegramHint).replace("{code}", watch("code") || "—")}</p>
           </label>
         ) : null}
         {!isApprove ? (

@@ -361,6 +361,7 @@ Route::prefix('bot/whatsapp')->group(function () {
 Route::prefix('bot/staff')->middleware('shared.secret:services.telegram.staff_bot_secret')->group(function () {
     Route::get('me', [StaffBotController::class, 'me']);
     Route::post('join', [StaffBotController::class, 'join']);
+    Route::post('link', [StaffBotController::class, 'link']);
     Route::post('reply', [StaffBotController::class, 'reply']);
     Route::get('replyable-requests', [StaffBotController::class, 'replyableRequests']);
     Route::get('quotable-requests', [StaffBotController::class, 'quotableRequests']);

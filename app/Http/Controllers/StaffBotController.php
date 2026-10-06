@@ -7,6 +7,7 @@ use App\Actions\CompleteRequest;
 use App\Actions\ConfirmRequestPayment;
 use App\Actions\ConfirmWorkPlan;
 use App\Actions\DispatchStatusWorkflow;
+use App\Actions\LinkStaffTelegram;
 use App\Actions\PrepareQuotationPreview;
 use App\Actions\RecordDelivery;
 use App\Actions\RequestStaffJoin;
@@ -51,6 +52,21 @@ class StaffBotController extends Controller
 
         return EmployeeResource::make($employee)
             ->additional(['message' => 'ok']);
+    }
+
+    public function link(Request $request, LinkStaffTelegram $link): EmployeeResource
+    {
+        $data = $request->validate([
+            'telegram_user_id' => ['required', 'string', 'max:80'],
+            'code' => ['required', 'string', 'max:40'],
+            'telegram_username' => ['nullable', 'string', 'max:80'],
+        ]);
+
+        return EmployeeResource::make($link->handle(
+            $data['telegram_user_id'],
+            $data['code'],
+            $data['telegram_username'] ?? null,
+        ))->additional(['message' => 'ok']);
     }
 
     public function join(StaffJoinRequest $request, RequestStaffJoin $join): JsonResponse

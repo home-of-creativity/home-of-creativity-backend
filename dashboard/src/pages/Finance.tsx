@@ -1,4 +1,5 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useMemo, useEffect, useState, type FormEvent } from "react";
+import { Search } from "lucide-react";
 import { toast } from "sonner";
 import { LoadingLottie } from "../components/LoadingLottie";
 import { PageHeader } from "../components/PageHeader";
@@ -17,6 +18,8 @@ export function Finance({ t }: { locale: Locale; t: (c: { ar: string; en: string
   const [category, setCategory] = useState("");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const [expenseQuery, setExpenseQuery] = useState("");
+  const [expenseCategory, setExpenseCategory] = useState("");
 
   useEffect(() => {
     api
@@ -49,6 +52,16 @@ export function Finance({ t }: { locale: Locale; t: (c: { ar: string; en: string
       setBusy(false);
     }
   }
+
+  const expenseRows = useMemo(() => {
+    if (!data) return [];
+    const needle = expenseQuery.trim().toLowerCase();
+    return data.expense_rows.filter((row) => {
+      if (expenseCategory && row.category !== expenseCategory) return false;
+      if (!needle) return true;
+      return (row.note ?? "").toLowerCase().includes(needle);
+    });
+  }, [data, expenseQuery, expenseCategory]);
 
   if (!data && !error) return <LoadingLottie variant="page" label={t(copy.loading)} />;
 
@@ -101,6 +114,24 @@ export function Finance({ t }: { locale: Locale; t: (c: { ar: string; en: string
               {t(copy.financeSave)}
             </button>
           </form>
+          <div className="toolbar filter-bar filter-grid">
+            <label className="field-label">
+              {t(copy.search)}
+              <span className="search-bar">
+                <Search size={16} aria-hidden="true" />
+                <input type="search" className="field" placeholder={t(copy.searchExpenses)} value={expenseQuery} onChange={(e) => setExpenseQuery(e.target.value)} aria-label={t(copy.search)} />
+              </span>
+            </label>
+            <label className="field-label">
+              {t(copy.financeCategory)}
+              <select className="field" value={expenseCategory} onChange={(e) => setExpenseCategory(e.target.value)}>
+                <option value="">{t(copy.all)}</option>
+                {data.categories.map((item) => (
+                  <option key={item} value={item}>{item}</option>
+                ))}
+              </select>
+            </label>
+          </div>
           <section className="panel recent-panel">
             <div className="panel-head">
               <h2>{t(copy.financeExpenses)}</h2>
@@ -115,12 +146,12 @@ export function Finance({ t }: { locale: Locale; t: (c: { ar: string; en: string
                   </tr>
                 </thead>
                 <tbody>
-                  {data.expense_rows.length === 0 ? (
+                  {expenseRows.length === 0 ? (
                     <tr>
-                      <td colSpan={3}>{t(copy.empty)}</td>
+                      <td colSpan={3}>{expenseQuery || expenseCategory ? t(copy.noSearchResults) : t(copy.empty)}</td>
                     </tr>
                   ) : (
-                    data.expense_rows.map((row) => (
+                    expenseRows.map((row) => (
                       <tr key={row.id}>
                         <td dir="ltr">{usd(row.amount)}</td>
                         <td>{row.category}</td>

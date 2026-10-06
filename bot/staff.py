@@ -24,6 +24,7 @@ WAITING_DELIVER_PICK = 5
 WAITING_PROGRESS_PICK = 6
 WAITING_COMPLETE_PICK = 7
 WAITING_QUOTE_CONFIRM = 8
+WAITING_LINK = 9
 BTN_TASKS = "📌 مهامي"
 BTN_NEW = "🆕 طلبات جديدة"
 BTN_REPLY = "💬 رد على طلب"
@@ -136,6 +137,27 @@ async def lookup_employee(telegram_id: int) -> Optional[dict[str, Any]]:
         )
         if response.status_code == 404:
             return None
+        response.raise_for_status()
+        return employee_payload(response.json())
+
+
+async def link_employee(telegram_id: int, code: str, username: Optional[str]) -> dict[str, Any]:
+    async with httpx.AsyncClient(timeout=API_TIMEOUT) as client:
+        response = await client.post(
+            f"{API_URL}/bot/staff/link",
+            headers=api_headers(),
+            json={
+                "telegram_user_id": str(telegram_id),
+                "code": code,
+                "telegram_username": username,
+            },
+        )
+        if response.status_code == 422:
+            body = response.json()
+            errors = body.get("errors") or {}
+            code_errors = errors.get("code") or []
+            detail = code_errors[0] if code_errors else body.get("message", "تعذر الربط.")
+            raise ValueError(str(detail))
         response.raise_for_status()
         return employee_payload(response.json())
 
@@ -431,18 +453,8 @@ async def send_staff_reply(update: Update, request_ref: str, text: str) -> bool:
     return True
 
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user = update.effective_user
-    if user is None or update.message is None:
-        return
-    display_name = user.full_name or user.first_name or "موظف"
-    try:
-        employee = await join_employee(user.id, display_name, user.username)
-    except httpx.TimeoutException:
-        await update.message.reply_text("تعذر الاتصال بالخادم حالياً. أعد /start بعد ثوانٍ.")
-        return
-    except httpx.HTTPStatusError:
-        await update.message.reply_text("تعذر تسجيل الانضمام حالياً. أعد /start بعد ثوانٍ.")
+async def greet_employee(update: Update, employee: dict[str, Any]) -> None:
+    if update.message is None:
         return
     if is_approved(employee):
         if is_sales(employee):
@@ -459,7 +471,47 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if employee.get("status") == "rejected":
         await update.message.reply_text("طلب انضمامك مرفوض حالياً.")
         return
-    await update.message.reply_text("تم إرسال طلب انضمامك. انتظر موافقة الإدارة.")
+    await update.message.reply_text("تم الربط. انتظر موافقة الإدارة إن لم يكن الحساب مفعّلاً.")
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user = update.effective_user
+    if user is None or update.message is None:
+        return ConversationHandler.END
+    try:
+        employee = await lookup_employee(user.id)
+    except httpx.TimeoutException:
+        await update.message.reply_text("تعذر الاتصال بالخادم حالياً. أعد /start بعد ثوانٍ.")
+        return ConversationHandler.END
+    except httpx.HTTPStatusError:
+        await update.message.reply_text("تعذر التحقق من الحساب حالياً. أعد /start بعد ثوانٍ.")
+        return ConversationHandler.END
+    if employee:
+        await greet_employee(update, employee)
+        return ConversationHandler.END
+    await update.message.reply_text(
+        "أدخل رقم الموظف الظاهر في اللوحة، مثل EMP-0001.\nيُضاف الموظف من الداشبورد أو من أودو أولاً، ثم يُرسل الرقم هنا."
+    )
+    return WAITING_LINK
+
+
+async def capture_employee_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user = update.effective_user
+    if user is None or update.message is None or not update.message.text:
+        return WAITING_LINK
+    try:
+        employee = await link_employee(user.id, update.message.text.strip(), user.username)
+    except ValueError as error:
+        await update.message.reply_text(str(error))
+        return WAITING_LINK
+    except httpx.TimeoutException:
+        await update.message.reply_text("تعذر الاتصال بالخادم حالياً. أعد إرسال الرقم.")
+        return WAITING_LINK
+    except httpx.HTTPStatusError:
+        await update.message.reply_text("تعذر الربط حالياً. أعد إرسال الرقم.")
+        return WAITING_LINK
+    await greet_employee(update, employee)
+    return ConversationHandler.END
 
 
 async def reply_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -979,8 +1031,18 @@ def main() -> None:
         .get_updates_request(telegram_request(long_polling=True))
         .build()
     )
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("join", start))
+    application.add_handler(
+        ConversationHandler(
+            entry_points=[
+                CommandHandler("start", start),
+                CommandHandler("join", start),
+            ],
+            states={
+                WAITING_LINK: [MessageHandler(filters.TEXT & ~filters.COMMAND, capture_employee_code)],
+            },
+            fallbacks=[CommandHandler("cancel", cancel)],
+        )
+    )
     application.add_handler(CommandHandler("reply", reply_menu))
     application.add_handler(CallbackQueryHandler(on_confirm_payment, pattern=r"^payok:"))
     application.add_handler(CallbackQueryHandler(on_confirm_plan, pattern=r"^planok:"))

@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Search } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
 import { ExternalLink, FileText, FolderOpen, Plus } from "lucide-react";
 import { toast } from "sonner";
@@ -22,6 +23,8 @@ export function ClientReports({ locale, t }: { locale: Locale; t: (c: { ar: stri
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [folderOpen, setFolderOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState("");
 
   useEffect(() => {
     setLoading(true);
@@ -45,6 +48,17 @@ export function ClientReports({ locale, t }: { locale: Locale; t: (c: { ar: stri
 
   const name = client?.company_name || client?.name || t(copy.clientReports);
   const newReport = `/reports/clients/${clientId}/new`;
+  const filteredReports = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return reports.filter((report) => {
+      const edited = Boolean(report.published_at && report.updated_at && new Date(report.updated_at).getTime() - new Date(report.published_at).getTime() > 5000);
+      if (status === "draft" && report.published_at) return false;
+      if (status === "published" && (!report.published_at || edited)) return false;
+      if (status === "edited" && !edited) return false;
+      if (needle && !report.title.toLowerCase().includes(needle)) return false;
+      return true;
+    });
+  }, [reports, query, status]);
 
   return (
     <section>
@@ -83,6 +97,25 @@ export function ClientReports({ locale, t }: { locale: Locale; t: (c: { ar: stri
           <Link className="btn btn-primary" to={newReport}><Plus size={16} aria-hidden="true" />{t(copy.addReport)}</Link>
         </div>
       ) : (
+        <>
+        <div className="toolbar filter-bar filter-grid">
+          <label className="field-label">
+            {t(copy.search)}
+            <span className="search-bar">
+              <Search size={16} aria-hidden="true" />
+              <input type="search" className="field" placeholder={t(copy.searchArticles)} value={query} onChange={(e) => setQuery(e.target.value)} aria-label={t(copy.search)} />
+            </span>
+          </label>
+          <label className="field-label">
+            {t(copy.status)}
+            <select className="field" value={status} onChange={(e) => setStatus(e.target.value)}>
+              <option value="">{t(copy.all)}</option>
+              <option value="draft">{t(copy.reportDraftStatus)}</option>
+              <option value="published">{t(copy.reportPublishedStatus)}</option>
+              <option value="edited">{t(copy.reportChangedAfterPublish)}</option>
+            </select>
+          </label>
+        </div>
         <div className="table-wrap">
           <table>
             <thead>
@@ -96,7 +129,12 @@ export function ClientReports({ locale, t }: { locale: Locale; t: (c: { ar: stri
             </thead>
             <tbody>
               {loading ? <LoadingTableRow colSpan={5} label={t(copy.loading)} rows={3} /> : null}
-              {reports.map((report) => {
+              {!loading && filteredReports.length === 0 ? (
+                <tr>
+                  <td colSpan={5}>{t(copy.noSearchResults)}</td>
+                </tr>
+              ) : null}
+              {filteredReports.map((report) => {
                 const edited = report.published_at && report.updated_at && new Date(report.updated_at).getTime() - new Date(report.published_at).getTime() > 5000;
                 return (
                   <tr key={report.id}>
@@ -136,6 +174,7 @@ export function ClientReports({ locale, t }: { locale: Locale; t: (c: { ar: stri
             </tbody>
           </table>
         </div>
+        </>
       )}
     </section>
   );

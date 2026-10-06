@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { Search } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmAction } from "../components/ConfirmAction";
 import { LoadingTableRow } from "../components/LoadingTableRow";
@@ -12,13 +13,16 @@ export function Articles({ locale, t }: { locale: Locale; t: (c: { ar: string; e
   const [articles, setArticles] = useState<Article[]>([]);
   const [meta, setMeta] = useState<PageMeta | null>(null);
   const [page, setPage] = useState(1);
+  const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [published, setPublished] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   function load() {
     setLoading(true);
     api
-      .articles(page)
+      .articles(page, { search: debouncedQuery, published })
       .then((res) => {
         setArticles(res.data);
         setMeta(res.meta);
@@ -31,8 +35,17 @@ export function Articles({ locale, t }: { locale: Locale; t: (c: { ar: string; e
   }
 
   useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedQuery(query.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedQuery, published]);
+
+  useEffect(() => {
     load();
-  }, [page]);
+  }, [page, debouncedQuery, published]);
 
   function formatDate(value: string | null) {
     if (!value) return "—";
@@ -91,6 +104,23 @@ export function Articles({ locale, t }: { locale: Locale; t: (c: { ar: string; e
       />
 
       {error ? <p className="error">{error}</p> : null}
+      <div className="toolbar filter-bar filter-grid">
+        <label className="field-label">
+          {t(copy.search)}
+          <span className="search-bar">
+            <Search size={16} aria-hidden="true" />
+            <input type="search" className="field" placeholder={t(copy.searchArticles)} value={query} onChange={(e) => setQuery(e.target.value)} aria-label={t(copy.search)} />
+          </span>
+        </label>
+        <label className="field-label">
+          {t(copy.filterPublished)}
+          <select className="field" value={published} onChange={(e) => setPublished(e.target.value)}>
+            <option value="">{t(copy.all)}</option>
+            <option value="yes">{t(copy.filterPublishedYes)}</option>
+            <option value="no">{t(copy.filterPublishedNo)}</option>
+          </select>
+        </label>
+      </div>
 
       <div className="table-wrap">
         <table>
