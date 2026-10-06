@@ -2991,26 +2991,6 @@ html[dir="ltr"] .report-panel {
   gap: 0.65rem;
 }
 
-.related-project-list {
-  display: grid;
-  gap: 0.4rem;
-}
-
-.related-pick {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-  padding: 0.5rem 0.7rem;
-  border: 1px solid var(--brand-line);
-  border-radius: 0.65rem;
-  background: var(--brand-surface);
-}
-
-.related-pick.is-picked {
-  border-color: var(--brand-orange);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand-orange) 30%, transparent);
-}
-
 .gallery-preview-item {
   display: grid;
   gap: 0.35rem;
@@ -3036,6 +3016,11 @@ html[dir="ltr"] .report-panel {
   aspect-ratio: 4 / 3;
   object-fit: cover;
   border-radius: 0.55rem;
+}
+
+.related-pick-empty {
+  display: block;
+  background: color-mix(in srgb, var(--brand-purple) 12%, var(--brand-surface));
 }
 
 .form-media-preview {

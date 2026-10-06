@@ -19,8 +19,8 @@ class StoreClientReportRequest extends FormRequest
     }
 
     /**
-     * The report is a Word file edited in the dashboard. `document` is the .docx, `pdf` the copy the
-     * browser renders from the same pages, and `body` a plain-text extract for search and Gemini.
+     * The report is a Word file edited in the dashboard. `document` is the .docx that publishing
+     * uploads to Drive. `pdf` is optional and is not uploaded. `body` is a plain-text extract.
      *
      * @return array<string, mixed>
      */

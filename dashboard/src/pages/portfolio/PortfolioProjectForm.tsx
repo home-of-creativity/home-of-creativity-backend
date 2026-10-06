@@ -311,12 +311,13 @@ export function PortfolioProjectForm({ locale, t }: { locale: Locale; t: (c: { a
       <FormSection title={t(copy.relatedProjects)} span>
         <p className="muted field-span">{t(copy.relatedProjectsHint)}</p>
         {otherProjects.length === 0 ? <p className="muted field-span">{t(copy.relatedProjectsEmpty)}</p> : null}
-        <div className="related-project-list field-span">
+        <div className="gallery-preview-grid field-span">
           {otherProjects.map((item) => {
             const position = relatedIds.indexOf(item.id);
             const title = locale === "ar" ? item.title_ar : item.title_en;
             return (
-              <label key={item.id} className={position >= 0 ? "related-pick is-picked" : "related-pick"}>
+              <label key={item.id} className={position >= 0 ? "gallery-preview-item is-picked" : "gallery-preview-item"}>
+                {item.image_url ? <img src={item.image_url} alt="" referrerPolicy="no-referrer" className="gallery-preview-thumb" /> : <span className="gallery-preview-thumb related-pick-empty" />}
                 <input
                   type="checkbox"
                   checked={position >= 0}

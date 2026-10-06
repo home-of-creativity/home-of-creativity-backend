@@ -1,5 +1,6 @@
 # Laravel API
 
+Last updated: 6 October 2026 (`POST /site/ask` answers published-site questions with Gemini; the key stays on the server)
 Last updated: 3 October 2026 (WhatsApp locked unless `WHATSAPP_ENABLED`; profile asks email + activity before the Odoo lead; `odoo_lead_notes` log on the lead; ClickUp created by Laravel only with retry; manual client decisions, finance, and bot drafts endpoints; staff quotation preview; quotation and invoice PDFs fall back to `correspondence.letter` (mPDF + IBM Plex Sans Arabic, so Arabic joins) when Odoo does not return a file)
 Last updated: 1 October 2026 (project gallery files under `/storage/portfolio/projects` are `Cache-Control: no-cache`, and each image includes `updated_at`)
 Last updated: 30 September 2026 (portfolio seeder keeps categories only; migration drops collage projects whose images are Google Drive URLs)
@@ -27,6 +28,7 @@ Seeded: `admin@example.com` / `password` (admin), `test@example.com` / `password
 | --- | --- |
 | GET | `/pricing` `/contact` `/reels` |
 | POST | `/contact/messages` (throttle 8/min; support interest → `support@`, else `sales@`, always CC `info@`; `contact` SMTP mailer) |
+| POST | `/site/ask` (throttle 8/min; `{question, locale, history[]}` → Gemini answers from `llms-full.txt` plus the live catalog. A price question compares packages in the same group using each package's published totals and listed features; 503 `unavailable` when Gemini has no key) |
 | GET | `/articles` `/articles/{slug}` (published only; HTML `body_en`/`body_ar`) |
 | GET | `/legal` `/legal/{slug}` — privacy and terms. A missing or placeholder-only row is filled from `LegalDefaults` (migration `2026_09_28_140000` inserts those rows when the slug is absent). `/profile-pdf` `/profile-pdf/file` |
 | GET | `/portfolio/clients` `/portfolio/projects` `/portfolio/projects/{id}` (projects carry `body_en`/`body_ar`, rich text cleaned with `LegalHtml::clean` on save; the detail adds `related`, the published projects linked from it in dashboard order. Admin create/update take `body_*`, `related_ids[]`, and `related_sync=1` to clear the list) |

@@ -31,13 +31,19 @@ import { copy, type Locale } from "../i18n";
 // The Word editor is large; load it only on this page.
 const ReportDocEditor = lazy(() => import("../components/report/ReportDocEditor").then((module) => ({ default: module.ReportDocEditor })));
 
+function failureMessage(err: unknown, fallback: string, capture: string): string {
+  if (!(err instanceof Error)) return fallback;
+  if (err.message === "pdf-capture") return capture;
+  return err.message || fallback;
+}
+
 type Phase = "loading" | "template" | "editing" | "error";
 type Busy = null | "saving" | "rendering" | "publishing";
 type PanelTab = "gemini" | "files" | "info";
 /**
  * auto: the timer after an edit; skipped when the server is current, retried when it fails.
  * leave: leaving the editor; skipped when the server is current.
- * manual: the Save button or Ctrl+S. publish: save, render the PDF, and upload both to Drive.
+ * manual: the Save button or Ctrl+S. publish: save the Word file and upload it to Drive.
  */
 type SaveMode = "auto" | "leave" | "manual" | "publish";
 /** The document read at one moment, before an await lets the editor change or unmount. */
@@ -173,10 +179,7 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
       form.set("title", name.trim() || tr(copy.reportTemplateBlank));
       form.set("body", snapshot.text.slice(0, 190000));
       form.set("document", new File([docx as BlobPart], "report.docx", { type: DOCX_MIME }));
-      if (mode === "publish" && handle) {
-        setBusy("rendering");
-        const pdf = await handle.pdf((done, total) => setProgress({ done, total }));
-        form.set("pdf", new File([pdf as BlobPart], "report.pdf", { type: "application/pdf" }));
+      if (mode === "publish") {
         form.set("publish", "1");
         setBusy("publishing");
       }
@@ -217,7 +220,7 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
       }
       return true;
     } catch (err) {
-      const message = err instanceof Error ? err.message : tr(copy.saveFailed);
+      const message = failureMessage(err, tr(copy.saveFailed), tr(copy.reportCaptureFailed));
       if (mode === "auto") {
         setAutoFailed(true);
         if (!failureShown.current) toast.error(message);
@@ -381,7 +384,7 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
       const pdf = await editor.current.pdf((done, total) => setProgress({ done, total }));
       download(pdf, `${title || "report"}.pdf`, "application/pdf");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t(copy.saveFailed));
+      toast.error(failureMessage(err, t(copy.saveFailed), t(copy.reportCaptureFailed)));
     } finally {
       setBusy(null);
       setProgress({ done: 0, total: 0 });

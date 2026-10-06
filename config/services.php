@@ -151,6 +151,10 @@ return [
         ],
     ],
 
+    'site' => [
+        'guide_url' => env('SITE_GUIDE_URL', 'https://hoc.agency/llms-full.txt'),
+    ],
+
     'gemini' => [
         'api_key' => env('GEMINI_API_KEY', env('GOOGLE_API_KEY')),
         'base_url' => env('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta'),

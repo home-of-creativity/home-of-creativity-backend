@@ -1,4 +1,4 @@
-import { toJpeg } from "html-to-image";
+import { toSvg } from "html-to-image";
 import { PDFDocument } from "pdf-lib";
 import { REPORT_FONT_FILES } from "./fonts";
 
@@ -20,27 +20,136 @@ function fileAsDataUrl(url: string): Promise<string> {
     }));
 }
 
+/** Family names actually painted on this page (the editor's private docx-embedded-* names). */
+function familiesOn(page: HTMLElement): Set<string> {
+  const names = new Set<string>();
+  const add = (value: string) => {
+    for (const part of value.split(",")) {
+      const name = part.trim().replace(/^["']|["']$/g, "");
+      if (name) names.add(name);
+    }
+  };
+  add(getComputedStyle(page).fontFamily);
+  page.querySelectorAll<HTMLElement>("*").forEach((node) => add(getComputedStyle(node).fontFamily));
+  return names;
+}
+
 /**
  * The editor paints text with faces it registers under private names (docx-embedded-*).
  * html-to-image draws each page inside an isolated SVG that cannot see those faces, so give it
  * the same font files as data URLs under the same names.
+ * Only the faces this page uses are embedded. The editor also registers Arial, Tahoma, and the
+ * other fallbacks, and embedding every one of them makes the page image too large to load.
  */
-async function embeddedFontCss(): Promise<string> {
+async function embeddedFontCss(page: HTMLElement): Promise<string> {
+  const used = familiesOn(page);
   fontData ??= Promise.all([fileAsDataUrl(REPORT_FONT_FILES.regular), fileAsDataUrl(REPORT_FONT_FILES.bold)])
     .then(([regular, bold]) => ({ regular, bold }));
   const data = await fontData;
   const seen = new Set<string>();
-  return Array.from(document.fonts)
-    .filter((face) => face.family.replace(/["']/g, "").startsWith("docx-embedded-"))
-    .map((face) => {
-      const family = face.family.replace(/["']/g, "");
-      const heavy = Number.parseInt(face.weight, 10) >= 600;
-      const key = `${family}|${face.weight}|${face.style}`;
-      if (seen.has(key)) return "";
-      seen.add(key);
-      return `@font-face{font-family:"${family}";font-weight:${face.weight};font-style:${face.style};src:url(${heavy ? data.bold : data.regular}) format("truetype");}`;
-    })
+  const rule = (family: string, weight: string, style: string, url: string) => {
+    const key = `${family}|${weight}|${style}`;
+    if (seen.has(key)) return "";
+    seen.add(key);
+    return `@font-face{font-family:"${family}";font-weight:${weight};font-style:${style};src:url(${url}) format("truetype");}`;
+  };
+  const faces = Array.from(document.fonts).filter((face) => used.has(face.family.replace(/["']/g, "")));
+  if (faces.length > 0) {
+    return faces
+      .map((face) => {
+        const family = face.family.replace(/["']/g, "");
+        const heavy = Number.parseInt(face.weight, 10) >= 600;
+        return rule(family, face.weight, face.style, heavy ? data.bold : data.regular);
+      })
+      .join("");
+  }
+  return [...used]
+    .filter((name) => name.startsWith("docx-embedded-"))
+    .map((family) => rule(family, "400", "normal", data.regular) + rule(family, "700", "normal", data.bold))
     .join("");
+}
+
+/** Standard properties only. Custom properties keep color-mix() text, which makes the page image fail to load. */
+function styleProperties(): string[] {
+  return Array.from(getComputedStyle(document.documentElement)).filter((name) => !name.startsWith("--") && name !== "content");
+}
+
+const COLOR_FN = /(?:color-mix|oklch|oklab|lab|lch|color)\((?:[^()]|\([^()]*\))*\)/g;
+
+/** Turn modern color functions into a computed rgb() the SVG image can paint. */
+function resolveColors(markup: string): string {
+  const withoutContent = markup.replace(/style="([^"]*)"/g, (_match, css: string) => {
+    const cleaned = css.replace(/(?:^|;)\s*content:\s*[^;"]*/g, "");
+    return `style="${cleaned}"`;
+  });
+  if (!/(?:color-mix|oklch|oklab|\blab\(|\blch\(|\bcolor\()/.test(withoutContent)) return withoutContent;
+  const probe = document.createElement("span");
+  document.body.appendChild(probe);
+  try {
+    return withoutContent.replace(COLOR_FN, (fn) => {
+      probe.style.color = "";
+      probe.style.color = fn;
+      const resolved = getComputedStyle(probe).color;
+      return resolved && !/(?:color-mix|oklch|oklab)/.test(resolved) ? resolved : "#1a0838";
+    });
+  } finally {
+    probe.remove();
+  }
+}
+
+function captureError(reason: unknown): Error {
+  return reason instanceof Error ? reason : new Error("pdf-capture");
+}
+
+function loadImage(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("pdf-capture"));
+    image.src = url;
+  });
+}
+
+/**
+ * Draw one page to a JPEG. html-to-image's own JPEG path loads the page as a data URL and,
+ * when that image fails, rejects with a DOM event rather than an Error.
+ */
+async function pageJpeg(page: HTMLElement, width: number, height: number, pixelRatio: number, fontEmbedCSS: string): Promise<string> {
+  let svg: string;
+  try {
+    svg = await toSvg(page, {
+      width,
+      height,
+      fontEmbedCSS,
+      cacheBust: false,
+      includeStyleProperties: styleProperties(),
+      onImageErrorHandler: () => undefined,
+    });
+  } catch (reason) {
+    throw captureError(reason);
+  }
+  const comma = svg.indexOf(",");
+  // Computed styles can contain form feeds and other controls. They are illegal in SVG XML,
+  // so the page image fails to load until those characters are removed.
+  const markup = resolveColors(decodeURIComponent(svg.slice(comma + 1)))
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g, "");
+  const url = URL.createObjectURL(new Blob([markup], { type: "image/svg+xml;charset=utf-8" }));
+  try {
+    const image = await loadImage(url);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(width * pixelRatio));
+    canvas.height = Math.max(1, Math.round(height * pixelRatio));
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("pdf-capture");
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", 0.92);
+  } catch (reason) {
+    throw captureError(reason);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 function scrollParent(element: HTMLElement): HTMLElement | null {
@@ -85,11 +194,11 @@ export async function pagesToPdf(root: HTMLElement, zoom: number, onProgress?: (
   // page up again by its index right before drawing it.
   const pageAt = (index: number) =>
     root.querySelector<HTMLElement>(`.docx-page[data-page-index="${index}"]`) ?? root.querySelectorAll<HTMLElement>(".docx-page")[index] ?? null;
-  const fontEmbedCSS = await embeddedFontCss();
   const first = pageAt(0);
   const scroller = first ? scrollParent(first) : null;
   const scrollTop = scroller?.scrollTop ?? 0;
   const pdf = await PDFDocument.create();
+  let fontEmbedCSS: string | null = null;
 
   try {
     for (let index = 0; index < count; index += 1) {
@@ -99,6 +208,7 @@ export async function pagesToPdf(root: HTMLElement, zoom: number, onProgress?: (
       await painted(current);
       const page = pageAt(index);
       if (!page) continue;
+      fontEmbedCSS ??= await embeddedFontCss(page);
       const width = page.offsetWidth;
       const height = page.offsetHeight;
       // Each page sits absolutely positioned down the stack, and html-to-image keeps that offset
@@ -108,15 +218,7 @@ export async function pagesToPdf(root: HTMLElement, zoom: number, onProgress?: (
       page.style.top = "0px";
       let image: string;
       try {
-        image = await toJpeg(page, {
-          width,
-          height,
-          pixelRatio: 2 / scale,
-          quality: 0.92,
-          backgroundColor: "#ffffff",
-          fontEmbedCSS,
-          cacheBust: false,
-        });
+        image = await pageJpeg(page, width, height, 2 / scale, fontEmbedCSS);
       } finally {
         page.style.top = top;
       }

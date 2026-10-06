@@ -7,9 +7,8 @@ use App\Services\GoogleDriveClient;
 use Illuminate\Support\Facades\Storage;
 
 /**
- * Upload a report to the client's Drive folder: the Word file, the PDF rendered in the dashboard,
- * and any attachments not uploaded yet. Republishing replaces the same Drive files instead of
- * adding copies.
+ * Upload a report to the client's Drive folder: the Word file and any attachments not uploaded
+ * yet. Republishing replaces the same Word file instead of adding a copy.
  */
 class PublishClientReport
 {
@@ -32,25 +31,11 @@ class PublishClientReport
             (string) Storage::disk('local')->get((string) $report->document_path),
             'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         );
-        $fill = [
+        $report->forceFill([
             'drive_document_id' => $document['id'],
             'drive_document_url' => $document['url'],
             'published_at' => now(),
-        ];
-
-        if ($this->readable($report->pdf_path)) {
-            $pdf = $this->put(
-                $folderId,
-                (string) $report->drive_file_id,
-                $report->title.'.pdf',
-                (string) Storage::disk('local')->get((string) $report->pdf_path),
-                'application/pdf',
-            );
-            $fill['drive_file_id'] = $pdf['id'];
-            $fill['drive_url'] = $pdf['url'];
-        }
-
-        $report->forceFill($fill)->save();
+        ])->save();
 
         foreach ($report->attachments as $attachment) {
             $path = Storage::disk('public')->path($attachment->path);

@@ -102,16 +102,16 @@ class ClientReportTest extends TestCase
             ->assertJsonValidationErrors('document');
     }
 
-    public function test_publishing_uploads_the_word_file_pdf_and_attachment_then_replaces_them(): void
+    public function test_publishing_uploads_the_word_file_and_attachment_then_replaces_the_word_file(): void
     {
         $this->mock(GoogleDriveClient::class, function ($mock): void {
             $mock->shouldReceive('ensureFolderPath')->andReturn('sub-folder');
             $mock->shouldReceive('lastError')->andReturn(null);
-            $mock->shouldReceive('uploadFile')->times(3)->andReturnUsing(fn (string $folder, string $name): array => [
+            $mock->shouldReceive('uploadFile')->times(2)->andReturnUsing(fn (string $folder, string $name): array => [
                 'id' => 'id-'.$name,
                 'url' => 'https://drive.google.com/file/d/'.$name.'/view',
             ]);
-            $mock->shouldReceive('replaceFile')->twice()->andReturnUsing(fn (string $folder, string $id): array => [
+            $mock->shouldReceive('replaceFile')->once()->andReturnUsing(fn (string $folder, string $id): array => [
                 'id' => $id,
                 'url' => 'https://drive.google.com/file/d/'.$id.'/view',
             ]);
@@ -126,18 +126,17 @@ class ClientReportTest extends TestCase
             'publish' => '1',
         ])->assertCreated()
             ->assertJsonPath('data.drive_document_url', 'https://drive.google.com/file/d/تقرير الربع.docx/view')
-            ->assertJsonPath('data.drive_url', 'https://drive.google.com/file/d/تقرير الربع.pdf/view')
+            ->assertJsonPath('data.drive_url', null)
             ->assertJsonPath('data.attachments.0.name', 'notes.pdf')
             ->assertJsonPath('drive_error', null)
             ->json('data.id');
 
         $this->assertNotNull($client->reports()->first()?->published_at);
 
-        // Republishing replaces the same two Drive files and does not upload the attachment again.
+        // Republishing replaces the same Word file and does not upload the attachment again.
         $this->post("/api/admin/reports/{$id}", [
             'title' => 'تقرير الربع',
             'document' => $this->docx(),
-            'pdf' => $this->pdf(),
             'publish' => '1',
         ])->assertOk()->assertJsonPath('drive_error', null);
     }

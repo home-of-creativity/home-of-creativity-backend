@@ -46,6 +46,7 @@ use App\Http\Controllers\PricingController;
 use App\Http\Controllers\ProfilePdfController;
 use App\Http\Controllers\SentryWebhookController;
 use App\Http\Controllers\ServiceRequestController;
+use App\Http\Controllers\SiteAskController;
 use App\Http\Controllers\SocialFeedController;
 use App\Http\Controllers\StaffBotController;
 use App\Http\Controllers\TelegramBotController;
@@ -68,6 +69,7 @@ Route::prefix('auth')->group(function () {
 Route::get('pricing', [PricingController::class, 'index']);
 Route::get('contact', [ContactController::class, 'index']);
 Route::post('contact/messages', [ContactController::class, 'send'])->middleware('throttle:8,1');
+Route::post('site/ask', SiteAskController::class)->middleware('throttle:8,1');
 Route::get('portfolio/clients', [PortfolioController::class, 'clients']);
 Route::get('portfolio/projects', [PortfolioController::class, 'projects']);
 Route::get('portfolio/projects/{portfolio_project}', [PortfolioController::class, 'show']);
