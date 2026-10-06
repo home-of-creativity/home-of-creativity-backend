@@ -144,9 +144,11 @@ class OdooController extends Controller
         }
 
         try {
+            $partner = $request->integer('partner');
             $items = $odoo->listQuotations(
                 min((int) $request->integer('limit', 100), 200),
                 max((int) $request->integer('offset', 0), 0),
+                $partner > 0 ? $partner : null,
             );
         } catch (\Throwable $exception) {
             return response()->json(['message' => 'Odoo quotations failed: '.$exception->getMessage()], 502);
@@ -162,9 +164,11 @@ class OdooController extends Controller
         }
 
         try {
+            $partner = $request->integer('partner');
             $items = $odoo->listInvoices(
                 min((int) $request->integer('limit', 100), 200),
                 max((int) $request->integer('offset', 0), 0),
+                $partner > 0 ? $partner : null,
             );
         } catch (\Throwable $exception) {
             return response()->json(['message' => 'Odoo invoices failed: '.$exception->getMessage()], 502);

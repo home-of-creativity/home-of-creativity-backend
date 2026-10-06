@@ -803,6 +803,7 @@ class AdminDashboardTest extends TestCase
                         'name' => 'S00031',
                         'partner_id' => [44, 'Damastech'],
                         'amount_total' => 250,
+                        'currency_id' => [1, 'USD'],
                         'state' => 'sale',
                         'client_order_ref' => 'REQ-2026-000001',
                         'origin' => false,
@@ -821,7 +822,8 @@ class AdminDashboardTest extends TestCase
         $this->getJson('/api/admin/odoo/quotations')
             ->assertOk()
             ->assertJsonPath('data.0.state', 'sale')
-            ->assertJsonPath('data.0.amount_total', 250);
+            ->assertJsonPath('data.0.amount_total', 250)
+            ->assertJsonPath('data.0.currency', 'USD');
     }
 
     public function test_admin_lists_odoo_invoices_from_live_odoo(): void
@@ -849,6 +851,8 @@ class AdminDashboardTest extends TestCase
                         'name' => 'INV/2026/0001',
                         'partner_id' => [44, 'Damastech'],
                         'amount_total' => 250,
+                        'amount_residual' => 100,
+                        'currency_id' => [1, 'USD'],
                         'state' => 'posted',
                         'payment_state' => 'not_paid',
                         'invoice_origin' => 'S00031',
@@ -869,7 +873,9 @@ class AdminDashboardTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.0.state', 'posted')
             ->assertJsonPath('data.0.payment_state', 'not_paid')
-            ->assertJsonPath('data.0.amount_total', 250);
+            ->assertJsonPath('data.0.amount_total', 250)
+            ->assertJsonPath('data.0.amount_residual', 100)
+            ->assertJsonPath('data.0.currency', 'USD');
     }
 
     public function test_admin_request_show_hydrates_live_odoo_quotation_and_invoice(): void
@@ -1649,7 +1655,7 @@ class AdminDashboardTest extends TestCase
         });
     }
 
-    public function test_admin_employees_index_removes_local_row_deleted_in_odoo(): void
+    public function test_admin_employees_index_keeps_local_row_missing_from_odoo(): void
     {
         Cache::flush();
         Http::preventStrayRequests();
@@ -1667,7 +1673,10 @@ class AdminDashboardTest extends TestCase
 
         $this->getJson('/api/admin/employees')->assertOk();
 
-        $this->assertDatabaseMissing('employees', ['id' => $employee->id]);
+        $this->assertDatabaseHas('employees', [
+            'id' => $employee->id,
+            'odoo_employee_id' => '66',
+        ]);
     }
 
     public function test_sync_partners_pushes_local_clients_without_odoo_id(): void

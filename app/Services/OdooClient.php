@@ -65,7 +65,7 @@ class OdooClient
      */
     private function quotationFields(): array
     {
-        return ['id', 'name', 'partner_id', 'amount_total', 'state', 'client_order_ref', 'origin', 'date_order'];
+        return ['id', 'name', 'partner_id', 'amount_total', 'currency_id', 'state', 'client_order_ref', 'origin', 'date_order'];
     }
 
     /**
@@ -73,7 +73,7 @@ class OdooClient
      */
     private function invoiceFields(): array
     {
-        return ['id', 'name', 'partner_id', 'amount_total', 'amount_residual', 'state', 'payment_state', 'invoice_origin', 'ref', 'invoice_date'];
+        return ['id', 'name', 'partner_id', 'amount_total', 'amount_residual', 'currency_id', 'state', 'payment_state', 'invoice_origin', 'ref', 'invoice_date'];
     }
 
     /**
@@ -87,6 +87,7 @@ class OdooClient
             'name' => (string) ($row['name'] ?? ''),
             'partner_name' => $this->relationName($row['partner_id'] ?? null),
             'amount_total' => (float) ($row['amount_total'] ?? 0),
+            'currency' => $this->relationName($row['currency_id'] ?? null),
             'state' => (string) ($row['state'] ?? ''),
             'client_order_ref' => $this->optionalString($row['client_order_ref'] ?? null),
             'origin' => $this->optionalString($row['origin'] ?? null),
@@ -107,6 +108,7 @@ class OdooClient
             'partner_name' => $this->relationName($row['partner_id'] ?? null),
             'amount_total' => (float) ($row['amount_total'] ?? 0),
             'amount_residual' => $this->invoiceResidual($row),
+            'currency' => $this->relationName($row['currency_id'] ?? null),
             'state' => (string) ($row['state'] ?? ''),
             'payment_state' => (string) ($row['payment_state'] ?? ''),
             'invoice_origin' => $this->optionalString($row['invoice_origin'] ?? null),
@@ -119,9 +121,9 @@ class OdooClient
     /**
      * @return list<array<string, mixed>>
      */
-    public function listQuotations(int $limit = 100, int $offset = 0): array
+    public function listQuotations(int $limit = 100, int $offset = 0, ?int $partnerId = null): array
     {
-        $rows = $this->searchRead('sale.order', [], $this->quotationFields(), $limit, $offset, 'date_order desc');
+        $rows = $this->searchRead('sale.order', $this->partnerDomain($partnerId), $this->quotationFields(), $limit, $offset, 'date_order desc');
 
         return array_map(fn (array $row): array => $this->mapQuotation($row), $rows);
     }
@@ -161,11 +163,15 @@ class OdooClient
     /**
      * @return list<array<string, mixed>>
      */
-    public function listInvoices(int $limit = 100, int $offset = 0): array
+    public function listInvoices(int $limit = 100, int $offset = 0, ?int $partnerId = null): array
     {
-        $rows = $this->searchRead('account.move', [
-            ['move_type', '=', 'out_invoice'],
-        ], $this->invoiceFields(), $limit, $offset, 'invoice_date desc');
+        $domain = [['move_type', '=', 'out_invoice']];
+        if ($partnerId !== null && $partnerId > 0) {
+            array_unshift($domain, '&');
+            $domain = array_merge($domain, $this->partnerDomain($partnerId));
+        }
+
+        $rows = $this->searchRead('account.move', $domain, $this->invoiceFields(), $limit, $offset, 'invoice_date desc');
 
         return array_map(fn (array $row): array => $this->mapInvoice($row), $rows);
     }
@@ -1475,6 +1481,29 @@ class OdooClient
         }
 
         return null;
+    }
+
+    /**
+     * @return list<array{0: string, 1: string, 2: int}>
+     */
+    private function partnerDomain(?int $partnerId): array
+    {
+        if ($partnerId === null || $partnerId <= 0) {
+            return [];
+        }
+
+        $scope = $partnerId;
+        try {
+            $row = $this->firstRecord($this->searchRead('res.partner', [['id', '=', $partnerId]], ['commercial_partner_id'], 1));
+            $commercial = is_array($row) ? ($row['commercial_partner_id'] ?? null) : null;
+            if (is_array($commercial) && isset($commercial[0])) {
+                $scope = (int) $commercial[0];
+            }
+        } catch (Throwable) {
+            $scope = $partnerId;
+        }
+
+        return [['partner_id', 'child_of', $scope > 0 ? $scope : $partnerId]];
     }
 
     private function relationName(mixed $value): ?string

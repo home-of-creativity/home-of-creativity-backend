@@ -1110,6 +1110,53 @@ td[colspan] {
   color: var(--brand-orange);
 }
 
+.odoo-table td:first-child,
+.odoo-table th:first-child,
+.odoo-table td:last-child,
+.odoo-table .nowrap {
+  white-space: nowrap;
+  width: 1%;
+}
+
+.odoo-table .money {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-align: end;
+}
+
+.odoo-table .cell-client .client-name,
+.odoo-table .cell-client .cell-detail,
+.odoo-table .money .cell-detail {
+  display: block;
+}
+
+.cell-detail {
+  color: var(--brand-muted);
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+.status-sale,
+.status-posted,
+.status-paid {
+  background: color-mix(in srgb, var(--brand-teal) 22%, var(--tint-base));
+  color: color-mix(in srgb, var(--brand-teal) 55%, var(--brand-ink));
+}
+
+.status-cancel {
+  background: color-mix(in srgb, #c0392b 14%, var(--tint-base));
+  color: #9b2c2c;
+}
+
+.status-partial {
+  background: color-mix(in srgb, var(--brand-orange) 22%, var(--tint-base));
+  color: color-mix(in srgb, var(--brand-orange) 65%, var(--brand-ink));
+}
+
 .client-name {
   font-weight: 600;
 }
@@ -3182,9 +3229,18 @@ html[dir="ltr"] .report-panel {
   cursor: not-allowed;
 }
 
+.papers-for {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0 0 0.85rem;
+}
+
 .actions-cell {
   display: flex;
-    flex-wrap: wrap;
+  flex-wrap: wrap;
   gap: 0.35rem;
 }
 

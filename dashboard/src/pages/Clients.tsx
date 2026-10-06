@@ -22,6 +22,39 @@ function readTab(value: string | null): Tab {
   return tabs.includes(value as Tab) ? (value as Tab) : "clients";
 }
 
+function formatMoney(amount: number, currency: string | null): string {
+  const formatted = amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return currency ? `${formatted} ${currency}` : formatted;
+}
+
+function formatOdooWhen(value: string | null, locale: Locale): string {
+  if (!value) return "—";
+  const tag = locale === "ar" ? "ar-SY-u-nu-latn" : "en-GB";
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  const date = dateOnly
+    ? new Date(Date.UTC(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]), 12))
+    : new Date(`${value.replace(" ", "T")}Z`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString(tag, dateOnly
+    ? { dateStyle: "medium", timeZone: "Asia/Damascus" }
+    : { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Damascus" });
+}
+
+function partnerLines(name: string | null): { title: string; detail: string | null } {
+  if (!name) return { title: "—", detail: null };
+  const parts = name.split(/,\s*/, 2);
+  if (parts.length === 2 && parts[0] && parts[1]) return { title: parts[0], detail: parts[1] };
+  return { title: name, detail: null };
+}
+
+function odooStatusClass(state: string): string {
+  if (state === "sale" || state === "posted" || state === "paid") return "status status-sale";
+  if (state === "sent" || state === "in_payment") return "status status-sent";
+  if (state === "cancel") return "status status-cancel";
+  if (state === "partial") return "status status-partial";
+  return "status status-draft";
+}
+
 function tabLabel(tab: Tab, t: (c: { ar: string; en: string }) => string) {
   switch (tab) {
     case "logos":
@@ -38,6 +71,9 @@ function tabLabel(tab: Tab, t: (c: { ar: string; en: string }) => string) {
 export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = readTab(searchParams.get("tab"));
+  const partnerFilter = searchParams.get("partner") ?? "";
+  const clientLabel = searchParams.get("client") ?? "";
+  const papersUnlinked = searchParams.get("unlinked") === "1";
 
   function setTab(next: Tab) {
     if (next === "clients") {
@@ -90,15 +126,23 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
       if (!silent) setLoading(true);
 
       const request =
-        tab === "quotations"
-          ? api.odooQuotations().then((res) => {
+        papersUnlinked && (tab === "quotations" || tab === "invoices")
+          ? Promise.resolve().then(() => {
+              if (cancelled) return;
+              if (tab === "quotations") setQuotations([]);
+              if (tab === "invoices") setInvoices([]);
+              setOdooReady(true);
+              setError("");
+            })
+          : tab === "quotations"
+          ? api.odooQuotations(partnerFilter || undefined).then((res) => {
               if (cancelled) return;
               setQuotations(res.data);
               setOdooReady(true);
               setError("");
             })
           : tab === "invoices"
-            ? api.odooInvoices().then((res) => {
+            ? api.odooInvoices(partnerFilter || undefined).then((res) => {
                 if (cancelled) return;
                 setInvoices(res.data);
                 setOdooReady(true);
@@ -148,7 +192,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [tab, page, debouncedQuery, odooFilter, companyFilter, phoneFilter, channelFilter, stageFilter, driveFilter, t]);
+  }, [tab, page, debouncedQuery, odooFilter, companyFilter, phoneFilter, channelFilter, stageFilter, driveFilter, partnerFilter, papersUnlinked, t]);
 
   useEffect(() => {
     setPage(1);
@@ -229,6 +273,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
     draft: copy.quoteStateDraft,
     sent: copy.quoteStateSent,
     sale: copy.quoteStateSale,
+    posted: copy.quoteStatePosted,
     cancel: copy.quoteStateCancel,
   };
   const paymentLabel: Record<string, { ar: string; en: string }> = {
@@ -437,6 +482,30 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                       </td>
                       <td>{item.requests_count ?? 0}</td>
                       <td className="actions-cell">
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          onClick={() => {
+                            const params: Record<string, string> = { tab: "quotations", client: item.company_name?.trim() || item.name };
+                            if (item.odoo_partner_id) params.partner = item.odoo_partner_id;
+                            else params.unlinked = "1";
+                            setSearchParams(params);
+                          }}
+                        >
+                          {t(copy.clientPaperQuotations)}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          onClick={() => {
+                            const params: Record<string, string> = { tab: "invoices", client: item.company_name?.trim() || item.name };
+                            if (item.odoo_partner_id) params.partner = item.odoo_partner_id;
+                            else params.unlinked = "1";
+                            setSearchParams(params);
+                          }}
+                        >
+                          {t(copy.clientPaperInvoices)}
+                        </button>
                         <Link className="btn btn-ghost" to={`/reports/clients/${item.id}`}>{t(copy.reportsTitle)}</Link>
                         <button
                           type="button"
@@ -485,46 +554,52 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
             </select>
           </label>
         </div>
+        {partnerFilter || papersUnlinked ? (
+          <p className="papers-for">
+            <span>{papersUnlinked ? t(copy.clientPapersUnlinked) : t(copy.papersFor).replace("{kind}", t(copy.odooTabQuotations)).replace("{client}", clientLabel || "—")}</span>
+            <button type="button" className="btn btn-ghost" onClick={() => setTab("quotations")}>{t(copy.showAllPapers)}</button>
+          </p>
+        ) : null}
         <div className="table-wrap">
-          <table>
+          <table className="odoo-table">
             <thead>
               <tr>
                 <th>{t(copy.number)}</th>
                 <th>{t(copy.client)}</th>
-                <th>{t(copy.odooAmount)}</th>
+                <th className="money">{t(copy.odooAmount)}</th>
                 <th>{t(copy.odooState)}</th>
                 <th>{t(copy.odooReference)}</th>
                 <th>{t(copy.odooDate)}</th>
-                <th>{t(copy.actions)}</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <LoadingTableRow colSpan={7} label={t(copy.loading)} />
+                <LoadingTableRow colSpan={6} label={t(copy.loading)} />
               ) : !odooReady ? (
                 <tr>
-                  <td colSpan={7}>{t(copy.odooNotConfigured)}</td>
+                  <td colSpan={6}>{t(copy.odooNotConfigured)}</td>
                 </tr>
               ) : filteredQuotations.length === 0 ? (
                 <tr>
-                  <td colSpan={7}>{quoteQuery || quoteState ? t(copy.noSearchResults) : t(copy.empty)}</td>
+                  <td colSpan={6}>{quoteQuery || quoteState ? t(copy.noSearchResults) : t(copy.empty)}</td>
                 </tr>
               ) : (
-                filteredQuotations.map((item) => (
+                filteredQuotations.map((item) => {
+                  const partner = partnerLines(item.partner_name);
+                  return (
                   <tr key={item.id}>
-                    <td dir="ltr">{item.name}</td>
-                    <td>{item.partner_name ?? "—"}</td>
-                    <td dir="ltr">{item.amount_total}</td>
-                    <td>{t(quoteStateLabel[item.state] ?? { ar: item.state, en: item.state })}</td>
-                    <td dir="ltr">{item.client_order_ref ?? item.origin ?? "—"}</td>
-                    <td dir="ltr">{item.date_order ?? "—"}</td>
-                    <td>
-                      <a href={item.odoo_url} target="_blank" rel="noreferrer">
-                        {t(copy.openOdoo)}
-                      </a>
+                    <td dir="ltr"><a className="table-link" href={item.odoo_url} target="_blank" rel="noreferrer">{item.name}</a></td>
+                    <td className="cell-client">
+                      <span className="client-name">{partner.title}</span>
+                      {partner.detail ? <span className="cell-detail">{partner.detail}</span> : null}
                     </td>
+                    <td className="money" dir="ltr">{formatMoney(item.amount_total, item.currency)}</td>
+                    <td><span className={odooStatusClass(item.state)}>{t(quoteStateLabel[item.state] ?? { ar: item.state, en: item.state })}</span></td>
+                    <td dir="ltr">{item.client_order_ref ?? item.origin ?? "—"}</td>
+                    <td className="nowrap">{formatOdooWhen(item.date_order, locale)}</td>
                   </tr>
-                ))
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -539,7 +614,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
             {t(copy.search)}
             <span className="search-bar">
               <Search size={16} aria-hidden="true" />
-              <input type="search" className="field" placeholder={t(copy.searchQuotations)} value={invoiceQuery} onChange={(e) => setInvoiceQuery(e.target.value)} aria-label={t(copy.search)} />
+              <input type="search" className="field" placeholder={t(copy.searchInvoices)} value={invoiceQuery} onChange={(e) => setInvoiceQuery(e.target.value)} aria-label={t(copy.search)} />
             </span>
           </label>
           <label className="field-label">
@@ -561,17 +636,23 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
             </select>
           </label>
         </div>
+        {partnerFilter || papersUnlinked ? (
+          <p className="papers-for">
+            <span>{papersUnlinked ? t(copy.clientPapersUnlinked) : t(copy.papersFor).replace("{kind}", t(copy.odooTabInvoices)).replace("{client}", clientLabel || "—")}</span>
+            <button type="button" className="btn btn-ghost" onClick={() => setTab("invoices")}>{t(copy.showAllPapers)}</button>
+          </p>
+        ) : null}
         <div className="table-wrap">
-          <table>
+          <table className="odoo-table">
             <thead>
               <tr>
                 <th>{t(copy.number)}</th>
                 <th>{t(copy.client)}</th>
-                <th>{t(copy.odooAmount)}</th>
+                <th className="money">{t(copy.odooAmount)}</th>
                 <th>{t(copy.odooState)}</th>
+                <th>{t(copy.filterPayment)}</th>
                 <th>{t(copy.odooReference)}</th>
                 <th>{t(copy.odooDate)}</th>
-                <th>{t(copy.actions)}</th>
               </tr>
             </thead>
             <tbody>
@@ -586,24 +667,26 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                   <td colSpan={7}>{invoiceQuery || invoiceState || invoicePayment ? t(copy.noSearchResults) : t(copy.empty)}</td>
                 </tr>
               ) : (
-                filteredInvoices.map((item) => (
+                filteredInvoices.map((item) => {
+                  const partner = partnerLines(item.partner_name);
+                  return (
                   <tr key={item.id}>
-                    <td dir="ltr">{item.name}</td>
-                    <td>{item.partner_name ?? "—"}</td>
-                    <td dir="ltr">{item.amount_total}</td>
-                    <td>
-                      {t(quoteStateLabel[item.state] ?? { ar: item.state, en: item.state })}
-                      {item.payment_state ? ` / ${t(paymentLabel[item.payment_state] ?? { ar: item.payment_state, en: item.payment_state })}` : ""}
+                    <td dir="ltr"><a className="table-link" href={item.odoo_url} target="_blank" rel="noreferrer">{item.name}</a></td>
+                    <td className="cell-client">
+                      <span className="client-name">{partner.title}</span>
+                      {partner.detail ? <span className="cell-detail">{partner.detail}</span> : null}
                     </td>
+                    <td className="money" dir="ltr">
+                      <span>{formatMoney(item.amount_total, item.currency)}</span>
+                      <span className="cell-detail">{t(copy.odooResidual)} {formatMoney(item.amount_residual, item.currency)}</span>
+                    </td>
+                    <td><span className={odooStatusClass(item.state)}>{t(quoteStateLabel[item.state] ?? { ar: item.state, en: item.state })}</span></td>
+                    <td>{item.payment_state ? <span className={odooStatusClass(item.payment_state)}>{t(paymentLabel[item.payment_state] ?? { ar: item.payment_state, en: item.payment_state })}</span> : "—"}</td>
                     <td dir="ltr">{item.ref ?? item.invoice_origin ?? "—"}</td>
-                    <td dir="ltr">{item.invoice_date ?? "—"}</td>
-                    <td>
-                      <a href={item.odoo_url} target="_blank" rel="noreferrer">
-                        {t(copy.openOdoo)}
-                      </a>
-                    </td>
+                    <td className="nowrap">{formatOdooWhen(item.invoice_date, locale)}</td>
                   </tr>
-                ))
+                  );
+                })
               )}
             </tbody>
           </table>

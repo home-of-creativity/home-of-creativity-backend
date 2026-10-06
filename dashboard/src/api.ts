@@ -341,6 +341,7 @@ export type OdooQuotation = {
   name: string;
   partner_name: string | null;
   amount_total: number;
+  currency: string | null;
   state: string;
   client_order_ref: string | null;
   origin: string | null;
@@ -353,6 +354,8 @@ export type OdooInvoice = {
   name: string;
   partner_name: string | null;
   amount_total: number;
+  amount_residual: number;
+  currency: string | null;
   state: string;
   payment_state: string;
   invoice_origin: string | null;
@@ -1168,11 +1171,13 @@ export const api = {
       }>
     >("/admin/odoo/import-crm-clients/excel", "POST", form);
   },
-  odooQuotations() {
-    return request<{ data: OdooQuotation[] }>("/admin/odoo/quotations");
+  odooQuotations(partner?: string) {
+    const query = partner ? `?partner=${encodeURIComponent(partner)}` : "";
+    return request<{ data: OdooQuotation[] }>(`/admin/odoo/quotations${query}`);
   },
-  odooInvoices() {
-    return request<{ data: OdooInvoice[] }>("/admin/odoo/invoices");
+  odooInvoices(partner?: string) {
+    const query = partner ? `?partner=${encodeURIComponent(partner)}` : "";
+    return request<{ data: OdooInvoice[] }>(`/admin/odoo/invoices${query}`);
   },
   employees(filters: {
     search?: string;
