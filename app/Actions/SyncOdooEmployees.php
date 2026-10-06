@@ -39,6 +39,17 @@ class SyncOdooEmployees
                 $employee = Employee::query()->where('email', $row['email'])->first();
             }
 
+            if (! $employee && $row['name'] !== '') {
+                $byName = Employee::query()
+                    ->whereNull('odoo_employee_id')
+                    ->whereRaw('LOWER(name) = ?', [mb_strtolower($row['name'])])
+                    ->limit(2)
+                    ->get();
+                if ($byName->count() === 1) {
+                    $employee = $byName->first();
+                }
+            }
+
             if ($employee) {
                 $employee->fill([
                     'name' => $row['name'] !== '' ? $row['name'] : $employee->name,

@@ -14,6 +14,7 @@ export function Employees({ t }: { locale: Locale; t: (c: { ar: string; en: stri
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [odooReady, setOdooReady] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [query, setQuery] = useState("");
   const staffBot = import.meta.env.VITE_TELEGRAM_STAFF_BOT as string | undefined;
 
@@ -57,6 +58,22 @@ export function Employees({ t }: { locale: Locale; t: (c: { ar: string; en: stri
     });
   }, [items, query]);
 
+  async function syncFromOdoo() {
+    setSyncing(true);
+    setError("");
+    try {
+      await api.syncOdooEmployees();
+      load();
+      toast.success(t(copy.employeesSynced));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t(copy.saveFailed);
+      setError(message);
+      toast.error(message);
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   async function remove(id: number) {
     setError("");
     try {
@@ -78,7 +95,11 @@ export function Employees({ t }: { locale: Locale; t: (c: { ar: string; en: stri
         lede={t(copy.employeesLede)}
         actions={
           <>
-            {!odooReady ? <span className="muted">{t(copy.odooNotConfigured)}</span> : null}
+            {!odooReady ? <span className="muted">{t(copy.odooNotConfigured)}</span> : (
+              <button className="btn btn-ghost" type="button" disabled={syncing} onClick={() => void syncFromOdoo()}>
+                {t(copy.syncEmployees)}
+              </button>
+            )}
             <Link className="btn btn-primary" to="/employees/new">
               {t(copy.addEmployee)}
             </Link>

@@ -24,7 +24,7 @@ export function EmployeeForm({ t }: { locale: Locale; t: (c: { ar: string; en: s
     () =>
       z.object({
         name: z.string().trim().min(1, t(copy.fieldRequired)),
-        code: z.string().trim(),
+        code: z.string().trim().optional(),
         phone: z.string().trim(),
         clickup_user_id: z.string().trim(),
         profession: z.string(),
@@ -112,7 +112,6 @@ export function EmployeeForm({ t }: { locale: Locale; t: (c: { ar: string; en: s
     setBusy(true);
     const payload = {
       name: values.name.trim(),
-      code: values.code.trim() || undefined,
       phone: values.phone.trim() || null,
       email: members.find((member) => member.id === values.clickup_user_id)?.email ?? null,
       clickup_user_id: values.clickup_user_id.trim() || null,
@@ -164,12 +163,14 @@ export function EmployeeForm({ t }: { locale: Locale; t: (c: { ar: string; en: s
           <input className={errors.name ? "field has-error" : "field"} disabled={isApprove} {...register("name")} />
           {errors.name ? <p className="field-error">{errors.name.message}</p> : null}
         </label>
+        {!isApprove && editingId ? (
+          <label className="field-label">
+            {t(copy.employeeCode)}
+            <input className="field" dir="ltr" readOnly value={watch("code") ?? ""} />
+          </label>
+        ) : null}
         {!isApprove ? (
           <>
-            <label className="field-label">
-              {t(copy.employeeCode)}
-              <input className="field" dir="ltr" placeholder="EMP-0001" {...register("code")} />
-            </label>
             <label className="field-label">
               {t(copy.phone)}
               <input className="field" dir="ltr" {...register("phone")} />

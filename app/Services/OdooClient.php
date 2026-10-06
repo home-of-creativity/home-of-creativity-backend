@@ -1283,6 +1283,16 @@ class OdooClient
             }
         }
 
+        if (filled($name)) {
+            $existing = $this->call('hr.employee', 'search', [
+                'domain' => [['name', '=ilike', $name]],
+                'limit' => 2,
+            ]);
+            if (is_array($existing) && count($existing) === 1 && isset($existing[0])) {
+                return (string) $existing[0];
+            }
+        }
+
         $employeeId = $this->call('hr.employee', 'create', [[
             'name' => $name,
             'work_email' => $email,

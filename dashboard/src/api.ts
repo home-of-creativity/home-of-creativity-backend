@@ -1106,6 +1106,12 @@ export const api = {
   odooStatus() {
     return request<Envelope<{ configured: boolean; url: string | null }>>("/admin/odoo/status");
   },
+  syncOdooEmployees() {
+    return request<Envelope<{ synced: number; created: number; updated: number; pushed: number }>>(
+      "/admin/odoo/sync-employees",
+      { method: "POST" },
+    );
+  },
   importOdooCrmClientsExcel(file: File) {
     const form = new FormData();
     form.append("file", file);

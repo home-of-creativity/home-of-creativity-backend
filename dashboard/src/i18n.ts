@@ -88,6 +88,8 @@ export const copy = {
   employeesLede: { ar: "الموظفون في الداشبورد وOdoo يتزامنون تلقائياً في الاتجاهين: إضافة وتعديل وحذف وقراءة.", en: "Dashboard and Odoo employees stay in sync both ways: create, update, delete, and read." },
   odooEmployee: { ar: "موظف Odoo", en: "Odoo employee" },
   addEmployee: { ar: "إضافة موظف", en: "Add employee" },
+  syncEmployees: { ar: "مزامنة من أودو", en: "Sync from Odoo" },
+  employeesSynced: { ar: "تمت مزامنة الموظفين من أودو.", en: "Employees synced from Odoo." },
   editEmployee: { ar: "تعديل", en: "Edit" },
   saveEmployee: { ar: "حفظ الموظف", en: "Save employee" },
   deleteEmployee: { ar: "حذف", en: "Delete" },
