@@ -3,6 +3,7 @@
 namespace App\Actions;
 
 use App\Enums\ClickUpSyncEvent;
+use App\Enums\ClickUpTaskType;
 use App\Enums\EmployeeProfession;
 use App\Enums\RequestStatus;
 use App\Models\Client;
@@ -251,6 +252,11 @@ class HandleWhatsAppInbound
             }
             if ($step === 'edit_body') {
                 $this->captureEditBody($client, $chatId, $phone, $session, (string) $text);
+
+                return;
+            }
+            if ($step === 'hours_pick') {
+                $this->pickRequestHours($client, $chatId, $phone, $session, (string) $text);
 
                 return;
             }
@@ -514,6 +520,16 @@ class HandleWhatsAppInbound
         }
         if (str_starts_with($data, 'open:')) {
             $this->showRequest($client, $chatId, substr($data, 5));
+
+            return;
+        }
+        if (str_starts_with($data, 'hours:')) {
+            $this->showTaskHours($client, $chatId, $phone, $session, substr($data, 6));
+
+            return;
+        }
+        if (str_starts_with($data, 'more_hours:')) {
+            $this->askRequestHours($client, $chatId, $phone, $session, (int) substr($data, 11));
 
             return;
         }
@@ -956,6 +972,160 @@ class HandleWhatsAppInbound
         $this->telegram->sendInlineKeyboard($chatId, implode("\n", $lines), $rows);
     }
 
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function askRequestHours(Client $client, string $chatId, string $phone, array &$session, int $offset = 0): void
+    {
+        $items = $client->requests()
+            ->latest('id')
+            ->get()
+            ->reject(fn (ServiceRequest $item) => $item->hiddenFromClient())
+            ->values();
+
+        if ($items->isEmpty()) {
+            $session['step'] = 'idle';
+            unset($session['hours_numbers']);
+            $this->putSession($phone, $session);
+            $this->sendMenu($chatId, $this->tx('لا توجد طلبات بعد.', 'There are no requests yet.'));
+
+            return;
+        }
+
+        $pageSize = 9;
+        $shown = $items->slice($offset, $pageSize)->values();
+        $numbers = $shown->map(fn (ServiceRequest $item): string => (string) $item->number)->all();
+        $session['step'] = 'hours_pick';
+        $session['hours_numbers'] = $numbers;
+        $this->putSession($phone, $session);
+
+        $lines = [$this->tx('أي طلب تقصد؟ أرسل رقمه:', 'Which request do you mean? Reply with its number:')];
+        $rows = [];
+        foreach ($shown as $item) {
+            $lines[] = "#{$item->number} — {$item->title}";
+            $rows[] = [[
+                'text' => mb_substr("#{$item->number}", 0, 24),
+                'callback_data' => 'hours:'.$item->number,
+            ]];
+        }
+        $next = $offset + $pageSize;
+        if ($next < $items->count()) {
+            $rows[] = [['text' => $this->tx('عرض الأقدم', 'Older'), 'callback_data' => 'more_hours:'.$next]];
+        }
+        $this->telegram->sendInlineKeyboard($chatId, implode("\n", $lines), $rows);
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function pickRequestHours(Client $client, string $chatId, string $phone, array &$session, string $text): void
+    {
+        $value = trim($text);
+        $western = strtr($value, ['٠' => '0', '١' => '1', '٢' => '2', '٣' => '3', '٤' => '4', '٥' => '5', '٦' => '6', '٧' => '7', '٨' => '8', '٩' => '9']);
+        $numbers = is_array($session['hours_numbers'] ?? null) ? $session['hours_numbers'] : [];
+        if (preg_match('/^(\d{1,2})$/', $western, $match) === 1) {
+            $picked = $numbers[(int) $match[1] - 1] ?? null;
+            if (is_string($picked) && $picked !== '') {
+                $this->showTaskHours($client, $chatId, $phone, $session, $picked);
+
+                return;
+            }
+        }
+
+        $owned = $client->requests()->get()->first(
+            fn (ServiceRequest $item): bool => ! $item->hiddenFromClient()
+                && ($value === (string) $item->number || str_contains($value, (string) $item->number))
+        );
+        if ($owned instanceof ServiceRequest) {
+            $this->showTaskHours($client, $chatId, $phone, $session, (string) $owned->number);
+
+            return;
+        }
+
+        $this->safeSend($chatId, $this->tx('أرسل رقم الطلب من القائمة.', 'Reply with the request number from the list.'));
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function showTaskHours(Client $client, string $chatId, string $phone, array &$session, string $number): void
+    {
+        $item = $client->requests()->where('number', $number)->with('clickupTasks')->first();
+        $session['step'] = 'idle';
+        unset($session['hours_numbers']);
+        $this->putSession($phone, $session);
+        if ($item === null || $item->hiddenFromClient()) {
+            $this->sendMenu($chatId, $this->tx('لا يوجد طلب بهذا الرقم.', 'There is no request with that number.'));
+
+            return;
+        }
+
+        $lines = ["#{$item->number} — {$item->title}", $this->tx('ساعات العمل:', 'Work hours:')];
+        $total = 0;
+        $shown = 0;
+        foreach ($item->clickupTasks as $task) {
+            $hours = (int) ($task->planned_hours ?? 0);
+            if ($hours < 1 || ! $task->task_type instanceof ClickUpTaskType) {
+                continue;
+            }
+            $lines[] = $this->taskHourLabel($task->task_type).': '.$this->hourWord($hours);
+            $total += $hours;
+            $shown++;
+        }
+        if ($shown === 0) {
+            $this->safeSend($chatId, $this->tx(
+                "#{$item->number} — {$item->title}\nلم تُحدد ساعات العمل لهذا الطلب بعد.",
+                "#{$item->number} — {$item->title}\nWork hours are not set for this request yet.",
+            ));
+
+            return;
+        }
+
+        $lines[] = $this->tx('المجموع: ', 'Total: ').$this->hourWord($total);
+        $this->safeSend($chatId, implode("\n", $lines));
+    }
+
+    private function asksForRequestHours(string $text): bool
+    {
+        if (preg_match('/طلباتي|شو صار|وين طلب/u', $text) === 1
+            || preg_match('/\b(my orders|my requests|order status)\b/i', $text) === 1) {
+            return false;
+        }
+
+        return preg_match('/شو\s*(?:في الطلب|بالطلب|فيه الطلب|داخل الطلب)|محتوى الطلب|كم\s*ساعة|ساعات\s*(?:العمل|المهام)|الوقت\s*المحتاج|تاسك/u', $text) === 1
+            || preg_match('/\b(what(?:\'s| is) in my (?:request|order)|how many hours|hours needed|task hours)\b/i', $text) === 1;
+    }
+
+    private function taskHourLabel(ClickUpTaskType $type): string
+    {
+        return match ($type) {
+            ClickUpTaskType::Sales => $this->tx('المبيعات', 'Sales'),
+            ClickUpTaskType::Design => $this->tx('التصميم', 'Design'),
+            ClickUpTaskType::Content => $this->tx('المحتوى', 'Content'),
+            ClickUpTaskType::Programming => $this->tx('البرمجة', 'Programming'),
+            ClickUpTaskType::Photography => $this->tx('التصوير', 'Photography'),
+            ClickUpTaskType::Revision => $this->tx('التعديل', 'Revision'),
+        };
+    }
+
+    private function hourWord(int $hours): string
+    {
+        if ($this->replyLang === 'en') {
+            return $hours === 1 ? '1 hour' : $hours.' hours';
+        }
+        if ($hours === 1) {
+            return 'ساعة';
+        }
+        if ($hours === 2) {
+            return 'ساعتان';
+        }
+        if ($hours >= 3 && $hours <= 10) {
+            return $hours.' ساعات';
+        }
+
+        return $hours.' ساعة';
+    }
+
     private function showRequest(Client $client, string $chatId, string $number): void
     {
         $item = $client->requests()->where('number', $number)->first();
@@ -1192,6 +1362,11 @@ class HandleWhatsAppInbound
 
             return true;
         }
+        if ($intent === 'hours') {
+            $this->askRequestHours($client, $chatId, $phone, $session);
+
+            return true;
+        }
         if ($intent === 'requests') {
             $this->listRequests($client, $chatId);
 
@@ -1233,6 +1408,9 @@ class HandleWhatsAppInbound
         $text = trim($text);
         if ($text === '') {
             return null;
+        }
+        if ($this->asksForRequestHours($text)) {
+            return 'hours';
         }
         if (preg_match('/طلباتي|وين طلب|شو صار بطلب/u', $text) === 1
             || preg_match('/\b(my orders|my requests|order status)\b/i', $text) === 1) {

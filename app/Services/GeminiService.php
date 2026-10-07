@@ -635,9 +635,10 @@ PROMPT;
 
         $prompt = <<<PROMPT
 You route one message inside the Home of Creativity client bot.
-Return ONLY JSON: {"intent":"requests|edit|new|ask|help|profile|approve|reject|none"}
+Return ONLY JSON: {"intent":"hours|requests|edit|new|ask|help|profile|approve|reject|none"}
 Judge the meaning. The client does not have to use a menu word.
-requests = they want to see their orders or know what happened to an order.
+hours = they ask what is inside one of their requests, or how many hours the work needs.
+requests = they want the list of orders or the status of an order. Not the hours inside a request.
 edit = they want to change an existing order's title or description.
 profile = they want to see or change their own name, phone, or company. Not an order.
 new = they want to start an order or a service.
@@ -671,7 +672,7 @@ PROMPT;
 
     private function allowedIntent(string $intent): string
     {
-        return in_array($intent, ['requests', 'edit', 'new', 'ask', 'help', 'profile', 'approve', 'reject', 'none'], true) ? $intent : 'none';
+        return in_array($intent, ['hours', 'requests', 'edit', 'new', 'ask', 'help', 'profile', 'approve', 'reject', 'none'], true) ? $intent : 'none';
     }
 
     /**

@@ -2,7 +2,9 @@
 
 namespace Tests\Feature;
 
+use App\Enums\ClickUpTaskType;
 use App\Enums\RequestStatus;
+use App\Models\ClickUpTask;
 use App\Models\Client;
 use App\Models\PricingCategory;
 use App\Models\PricingPackage;
@@ -431,5 +433,78 @@ class WhatsAppWebBotTest extends TestCase
         Http::assertSent(fn (Request $request): bool => $request->url() === 'http://wa-web.test/send'
             && str_contains((string) data_get($request->data(), 'text'), 'أهلاً'));
         $this->assertSame('ar', Client::query()->where('telegram_user_id', 'wa:963922222222')->firstOrFail()->locale);
+    }
+
+    public function test_asking_what_is_in_the_request_shows_clickup_hours_after_the_client_picks(): void
+    {
+        config(['services.gemini.e2e_stub' => true]);
+        $client = Client::query()->create([
+            'name' => 'Nour',
+            'phone' => '+963944444444',
+            'company_name' => 'Nour Co',
+            'telegram_user_id' => 'wa:963944444444',
+            'locale' => 'ar',
+        ]);
+        $older = ServiceRequest::factory()->create([
+            'client_id' => $client->id,
+            'title' => 'الشعار',
+            'status' => RequestStatus::InProgress,
+        ]);
+        $newer = ServiceRequest::factory()->create([
+            'client_id' => $client->id,
+            'title' => 'الموقع',
+            'status' => RequestStatus::InProgress,
+        ]);
+        ClickUpTask::query()->create([
+            'request_id' => $older->id,
+            'task_type' => ClickUpTaskType::Design,
+            'integration_key' => 'hours-design',
+            'status' => 'to do',
+            'planned_hours' => 16,
+        ]);
+        ClickUpTask::query()->create([
+            'request_id' => $newer->id,
+            'task_type' => ClickUpTaskType::Content,
+            'integration_key' => 'hours-content',
+            'status' => 'to do',
+            'planned_hours' => 40,
+        ]);
+
+        $this->withHeaders(['X-Webhook-Secret' => 'web-secret'])
+            ->postJson('/api/bot/whatsapp/web', [
+                'phone' => '963944444444',
+                'message_id' => 'web-hours-ask',
+                'text' => 'شو بالطلب الخاص بي',
+            ])
+            ->assertOk();
+
+        Http::assertSent(function (Request $request) use ($newer): bool {
+            $text = (string) data_get($request->data(), 'text');
+
+            return $request->url() === 'http://wa-web.test/send'
+                && str_contains($text, 'أي طلب تقصد؟')
+                && ! str_contains($text, 'أرسل رقم الطلب لفتحه')
+                && collect(data_get($request->data(), 'buttons', []))->contains('id', 'hours:'.$newer->number)
+                && ! collect(data_get($request->data(), 'buttons', []))->contains(fn (array $button): bool => str_starts_with((string) ($button['id'] ?? ''), 'open:'));
+        });
+
+        $this->withHeaders(['X-Webhook-Secret' => 'web-secret'])
+            ->postJson('/api/bot/whatsapp/web', [
+                'phone' => '963944444444',
+                'message_id' => 'web-hours-pick',
+                'text' => '1',
+            ])
+            ->assertOk();
+
+        Http::assertSent(function (Request $request) use ($newer): bool {
+            $text = (string) data_get($request->data(), 'text');
+
+            return $request->url() === 'http://wa-web.test/send'
+                && str_contains($text, '#'.$newer->number)
+                && str_contains($text, 'المحتوى')
+                && str_contains($text, '40 ساعة')
+                && str_contains($text, 'المجموع')
+                && ! str_contains($text, 'المدفوع');
+        });
     }
 }

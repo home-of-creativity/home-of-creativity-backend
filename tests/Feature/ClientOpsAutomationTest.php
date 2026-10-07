@@ -1404,6 +1404,40 @@ class ClientOpsAutomationTest extends TestCase
             ->assertJsonPath('data.0.can_revise', true);
     }
 
+    public function test_an_open_revision_is_not_closed_when_the_drive_folder_is_idle(): void
+    {
+        Cache::flush();
+        config(['services.telegram.bot_token' => 'client-token']);
+        Http::fake([
+            'https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 1]], 200),
+        ]);
+
+        $client = Client::factory()->create(['telegram_user_id' => 'tg-revision-open']);
+        $request = ServiceRequest::factory()->for($client)->create([
+            'status' => RequestStatus::RevisionRequested,
+            'google_drive_folder_id' => 'folder-revision',
+            'drive_last_activity_at' => now()->subMinutes(10),
+        ]);
+        DriveDelivery::query()->create([
+            'request_id' => $request->id,
+            'drive_file_id' => 'file-old',
+            'name' => 'logo.png',
+            'mime_type' => 'image/png',
+            'sent_at' => now()->subMinutes(10),
+        ]);
+
+        $this->mock(GoogleDriveClient::class, function ($mock): void {
+            $mock->shouldReceive('configured')->andReturn(true);
+            $mock->shouldReceive('isHocClientRootId')->andReturn(false);
+            $mock->shouldReceive('listNewFiles')->andReturn([]);
+        });
+
+        $this->artisan('ops:poll-drive')->assertSuccessful();
+
+        $this->assertSame(RequestStatus::RevisionRequested, $request->fresh()?->status);
+        Http::assertNothingSent();
+    }
+
     public function test_revision_is_blocked_before_drive_files_or_delivery(): void
     {
         $client = Client::factory()->create(['telegram_user_id' => 'tg-revblock']);

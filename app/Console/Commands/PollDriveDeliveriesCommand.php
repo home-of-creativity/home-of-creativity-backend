@@ -390,6 +390,15 @@ class PollDriveDeliveriesCommand extends Command
                 'Work files uploaded to Drive.',
             );
         }
+
+        if ($request->status === RequestStatus::RevisionRequested) {
+            $transitions->transition(
+                $request,
+                RequestStatus::InProgress,
+                'drive',
+                'Revised file sent to the client.',
+            );
+        }
     }
 
     private function openWhenIdle(
@@ -400,7 +409,6 @@ class PollDriveDeliveriesCommand extends Command
         if (! in_array($request->status, [
             RequestStatus::PaymentConfirmed,
             RequestStatus::InProgress,
-            RequestStatus::RevisionRequested,
         ], true)) {
             return;
         }
