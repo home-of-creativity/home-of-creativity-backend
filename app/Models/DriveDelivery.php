@@ -62,18 +62,19 @@ class DriveDelivery extends Model
     /**
      * @return array{inline_keyboard: list<list<array{text: string, callback_data: string}>>}
      */
-    public function clientRevisionKeyboard(string $requestRef, bool $canComplete = false): array
+    public function clientRevisionKeyboard(string $requestRef, bool $canComplete = false, string $locale = 'ar'): array
     {
+        $english = $locale === 'en';
         $row = [
-            ['text' => '✏️ تعديل', 'callback_data' => 'revfile:'.$requestRef.':'.$this->id],
+            ['text' => $english ? 'Revise' : '✏️ تعديل', 'callback_data' => 'revfile:'.$requestRef.':'.$this->id],
         ];
         if ($this->client_approved_at === null) {
-            $row[] = ['text' => '✅ موافقة', 'callback_data' => 'okfile:'.$requestRef.':'.$this->id];
+            $row[] = ['text' => $english ? 'Approve' : '✅ موافقة', 'callback_data' => 'okfile:'.$requestRef.':'.$this->id];
         }
 
         $rows = [$row];
         if ($canComplete) {
-            $rows[] = [['text' => '✅ اعتماد التسليم', 'callback_data' => 'complete:'.$requestRef]];
+            $rows[] = [['text' => $english ? 'Accept delivery' : '✅ اعتماد التسليم', 'callback_data' => 'complete:'.$requestRef]];
         }
 
         return ['inline_keyboard' => $rows];
@@ -82,7 +83,7 @@ class DriveDelivery extends Model
     /**
      * @return array{inline_keyboard: list<list<array{text: string, callback_data: string}>>}
      */
-    public static function clientReviewKeyboard(string $requestRef, bool $canComplete = true): array
+    public static function clientReviewKeyboard(string $requestRef, bool $canComplete = true, string $locale = 'ar'): array
     {
         if (! $canComplete) {
             return ['inline_keyboard' => []];
@@ -90,7 +91,7 @@ class DriveDelivery extends Model
 
         return [
             'inline_keyboard' => [
-                [['text' => '✅ اعتماد التسليم', 'callback_data' => 'complete:'.$requestRef]],
+                [['text' => $locale === 'en' ? 'Accept delivery' : '✅ اعتماد التسليم', 'callback_data' => 'complete:'.$requestRef]],
             ],
         ];
     }
@@ -130,14 +131,19 @@ class DriveDelivery extends Model
         return $this->exists && $this->sent_at !== null;
     }
 
-    public function clientSendCaption(string $requestRef): string
+    public function clientSendCaption(string $requestRef, string $locale = 'ar'): string
     {
-        $name = (string) ($this->name ?: 'ملف');
+        $english = $locale === 'en';
+        $name = (string) ($this->name ?: ($english ? 'file' : 'ملف'));
         if ($this->wasAlreadySent()) {
-            return 'تم تعديل الملف «'.$name.'» للطلب #'.$requestRef." وأُرسل من جديد.\nإذا كانت جاهزة اضغط موافقة، أو اطلب تعديلاً.";
+            return $english
+                ? 'The file “'.$name.'” for request #'.$requestRef." was updated and sent again.\nReply 1 to approve it, or 2 to ask for a revision."
+                : 'تم تعديل الملف «'.$name.'» للطلب #'.$requestRef." وأُرسل من جديد.\nإذا كانت جاهزة اضغط موافقة، أو اطلب تعديلاً.";
         }
 
-        return 'ملف جديد للطلب #'.$requestRef.': '.$name."\nإذا كانت جاهزة اضغط موافقة، أو اطلب تعديلاً.";
+        return $english
+            ? 'New file for request #'.$requestRef.': '.$name."\nReply 1 to approve it, or 2 to ask for a revision."
+            : 'ملف جديد للطلب #'.$requestRef.': '.$name."\nإذا كانت جاهزة اضغط موافقة، أو اطلب تعديلاً.";
     }
 
     /**

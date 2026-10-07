@@ -22,6 +22,22 @@ class BillingPeriod
         };
     }
 
+    public static function label(string $period, string $locale = 'ar'): string
+    {
+        if ($locale !== 'en') {
+            return self::labelAr($period);
+        }
+
+        return match ($period) {
+            'monthly' => 'Monthly',
+            'quarterly' => 'Quarterly',
+            'semiannual' => 'Semiannual',
+            'yearly' => 'Yearly',
+            'one_time' => 'One time',
+            default => $period,
+        };
+    }
+
     public static function months(string $period): int
     {
         return match ($period) {

@@ -328,13 +328,14 @@ class PollDriveDeliveriesCommand extends Command
                 $fresh = $request->fresh() ?? $request;
                 $ref = ResolveServiceRequest::displayNumber($fresh);
                 $telegram->lastMessageId = null;
+                $locale = ($fresh->client?->locale === 'en') ? 'en' : 'ar';
                 $telegram->sendFile(
                     (string) $chatId,
                     Storage::disk('local')->path($tmp),
                     (string) $file['mimeType'],
-                    $delivery->clientSendCaption($ref),
+                    $delivery->clientSendCaption($ref, $locale),
                     'client',
-                    $delivery->clientRevisionKeyboard($ref),
+                    $delivery->clientRevisionKeyboard($ref, false, $locale),
                 );
                 $sent = true;
                 $delivery->forceFill([
@@ -421,10 +422,13 @@ class PollDriveDeliveriesCommand extends Command
         }
 
         $ref = ResolveServiceRequest::displayNumber($updated);
+        $locale = ($updated->client?->locale === 'en') ? 'en' : 'ar';
         $telegram->sendInlineKeyboard(
             (string) $chatId,
-            'اكتملت ملفات الطلب #'.$ref.".\nإذا اكتمل العمل اضغط اعتماد التسليم.",
-            DriveDelivery::clientReviewKeyboard($ref, true)['inline_keyboard'],
+            $locale === 'en'
+                ? 'The files for request #'.$ref." are complete.\nReply 1 to accept the delivery."
+                : 'اكتملت ملفات الطلب #'.$ref.".\nإذا اكتمل العمل اضغط اعتماد التسليم.",
+            DriveDelivery::clientReviewKeyboard($ref, true, $locale)['inline_keyboard'],
         );
     }
 

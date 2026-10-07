@@ -583,7 +583,7 @@ A recommendation or comparison may be up to 140 words. Any other reply stays und
 Private information is closed: other clients, their results, invoices, quotations, phone numbers, staff names, salaries, internal costs, margins, unpublished discounts, Odoo, ClickUp, and another person's conversation. If asked, say that is not shared, then continue from the published packages.
 Format so Arabic and English stay easy to read:
 - Separate the chosen package from the next one with a blank line.
-- Write the Arabic explanation, then put the English package name and each price on the following lines. Do not drop an English name into the middle of an Arabic sentence.
+- Write the explanation in {$language}, then put the package name and each price on the following lines. Do not drop a package name into the middle of a sentence.
 - Put a full https:// URL on its own line when you point to a page.
 - Both 0968862822 and 0954187154 open a phone call or WhatsApp. Mention both when the visitor asks how to get in touch, and no other phone number.
 Return ONLY JSON: {"answer":"..."}
@@ -680,7 +680,7 @@ PROMPT;
      * @param  list<array{role: string, text: string}>  $history
      * @return array{id: int, period: string, answer: string}|null
      */
-    public function recommendPackage(string $question, string $catalog, array $history = []): ?array
+    public function recommendPackage(string $question, string $catalog, array $history = [], string $locale = 'ar'): ?array
     {
         $question = mb_substr(trim($question), 0, 500);
         $catalog = trim($catalog);
@@ -697,13 +697,14 @@ PROMPT;
             }
         }
         $earlier = $turns === [] ? '(none)' : implode("\n", $turns);
+        $language = $locale === 'en' ? 'English' : 'Arabic';
 
         $prompt = <<<PROMPT
 You choose one published Home of Creativity package for a visitor who wants to start an order.
 Return ONLY JSON: {"id":0,"period":"","answer":""}
 Use an id and a period that appear on the same catalog line. id 0 means this message is not asking to start or choose a package.
 For one shop or one local branch that wants a subscription and better results, choose the line whose subtitle is منشآت صغيرة and prefer period quarterly when that line lists it, otherwise monthly.
-Do not invent a package, a price, a discount, or a result. The answer is Arabic, under 80 words, names the package, says why its line fits, and says the quotation arrives after they confirm. Never mention other clients, invoices, staff, costs, Odoo, or ClickUp.
+Do not invent a package, a price, a discount, or a result. The answer is in {$language}, under 80 words, names the package, says why its line fits, and says the quotation arrives after they confirm. Never mention other clients, invoices, staff, costs, Odoo, or ClickUp.
 
 Catalog:
 {$catalog}

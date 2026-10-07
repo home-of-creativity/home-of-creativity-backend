@@ -10,4 +10,14 @@ class StatusLabel
     {
         return RequestStatus::tryFrom($status)?->labelAr() ?? $status;
     }
+
+    public static function request(string $status, string $locale = 'ar'): string
+    {
+        $enum = RequestStatus::tryFrom($status);
+        if ($enum === null) {
+            return $status;
+        }
+
+        return $locale === 'en' ? $enum->labelEn() : $enum->labelAr();
+    }
 }

@@ -66,4 +66,20 @@ enum RequestStatus: string
             self::Cancelled => 'ملغى',
         };
     }
+
+    public function labelEn(): string
+    {
+        return match ($this) {
+            self::Submitted => 'Received',
+            self::QuotationSent => 'Quotation sent',
+            self::QuotationRejected => 'Quotation rejected',
+            self::AwaitingPayment => 'Awaiting payment',
+            self::PaymentConfirmed => 'Payment confirmed',
+            self::InProgress => 'In progress',
+            self::ReadyForReview => 'Ready for review',
+            self::RevisionRequested => 'Revision requested',
+            self::Completed => 'Completed',
+            self::Cancelled => 'Cancelled',
+        };
+    }
 }

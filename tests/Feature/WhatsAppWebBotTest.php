@@ -394,4 +394,42 @@ class WhatsAppWebBotTest extends TestCase
         Http::assertSent(fn (Request $request): bool => $request->url() === 'http://wa-web.test/send'
             && str_contains((string) data_get($request->data(), 'text'), 'لا توجد طلبات'));
     }
+
+    public function test_the_chat_follows_the_language_of_the_latest_message(): void
+    {
+        $this->withHeaders(['X-Webhook-Secret' => 'web-secret'])
+            ->postJson('/api/bot/whatsapp/web', [
+                'phone' => '963922222222',
+                'profile_name' => 'Nour',
+                'message_id' => 'web-lang-en',
+                'text' => 'Hello',
+            ])
+            ->assertOk();
+
+        Http::assertSent(fn (Request $request): bool => $request->url() === 'http://wa-web.test/send'
+            && str_contains((string) data_get($request->data(), 'text'), 'What is the company name?'));
+
+        $this->withHeaders(['X-Webhook-Secret' => 'web-secret'])
+            ->postJson('/api/bot/whatsapp/web', [
+                'phone' => '963922222222',
+                'message_id' => 'web-lang-company',
+                'text' => 'Acme Studio',
+            ])
+            ->assertOk();
+
+        Http::assertSent(fn (Request $request): bool => $request->url() === 'http://wa-web.test/send'
+            && str_contains((string) data_get($request->data(), 'text'), 'Your details are saved.'));
+
+        $this->withHeaders(['X-Webhook-Secret' => 'web-secret'])
+            ->postJson('/api/bot/whatsapp/web', [
+                'phone' => '963922222222',
+                'message_id' => 'web-lang-ar',
+                'text' => 'مرحبا',
+            ])
+            ->assertOk();
+
+        Http::assertSent(fn (Request $request): bool => $request->url() === 'http://wa-web.test/send'
+            && str_contains((string) data_get($request->data(), 'text'), 'أهلاً'));
+        $this->assertSame('ar', Client::query()->where('telegram_user_id', 'wa:963922222222')->firstOrFail()->locale);
+    }
 }
