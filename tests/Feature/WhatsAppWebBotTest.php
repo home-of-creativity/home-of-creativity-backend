@@ -196,6 +196,94 @@ class WhatsAppWebBotTest extends TestCase
             && ! str_contains((string) data_get($request->data(), 'text'), 'اختر الفئة'));
     }
 
+    public function test_asking_for_a_bigger_package_sends_a_larger_quotation_with_the_ad_budget(): void
+    {
+        $category = PricingCategory::query()->create([
+            'slug' => 'strategic',
+            'name_en' => 'Strategic',
+            'name_ar' => 'حلول استراتيجية',
+            'is_published' => true,
+            'allows_renewal' => true,
+        ]);
+        $subcategory = PricingSubcategory::query()->create([
+            'category_id' => $category->id,
+            'slug' => 'plans',
+            'name_en' => 'Plans',
+            'name_ar' => 'باقات',
+            'is_published' => true,
+        ]);
+        $startup = PricingPackage::query()->create([
+            'subcategory_id' => $subcategory->id,
+            'slug' => 'startup-build',
+            'name_en' => 'Startup Build',
+            'name_ar' => 'Startup Build',
+            'subtitle_en' => 'Small',
+            'subtitle_ar' => 'صغيرة',
+            'prices' => ['quarterly' => 1137],
+            'is_published' => true,
+        ]);
+        PricingPackage::query()->create([
+            'subcategory_id' => $subcategory->id,
+            'slug' => 'business-growth',
+            'name_en' => 'Business Growth',
+            'name_ar' => 'Business Growth',
+            'subtitle_en' => 'Mid',
+            'subtitle_ar' => 'متوسطة',
+            'prices' => ['quarterly' => 2697],
+            'features' => [['ar' => 'دراسة دورية للمنافسين']],
+            'reach' => ['adBudgetUsd' => 200],
+            'is_published' => true,
+        ]);
+        $client = Client::query()->create([
+            'name' => 'Nour',
+            'phone' => '+963977777777',
+            'company_name' => 'Nour Co',
+            'telegram_user_id' => 'wa:963977777777',
+            'locale' => 'ar',
+        ]);
+        $serviceRequest = ServiceRequest::factory()->create([
+            'client_id' => $client->id,
+            'pricing_package_id' => $startup->id,
+            'billing_period' => 'quarterly',
+            'status' => RequestStatus::QuotationSent,
+            'quotation_amount' => 1137,
+            'title' => 'Startup Build',
+        ]);
+        Quotation::query()->create([
+            'request_id' => $serviceRequest->id,
+            'version' => 1,
+            'amount' => 1137,
+            'sent_at' => now(),
+        ]);
+        Cache::put('hoc:wa-session:963977777777', [
+            'step' => 'quote',
+            'quote_ref' => $serviceRequest->number,
+        ], now()->addHour());
+
+        $this->withHeaders(['X-Webhook-Secret' => 'web-secret'])
+            ->postJson('/api/bot/whatsapp/web', [
+                'phone' => '963977777777',
+                'message_id' => 'web-bigger',
+                'text' => 'اريد الباقة اكبر',
+            ])
+            ->assertOk();
+
+        $fresh = $serviceRequest->fresh();
+        $this->assertSame(RequestStatus::QuotationSent, $fresh->status);
+        $this->assertSame('Business Growth', $fresh->title);
+        $this->assertEquals(2897, (float) $fresh->quotation_amount);
+        Http::assertSent(function (Request $request): bool {
+            if ($request->url() !== 'http://wa-web.test/send') {
+                return false;
+            }
+            $body = (string) (data_get($request->data(), 'text') ?: data_get($request->data(), 'caption'));
+
+            return str_contains($body, 'Business Growth')
+                && str_contains($body, 'ميزانية الإعلان')
+                && ! str_contains($body, 'سبب الرفض');
+        });
+    }
+
     public function test_gemini_suggests_a_package_and_offers_to_open_it(): void
     {
         config([
@@ -506,5 +594,135 @@ class WhatsAppWebBotTest extends TestCase
                 && str_contains($text, 'المجموع')
                 && ! str_contains($text, 'المدفوع');
         });
+    }
+
+    public function test_a_voice_note_is_transcribed_and_runs_the_spoken_request(): void
+    {
+        config([
+            'services.gemini.e2e_stub' => false,
+            'services.gemini.api_key' => 'test-key',
+            'services.gemini.vertex_project' => '',
+        ]);
+        Client::query()->create([
+            'name' => 'Nour',
+            'phone' => '+963933333331',
+            'company_name' => 'Nour Co',
+            'telegram_user_id' => 'wa:963933333331',
+            'locale' => 'ar',
+        ]);
+        Http::fake(function (Request $request) {
+            if (str_contains($request->url(), 'wa-web.test')) {
+                return Http::response(['id' => 'wa-web-1'], 200);
+            }
+
+            return Http::response([
+                'candidates' => [[
+                    'content' => ['parts' => [['text' => '{"text":"طلباتي"}']]],
+                ]],
+            ], 200);
+        });
+
+        $this->withHeaders(['X-Webhook-Secret' => 'web-secret'])
+            ->postJson('/api/bot/whatsapp/web', [
+                'phone' => '963933333331',
+                'message_id' => 'web-voice',
+                'media' => [
+                    'kind' => 'audio',
+                    'mime' => 'audio/ogg; codecs=opus',
+                    'filename' => 'voice.ogg',
+                    'data_base64' => base64_encode('voice'),
+                ],
+            ])
+            ->assertOk();
+
+        Http::assertSent(fn (Request $request): bool => $request->url() === 'http://wa-web.test/send'
+            && str_contains((string) data_get($request->data(), 'text'), 'لا توجد طلبات'));
+    }
+
+    public function test_a_subscriber_can_book_photography_from_the_package_allowance(): void
+    {
+        $category = PricingCategory::query()->create([
+            'slug' => 'strategic-photo',
+            'name_en' => 'Strategic',
+            'name_ar' => 'حلول',
+            'is_published' => true,
+            'allows_renewal' => true,
+        ]);
+        $subcategory = PricingSubcategory::query()->create([
+            'category_id' => $category->id,
+            'slug' => 'plans-photo',
+            'name_en' => 'Plans',
+            'name_ar' => 'باقات',
+            'is_published' => true,
+        ]);
+        $package = PricingPackage::query()->create([
+            'subcategory_id' => $subcategory->id,
+            'slug' => 'growth-photo',
+            'name_en' => 'Business Growth',
+            'name_ar' => 'Business Growth',
+            'subtitle_en' => 'Mid',
+            'subtitle_ar' => 'متوسطة',
+            'prices' => ['monthly' => 899],
+            'work_lines' => [['department' => 'photography', 'hours' => 6]],
+            'is_published' => true,
+        ]);
+        $client = Client::query()->create([
+            'name' => 'Nour',
+            'phone' => '+963933333332',
+            'company_name' => 'Nour Co',
+            'telegram_user_id' => 'wa:963933333332',
+            'locale' => 'ar',
+        ]);
+        ServiceRequest::factory()->create([
+            'client_id' => $client->id,
+            'pricing_package_id' => $package->id,
+            'billing_period' => 'monthly',
+            'allows_renewal' => true,
+            'status' => RequestStatus::InProgress,
+            'subscription_ends_at' => now()->addDays(20),
+            'title' => 'Business Growth',
+        ]);
+
+        $this->withHeaders(['X-Webhook-Secret' => 'web-secret'])
+            ->postJson('/api/bot/whatsapp/web', [
+                'phone' => '963933333332',
+                'message_id' => 'web-photo',
+                'text' => 'بدي موعد تصوير',
+            ])
+            ->assertOk();
+
+        Http::assertSent(fn (Request $request): bool => $request->url() === 'http://wa-web.test/send'
+            && str_contains((string) data_get($request->data(), 'text'), 'متبقي 2')
+            && ! str_contains((string) data_get($request->data(), 'text'), 'غير متاح'));
+    }
+
+    public function test_asking_to_renew_before_the_window_explains_when_it_opens(): void
+    {
+        $client = Client::query()->create([
+            'name' => 'Nour',
+            'phone' => '+963933333333',
+            'company_name' => 'Nour Co',
+            'telegram_user_id' => 'wa:963933333333',
+            'locale' => 'ar',
+        ]);
+        ServiceRequest::factory()->create([
+            'client_id' => $client->id,
+            'billing_period' => 'monthly',
+            'allows_renewal' => true,
+            'status' => RequestStatus::InProgress,
+            'subscription_ends_at' => now()->addDays(40),
+            'quotation_amount' => 399,
+        ]);
+
+        $this->withHeaders(['X-Webhook-Secret' => 'web-secret'])
+            ->postJson('/api/bot/whatsapp/web', [
+                'phone' => '963933333333',
+                'message_id' => 'web-renew',
+                'text' => 'بدي جدد الاشتراك',
+            ])
+            ->assertOk();
+
+        Http::assertSent(fn (Request $request): bool => $request->url() === 'http://wa-web.test/send'
+            && str_contains((string) data_get($request->data(), 'text'), 'آخر 8 أيام'));
     }
 }

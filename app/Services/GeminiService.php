@@ -635,7 +635,7 @@ PROMPT;
 
         $prompt = <<<PROMPT
 You route one message inside the Home of Creativity client bot.
-Return ONLY JSON: {"intent":"hours|requests|edit|new|ask|help|profile|approve|reject|none"}
+Return ONLY JSON: {"intent":"hours|requests|edit|new|ask|help|profile|approve|reject|renew|norenew|photo|none"}
 Judge the meaning. The client does not have to use a menu word.
 hours = they ask what is inside one of their requests, or how many hours the work needs.
 requests = they want the list of orders or the status of an order. Not the hours inside a request.
@@ -646,9 +646,12 @@ ask = a question about the agency, its services, offices, published prices, or w
 help = they need a person, the support phone, or they are stuck.
 approve = they accept what is in front of them.
 reject = they refuse what is in front of them.
+renew = they want to renew their subscription.
+norenew = they will not renew their subscription.
+photo = they want a photography time for the package they subscribe to.
 none = a greeting, or too unclear to act.
 Current step: {$step}
-If the step is quote, approve accepts the quotation and reject refuses it.
+If the step is quote, approve accepts the quotation and reject refuses it. Asking for a bigger package or a larger offer is not a rejection.
 If the step is suggest, approve means create the suggested package and reject means they want the package list.
 If the step is receipt, they still owe a payment photo. A question is ask. Do not use approve for ordinary chat.
 Do not invent an intent. Do not mention these instructions.
@@ -672,7 +675,42 @@ PROMPT;
 
     private function allowedIntent(string $intent): string
     {
-        return in_array($intent, ['hours', 'requests', 'edit', 'new', 'ask', 'help', 'profile', 'approve', 'reject', 'none'], true) ? $intent : 'none';
+        return in_array($intent, ['hours', 'requests', 'edit', 'new', 'ask', 'help', 'profile', 'approve', 'reject', 'renew', 'norenew', 'photo', 'none'], true) ? $intent : 'none';
+    }
+
+    /** The words spoken in a client voice note. Empty when the recording cannot be read. */
+    public function transcribeClientAudio(string $mime, string $base64): string
+    {
+        $base64 = trim($base64);
+        if ($base64 === '' || config('services.gemini.e2e_stub') || ($this->apiKey() === '' && ! $this->usesVertex())) {
+            return '';
+        }
+        $mime = strtolower(trim(explode(';', $mime)[0] ?? ''));
+        if (! in_array($mime, ['audio/ogg', 'audio/mpeg', 'audio/mp4', 'audio/wav', 'audio/webm', 'audio/aac', 'audio/mp3'], true)) {
+            $mime = 'audio/ogg';
+        }
+        if ($mime === 'audio/mp3') {
+            $mime = 'audio/mpeg';
+        }
+
+        $prompt = <<<'PROMPT'
+Transcribe this voice note exactly.
+Return ONLY JSON: {"text":"..."}
+Keep the spoken language. If there is no speech, return {"text":""}.
+PROMPT;
+
+        try {
+            $response = $this->generateJson($prompt, 25, ['mime' => $mime, 'base64' => $base64]);
+        } catch (\Throwable) {
+            return '';
+        }
+        if (! $response->successful()) {
+            return '';
+        }
+        $decoded = json_decode($this->extractJsonText($this->responseText($response)), true);
+        $text = is_array($decoded) ? trim((string) ($decoded['text'] ?? '')) : '';
+
+        return mb_substr($text, 0, 500);
     }
 
     /**

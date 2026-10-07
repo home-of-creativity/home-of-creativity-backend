@@ -162,6 +162,7 @@ async function forwardMessage(msg) {
   };
   const image = message.imageMessage;
   const document = message.documentMessage;
+  const audio = message.audioMessage;
   const node = image || document;
   if (node) {
     const buffer = await downloadMediaMessage(msg, "buffer", {}, { logger, reuploadRequest: sock.updateMediaMessage });
@@ -170,6 +171,16 @@ async function forwardMessage(msg) {
         kind: image ? "image" : "document",
         mime: node.mimetype || (image ? "image/jpeg" : "application/octet-stream"),
         filename: node.fileName || (image ? "image.jpg" : "file"),
+        data_base64: Buffer.from(buffer).toString("base64"),
+      };
+    }
+  } else if (audio) {
+    const buffer = await downloadMediaMessage(msg, "buffer", {}, { logger, reuploadRequest: sock.updateMediaMessage });
+    if (buffer && buffer.length > 0 && buffer.length <= 8_000_000) {
+      payload.media = {
+        kind: "audio",
+        mime: audio.mimetype || "audio/ogg",
+        filename: "voice.ogg",
         data_base64: Buffer.from(buffer).toString("base64"),
       };
     }

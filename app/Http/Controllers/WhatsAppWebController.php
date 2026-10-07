@@ -18,7 +18,7 @@ class WhatsAppWebController extends Controller
             'text' => ['nullable', 'string', 'max:4000'],
             'button_id' => ['nullable', 'string', 'max:256'],
             'media' => ['nullable', 'array'],
-            'media.kind' => ['required_with:media', 'in:image,document'],
+            'media.kind' => ['required_with:media', 'in:image,document,audio'],
             'media.mime' => ['nullable', 'string', 'max:80'],
             'media.filename' => ['nullable', 'string', 'max:180'],
             'media.data_base64' => ['required_with:media', 'string', 'max:12000000'],

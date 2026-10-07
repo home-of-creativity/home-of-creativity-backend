@@ -8,6 +8,7 @@ use App\Enums\EmployeeProfession;
 use App\Enums\RequestStatus;
 use App\Models\Client;
 use App\Models\DriveDelivery;
+use App\Models\PhotographyBooking;
 use App\Models\PricingPackage;
 use App\Models\RequestFile;
 use App\Models\ServiceRequest;
@@ -17,12 +18,14 @@ use App\Services\SiteGuide;
 use App\Services\TelegramNotifier;
 use App\Contracts\WhatsAppMessenger;
 use App\Support\BillingPeriod;
+use App\Support\PaymentPlanResolver;
 use App\Support\ChatLanguage;
 use App\Support\ClientChannelGate;
 use App\Support\ClientProfileValue;
 use App\Support\PricingCatalog;
 use App\Support\ResolveServiceRequest;
 use App\Support\StatusLabel;
+use App\Support\WorkLines;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -155,6 +158,16 @@ class HandleWhatsAppInbound
             $callback = $this->callbackId($message);
             $text = $this->messageText($message);
             $media = $this->messageMedia($message);
+            $voice = $this->voiceNote($message);
+            if ($voice !== null) {
+                $spoken = app(GeminiService::class)->transcribeClientAudio($voice['mime_type'], $voice['file_base64']);
+                if ($spoken === '') {
+                    $this->safeSend($chatId, $this->tx('ما قدرت أفهم التسجيل. أعده أو اكتبه.', 'I could not understand the recording. Send it again or type it.'));
+
+                    return;
+                }
+                $text = $spoken;
+            }
             $this->rememberLanguage($callback === null ? $text : null, $phone, $session, $client);
 
             if ($callback !== null) {
@@ -257,6 +270,11 @@ class HandleWhatsAppInbound
             }
             if ($step === 'hours_pick') {
                 $this->pickRequestHours($client, $chatId, $phone, $session, (string) $text);
+
+                return;
+            }
+            if ($step === 'photo_pick' && preg_match('/^[1-9]$/u', trim((string) $text)) === 1) {
+                $this->bookPhotoSlot($client, $chatId, $phone, $session, (int) $text);
 
                 return;
             }
@@ -538,11 +556,18 @@ class HandleWhatsAppInbound
 
             return;
         }
+        if (str_starts_with($data, 'ph:')) {
+            $this->bookPhotoSlot($client, $chatId, $phone, $session, (int) substr($data, 3) + 1);
+
+            return;
+        }
         if (str_starts_with($data, 'photoyes:') || str_starts_with($data, 'photonno:')) {
-            $this->sendMenu($chatId, $this->tx(
-                'حجز التصوير غير متاح من المحادثة. رقم الدعم: '.self::SUPPORT_PHONE,
-                'Photography booking is not available in this chat. Support: '.self::SUPPORT_PHONE,
-            ));
+            $number = explode(':', $data, 2)[1] ?? '';
+            $accept = str_starts_with($data, 'photoyes:');
+            $this->runOwned($client, $number, function (ServiceRequest $request) use ($chatId, $accept): void {
+                $booking = app(BookPhotographySlot::class)->decide($request, $accept);
+                $this->safeSend($chatId, app(BookPhotographySlot::class)->clientMessage($booking));
+            });
 
             return;
         }
@@ -916,16 +941,10 @@ class HandleWhatsAppInbound
         $number = $fresh->number;
         $label = $this->statusText($fresh->status);
         if ($this->createCatalogRequest->quotationDelivered) {
-            $ref = ResolveServiceRequest::displayNumber($fresh);
             $session['step'] = 'quote';
-            $session['quote_ref'] = $ref;
+            $session['quote_ref'] = ResolveServiceRequest::displayNumber($fresh);
             $session['catalog_stack'] = [];
             $this->putSession($phone, $session);
-            $this->safeSend($chatId, $this->tx(
-                "تم إنشاء الطلب #{$number}.\nالحالة: {$label}.\nالعرض أعلاه. أكمل بالموافقة ثم الدفع، أو بالرفض وسببه.",
-                "Request #{$number} was created.\nStatus: {$label}.\nThe quotation is above. Approve it and then pay, or reject it and give the reason.",
-            ));
-            $this->showQuoteDecision($chatId, $phone, $session);
 
             return;
         }
@@ -1301,6 +1320,14 @@ class HandleWhatsAppInbound
         if ($intent === null && $word === 'reject' && in_array($step, ['quote', 'suggest'], true)) {
             $intent = 'reject';
         }
+        if ($this->wantsBiggerPackage($text) && ($step === 'quote' || $this->openQuotation($client) !== null)) {
+            $open = $this->openQuotation($client);
+            if ($open !== null) {
+                $this->offerLargerPackage($client, $chatId, $phone, $session, $open);
+
+                return true;
+            }
+        }
         if ($intent === null && $step !== 'quote' && $this->wantsPackage($text)) {
             $open = $this->openQuotation($client);
             if ($open !== null) {
@@ -1367,6 +1394,21 @@ class HandleWhatsAppInbound
 
             return true;
         }
+        if ($intent === 'renew') {
+            $this->startRenewal($client, $chatId);
+
+            return true;
+        }
+        if ($intent === 'norenew') {
+            $this->declineRenewalFromChat($client, $chatId);
+
+            return true;
+        }
+        if ($intent === 'photo') {
+            $this->offerPhotography($client, $chatId, $phone, $session);
+
+            return true;
+        }
         if ($intent === 'requests') {
             $this->listRequests($client, $chatId);
 
@@ -1411,6 +1453,18 @@ class HandleWhatsAppInbound
         }
         if ($this->asksForRequestHours($text)) {
             return 'hours';
+        }
+        if (preg_match('/لن\s*أجدد|لن\s*اجدد|ما\s*(?:بدي|أبي|ابغى)\s*جدد/u', $text) === 1
+            || preg_match('/\b(will not renew|not renewing)\b/i', $text) === 1) {
+            return 'norenew';
+        }
+        if (preg_match('/تجديد|أجدد|اجدد|جدد\s*ال?اشتراك/u', $text) === 1
+            || preg_match('/\brenew\b/i', $text) === 1) {
+            return 'renew';
+        }
+        if (preg_match('/موعد\s*تصوير|حجز\s*تصوير|بدي\s*أصو|أبي\s*أصو|ابغى\s*أصو/u', $text) === 1
+            || preg_match('/\b(photography|photo shoot|book a shoot)\b/i', $text) === 1) {
+            return 'photo';
         }
         if (preg_match('/طلباتي|وين طلب|شو صار بطلب/u', $text) === 1
             || preg_match('/\b(my orders|my requests|order status)\b/i', $text) === 1) {
@@ -1796,6 +1850,194 @@ class HandleWhatsAppInbound
     }
 
     /**
+     * @param  array<string, mixed>  $message
+     * @return array{file_base64: string, mime_type: string}|null
+     */
+    private function voiceNote(array $message): ?array
+    {
+        if (($message['type'] ?? '') !== 'audio' || ! is_array($message['audio'] ?? null)) {
+            return null;
+        }
+        $inline = $message['audio']['file_base64'] ?? null;
+        if (! is_string($inline) || $inline === '') {
+            return null;
+        }
+
+        return [
+            'file_base64' => $inline,
+            'mime_type' => (string) ($message['audio']['mime_type'] ?? 'audio/ogg'),
+        ];
+    }
+
+    private function startRenewal(Client $client, string $chatId): void
+    {
+        $items = $client->requests()->latest('id')->get()
+            ->filter(fn (ServiceRequest $item): bool => $item->canRenew() && ! $item->hiddenFromClient())
+            ->values();
+        if ($items->isEmpty()) {
+            $this->sendMenu($chatId, $this->tx(
+                'التجديد يفتح خلال آخر 8 أيام من الاشتراك.',
+                'Renewal opens during the last 8 days of the subscription.',
+            ));
+
+            return;
+        }
+        if ($items->count() === 1) {
+            $this->renewSubscription->handle($items->first());
+            $this->safeSend($chatId, $this->tx(
+                'تجديد الاشتراك. أُرسل ملف الفاتورة بالمبلغ المتفق عليه.',
+                'Subscription renewal. The invoice file was sent with the agreed amount.',
+            ));
+
+            return;
+        }
+        $rows = [];
+        foreach ($items as $item) {
+            $rows[] = [['text' => '#'.$item->number, 'callback_data' => 'renew:'.$item->number]];
+        }
+        $this->telegram->sendInlineKeyboard($chatId, $this->tx('أي اشتراك تجدّد؟', 'Which subscription should be renewed?'), $rows);
+    }
+
+    private function declineRenewalFromChat(Client $client, string $chatId): void
+    {
+        $items = $client->requests()->latest('id')->get()
+            ->filter(fn (ServiceRequest $item): bool => $item->canRenew() && ! $item->hiddenFromClient())
+            ->values();
+        if ($items->isEmpty()) {
+            $this->sendMenu($chatId, $this->tx('لا يوجد اشتراك بانتظار التجديد.', 'No subscription is waiting for renewal.'));
+
+            return;
+        }
+        if ($items->count() === 1) {
+            $this->declineRenewal->handle($items->first());
+            $this->sendMenu($chatId, $this->tx('تم تسجيل أنك لن تجدّد الآن.', 'Recorded: you will not renew now.'));
+
+            return;
+        }
+        $rows = [];
+        foreach ($items as $item) {
+            $rows[] = [['text' => '#'.$item->number, 'callback_data' => 'norenew:'.$item->number]];
+        }
+        $this->telegram->sendInlineKeyboard($chatId, $this->tx('أي اشتراك لن تجدّده؟', 'Which subscription will you not renew?'), $rows);
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function offerPhotography(Client $client, string $chatId, string $phone, array &$session): void
+    {
+        $request = $this->photographyRequest($client);
+        if ($request === null) {
+            $this->sendMenu($chatId, $this->tx(
+                'موعد التصوير متاح ضمن باقة الاشتراك التي تشمل التصوير.',
+                'A photography time is available on a subscription package that includes photography.',
+            ));
+
+            return;
+        }
+        $used = PhotographyBooking::query()
+            ->where('request_id', $request->id)
+            ->whereIn('status', ['pending_staff', 'needs_client', 'confirmed'])
+            ->count();
+        $left = $this->shootAllowance($request) - $used;
+        if ($left < 1) {
+            $this->sendMenu($chatId, $this->tx(
+                'خلصت مواعيد التصوير ضمن باقتك.',
+                'The photography times in your package are used.',
+            ));
+
+            return;
+        }
+        $slots = array_slice(app(BookPhotographySlot::class)->freeSlots(), 0, 6);
+        if ($slots === []) {
+            $this->sendMenu($chatId, $this->tx('لا يوجد وقت تصوير متاح الآن.', 'No photography time is free right now.'));
+
+            return;
+        }
+        $name = $request->pricingPackage?->name_ar ?: $request->title;
+        $lines = [$this->tx(
+            "باقة {$name}: متبقي {$left} ".($left === 1 ? 'موعد' : 'مواعيد').".\nاختر رقماً:",
+            "Package {$name}: {$left} photography ".($left === 1 ? 'time' : 'times')." left.\nReply with a number:",
+        )];
+        $rows = [];
+        foreach ($slots as $index => $slot) {
+            $lines[] = ($index + 1).'. '.$slot['label'];
+            $rows[] = [['text' => (string) ($index + 1), 'callback_data' => 'ph:'.$index]];
+        }
+        $session['step'] = 'photo_pick';
+        $session['photo_request'] = $request->number;
+        $session['photo_slots'] = array_column($slots, 'starts_at');
+        $this->putSession($phone, $session);
+        $this->telegram->sendInlineKeyboard($chatId, implode("\n", $lines), $rows);
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function bookPhotoSlot(Client $client, string $chatId, string $phone, array &$session, int $choice): void
+    {
+        $slots = is_array($session['photo_slots'] ?? null) ? array_values($session['photo_slots']) : [];
+        $startsAt = $slots[$choice - 1] ?? null;
+        $request = $client->requests()->where('number', (string) ($session['photo_request'] ?? ''))->first();
+        if (! is_string($startsAt) || ! $request instanceof ServiceRequest) {
+            $session['step'] = 'idle';
+            $this->putSession($phone, $session);
+            $this->offerPhotography($client, $chatId, $phone, $session);
+
+            return;
+        }
+        try {
+            $booking = app(BookPhotographySlot::class)->hold($request, $startsAt);
+            $reply = app(BookPhotographySlot::class)->clientMessage($booking);
+        } catch (ValidationException $exception) {
+            $reply = collect($exception->errors())->flatten()->first() ?: $this->tx('تعذر حجز هذا الوقت.', 'That time could not be booked.');
+        }
+        $session['step'] = 'idle';
+        unset($session['photo_request'], $session['photo_slots']);
+        $this->putSession($phone, $session);
+        $this->safeSend($chatId, (string) $reply);
+    }
+
+    private function photographyRequest(Client $client): ?ServiceRequest
+    {
+        return $client->requests()
+            ->with('pricingPackage')
+            ->where('allows_renewal', true)
+            ->where(function ($query): void {
+                $query->where('subscription_ends_at', '>', now())
+                    ->orWhereIn('status', [
+                        RequestStatus::PaymentConfirmed->value,
+                        RequestStatus::InProgress->value,
+                        RequestStatus::ReadyForReview->value,
+                        RequestStatus::RevisionRequested->value,
+                    ]);
+            })
+            ->latest('id')
+            ->get()
+            ->first(function (ServiceRequest $item): bool {
+                return ! $item->hiddenFromClient()
+                    && ! $item->renewalDeclined()
+                    && $this->shootAllowance($item) > 0;
+            });
+    }
+
+    private function shootAllowance(ServiceRequest $request): int
+    {
+        $hours = 0;
+        foreach (WorkLines::fromRequest($request) as $line) {
+            if ($line['department'] === 'photography') {
+                $hours += $line['hours'];
+            }
+        }
+        if ($hours >= 1) {
+            return max(1, intdiv($hours, BookPhotographySlot::SHOOT_HOURS));
+        }
+        $features = json_encode($request->pricingPackage?->features ?? '', JSON_UNESCAPED_UNICODE) ?: '';
+
+        return str_contains($features, 'تصوير') ? 1 : 0;
+    }
+
+    /**
      * @param  list<string>  $labels
      */
     private function isNav(?string $text, array $labels): bool
@@ -2155,6 +2397,117 @@ class HandleWhatsAppInbound
         }
         if (in_array($text, ['2', 'رفض', '❌ رفض'], true) || in_array($folded, ['reject', 'no'], true)) {
             return 'reject';
+        }
+
+        return null;
+    }
+
+    private function wantsBiggerPackage(string $text): bool
+    {
+        return preg_match('/باق[ةه]\s+[أا]كبر|باق[ةه]\s+[أا]غلى|عرض\s+[أا]كبر|bigger package|larger package|larger offer/ui', $text) === 1;
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function offerLargerPackage(Client $client, string $chatId, string $phone, array $session, ServiceRequest $request): void
+    {
+        $request->loadMissing('pricingPackage.subcategory.category');
+        $current = $request->pricingPackage;
+        $period = (string) ($request->billing_period ?: 'one_time');
+        $larger = $current instanceof PricingPackage ? $this->nextPricedPackage($current, $period) : null;
+        if (! $larger instanceof PricingPackage) {
+            $this->safeSend($chatId, $this->tx(
+                'هذه أكبر باقة لهذه الفترة. العرض الحالي ما زال بانتظار موافقتك أو رفضك.',
+                'This is the largest package for this period. The current quotation is still waiting for your approval or rejection.',
+            ));
+
+            return;
+        }
+
+        $price = $this->packagePrice($larger, $period);
+        $plan = PaymentPlanResolver::forPackage($larger);
+        $name = $larger->name_ar ?: $larger->name_en ?: $larger->slug;
+        $periodLabel = BillingPeriod::labelAr($period);
+        $request->forceFill([
+            'pricing_package_id' => $larger->id,
+            'billing_period' => $period,
+            'title' => $name,
+            'description' => "طلب من الكتالوج: {$name}\nالفترة: {$periodLabel}",
+            'payment_plan' => $plan['payment_plan'],
+            'requires_full_payment' => $plan['requires_full_payment'],
+            'allows_renewal' => $plan['allows_renewal'],
+        ])->save();
+
+        $features = collect(is_array($larger->features) ? $larger->features : [])
+            ->map(function (mixed $feature): string {
+                if (is_string($feature)) {
+                    return trim($feature);
+                }
+                if (! is_array($feature)) {
+                    return '';
+                }
+
+                return trim((string) ($feature['ar'] ?? $feature['en'] ?? ''));
+            })
+            ->filter()
+            ->take(8)
+            ->implode('، ');
+        $budgetNote = $plan['requires_full_payment']
+            ? 'الميزانية: الدفع كامل قبل بدء العمل'
+            : 'الميزانية: دفعة أولى 50٪ ثم المتبقي';
+        $packageNotes = $periodLabel.($features !== '' ? "\nيشمل: {$features}" : '')."\n{$budgetNote}";
+        $lines = [[
+            'title' => $name,
+            'amount' => $price,
+            'units' => 1,
+            'notes' => $packageNotes,
+        ]];
+        $adBudget = (float) (is_array($larger->reach) ? ($larger->reach['adBudgetUsd'] ?? 0) : 0);
+        if ($adBudget > 0 && abs($adBudget - $price) > 0.5) {
+            $lines[] = [
+                'title' => 'ميزانية الإعلان',
+                'amount' => $adBudget,
+                'units' => 1,
+                'notes' => 'تُحسب ضمن هذا العرض',
+            ];
+        }
+
+        $session['step'] = 'quote';
+        $session['quote_ref'] = ResolveServiceRequest::displayNumber($request);
+        $this->putSession($phone, $session);
+        app(SendQuotation::class)->handle($request->fresh(['client', 'pricingPackage']) ?? $request, $price, null, 'client:larger-package', null, $lines, true);
+    }
+
+    private function nextPricedPackage(PricingPackage $current, string $period): ?PricingPackage
+    {
+        $currentPrice = $this->packagePrice($current, $period);
+        if ($currentPrice === null) {
+            return null;
+        }
+
+        return PricingPackage::query()
+            ->where('is_published', true)
+            ->where('subcategory_id', $current->subcategory_id)
+            ->whereKeyNot($current->id)
+            ->get()
+            ->filter(function (PricingPackage $package) use ($period, $currentPrice): bool {
+                $price = $this->packagePrice($package, $period);
+
+                return $price !== null && $price > $currentPrice;
+            })
+            ->sortBy(fn (PricingPackage $package): float => (float) $this->packagePrice($package, $period))
+            ->first();
+    }
+
+    private function packagePrice(PricingPackage $package, string $period): ?float
+    {
+        $prices = is_array($package->prices) ? $package->prices : [];
+        if (isset($prices[$period]) && is_numeric($prices[$period])) {
+            return (float) $prices[$period];
+        }
+        if ($period === 'one_time' && $package->price_usd !== null) {
+            return (float) $package->price_usd;
         }
 
         return null;
