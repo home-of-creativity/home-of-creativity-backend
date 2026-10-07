@@ -2305,6 +2305,39 @@ html[dir="ltr"] .report-panel {
   gap: 1rem;
 }
 
+.report-template-save {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.6rem;
+  margin: 0 0 0.75rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--brand-line);
+  border-radius: var(--radius);
+  background: var(--brand-surface);
+}
+
+.report-template-save .field-label {
+  flex: 1 1 14rem;
+  margin: 0;
+}
+
+.template-card.is-saved {
+  cursor: default;
+}
+
+.template-card-body {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
 .template-card {
   display: grid;
   align-content: start;
@@ -2419,6 +2452,11 @@ html[dir="ltr"] .report-panel {
   padding: 0.2rem;
   border-radius: 0.8rem;
   background: color-mix(in srgb, var(--brand-purple) 7%, var(--tint-base));
+}
+
+.segmented.is-stack {
+  grid-auto-flow: row;
+  grid-template-columns: 1fr;
 }
 
 .segmented button {

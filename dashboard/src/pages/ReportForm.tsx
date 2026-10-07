@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
@@ -25,6 +25,7 @@ import { ReportGemini } from "../components/ReportGemini";
 import { addParagraphFontStyle, buildDocxFromParagraphs, buildReportDocx, legacyHtmlToParagraphs, type ReportTemplateId } from "../components/report/docxTemplate";
 import { addBodyBackground } from "../components/report/pictureLayout";
 import { clearReportDraft, readReportDraft, writeReportDraft } from "../components/report/draftStore";
+import { forgetReportTemplate, loadSavedTemplates, rememberReportTemplate, type SavedReportTemplate } from "../components/report/templateStore";
 import { loadReportFonts, rememberReportFont, type StoredReportFont } from "../components/report/fontStore";
 import type { ReportDocHandle } from "../components/report/ReportDocEditor";
 import { copy, type Locale } from "../i18n";
@@ -100,6 +101,9 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
   const [panel, setPanel] = useState<PanelTab | null>(() => (window.matchMedia("(min-width: 1180px)").matches ? "gemini" : null));
   const [folderOpen, setFolderOpen] = useState(false);
   const [extraFonts, setExtraFonts] = useState<StoredReportFont[]>([]);
+  const [savedTemplates, setSavedTemplates] = useState<SavedReportTemplate[]>([]);
+  const [templateSaveOpen, setTemplateSaveOpen] = useState(false);
+  const [templateName, setTemplateName] = useState("");
   const ownerId = report?.client_id ?? clientId;
   const BackIcon = locale === "ar" ? ArrowRight : ArrowLeft;
 
@@ -352,6 +356,11 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
     }
   }
 
+  useEffect(() => {
+    if (phase !== "template") return;
+    void loadSavedTemplates().then(setSavedTemplates);
+  }, [phase]);
+
   async function start(id: ReportTemplateId) {
     const company = client?.company_name || client?.name || "";
     const name = t(TEMPLATES.find((item) => item.id === id)?.name ?? copy.reportTemplateBlank);
@@ -368,6 +377,28 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
     if (id === "social") bytes = await paintLetterhead(bytes);
     setBytes(bytes);
     setPhase("editing");
+  }
+
+  function startSaved(item: SavedReportTemplate) {
+    const copy = new Uint8Array(item.bytes.byteLength);
+    copy.set(new Uint8Array(item.bytes));
+    setTitle(item.name);
+    setBytes(copy);
+    setPhase("editing");
+  }
+
+  async function keepAsTemplate(event: FormEvent) {
+    event.preventDefault();
+    const name = templateName.trim();
+    const docx = await editor.current?.save();
+    if (!name || !docx) return;
+    try {
+      setSavedTemplates(await rememberReportTemplate(name, docx));
+      setTemplateSaveOpen(false);
+      toast.success(t(copy.reportTemplateSaved));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t(copy.saveFailed));
+    }
   }
 
   async function importWord(file: File | undefined) {
@@ -465,6 +496,22 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
               <span>{t(template.hint)}</span>
             </button>
           ))}
+          {savedTemplates.map((item) => (
+            <div key={item.id} className="template-card is-saved">
+              <button type="button" className="template-card-body" onClick={() => startSaved(item)}>
+                <span className="template-sheet" aria-hidden="true"><i /><i /><i /><i /></span>
+                <strong>{item.name}</strong>
+                <span>{t(copy.reportTemplateSavedHint)}</span>
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => void forgetReportTemplate(item.id).then(setSavedTemplates)}
+              >
+                {t(copy.delete)}
+              </button>
+            </div>
+          ))}
           <label className="template-card is-import">
             <span className="template-sheet" aria-hidden="true"><FileUp size={28} /></span>
             <strong>{t(copy.reportTemplateImport)}</strong>
@@ -488,6 +535,17 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
   const titleBarEnd = () => (
     <div className="report-bar" dir={locale === "ar" ? "rtl" : "ltr"}>
       <span className={`status-dot${dirty || autoFailed ? " is-dirty" : report?.published_at && !editedSincePublish ? " is-live" : ""}${busy || autoSaving ? " is-busy" : ""}`} role="status" aria-live="polite">{status}</span>
+      <button
+        type="button"
+        className="btn btn-sm"
+        disabled={busy !== null}
+        onClick={() => {
+          setTemplateName(title);
+          setTemplateSaveOpen(true);
+        }}
+      >
+        <span className="btn-label">{t(copy.reportSaveTemplate)}</span>
+      </button>
       <button type="button" className="btn btn-sm" disabled={busy !== null} onClick={() => void save("manual")} title="Ctrl+S">
         <Save size={15} aria-hidden="true" /><span className="btn-label">{t(copy.reportSaveDraft)}</span>
       </button>
@@ -514,6 +572,16 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
 
   return (
     <section className={`report-studio${panel ? " has-panel" : ""}`}>
+      {templateSaveOpen ? (
+        <form className="report-template-save" onSubmit={(event) => void keepAsTemplate(event)}>
+          <label className="field-label">
+            {t(copy.reportTemplateName)}
+            <input className="field" value={templateName} maxLength={80} required onChange={(event) => setTemplateName(event.target.value)} />
+          </label>
+          <button type="submit" className="btn btn-primary btn-sm">{t(copy.reportSaveTemplate)}</button>
+          <button type="button" className="btn btn-sm" onClick={() => setTemplateSaveOpen(false)}>{t(copy.cancel)}</button>
+        </form>
+      ) : null}
       {legacy ? <p className="report-studio-notice" role="status">{t(copy.reportLegacyNotice)}</p> : null}
       <div className="report-studio-body">
         <div className="report-studio-doc">
@@ -553,12 +621,18 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
                 <ReportGemini
                   t={t}
                   selectedText={() => editor.current?.selectedText() ?? ""}
+                  documentText={() => editor.current?.text() ?? ""}
                   pageCount={() => editor.current?.pageCount() ?? 1}
                   pageText={(page) => editor.current?.pageText(page) ?? ""}
                   onApply={async (text, page) => {
                     const done = page === null
                       ? editor.current?.replaceSelection(text) ?? false
                       : await (editor.current?.insertOnPage(page, text) ?? false);
+                    if (done) markChanged();
+                    return done;
+                  }}
+                  onApplyDocument={(text) => {
+                    const done = editor.current?.replaceDocument(text) ?? false;
                     if (done) markChanged();
                     return done;
                   }}
@@ -576,16 +650,6 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
                   }}
                   onInsertTextBox={async (options) => {
                     const done = await editor.current?.insertTextBox(options) ?? false;
-                    if (done) markChanged();
-                    return done;
-                  }}
-                  onInsertShape={async (shape) => {
-                    const done = await editor.current?.insertShape(shape) ?? false;
-                    if (done) markChanged();
-                    return done;
-                  }}
-                  onRemoveShape={async () => {
-                    const done = await editor.current?.removeLastShape() ?? false;
                     if (done) markChanged();
                     return done;
                   }}

@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { api } from "../api";
 import { copy } from "../i18n";
-import type { ImagePlacement, ShapeRequest } from "./report/ReportDocEditor";
-import type { ShapeKind } from "./report/pageObjects";
+import type { ImagePlacement } from "./report/ReportDocEditor";
+import type { TextBoxShape } from "./report/pageObjects";
 
 type Memory = { id: number; body: string };
 
@@ -15,7 +15,7 @@ function asMemories(value: unknown): Memory[] {
     return typeof row.id === "number" && typeof row.body === "string";
   });
 }
-type Scope = "selection" | "write";
+type Scope = "selection" | "write" | "document";
 
 async function rasterToPng(bytes: Uint8Array, mime: string) {
   const copy = new ArrayBuffer(bytes.byteLength);
@@ -124,29 +124,31 @@ async function fileToChatImage(file: File): Promise<ChatImage> {
 export function ReportGemini({
   t,
   selectedText,
+  documentText,
   pageCount,
   pageText,
   onApply,
+  onApplyDocument,
   onInsertImage,
   onInsertCover,
   onInsertTextBox,
-  onInsertShape,
-  onRemoveShape,
   fonts = [],
   onInstallFont,
 }: {
   t: (c: { ar: string; en: string }) => string;
   /** Text currently selected in the document. */
   selectedText: () => string;
+  /** Plain text of every page. */
+  documentText: () => string;
   pageCount: () => number;
   pageText: (page: number) => string;
   /** Apply the new text. `page` is set when writing onto a chosen page. */
   onApply: (text: string, page: number | null) => boolean | Promise<boolean>;
+  /** Replace the whole document with the new text. */
+  onApplyDocument: (text: string) => boolean | Promise<boolean>;
   onInsertImage: (bytes: Uint8Array, placement: ImagePlacement) => Promise<"ok" | "unsupported" | "refused">;
   onInsertCover: (bytes: Uint8Array) => Promise<"ok" | "unsupported" | "refused">;
-  onInsertTextBox: (options: { widthPercent: number; border: boolean; text: string }) => Promise<boolean>;
-  onInsertShape: (shape: ShapeRequest) => Promise<boolean>;
-  onRemoveShape: () => Promise<boolean>;
+  onInsertTextBox: (options: { kind: TextBoxShape; text: string }) => Promise<boolean>;
   fonts: Array<{ family: string }>;
   onInstallFont: (family: string, file: File) => Promise<void>;
 }) {
@@ -162,13 +164,7 @@ export function ReportGemini({
   // "wrap": the picture sits behind the text on every page except the cover. "place": it goes where the caret is.
   const [place, setPlace] = useState<"wrap" | "place">("place");
   const [imagePrompt, setImagePrompt] = useState("");
-  const [boxWidth, setBoxWidth] = useState(60);
-  const [boxBorder, setBoxBorder] = useState(false);
-  const [shapeKind, setShapeKind] = useState<ShapeKind>("rect");
-  const [shapeColor, setShapeColor] = useState("#2e0e5c");
-  const [shapeWidth, setShapeWidth] = useState(40);
-  const [shapeHeight, setShapeHeight] = useState(80);
-  const [shapeBehind, setShapeBehind] = useState(false);
+  const [boxKind, setBoxKind] = useState<TextBoxShape>("rect");
   const [draft, setDraft] = useState<{ reply: string; previous: string; next: string } | null>(null);
   const [attachment, setAttachment] = useState<ChatImage | null>(null);
   const [source, setSource] = useState<ChatImage | null>(null);
@@ -188,9 +184,13 @@ export function ReportGemini({
   async function ask(text = instruction) {
     const request = text.trim();
     if (request === "") return;
-    const source = scope === "selection" ? selectedText() : pageText(page);
+    const source = scope === "selection" ? selectedText() : scope === "document" ? documentText() : pageText(page);
     if (scope === "selection" && source.trim() === "") {
       toast.info(t(copy.reportGeminiSelectFirst));
+      return;
+    }
+    if (scope === "document" && source.trim() === "") {
+      toast.info(t(copy.reportGeminiDocumentEmpty));
       return;
     }
     setBusy(true);
@@ -220,7 +220,10 @@ export function ReportGemini({
       toast.info(t(copy.reportGeminiSelectFirst));
       return;
     }
-    if (await onApply(draft.next, scope === "write" ? page : null)) {
+    const applied = scope === "document"
+      ? await onApplyDocument(draft.next)
+      : await onApply(draft.next, scope === "write" ? page : null);
+    if (applied) {
       toast.success(t(copy.reportGeminiApplied));
       setDraft(null);
     }
@@ -375,11 +378,10 @@ export function ReportGemini({
     }
   }
 
-  const shapeKinds: Array<[ShapeKind, { ar: string; en: string }]> = [
+  const boxKinds: Array<[TextBoxShape, { ar: string; en: string }]> = [
     ["rect", copy.reportShapeRect],
     ["roundRect", copy.reportShapeRoundRect],
     ["ellipse", copy.reportShapeEllipse],
-    ["line", copy.reportShapeLine],
   ];
 
   const quick = [copy.reportGeminiProofread, copy.reportGeminiFormal, copy.reportGeminiShorten, copy.reportGeminiSummary, copy.reportGeminiTranslate];
@@ -437,64 +439,21 @@ export function ReportGemini({
         <legend>{t(copy.reportTextBox)}</legend>
         <p className="muted">{t(copy.reportTextBoxHint)}</p>
         <label className="field-label">
-          {t(copy.reportTextBoxWidth)} ({boxWidth}%)
-          <input className="field" type="range" min={20} max={100} step={5} value={boxWidth} onChange={(event) => setBoxWidth(Number(event.target.value))} />
+          {t(copy.reportTextBoxShape)}
+          <select className="field" value={boxKind} onChange={(event) => setBoxKind(event.target.value as TextBoxShape)}>
+            {boxKinds.map(([kind, label]) => <option key={kind} value={kind}>{t(label)}</option>)}
+          </select>
         </label>
-        <label className="checkbox-row">
-          <input type="checkbox" checked={boxBorder} onChange={(event) => setBoxBorder(event.target.checked)} />
-          {t(copy.reportTextBoxBorder)}
-        </label>
-        <button type="button" className="btn btn-sm" disabled={busy} onClick={() => void run(() => onInsertTextBox({ widthPercent: boxWidth, border: boxBorder, text: t(copy.reportTextBoxText) }), copy.reportTextBoxInserted)}>
+        <button type="button" className="btn btn-sm" disabled={busy} onClick={() => void run(() => onInsertTextBox({ kind: boxKind, text: t(copy.reportTextBoxText) }), copy.reportTextBoxInserted)}>
           {t(copy.reportTextBoxInsert)}
         </button>
       </fieldset>
-      <fieldset className="report-picture">
-        <legend>{t(copy.reportShapes)}</legend>
-        <p className="muted">{t(copy.reportShapesHint)}</p>
-        <label className="field-label">
-          {t(copy.reportShapeKind)}
-          <select className="field" value={shapeKind} onChange={(event) => setShapeKind(event.target.value as ShapeKind)}>
-            {shapeKinds.map(([kind, label]) => <option key={kind} value={kind}>{t(label)}</option>)}
-          </select>
-        </label>
-        <label className="field-label">
-          {t(copy.reportShapeColor)}
-          <input className="field" type="color" value={shapeColor} onChange={(event) => setShapeColor(event.target.value)} />
-        </label>
-        <label className="field-label">
-          {t(copy.reportShapeWidth)} ({shapeWidth}%)
-          <input className="field" type="range" min={5} max={100} step={5} value={shapeWidth} onChange={(event) => setShapeWidth(Number(event.target.value))} />
-        </label>
-        {shapeKind !== "line" ? (
-          <label className="field-label">
-            {t(copy.reportShapeHeight)} ({shapeHeight} pt)
-            <input className="field" type="range" min={10} max={500} step={10} value={shapeHeight} onChange={(event) => setShapeHeight(Number(event.target.value))} />
-          </label>
-        ) : null}
-        <div className="segmented" role="radiogroup" aria-label={t(copy.reportShapePlace)}>
-          <button type="button" role="radio" aria-checked={!shapeBehind} className={!shapeBehind ? "is-active" : ""} onClick={() => setShapeBehind(false)}>{t(copy.reportShapeFlow)}</button>
-          <button type="button" role="radio" aria-checked={shapeBehind} className={shapeBehind ? "is-active" : ""} onClick={() => setShapeBehind(true)}>{t(copy.reportShapeBehind)}</button>
-        </div>
-        <div className="chip-row">
-          <button type="button" className="btn btn-sm" disabled={busy} onClick={() => void run(() => onInsertShape({ kind: shapeKind, colorHex: shapeColor, widthPercent: shapeWidth, heightPt: shapeHeight, behind: shapeBehind }), copy.reportShapeInserted)}>
-            {t(copy.reportShapeInsert)}
-          </button>
-          <button type="button" className="btn btn-sm" disabled={busy} onClick={() => void run(onRemoveShape, copy.reportShapeRemoved, copy.reportShapeNone)}>
-            {t(copy.reportShapeRemove)}
-          </button>
-        </div>
-      </fieldset>
-      <div className="segmented" role="radiogroup">
+      <div className="segmented is-stack" role="radiogroup">
         <button type="button" role="radio" aria-checked={scope === "selection"} className={scope === "selection" ? "is-active" : ""} onClick={() => setScope("selection")}>{t(copy.reportGeminiScopeSelection)}</button>
         <button type="button" role="radio" aria-checked={scope === "write"} className={scope === "write" ? "is-active" : ""} onClick={() => setScope("write")}>{t(copy.reportGeminiScopeWrite)}</button>
+        <button type="button" role="radio" aria-checked={scope === "document"} className={scope === "document" ? "is-active" : ""} onClick={() => setScope("document")}>{t(copy.reportGeminiScopeDocument)}</button>
       </div>
-      {scope === "selection" ? (
-        <div className="chip-row" aria-label={t(copy.reportGeminiQuick)}>
-          {quick.map((item) => (
-            <button key={item.en} type="button" className="chip" disabled={busy} onClick={() => { setInstruction(t(item)); void ask(t(item)); }}>{t(item)}</button>
-          ))}
-        </div>
-      ) : (
+      {scope === "write" ? (
         <label className="field-label">
           {t(copy.reportGeminiPage)}
           <select className="field" value={page} onChange={(event) => setPage(Number(event.target.value))}>
@@ -503,6 +462,12 @@ export function ReportGemini({
             ))}
           </select>
         </label>
+      ) : (
+        <div className="chip-row" aria-label={t(copy.reportGeminiQuick)}>
+          {quick.map((item) => (
+            <button key={item.en} type="button" className="chip" disabled={busy} onClick={() => { setInstruction(t(item)); void ask(t(item)); }}>{t(item)}</button>
+          ))}
+        </div>
       )}
       <label className="field-label">
         {t(copy.reportGeminiAsk)}

@@ -1,13 +1,9 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 
-// Text boxes, shapes and the cover page. The editor draws shapes but has no command that creates
-// them, and it cannot put a caret inside a floating text box, so these are written into the .docx
-// XML and the document is reloaded:
-// - a text box is a one-cell table, so staff type in it like any other text;
-// - a shape is a drawing in a 1pt paragraph of its own (a right-to-left paragraph that holds a
-//   drawing next to its words is drawn with the words reversed); it cannot be selected in the
-//   editor afterwards, so the panel places it and removes the last one;
-// - the cover is a new first page: the picture behind it, ordinary lines of text, no header or footer.
+// A text box and the cover page. The text box is a floating Word shape (rectangle, rounded
+// rectangle, or ellipse) anchored to the page, so the editor can drag it and resize it from its
+// handles. It is written into the .docx and the document is reloaded. The cover is a new first
+// page: the picture behind it, ordinary lines of text, no header or footer.
 
 const EMU_PER_POINT = 12700;
 const NS = [
@@ -20,26 +16,17 @@ const NS = [
 const WPS_URI = "http://schemas.microsoft.com/office/word/2010/wordprocessingShape";
 const PIC_URI = "http://schemas.openxmlformats.org/drawingml/2006/picture";
 const IMAGE_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
-const SHAPE_NAME = "HOC Shape";
-/** A line is drawn as a thin filled bar: the editor paints a zero-height stroke invisible. */
-const LINE_THICKNESS_PT = 2.5;
-
-export type ShapeKind = "rect" | "roundRect" | "ellipse" | "line";
-
-export type ShapeOptions = {
-  kind: ShapeKind;
-  colorHex: string;
-  widthPt: number;
-  /** Ignored for a line. */
-  heightPt: number;
-  /** `true`: behind the text, which runs over it. `false`: on its own band, text above and below. */
-  behind: boolean;
-};
+export type TextBoxShape = "rect" | "roundRect" | "ellipse";
 
 export type TextBoxOptions = {
-  widthPt: number;
-  border: boolean;
+  kind: TextBoxShape;
   text: string;
+  widthPt: number;
+  heightPt: number;
+  /** Distance from the page's left edge, in points. */
+  xPt: number;
+  /** Distance from the page's top edge, in points. */
+  yPt: number;
 };
 
 /** Crop per edge, in percent. */
@@ -109,25 +96,6 @@ function holder(content: string) {
     + `${content}</w:p>`;
 }
 
-/** A one-cell table after the caret's paragraph: staff type inside it like any other text. */
-export function addTextBox(docx: Uint8Array, paraId: string, options: TextBoxOptions): Uint8Array | null {
-  const doc = unpack(docx);
-  if (!doc) return null;
-  const width = twips(options.widthPt);
-  const line = options.border ? '<w:top w:val="single" w:sz="6" w:space="0" w:color="9A93A6"/>'
-    + '<w:left w:val="single" w:sz="6" w:space="0" w:color="9A93A6"/><w:bottom w:val="single" w:sz="6" w:space="0" w:color="9A93A6"/>'
-    + '<w:right w:val="single" w:sz="6" w:space="0" w:color="9A93A6"/>'
-    : '<w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/><w:right w:val="nil"/>';
-  const table = `<w:tbl><w:tblPr><w:bidiVisual/><w:tblW w:w="${width}" w:type="dxa"/><w:jc w:val="center"/>`
-    + `<w:tblBorders>${line}<w:insideH w:val="nil"/><w:insideV w:val="nil"/></w:tblBorders><w:tblLayout w:type="fixed"/>`
-    + '<w:tblCellMar><w:top w:w="113" w:type="dxa"/><w:left w:w="142" w:type="dxa"/><w:bottom w:w="113" w:type="dxa"/><w:right w:w="142" w:type="dxa"/></w:tblCellMar>'
-    + `</w:tblPr><w:tblGrid><w:gridCol w:w="${width}"/></w:tblGrid><w:tr><w:tc><w:tcPr><w:tcW w:w="${width}" w:type="dxa"/></w:tcPr>`
-    + `<w:p><w:pPr><w:bidi/><w:spacing w:before="0" w:after="0"/></w:pPr><w:r><w:rPr><w:rtl/></w:rPr><w:t xml:space="preserve">${escapeXml(options.text)}</w:t></w:r></w:p>`
-    + "</w:tc></w:tr></w:tbl>";
-  const xml = insertAfterParagraph(doc.xml, paraId, table);
-  return xml ? pack(doc.files, xml) : null;
-}
-
 /** Rounded rectangle as free-form geometry: the editor only paints `rect`, `ellipse` and `line` presets. */
 function roundRectGeometry(cx: number, cy: number) {
   const radius = Math.round(Math.min(cx, cy) * 0.18);
@@ -146,49 +114,35 @@ function roundRectGeometry(cx: number, cy: number) {
 }
 
 /**
- * A filled shape (or a line) after the caret's paragraph. On its own band it is an inline drawing
- * in a centred paragraph (a floating one there is drawn above a heading kept with it); behind the
- * text it floats, centred on the column, and the text runs over it.
+ * A floating text box after the caret's paragraph, positioned on the page. Staff drag it and
+ * pull its handles in the editor; the shape is a rectangle, a rounded rectangle, or an ellipse.
  */
-export function addShape(docx: Uint8Array, paraId: string, options: ShapeOptions): Uint8Array | null {
+export function addTextBox(docx: Uint8Array, paraId: string, options: TextBoxOptions): Uint8Array | null {
   const doc = unpack(docx);
   if (!doc) return null;
   const id = nextDrawingId(doc.xml);
   const cx = emu(options.widthPt);
-  const cy = emu(options.kind === "line" ? LINE_THICKNESS_PT : options.heightPt);
+  const cy = emu(options.heightPt);
   const geometry = options.kind === "roundRect"
     ? roundRectGeometry(cx, cy)
     : `<a:prstGeom prst="${options.kind === "ellipse" ? "ellipse" : "rect"}"><a:avLst/></a:prstGeom>`;
-  const color = options.colorHex.replace(/^#/, "").toUpperCase();
-  const graphic = `<wp:docPr id="${id}" name="${SHAPE_NAME} ${id}"/><wp:cNvGraphicFramePr/>`
-    + `<a:graphic><a:graphicData uri="${WPS_URI}"><wps:wsp><wps:cNvSpPr/><wps:spPr>`
+  const graphic = `<wp:docPr id="${id}" name="HOC Text Box ${id}"/><wp:cNvGraphicFramePr/>`
+    + `<a:graphic><a:graphicData uri="${WPS_URI}"><wps:wsp><wps:cNvSpPr txBox="1"/><wps:spPr>`
     + `<a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>${geometry}`
-    + `<a:solidFill><a:srgbClr val="${color}"/></a:solidFill><a:ln><a:noFill/></a:ln></wps:spPr><wps:bodyPr/></wps:wsp>`
-    + "</a:graphicData></a:graphic>";
+    + '<a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:ln w="19050"><a:solidFill><a:srgbClr val="2B1A5E"/></a:solidFill></a:ln>'
+    + "</wps:spPr><wps:txbx><w:txbxContent>"
+    + `<w:p><w:pPr><w:bidi/></w:pPr><w:r><w:rPr><w:rtl/></w:rPr><w:t xml:space="preserve">${escapeXml(options.text)}</w:t></w:r></w:p>`
+    + "</w:txbxContent></wps:txbx>"
+    + '<wps:bodyPr wrap="square" lIns="91440" tIns="45720" rIns="91440" bIns="45720" anchor="t"/>'
+    + "</wps:wsp></a:graphicData></a:graphic>";
   const extent = `<wp:extent cx="${cx}" cy="${cy}"/><wp:effectExtent l="0" t="0" r="0" b="0"/>`;
-  const block = options.behind
-    ? holder(`<w:r><w:drawing ${NS}><wp:anchor distT="0" distB="0" distL="114300" distR="114300" simplePos="0" relativeHeight="251658240"`
-      + ' behindDoc="1" locked="0" layoutInCell="1" allowOverlap="1"><wp:simplePos x="0" y="0"/>'
-      + '<wp:positionH relativeFrom="column"><wp:align>center</wp:align></wp:positionH>'
-      + '<wp:positionV relativeFrom="paragraph"><wp:posOffset>0</wp:posOffset></wp:positionV>'
-      + `${extent}<wp:wrapNone/>${graphic}</wp:anchor></w:drawing></w:r>`)
-    : '<w:p><w:pPr><w:bidi/><w:spacing w:before="120" w:after="120"/><w:jc w:val="center"/></w:pPr>'
-      + `<w:r><w:drawing ${NS}><wp:inline distT="0" distB="0" distL="0" distR="0">${extent}${graphic}</wp:inline></w:drawing></w:r></w:p>`;
+  const block = holder(`<w:r><w:drawing ${NS}><wp:anchor distT="0" distB="0" distL="114300" distR="114300" simplePos="0" relativeHeight="251659264"`
+    + ' behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1"><wp:simplePos x="0" y="0"/>'
+    + `<wp:positionH relativeFrom="page"><wp:posOffset>${emu(options.xPt)}</wp:posOffset></wp:positionH>`
+    + `<wp:positionV relativeFrom="page"><wp:posOffset>${emu(options.yPt)}</wp:posOffset></wp:positionV>`
+    + `${extent}<wp:wrapSquare wrapText="bothSides"/>${graphic}</wp:anchor></w:drawing></w:r>`);
   const xml = insertAfterParagraph(doc.xml, paraId, block);
   return xml ? pack(doc.files, xml) : null;
-}
-
-/** Remove the most recently added shape (with its paragraph). Null when there is none. */
-export function removeLastShape(docx: Uint8Array): Uint8Array | null {
-  const doc = unpack(docx);
-  if (!doc) return null;
-  const shapes = Array.from(doc.xml.matchAll(new RegExp(`<wp:docPr\\b[^>]*\\bname="${SHAPE_NAME} (\\d+)"`, "g")));
-  if (shapes.length === 0) return null;
-  const last = shapes.reduce((best, match) => (Number(match[1]) > Number(best[1]) ? match : best));
-  const start = Math.max(doc.xml.lastIndexOf("<w:p>", last.index), doc.xml.lastIndexOf("<w:p ", last.index));
-  const end = start < 0 ? -1 : paragraphEnd(doc.xml, start);
-  if (end < 0) return null;
-  return pack(doc.files, doc.xml.slice(0, start) + doc.xml.slice(end));
 }
 
 function mediaExtension(mime: CoverInput["image"]["mime"]) {

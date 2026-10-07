@@ -5,7 +5,7 @@ import harfbuzzWasm from "@docx-editor.dev/core/harfbuzz.wasm?url";
 import "@docx-editor.dev/core/styles/editor.css";
 import type { Locale } from "../../i18n";
 import { editorArabic } from "./editorArabic";
-import { addCover, addShape, addTextBox, removeLastShape, type ShapeKind } from "./pageObjects";
+import { addCover, addTextBox, type TextBoxShape } from "./pageObjects";
 import { addBodyBackground, bodyDrawings, layoutNewDrawing } from "./pictureLayout";
 import { reportFontConfiguration, type ExtraFont } from "./fonts";
 import { pagesToPdf } from "./pdf";
@@ -28,16 +28,14 @@ export type ReportDocHandle = {
   selectedText(): string;
   /** Replace the current selection (or insert at the caret) with plain text. */
   replaceSelection(text: string): boolean;
+  /** Replace the whole document story with plain text. */
+  replaceDocument(text: string): boolean;
   /** Put plain text at the start of a page. */
   insertOnPage(page: number, text: string): Promise<boolean>;
   /** Insert a picture as a full-page background or at the caret (see `ImagePlacement`). */
   insertImage(bytes: Uint8Array, placement: ImagePlacement): Promise<"ok" | "unsupported" | "refused">;
-  /** A box to type in (a one-cell table) after the caret's paragraph, at a share of the text width. */
-  insertTextBox(options: { widthPercent: number; border: boolean; text: string }): Promise<boolean>;
-  /** A filled shape (or a line) after the caret's paragraph; the panel sets its look and place. */
-  insertShape(options: ShapeRequest): Promise<boolean>;
-  /** Remove the most recently added shape. */
-  removeLastShape(): Promise<boolean>;
+  /** A floating text box on the page. The editor drags it and resizes it from its handles. */
+  insertTextBox(options: { kind: TextBoxShape; text: string }): Promise<boolean>;
   /** A new first page with the picture behind it, one text box per line and no header or footer. */
   insertCover(bytes: Uint8Array, lines: string[]): Promise<"ok" | "unsupported" | "refused">;
   focus(): void;
@@ -52,17 +50,6 @@ export type ReportDocHandle = {
 export type ImagePlacement =
   | { mode: "background" }
   | { mode: "place"; widthPercent: number };
-
-export type ShapeRequest = {
-  kind: ShapeKind;
-  colorHex: string;
-  /** Share of the page's text width. */
-  widthPercent: number;
-  /** Ignored for a line. */
-  heightPt: number;
-  /** Behind the text, or on its own band with the text above and below. */
-  behind: boolean;
-};
 
 const PAGE_TEXT_WIDTH_PT = 460;
 const A4_WIDTH_PT = 595.3;
@@ -318,6 +305,13 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
       current.focus();
       return current.exec({ type: "paste", text, html: paragraphHtml(text) }).ok;
     },
+    replaceDocument(text) {
+      const current = editor.current?.getEditor();
+      if (!current) return false;
+      current.focus();
+      if (!current.exec({ type: "selectAll" }).ok) return false;
+      return current.exec({ type: "paste", text, html: paragraphHtml(text) }).ok;
+    },
     async insertOnPage(page, text) {
       await placeCaret(page);
       const current = editor.current?.getEditor();
@@ -384,23 +378,15 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
       await reload(laidOut, page);
       return "ok";
     },
-    insertTextBox({ widthPercent, border, text }) {
-      const widthPt = PAGE_TEXT_WIDTH_PT * (Math.min(100, Math.max(15, widthPercent)) / 100);
-      return rewriteAtCaret((docx, paraId) => addTextBox(docx, paraId, { widthPt, border, text }));
-    },
-    insertShape({ widthPercent, ...shape }) {
-      const widthPt = PAGE_TEXT_WIDTH_PT * (Math.min(100, Math.max(5, widthPercent)) / 100);
-      return rewriteAtCaret((docx, paraId) => addShape(docx, paraId, { ...shape, widthPt }));
-    },
-    async removeLastShape() {
-      const host = editor.current;
-      const current = host?.getEditor();
-      if (!host || !current) return false;
-      const saved = await host.save();
-      const next = saved ? removeLastShape(new Uint8Array(saved)) : null;
-      if (!next) return false;
-      await reload(next, current.getCurrentPage("viewport"));
-      return true;
+    insertTextBox({ kind, text }) {
+      return rewriteAtCaret((docx, paraId) => addTextBox(docx, paraId, {
+        kind,
+        text,
+        widthPt: 240,
+        heightPt: 96,
+        xPt: 72,
+        yPt: 160,
+      }));
     },
     async insertCover(bytes, lines) {
       const host = editor.current;
