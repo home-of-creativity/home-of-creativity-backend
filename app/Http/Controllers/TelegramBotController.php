@@ -3,7 +3,6 @@
 namespace App\Http\Controllers;
 
 use App\Actions\ApproveDriveDelivery;
-use App\Actions\BookPhotographySlot;
 use App\Actions\ApproveQuotation;
 use App\Actions\CompleteRequest;
 use App\Actions\CreateCatalogRequest;
@@ -40,7 +39,6 @@ use App\Support\PricingCatalog;
 use App\Support\ResolveServiceRequest;
 use App\Support\ShamCashQr;
 use App\Support\StatusLabel;
-use App\Support\WorkCalendar;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -473,19 +471,18 @@ class TelegramBotController extends Controller
             ->additional(['message' => 'Completed.']);
     }
 
-    public function supportBrief(WorkCalendar $calendar): JsonResponse
+    public function supportBrief(): JsonResponse
     {
         return response()->json([
             'data' => [
                 'phone' => '0947823488',
                 'email' => 'info@hoc.agency',
-                'calendar' => $calendar->holidaySummary(),
             ],
             'message' => 'ok',
         ]);
     }
 
-    public function support(Request $request, NotifyEmployees $notifyEmployees, WorkCalendar $calendar): JsonResponse
+    public function support(Request $request, NotifyEmployees $notifyEmployees): JsonResponse
     {
         $validated = $request->validate([
             'telegram_user_id' => ['required', 'string'],
@@ -518,10 +515,7 @@ class TelegramBotController extends Controller
             $notifyEmployees->handlePlain(EmployeeProfession::Sales, $text);
         }
 
-        $reply = 'Support message saved.';
-        if (preg_match('/عطل|عطلة|دوام|جمعة/u', $validated['message']) === 1) {
-            $reply = "رقم الدعم: 0947823488\n".$calendar->holidaySummary();
-        }
+        $reply = 'رقم الدعم: 0947823488';
 
         return response()->json(['data' => ['stored' => true], 'message' => $reply]);
     }
@@ -640,43 +634,30 @@ class TelegramBotController extends Controller
         );
     }
 
-    public function photographySlots(Request $request, ServiceRequest $serviceRequest, BookPhotographySlot $bookPhotographySlot): JsonResponse
+    public function photographySlots(Request $request, ServiceRequest $serviceRequest): JsonResponse
     {
         $this->assertClientOwns($request, $serviceRequest);
-
-        return response()->json(['data' => $bookPhotographySlot->freeSlots(), 'message' => 'ok']);
+        abort(422, 'حجز التصوير غير متاح من المحادثة.');
     }
 
-    public function bookPhotography(Request $request, ServiceRequest $serviceRequest, BookPhotographySlot $bookPhotographySlot): JsonResponse
+    public function bookPhotography(Request $request, ServiceRequest $serviceRequest): JsonResponse
     {
         $this->assertClientOwns($request, $serviceRequest);
-        $validated = $request->validate([
+        $request->validate([
             'telegram_user_id' => ['required', 'string'],
             'starts_at' => ['required', 'date'],
         ]);
-        $booking = $bookPhotographySlot->hold($serviceRequest, $validated['starts_at']);
-
-        return response()->json([
-            'data' => [
-                'status' => $booking->status,
-                'starts_at' => $booking->starts_at?->toIso8601String(),
-                'message' => $bookPhotographySlot->clientMessage($booking),
-            ],
-            'message' => 'ok',
-        ]);
+        abort(422, 'حجز التصوير غير متاح من المحادثة.');
     }
 
-    public function decidePhotography(Request $request, ServiceRequest $serviceRequest, BookPhotographySlot $bookPhotographySlot): JsonResponse
+    public function decidePhotography(Request $request, ServiceRequest $serviceRequest): JsonResponse
     {
         $this->assertClientOwns($request, $serviceRequest);
-        $validated = $request->validate([
+        $request->validate([
             'telegram_user_id' => ['required', 'string'],
             'accept' => ['required', 'boolean'],
         ]);
-
-        $booking = $bookPhotographySlot->decide($serviceRequest, (bool) $validated['accept']);
-
-        return response()->json(['data' => ['status' => $booking->status], 'message' => 'ok']);
+        abort(422, 'حجز التصوير غير متاح من المحادثة.');
     }
 
     private function assertClientOwns(Request $request, ServiceRequest $serviceRequest): void

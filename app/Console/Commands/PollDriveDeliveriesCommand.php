@@ -354,7 +354,10 @@ class PollDriveDeliveriesCommand extends Command
                     $message,
                     (string) ($file['name'] ?? $fileId),
                 );
-                if ($this->isPermanentTelegramFailure($message)) {
+                $attemptKey = 'drive-send-attempts:'.$request->id.':'.$fileId;
+                $attempts = (int) Cache::get($attemptKey, 0) + 1;
+                Cache::put($attemptKey, $attempts, now()->addDay());
+                if ($this->isPermanentTelegramFailure($message) || $attempts >= 2) {
                     $this->markPermanentFailure($delivery, $request, $notifyEmployees, $file, $message);
                 }
             } finally {

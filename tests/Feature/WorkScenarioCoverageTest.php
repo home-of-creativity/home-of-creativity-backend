@@ -351,56 +351,43 @@ class WorkScenarioCoverageTest extends TestCase
         $this->assertNotSame($active->id, $fresh->id);
     }
 
-    public function test_photography_offers_five_hours_until_the_client_accepts(): void
+    public function test_the_client_path_cannot_open_a_photography_slot(): void
     {
-        Http::fake();
-        Carbon::setTestNow(Carbon::parse('2026-10-03 08:00:00', 'Asia/Damascus'));
+        $client = Client::factory()->create(['telegram_user_id' => 'tg-no-photo']);
+        $request = ServiceRequest::factory()->for($client)->create();
+
+        $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
+            ->postJson("/api/bot/telegram/requests/{$request->id}/photography-bookings", [
+                'telegram_user_id' => 'tg-no-photo',
+                'starts_at' => now()->addDay()->toIso8601String(),
+            ])
+            ->assertUnprocessable();
+
+        $this->assertSame(0, PhotographyBooking::query()->count());
+    }
+
+    public function test_photography_cannot_be_booked_before_a_week(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-10-07 08:00:00', 'Asia/Damascus'));
         $book = app(BookPhotographySlot::class);
-        $today = ServiceRequest::factory()->create();
+        $request = ServiceRequest::factory()->create();
+
         try {
-            $book->hold($today, Carbon::parse('2026-10-03 09:00:00', 'Asia/Damascus')->toIso8601String());
-            $this->fail('Photography cannot be booked today.');
+            $book->hold($request, Carbon::parse('2026-10-08 09:00:00', 'Asia/Damascus')->toIso8601String());
+            $this->fail('A next-day photography slot must be refused.');
         } catch (ValidationException $exception) {
-            $this->assertStringContainsString('نفس اليوم', $exception->errors()['starts_at'][0]);
+            $this->assertStringContainsString('أسبوع', $exception->errors()['starts_at'][0]);
         }
 
-        $first = ServiceRequest::factory()->create();
-        $second = ServiceRequest::factory()->create();
-        $eleven = Carbon::parse('2026-10-04 11:00:00', 'Asia/Damascus');
-        $held = $book->hold($first, $eleven->toIso8601String());
+        $held = $book->hold($request, Carbon::parse('2026-10-14 09:00:00', 'Asia/Damascus')->toIso8601String());
         $this->assertSame('pending_staff', $held->status);
-        $this->assertSame(3, (int) $held->starts_at->diffInHours($held->ends_at, absolute: true));
-
-        $clash = $book->hold($second, Carbon::parse('2026-10-04 14:00:00', 'Asia/Damascus')->toIso8601String());
-        $this->assertSame('pending_staff', $clash->status);
-        $chosen = $book->approveSameTime($held);
-        $this->assertSame('confirmed', $chosen->status);
-        $offered = $clash->fresh();
-        $this->assertSame('needs_client', $offered->status);
-        $this->assertSame('16:00', $offered->proposed_starts_at?->format('H:i'));
-        $this->assertStringContainsString('الساعة 4 مساءً', $book->clientMessage($offered));
-
-        $refused = $book->decide($second, false);
-        $this->assertSame('pending_staff', $refused->status);
-        $proposed = $book->propose($refused, Carbon::parse('2026-10-05 11:00:00', 'Asia/Damascus')->toIso8601String());
-        $this->assertSame('needs_client', $proposed->status);
-        $accepted = $book->decide($second, true);
-        $this->assertSame('confirmed', $accepted->status);
-        $this->assertSame('2026-10-05 11:00', $accepted->starts_at?->format('Y-m-d H:i'));
-        $laterIntent = app(\App\Support\PhotographyDeviceAlarm::class)->intent(Carbon::parse('2026-10-05 11:00:00', 'Asia/Damascus'));
-        $this->assertIsString($laterIntent);
-        $this->assertStringContainsString('SET_TIMER', $laterIntent);
-
-        $slots = $book->freeSlots();
-        $this->assertNotEmpty($slots);
-        $this->assertFalse(collect($slots)->contains(fn (array $slot): bool => str_starts_with($slot['label'], '2026-10-03')));
-        $this->assertFalse(collect($slots)->contains(fn (array $slot): bool => str_starts_with($slot['label'], '2026-10-04')));
+        $this->assertSame('2026-10-14 09:00', $held->starts_at?->format('Y-m-d H:i'));
     }
 
     public function test_three_photography_bookings_at_the_same_time_keep_one_calendar_event(): void
     {
         Http::fake();
-        Carbon::setTestNow(Carbon::parse('2026-10-03 08:00:00', 'Asia/Damascus'));
+        Carbon::setTestNow(Carbon::parse('2026-09-26 08:00:00', 'Asia/Damascus'));
         $this->mock(\App\Services\GoogleCalendarClient::class, function ($mock): void {
             $mock->shouldReceive('createShoot')->once()->andReturn('evt-one');
             $mock->shouldReceive('deleteEvent')->twice();

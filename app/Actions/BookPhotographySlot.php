@@ -3,17 +3,13 @@
 namespace App\Actions;
 
 use App\Enums\EmployeeProfession;
-use App\Models\Client;
 use App\Models\Employee;
 use App\Models\PhotographyBooking;
 use App\Models\ServiceRequest;
 use App\Services\GoogleCalendarClient;
-use App\Services\TelegramNotifier;
 use App\Support\WorkCalendar;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Mail;
-use Illuminate\Support\Facades\URL;
 use Illuminate\Validation\ValidationException;
 
 class BookPhotographySlot
@@ -22,12 +18,12 @@ class BookPhotographySlot
 
     public const GAP_HOURS = 5;
 
+    public const LEAD_DAYS = 7;
+
     public function __construct(
         private WorkCalendar $calendar,
         private NotifyEmployees $notifyEmployees,
-        private NotifyClientChannels $notifyClientChannels,
         private GoogleCalendarClient $googleCalendar,
-        private TelegramNotifier $telegram,
     ) {}
 
     /**
@@ -36,12 +32,18 @@ class BookPhotographySlot
     public function freeSlots(): array
     {
         $slots = [];
-        $today = now('Asia/Damascus')->toDateString();
-        foreach ($this->calendar->upcomingWorkDays(10) as $day) {
-            $local = $day->copy()->timezone('Asia/Damascus');
-            if ($local->toDateString() === $today) {
+        $earliest = now('Asia/Damascus')->addDays(self::LEAD_DAYS)->startOfDay();
+        $cursorDay = $earliest->copy();
+        $found = 0;
+        for ($i = 0; $found < 10 && $i < 24; $i++) {
+            if (! $this->calendar->isWorkDay($cursorDay)) {
+                $cursorDay->addDay();
+
                 continue;
             }
+            $found++;
+            $local = $cursorDay->copy();
+            $cursorDay->addDay();
             $start = $local->copy()->setTime(WorkCalendar::DAY_START_HOUR, 0);
             $dayEnd = $start->copy()->addHours($this->calendar->hoursPerDay());
             for ($cursor = $start->copy(); $cursor->copy()->addHours(self::SHOOT_HOURS)->lte($dayEnd); $cursor->addHour()) {
@@ -250,13 +252,6 @@ class BookPhotographySlot
             'proposed_starts_at' => $this->stored($proposed),
             'google_event_id' => null,
         ])->save();
-        $request = $booking->request ?? ServiceRequest::query()->find($booking->request_id);
-        if ($request instanceof ServiceRequest) {
-            $this->notifyClientChannels->send($request, $this->offerText($proposed), [
-                ['text' => 'يناسبني', 'callback_data' => 'photoyes:'.$request->id],
-                ['text' => 'لا يناسبني', 'callback_data' => 'photonno:'.$request->id],
-            ]);
-        }
 
         return $booking->fresh() ?? $booking;
     }
@@ -296,7 +291,6 @@ class BookPhotographySlot
 
         if ($request instanceof ServiceRequest) {
             $when = $start->format('Y-m-d H:i');
-            $this->sendAlarmChoice($request, $booking, $start, $when);
             $this->notifyEmployees->handle(
                 $request,
                 EmployeeProfession::Media,
@@ -305,38 +299,6 @@ class BookPhotographySlot
         }
 
         return $booking->fresh() ?? $booking;
-    }
-
-    private function sendAlarmChoice(ServiceRequest $request, PhotographyBooking $booking, Carbon $start, string $when): void
-    {
-        $alarmUrl = URL::temporarySignedRoute('photography.alarm', $start->copy()->addHour(), [
-            'booking' => $booking->id,
-        ]);
-        $text = "تمت الموافقة على موعد التصوير يوم {$when}.";
-        $chatId = $request->client?->telegram_user_id;
-
-        try {
-            if (is_string($chatId) && Client::isWhatsAppKey($chatId)) {
-                $this->telegram->send($chatId, $text."\n".$alarmUrl);
-
-                return;
-            }
-            if ($this->telegram->canReachClient($chatId)) {
-                $this->telegram->sendInlineKeyboard((string) $chatId, $text, [
-                    [['text' => 'تسجيل التذكير', 'url' => $alarmUrl]],
-                ]);
-
-                return;
-            }
-            $email = $request->client?->email;
-            if (filled($email)) {
-                Mail::raw($text."\n".$alarmUrl, function ($message) use ($email): void {
-                    $message->to((string) $email)->subject('موعد التصوير');
-                });
-            }
-        } catch (\Throwable) {
-            // The booking stays confirmed even if the notice fails.
-        }
     }
 
     private function offerText(Carbon $proposed): string
@@ -368,9 +330,10 @@ class BookPhotographySlot
     private function guardStart(string $startsAt): Carbon
     {
         $start = $this->clock(Carbon::parse($startsAt, 'Asia/Damascus'));
-        if ($start->toDateString() === now('Asia/Damascus')->toDateString() || $start->lt(now('Asia/Damascus'))) {
+        $earliest = now('Asia/Damascus')->addDays(self::LEAD_DAYS)->startOfDay();
+        if ($start->lt($earliest)) {
             throw ValidationException::withMessages([
-                'starts_at' => 'لا يمكن حجز التصوير في نفس اليوم. اختر يوم دوام قادم.',
+                'starts_at' => 'أقرب حجز للتصوير بعد أسبوع من اليوم.',
             ]);
         }
         if (! $this->calendar->isWorkDay($start)) {

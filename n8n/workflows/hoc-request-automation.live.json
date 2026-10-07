@@ -10,7 +10,7 @@
     "test": "https://nivxtime.app.n8n.cloud/webhook-test/hoc-events"
   },
   "capturedAt": "2026-10-07T11:46:00Z",
-  "versionId": "d19cc1cb-aefa-4ab7-8216-6bc4c8d859e9",
+  "versionId": "ba31ff83-e637-40a8-9597-dfe1bcc51e83",
   "sameAsDraft": true,
   "settings": {
     "executionOrder": "v1",
@@ -39,9 +39,27 @@
       ]
     },
     {
+      "name": "Revision",
+      "flow": [
+        "Notify Revision → POST /api/integrations/telegram/notify text طلب تعديل"
+      ]
+    },
+    {
+      "name": "Delivery",
+      "flow": [
+        "Notify Delivery → POST /api/integrations/telegram/notify text التسليم جاهز"
+      ]
+    },
+    {
+      "name": "Completed",
+      "flow": [
+        "Notify Completed → POST /api/integrations/telegram/notify text اكتمل المشروع"
+      ]
+    },
+    {
       "name": "Other",
       "flow": [
-        "Forward Event → POST /api/webhooks/n8n with the original event"
+        "Forward Event → POST /api/webhooks/n8n with the original event, including QUOTATION_READY which Laravel rejects"
       ]
     }
   ],

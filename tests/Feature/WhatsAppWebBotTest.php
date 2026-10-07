@@ -2,10 +2,13 @@
 
 namespace Tests\Feature;
 
+use App\Enums\RequestStatus;
 use App\Models\Client;
+use App\Models\ServiceRequest;
 use App\Support\ClientChannelGate;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -65,5 +68,86 @@ class WhatsAppWebBotTest extends TestCase
         Http::assertSent(fn (Request $request): bool => $request->url() === 'http://wa-web.test/send'
             && $request->hasHeader('X-Webhook-Secret', 'web-secret')
             && data_get($request->data(), 'to') === '963911111111');
+    }
+
+    public function test_a_free_question_is_answered_from_the_published_brief(): void
+    {
+        config(['services.gemini.e2e_stub' => true]);
+        Cache::put('site-guide-v2', 'Home of Creativity brief', now()->addMinute());
+        Client::query()->create([
+            'name' => 'Nour',
+            'phone' => '+963922222222',
+            'company_name' => 'Nour Co',
+            'telegram_user_id' => 'wa:963922222222',
+            'locale' => 'ar',
+        ]);
+
+        $this->withHeaders(['X-Webhook-Secret' => 'web-secret'])
+            ->postJson('/api/bot/whatsapp/web', [
+                'phone' => '963922222222',
+                'message_id' => 'web-ask',
+                'text' => 'وين مكتبكم؟',
+            ])
+            ->assertOk();
+
+        Http::assertSent(fn (Request $request): bool => $request->url() === 'http://wa-web.test/send'
+            && str_contains((string) data_get($request->data(), 'text'), 'hoc.agency')
+            && collect(data_get($request->data(), 'buttons', []))->contains('title', 'استفسار'));
+    }
+
+    public function test_the_client_opens_a_request_and_edits_it_before_a_quotation(): void
+    {
+        $client = Client::query()->create([
+            'name' => 'Nour',
+            'phone' => '+963933333333',
+            'company_name' => 'Nour Co',
+            'telegram_user_id' => 'wa:963933333333',
+            'locale' => 'ar',
+        ]);
+        $serviceRequest = ServiceRequest::factory()->create([
+            'client_id' => $client->id,
+            'title' => 'الشعار القديم',
+            'description' => 'وصف قديم للطلب يكفي هنا.',
+            'status' => RequestStatus::Submitted,
+        ]);
+
+        $this->withHeaders(['X-Webhook-Secret' => 'web-secret'])
+            ->postJson('/api/bot/whatsapp/web', [
+                'phone' => '963933333333',
+                'message_id' => 'web-list',
+                'text' => 'طلباتي',
+            ])
+            ->assertOk();
+
+        Http::assertSent(fn (Request $request): bool => collect(data_get($request->data(), 'buttons', []))
+            ->contains('id', 'open:'.$serviceRequest->number));
+
+        $this->withHeaders(['X-Webhook-Secret' => 'web-secret'])
+            ->postJson('/api/bot/whatsapp/web', [
+                'phone' => '963933333333',
+                'message_id' => 'web-edit',
+                'button_id' => 'edit:'.$serviceRequest->number,
+            ])
+            ->assertOk();
+
+        $this->withHeaders(['X-Webhook-Secret' => 'web-secret'])
+            ->postJson('/api/bot/whatsapp/web', [
+                'phone' => '963933333333',
+                'message_id' => 'web-title',
+                'text' => 'الشعار الجديد',
+            ])
+            ->assertOk();
+
+        $this->withHeaders(['X-Webhook-Secret' => 'web-secret'])
+            ->postJson('/api/bot/whatsapp/web', [
+                'phone' => '963933333333',
+                'message_id' => 'web-body',
+                'text' => 'وصف جديد يوضح التعديل المطلوب على الشعار.',
+            ])
+            ->assertOk();
+
+        $serviceRequest->refresh();
+        $this->assertSame('الشعار الجديد', $serviceRequest->title);
+        $this->assertSame('وصف جديد يوضح التعديل المطلوب على الشعار.', $serviceRequest->description);
     }
 }

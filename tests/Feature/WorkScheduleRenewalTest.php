@@ -176,7 +176,7 @@ class WorkScheduleRenewalTest extends TestCase
         $book = app(BookPhotographySlot::class);
         $start = Carbon::parse('2026-10-03 09:00:00', 'Asia/Damascus');
 
-        Carbon::setTestNow(Carbon::parse('2026-10-02 08:00:00', 'Asia/Damascus'));
+        Carbon::setTestNow(Carbon::parse('2026-09-26 08:00:00', 'Asia/Damascus'));
         $first = $book->hold($request, $start->toIso8601String());
         $this->assertSame('pending_staff', $first->status);
 

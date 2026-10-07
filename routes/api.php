@@ -44,6 +44,7 @@ use App\Http\Controllers\N8nWebhookController;
 use App\Http\Controllers\PortfolioController;
 use App\Http\Controllers\PricingController;
 use App\Http\Controllers\ProfilePdfController;
+use App\Http\Controllers\GithubWebhookController;
 use App\Http\Controllers\SentryWebhookController;
 use App\Http\Controllers\ServiceRequestController;
 use App\Http\Controllers\SiteAskController;
@@ -321,6 +322,9 @@ Route::post('integrations/drive/changed', [IntegrationController::class, 'driveC
 
 Route::post('integrations/sentry', SentryWebhookController::class)
     ->middleware(['sentry.webhook', 'throttle:60,1']);
+
+Route::post('integrations/github', GithubWebhookController::class)
+    ->middleware('throttle:60,1');
 
 Route::prefix('bot/telegram')->middleware(['shared.secret:services.telegram.bot_secret', 'telegram.client'])->group(function () {
     Route::post('link', [TelegramBotController::class, 'link']);

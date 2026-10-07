@@ -1,7 +1,7 @@
 # Laravel API
 
 Last updated: 6 October 2026 (`POST /site/ask` answers published-site questions with Gemini; the key stays on the server)
-Last updated: 7 October 2026 (WhatsApp Web bridge when `WHATSAPP_TRANSPORT=web`; Meta Cloud API stays off unless `WHATSAPP_ENABLED`)
+Last updated: 7 October 2026 (GitHub `workflow_job` webhooks post to `POST /api/integrations/github`, signed with `X-Hub-Signature-256` and `GITHUB_WEBHOOK_SECRET`, and `DevAlert` sends the result to the developer bot. A skipped design schedule stays silent. Client photography booking routes return 422.)
 Last updated: 1 October 2026 (project gallery files under `/storage/portfolio/projects` are `Cache-Control: no-cache`, and each image includes `updated_at`)
 Last updated: 30 September 2026 (portfolio seeder keeps categories only; migration drops collage projects whose images are Google Drive URLs)
 Last updated: 29 September 2026 (public CSP allows Google fonts; sw.js, robots.txt, and the web manifest are no-cache; `/articles/detail/?slug=` and `/articles/?slug=` 301 to `/articles/{slug}/`)

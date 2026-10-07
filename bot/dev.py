@@ -69,7 +69,8 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     data = response.json().get("data") or {}
     state = "يعمل" if data.get("up") else "Server Down"
-    await update.message.reply_text(f"{state}\n{data.get('health_url', '')}")
+    github = data.get("github_last") or "لا توجد عملية GitHub بعد"
+    await update.message.reply_text(f"{state}\n{data.get('health_url', '')}\n{github}")
 
 
 async def reply_text(update: Update, path: str, failure: str) -> None:

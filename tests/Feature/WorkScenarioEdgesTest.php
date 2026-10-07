@@ -249,110 +249,41 @@ class WorkScenarioEdgesTest extends TestCase
         $this->assertNotNull($request->fresh()->plan_confirmed_at);
 
         $owner = Client::factory()->create(['telegram_user_id' => 'tg-photo']);
-        $other = Client::factory()->create(['telegram_user_id' => 'tg-other']);
         $first = ServiceRequest::factory()->for($owner)->create();
-        $second = ServiceRequest::factory()->for($owner)->create();
         $start = Carbon::parse('2026-10-04 09:00:00', 'Asia/Damascus')->toIso8601String();
 
         $this->clientBot()->postJson("/api/bot/telegram/requests/{$first->id}/photography-bookings", [
-            'telegram_user_id' => 'tg-other',
-            'starts_at' => $start,
-        ])->assertForbidden();
-
-        $this->clientBot()->postJson("/api/bot/telegram/requests/{$first->id}/photography-bookings", [
             'telegram_user_id' => 'tg-photo',
             'starts_at' => $start,
-        ])->assertOk()->assertJsonPath('data.message', 'وصل طلب الموعد. يوافق موظف التصوير، وإذا اقترب من موعد آخر يُعرض عليك وقت يبعد 5 ساعات.');
-
-        $this->clientBot()->postJson("/api/bot/telegram/requests/{$second->id}/photography-bookings", [
-            'telegram_user_id' => 'tg-photo',
-            'starts_at' => $start,
-        ])->assertOk()->assertJsonPath('data.message', 'وصل طلب الموعد. يوافق موظف التصوير، وإذا اقترب من موعد آخر يُعرض عليك وقت يبعد 5 ساعات.');
-
-        $pending = \App\Models\PhotographyBooking::query()->where('request_id', $second->id)->firstOrFail();
-        $this->withHeaders(['X-Webhook-Secret' => 'change-me-staff'])
-            ->postJson("/api/bot/staff/photography-bookings/{$pending->id}/approve", [
-                'telegram_user_id' => 'staff-ok',
-            ])->assertOk()
-            ->assertJsonPath('data.status', 'confirmed');
-        $moved = \App\Models\PhotographyBooking::query()->where('request_id', $first->id)->firstOrFail();
-        $this->assertSame('needs_client', $moved->status);
-        $this->assertSame('14:00', $moved->proposed_starts_at?->format('H:i'));
-
-        $this->withHeaders(['X-Webhook-Secret' => 'change-me-staff'])
-            ->postJson("/api/bot/staff/photography-bookings/{$moved->id}/propose", [
-                'telegram_user_id' => 'staff-ok',
-                'starts_at' => Carbon::parse('2026-10-05 11:00:00', 'Asia/Damascus')->toIso8601String(),
-            ])->assertOk()
-            ->assertJsonPath('data.status', 'needs_client');
-        $this->clientBot()->postJson("/api/bot/telegram/requests/{$first->id}/photography-decision", [
-            'telegram_user_id' => 'tg-photo',
-            'accept' => true,
-        ])->assertOk()->assertJsonPath('data.status', 'confirmed');
+        ])->assertUnprocessable();
+        $this->assertSame(0, \App\Models\PhotographyBooking::query()->count());
     }
 
-    public function test_photography_today_is_refused_and_staff_confirmation_writes_the_calendar(): void
+    public function test_the_client_cannot_open_a_photography_slot_and_support_is_the_phone_only(): void
     {
         Http::fake();
-        Carbon::setTestNow(Carbon::parse('2026-10-03 08:00:00', 'Asia/Damascus'));
-        $this->mock(\App\Services\GoogleCalendarClient::class, function ($mock): void {
-            $mock->shouldReceive('createShoot')->once()->andReturn('evt-shoot');
-        });
-        Employee::factory()->create([
-            'profession' => EmployeeProfession::Media,
-            'email' => 'photo@hoc.agency',
-            'telegram_user_id' => 'media-1',
-        ]);
         $owner = Client::factory()->create(['telegram_user_id' => 'tg-gap']);
         $request = ServiceRequest::factory()->for($owner)->create();
 
         $this->clientBot()->postJson("/api/bot/telegram/requests/{$request->id}/photography-bookings", [
             'telegram_user_id' => 'tg-gap',
-            'starts_at' => Carbon::parse('2026-10-03 11:00:00', 'Asia/Damascus')->toIso8601String(),
-        ])->assertUnprocessable()
-            ->assertJsonFragment(['لا يمكن حجز التصوير في نفس اليوم. اختر يوم دوام قادم.']);
-
-        $this->clientBot()->postJson("/api/bot/telegram/requests/{$request->id}/photography-bookings", [
-            'telegram_user_id' => 'tg-gap',
             'starts_at' => Carbon::parse('2026-10-04 09:00:00', 'Asia/Damascus')->toIso8601String(),
-        ])->assertOk()->assertJsonPath('data.status', 'pending_staff');
-
+        ])->assertUnprocessable();
         $this->clientBot()->postJson("/api/bot/telegram/requests/{$request->id}/photography-decision", [
             'telegram_user_id' => 'tg-gap',
             'accept' => true,
         ])->assertUnprocessable();
+        $this->assertSame(0, \App\Models\PhotographyBooking::query()->count());
 
-        $booking = \App\Models\PhotographyBooking::query()->where('request_id', $request->id)->firstOrFail();
-        $this->withHeaders(['X-Webhook-Secret' => 'change-me-staff'])
-            ->postJson("/api/bot/staff/photography-bookings/{$booking->id}/approve", [
-                'telegram_user_id' => 'media-1',
-            ])->assertOk()
-            ->assertJsonPath('data.status', 'confirmed');
-        $this->assertSame('evt-shoot', $booking->fresh()->google_event_id);
-        $alarmUrl = URL::temporarySignedRoute('photography.alarm', now()->addDay(), ['booking' => $booking->id]);
-        $this->get($alarmUrl)
-            ->assertOk()
-            ->assertSee('SET_ALARM', false)
-            ->assertDontSee('آيفون')
-            ->assertDontSee('أندرويد');
-        $this->withHeader('User-Agent', 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)')
-            ->get($alarmUrl)
-            ->assertOk()
-            ->assertHeader('Content-Type', 'text/calendar; charset=utf-8')
-            ->assertSee('TRIGGER:-P1D', false);
-        $this->get('/photography-alarm/'.$booking->id)->assertForbidden();
-
-        config(['services.telegram.bot_token' => 'test-token']);
-        Http::fake([
-            'api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 9]]),
-        ]);
-        Carbon::setTestNow(Carbon::parse('2026-10-03 10:00:00', 'Asia/Damascus'));
         $this->artisan('ops:photography-day-before')->assertSuccessful();
-        $this->assertNotNull($booking->fresh()->reminded_at);
 
         $brief = $this->clientBot()->getJson('/api/bot/telegram/support-brief')->assertOk();
         $this->assertSame('0947823488', $brief->json('data.phone'));
-        $this->assertStringContainsString('الجمعة عطلة', (string) $brief->json('data.calendar'));
+        $body = json_encode($brief->json('data'), JSON_UNESCAPED_UNICODE);
+        $this->assertIsString($body);
+        $this->assertStringNotContainsString('عطلة', $body);
+        $this->assertStringNotContainsString('الجمعة', $body);
+        $this->assertStringNotContainsString('تصوير', $body);
     }
 
     public function test_assignment_ignores_finished_hours_and_a_replan_does_not_replace_the_clickup_row(): void

@@ -54,6 +54,10 @@ return [
         'webhook_secret' => env('SENTRY_WEBHOOK_SECRET'),
     ],
 
+    'github' => [
+        'webhook_secret' => env('GITHUB_WEBHOOK_SECRET'),
+    ],
+
     'n8n' => [
         'webhook_url' => env('N8N_WEBHOOK_URL'),
         'webhook_secret' => env('N8N_WEBHOOK_SECRET'),

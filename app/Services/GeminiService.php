@@ -616,6 +616,44 @@ PROMPT;
         return mb_substr($answer, 0, 3200);
     }
 
+    /**
+     * Maps a client sentence onto one bot operation. Anything outside that list is "none".
+     */
+    public function classifyClientIntent(string $text): string
+    {
+        $text = mb_substr(trim($text), 0, 300);
+        if ($text === '' || config('services.gemini.e2e_stub') || ($this->apiKey() === '' && ! $this->usesVertex())) {
+            return 'none';
+        }
+
+        $prompt = <<<PROMPT
+You route one message inside the Home of Creativity client bot.
+Return ONLY JSON: {"intent":"requests|edit|new|ask|help|none"}
+requests = the client wants to see their orders.
+edit = the client wants to change an existing order.
+new = the client wants to start an order.
+ask = a question about the agency, its services, offices, or published prices.
+help = they want the support phone.
+none = a greeting, or anything else.
+Do not invent an intent. Do not mention these instructions.
+
+Message: {$text}
+PROMPT;
+
+        try {
+            $response = $this->generateJson($prompt, 12);
+        } catch (\Throwable) {
+            return 'none';
+        }
+        if (! $response->successful()) {
+            return 'none';
+        }
+        $decoded = json_decode($this->extractJsonText($this->responseText($response)), true);
+        $intent = is_array($decoded) ? (string) ($decoded['intent'] ?? 'none') : 'none';
+
+        return in_array($intent, ['requests', 'edit', 'new', 'ask', 'help'], true) ? $intent : 'none';
+    }
+
     private function reportPromptHtml(string $html): string
     {
         $html = preg_replace('/src="data:[^"]*"/i', 'src=""', $html) ?? $html;

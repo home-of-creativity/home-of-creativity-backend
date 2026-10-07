@@ -27,6 +27,7 @@ class DevBotController extends Controller
                 'up' => $up,
                 'health_url' => $url,
                 'reported_down' => (bool) Cache::get('dev.health.down'),
+                'github_last' => Cache::get('dev.github.last'),
             ],
             'message' => $up ? 'up' : 'down',
         ]);

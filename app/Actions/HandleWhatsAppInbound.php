@@ -10,7 +10,9 @@ use App\Models\DriveDelivery;
 use App\Models\PricingPackage;
 use App\Models\RequestFile;
 use App\Models\ServiceRequest;
+use App\Services\GeminiService;
 use App\Services\RequestStatusTransitionService;
+use App\Services\SiteGuide;
 use App\Services\TelegramNotifier;
 use App\Contracts\WhatsAppMessenger;
 use App\Support\BillingPeriod;
@@ -19,7 +21,6 @@ use App\Support\ClientProfileValue;
 use App\Support\PricingCatalog;
 use App\Support\ResolveServiceRequest;
 use App\Support\StatusLabel;
-use App\Support\WorkCalendar;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -40,6 +41,9 @@ class HandleWhatsAppInbound
 
     /** @var list<string> */
     private const NAV_HELP = ['الدعم', '💬 دعم', 'menu:help'];
+
+    /** @var list<string> */
+    private const NAV_ASK = ['استفسار', 'menu:ask'];
 
     public function __construct(
         private ResolveTelegramClient $resolveTelegramClient,
@@ -62,8 +66,6 @@ class HandleWhatsAppInbound
         private PushClientLeadToOdoo $pushClientLeadToOdoo,
         private ResolveServiceRequest $resolveServiceRequest,
         private RequestStatusTransitionService $transitions,
-        private WorkCalendar $workCalendar,
-        private BookPhotographySlot $bookPhotography,
     ) {}
 
     /**
@@ -173,7 +175,13 @@ class HandleWhatsAppInbound
             if ($this->isNav($text, self::NAV_HELP)) {
                 $this->resetCompose($session);
                 $this->putSession($phone, $session);
-                $this->sendMenu($chatId, "رقم الدعم: ".self::SUPPORT_PHONE."\n".$this->workCalendar->holidaySummary());
+                $this->sendMenu($chatId, 'رقم الدعم: '.self::SUPPORT_PHONE);
+
+                return;
+            }
+            if ($this->isNav($text, self::NAV_ASK)) {
+                $this->resetCompose($session);
+                $this->beginAsk($chatId, $phone, $session);
 
                 return;
             }
@@ -209,8 +217,56 @@ class HandleWhatsAppInbound
 
                 return;
             }
+            if ($step === 'ask') {
+                $this->answerAsk($chatId, $phone, $session, (string) $text);
 
-            if (! $this->gateProfile($client, $chatId, $session, greet: true)) {
+                return;
+            }
+            if ($step === 'edit_title') {
+                $this->captureEditTitle($chatId, $phone, $session, (string) $text);
+
+                return;
+            }
+            if ($step === 'edit_body') {
+                $this->captureEditBody($client, $chatId, $phone, $session, (string) $text);
+
+                return;
+            }
+
+            $operation = $this->operationIntent((string) $text);
+            if ($operation === null && mb_strlen(trim((string) $text)) >= 8 && ! $this->looksLikeQuestion((string) $text)) {
+                $operation = app(GeminiService::class)->classifyClientIntent((string) $text);
+            }
+            if ($operation === 'requests') {
+                $this->listRequests($client, $chatId);
+
+                return;
+            }
+            if ($operation === 'edit') {
+                $this->startEdit($client, $chatId, $phone, $session);
+
+                return;
+            }
+            if ($operation === 'new') {
+                if ($this->gateProfile($client, $chatId, $session)) {
+                    $this->showCatalog($client, $chatId, $phone, $session);
+                }
+
+                return;
+            }
+            if ($operation === 'help') {
+                $this->sendMenu($chatId, 'رقم الدعم: '.self::SUPPORT_PHONE);
+
+                return;
+            }
+            if ($operation === 'ask') {
+                $this->answerAsk($chatId, $phone, $session, (string) $text);
+
+                return;
+            }
+
+            $asking = $this->looksLikeQuestion((string) $text);
+            if (! $this->gateProfile($client, $chatId, $session, greet: ! $asking)) {
                 return;
             }
 
@@ -222,10 +278,9 @@ class HandleWhatsAppInbound
                 return;
             }
 
-            $this->sendMenu(
-                $chatId,
-                'أهلاً '.($client->name ?: '')." في Home of Creativity.\nهذا بوت العملاء: تطلب الخدمة، تستلم عرض السعر، وتتابع حالة طلبك من هنا.\nاختر من الأزرار أدناه لطلب جديد أو متابعة طلباتك.",
-            );
+            if ($asking) {
+                $this->answerAsk($chatId, $phone, $session, (string) $text);
+            }
         } catch (Throwable $exception) {
             Log::error('WhatsApp conversation failed.', [
                 'phone' => $phone,
@@ -278,7 +333,7 @@ class HandleWhatsAppInbound
             if ($greet) {
                 $this->sendMenu(
                     $chatId,
-                    'أهلاً '.$client->name." في Home of Creativity.\nهذا بوت العملاء: تطلب الخدمة، تستلم عرض السعر، وتتابع حالة طلبك من هنا.\nاختر من الأزرار أدناه لطلب جديد أو متابعة طلباتك.",
+                    'أهلاً '.$client->name." في Home of Creativity.\nهذا بوت العملاء: تطلب الخدمة، تستلم عرض السعر، وتتابع حالة طلبك من هنا.\nاختر برقم الخيار: طلب جديد، طلباتي، استفسار، أو الدعم.",
                 );
             }
 
@@ -345,7 +400,7 @@ class HandleWhatsAppInbound
             return;
         }
 
-        $this->sendMenu($chatId, 'تم حفظ بياناتك. اختر من الأزرار أدناه.');
+        $this->sendMenu($chatId, 'تم حفظ بياناتك. اختر برقم الخيار.');
     }
 
     /**
@@ -353,6 +408,11 @@ class HandleWhatsAppInbound
      */
     private function handleCallback(Client $client, string $chatId, string $phone, array $session, string $data): void
     {
+        if ($data === 'menu:home') {
+            $this->sendMenu($chatId, 'اختر برقم الخيار: طلب جديد، طلباتي، استفسار، أو الدعم.');
+
+            return;
+        }
         if ($this->isNav($data, self::NAV_NEW) || $data === 'menu:new') {
             if (! $this->gateProfile($client, $chatId, $session)) {
                 return;
@@ -367,34 +427,27 @@ class HandleWhatsAppInbound
             return;
         }
         if ($this->isNav($data, self::NAV_HELP) || $data === 'menu:help') {
-            $this->sendMenu($chatId, "رقم الدعم: ".self::SUPPORT_PHONE."\n".$this->workCalendar->holidaySummary());
+            $this->sendMenu($chatId, 'رقم الدعم: '.self::SUPPORT_PHONE);
+
+            return;
+        }
+        if ($this->isNav($data, self::NAV_ASK) || $data === 'menu:ask') {
+            $this->beginAsk($chatId, $phone, $session);
+
+            return;
+        }
+        if (str_starts_with($data, 'open:')) {
+            $this->showRequest($client, $chatId, substr($data, 5));
+
+            return;
+        }
+        if (str_starts_with($data, 'edit:')) {
+            $this->beginEdit($client, $chatId, $phone, $session, substr($data, 5));
 
             return;
         }
         if (str_starts_with($data, 'photoyes:') || str_starts_with($data, 'photonno:')) {
-            $request = ServiceRequest::query()
-                ->whereKey((int) substr($data, strpos($data, ':') + 1))
-                ->where('client_id', $client->id)
-                ->first();
-            if ($request === null) {
-                $this->safeSend($chatId, 'لا يوجد موعد تصوير بهذا الرقم.');
-
-                return;
-            }
-            try {
-                $booking = $this->bookPhotography->decide($request, str_starts_with($data, 'photoyes:'));
-            } catch (ValidationException $exception) {
-                $message = collect($exception->errors())->flatten()->first();
-                $this->safeSend($chatId, is_string($message) ? $message : 'تعذر تثبيت الموعد.');
-
-                return;
-            }
-            $this->safeSend(
-                $chatId,
-                $booking->status === 'confirmed'
-                    ? 'تم تثبيت موعد التصوير، وأُرسلت الدعوة إلى تقويمك.'
-                    : 'أُبلغ موظف التصوير. سيرسل وقتاً آخر.',
-            );
+            $this->sendMenu($chatId, 'حجز التصوير غير متاح من المحادثة. رقم الدعم: '.self::SUPPORT_PHONE);
 
             return;
         }
@@ -767,59 +820,181 @@ class HandleWhatsAppInbound
             return;
         }
 
-        $pageSize = 10;
+        $pageSize = 9;
         $shown = $items->slice($offset, $pageSize);
-        $header = $items->count() <= $pageSize
-            ? 'طلباتك:'
-            : 'طلباتك ('.($offset + 1).'–'.($offset + $shown->count()).' من '.$items->count().'):';
-        $this->safeSend($chatId, $header);
-
+        $lines = ['أرسل رقم الطلب لفتحه أو تعديله:'];
+        $rows = [];
         foreach ($shown as $item) {
             $label = StatusLabel::requestAr($item->status->value);
-            $package = $item->pricingPackage?->name_ar ?: $item->pricingPackage?->name_en ?: 'طلب يدوي';
-            $period = filled($item->billing_period) ? BillingPeriod::labelAr((string) $item->billing_period) : '';
-            $duration = $item->durationLabel();
-            $suffix = $duration ?: ($period !== '' && ! $item->renewalDeclined() ? $period : '');
-            $lines = [
-                "#{$item->number} — {$item->title}",
-                'الحالة: '.$label,
-                'الباقة: '.$package.($suffix !== '' ? " — {$suffix}" : ''),
-            ];
-            if ($item->amount_paid !== null || $item->amount_remaining !== null) {
-                $lines[] = 'المدفوع: '.($item->amount_paid ?: 0).' USD — المتبقي: '.($item->amount_remaining ?: 0).' USD';
-            }
-            if ($item->receipt_reupload_required || $item->acceptsReceiptUpload()) {
-                $lines[] = '📎 أرسل وصل الدفع كصورة أو PDF';
-            }
-
-            $ref = ResolveServiceRequest::displayNumber($item);
-            $rows = [];
-            if ($item->status === RequestStatus::ReadyForReview) {
-                $rows[] = [['text' => 'اعتماد التسليم', 'callback_data' => 'complete:'.$ref]];
-            }
-            if ($item->receipt_reupload_required || $item->acceptsReceiptUpload()) {
-                $rows[] = [['text' => 'رفع وصل الدفع', 'callback_data' => 'receipt_hint:'.$ref]];
-            }
-            if ($item->canRenew()) {
-                $rows[] = [
-                    ['text' => 'تجديد', 'callback_data' => 'renew:'.$item->number],
-                    ['text' => 'لن أجدد', 'callback_data' => 'norenew:'.$item->number],
-                ];
-            }
-
-            if ($rows === []) {
-                $this->safeSend($chatId, implode("\n", $lines));
-            } else {
-                $this->telegram->sendInlineKeyboard($chatId, implode("\n", $lines), $rows);
-            }
+            $lines[] = "#{$item->number} — {$item->title} — {$label}";
+            $rows[] = [[
+                'text' => mb_substr("#{$item->number} {$label}", 0, 24),
+                'callback_data' => 'open:'.$item->number,
+            ]];
         }
-
         $next = $offset + $pageSize;
         if ($next < $items->count()) {
-            $this->telegram->sendInlineKeyboard($chatId, 'عرض الطلبات الأقدم:', [[
-                ['text' => 'عرض الأقدم', 'callback_data' => 'more_reqs:'.$next],
-            ]]);
+            $rows[] = [['text' => 'عرض الأقدم', 'callback_data' => 'more_reqs:'.$next]];
         }
+        $rows[] = [['text' => 'القائمة', 'callback_data' => 'menu:home']];
+        $this->telegram->sendInlineKeyboard($chatId, implode("\n", $lines), $rows);
+    }
+
+    private function showRequest(Client $client, string $chatId, string $number): void
+    {
+        $item = $client->requests()->where('number', $number)->first();
+        if ($item === null || $item->hiddenFromClient()) {
+            $this->sendMenu($chatId, 'لا يوجد طلب بهذا الرقم.');
+
+            return;
+        }
+
+        $label = StatusLabel::requestAr($item->status->value);
+        $package = $item->pricingPackage?->name_ar ?: $item->pricingPackage?->name_en ?: 'طلب يدوي';
+        $lines = [
+            "#{$item->number} — {$item->title}",
+            'الحالة: '.$label,
+            'الباقة: '.$package,
+        ];
+        if (filled($item->description)) {
+            $lines[] = 'الوصف: '.mb_substr((string) $item->description, 0, 280);
+        }
+        if ($item->amount_paid !== null || $item->amount_remaining !== null) {
+            $lines[] = 'المدفوع: '.($item->amount_paid ?: 0).' USD — المتبقي: '.($item->amount_remaining ?: 0).' USD';
+        }
+
+        $ref = ResolveServiceRequest::displayNumber($item);
+        $rows = [];
+        if ($item->status->allowsClientEdit()) {
+            $rows[] = [['text' => 'تعديل البيانات', 'callback_data' => 'edit:'.$item->number]];
+        }
+        if ($item->allowsClientRevision()) {
+            $rows[] = [['text' => 'طلب تعديل', 'callback_data' => 'revision:'.$ref]];
+        }
+        if ($item->status === RequestStatus::ReadyForReview) {
+            $rows[] = [['text' => 'اعتماد التسليم', 'callback_data' => 'complete:'.$ref]];
+        }
+        if ($item->receipt_reupload_required || $item->acceptsReceiptUpload()) {
+            $lines[] = 'أرسل وصل الدفع كصورة أو PDF';
+            $rows[] = [['text' => 'رفع وصل الدفع', 'callback_data' => 'receipt_hint:'.$ref]];
+        }
+        if ($item->canRenew()) {
+            $rows[] = [
+                ['text' => 'تجديد', 'callback_data' => 'renew:'.$item->number],
+                ['text' => 'لن أجدد', 'callback_data' => 'norenew:'.$item->number],
+            ];
+        }
+        $rows[] = [['text' => 'طلباتي', 'callback_data' => 'menu:mine']];
+        $this->telegram->sendInlineKeyboard($chatId, implode("\n", $lines), $rows);
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function startEdit(Client $client, string $chatId, string $phone, array &$session): void
+    {
+        $editable = $client->requests()
+            ->latest('id')
+            ->get()
+            ->filter(fn (ServiceRequest $item) => $item->status->allowsClientEdit() && ! $item->hiddenFromClient())
+            ->values();
+        if ($editable->isEmpty()) {
+            $this->sendMenu($chatId, "التعديل متاح قبل صدور عرض السعر.\nافتح طلباتي لرؤية الحالة، أو اطلب تعديلاً على التسليم بعد بدء التنفيذ.");
+
+            return;
+        }
+        if ($editable->count() === 1) {
+            $this->beginEdit($client, $chatId, $phone, $session, (string) $editable->first()->number);
+
+            return;
+        }
+        $this->listRequests($client, $chatId);
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function beginEdit(Client $client, string $chatId, string $phone, array &$session, string $number): void
+    {
+        $item = $client->requests()->where('number', $number)->first();
+        if ($item === null || ! $item->status->allowsClientEdit()) {
+            $this->sendMenu($chatId, 'هذا الطلب لم يعد قابلاً لتعديل البيانات.');
+
+            return;
+        }
+        $session['step'] = 'edit_title';
+        $session['edit_number'] = $item->number;
+        $this->putSession($phone, $session);
+        $this->safeSend($chatId, "تعديل #{$item->number}.\nالعنوان الحالي: {$item->title}\nأرسل العنوان الجديد.");
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function captureEditTitle(string $chatId, string $phone, array &$session, string $text): void
+    {
+        $title = trim($text);
+        if ($title === '' || mb_strlen($title) > 255) {
+            $this->safeSend($chatId, 'أرسل عنواناً واضحاً، حتى 255 حرفاً.');
+
+            return;
+        }
+        $session['edit_title'] = $title;
+        $session['step'] = 'edit_body';
+        $this->putSession($phone, $session);
+        $this->safeSend($chatId, 'أرسل الوصف الجديد في جملة واضحة.');
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function captureEditBody(Client $client, string $chatId, string $phone, array &$session, string $text): void
+    {
+        $description = trim($text);
+        if (mb_strlen($description) < 15) {
+            $this->safeSend($chatId, 'أرسل جملة أوضح تصف التعديل.');
+
+            return;
+        }
+        $item = $client->requests()->where('number', (string) ($session['edit_number'] ?? ''))->first();
+        if ($item === null || ! $item->status->allowsClientEdit()) {
+            $session['step'] = 'idle';
+            unset($session['edit_number'], $session['edit_title']);
+            $this->putSession($phone, $session);
+            $this->sendMenu($chatId, 'هذا الطلب لم يعد قابلاً لتعديل البيانات.');
+
+            return;
+        }
+        $item->forceFill([
+            'title' => (string) $session['edit_title'],
+            'description' => mb_substr($description, 0, 10000),
+        ])->save();
+        $session['step'] = 'idle';
+        unset($session['edit_number'], $session['edit_title']);
+        $this->putSession($phone, $session);
+        $this->showRequest($client, $chatId, (string) $item->number);
+    }
+
+    private function operationIntent(string $text): ?string
+    {
+        $text = trim($text);
+        if ($text === '') {
+            return null;
+        }
+        if (preg_match('/طلباتي|وين طلب|شو صار بطلب/u', $text) === 1) {
+            return 'requests';
+        }
+        if (preg_match('/تعديل|عدّل|(?:^|\s)عدل(?:\s|$)/u', $text) === 1) {
+            return 'edit';
+        }
+        if (preg_match('/طلب جديد|أبي أطلب|بدي أطلب/u', $text) === 1) {
+            return 'new';
+        }
+        if (preg_match('/(?:^|\s)الدعم(?:\s|$)/u', $text) === 1) {
+            return 'help';
+        }
+
+        return null;
     }
 
     /**
@@ -1193,8 +1368,75 @@ class HandleWhatsAppInbound
         $this->telegram->sendInlineKeyboard($chatId, $text, [[
             ['text' => 'طلب جديد', 'callback_data' => 'menu:new'],
             ['text' => 'طلباتي', 'callback_data' => 'menu:mine'],
+            ['text' => 'استفسار', 'callback_data' => 'menu:ask'],
             ['text' => 'الدعم', 'callback_data' => 'menu:help'],
         ]]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function beginAsk(string $chatId, string $phone, array &$session): void
+    {
+        $session['step'] = 'ask';
+        $this->putSession($phone, $session);
+        $this->safeSend($chatId, "اكتب سؤالك عن الخدمات أو المكتب أو الأسعار المنشورة.\nالجواب من معلومات الموقع فقط.");
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function answerAsk(string $chatId, string $phone, array &$session, string $text): void
+    {
+        $question = trim($text);
+        if ($question === '' || ClientProfileValue::isKeyboardLabel($question)) {
+            $this->beginAsk($chatId, $phone, $session);
+
+            return;
+        }
+
+        $history = is_array($session['ask_history'] ?? null) ? $session['ask_history'] : [];
+        $answer = $this->boundedAnswer($question, $history);
+        $history[] = ['role' => 'user', 'text' => mb_substr($question, 0, 400)];
+        $history[] = ['role' => 'assistant', 'text' => mb_substr($answer, 0, 400)];
+        $session['ask_history'] = array_slice($history, -6);
+        $session['step'] = 'idle';
+        $this->putSession($phone, $session);
+        $this->sendMenu($chatId, $answer);
+    }
+
+    /**
+     * @param  list<array{role: string, text: string}>  $history
+     */
+    private function boundedAnswer(string $question, array $history): string
+    {
+        try {
+            $answer = app(GeminiService::class)->answerSiteQuestion(
+                $question,
+                'ar',
+                app(SiteGuide::class)->brief(),
+                $history,
+            );
+        } catch (Throwable $exception) {
+            Log::warning('WhatsApp inquiry failed.', ['error' => $exception->getMessage()]);
+
+            return "ما لقيت هذا التفصيل في المعلومات المنشورة.\nتقدر تسأل رقم الدعم: ".self::SUPPORT_PHONE;
+        }
+
+        return mb_substr($answer, 0, 1200);
+    }
+
+    private function looksLikeQuestion(string $text): bool
+    {
+        $text = trim($text);
+        if (mb_strlen($text) < 8) {
+            return false;
+        }
+        if (preg_match('/[?؟]/u', $text) === 1) {
+            return true;
+        }
+
+        return preg_match('/(?:^|\s)(ما|ماذا|كيف|وين|أين|اين|كم|هل|متى|ليش|لماذا|شو|فرق|سعر|أسعار|باقة|خدمات)/u', $text) === 1;
     }
 
     private function safeSend(string $chatId, string $text): void

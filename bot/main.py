@@ -1439,10 +1439,7 @@ async def support_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         if response.status_code < 400:
             payload = response.json().get("data") or {}
             phone = payload.get("phone") or SUPPORT_PHONE
-            calendar = (payload.get("calendar") or "").strip()
             text = f"رقم الدعم: {phone}"
-            if calendar:
-                text = f"{text}\n{calendar}"
     except Exception:
         text = f"رقم الدعم: {SUPPORT_PHONE}"
     await message.reply_text(text, reply_markup=main_keyboard())
@@ -1639,27 +1636,17 @@ async def client_request_action(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def photography_decision(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    user = update.effective_user
-    if query is None or query.data is None or user is None:
+    if query is None or query.data is None:
         return
-    action, request_id = query.data.split(":", 1)
-    async with httpx.AsyncClient(timeout=12) as client:
-        response = await client.post(
-            f"{API_URL}/bot/telegram/requests/{request_id}/photography-decision",
-            headers=api_headers(),
-            json={"telegram_user_id": str(user.id), "accept": action == "photoyes"},
-        )
-    if response.status_code >= 400:
-        await api_error_alert(query, response)
-        return
-    await query.answer()
     try:
-        await query.edit_message_reply_markup(reply_markup=None)
+        await query.answer()
     except Exception:
         pass
     if query.message:
-        text = "تم تثبيت موعد التصوير." if action == "photoyes" else "أُبلغ موظف التصوير. سيرسل وقتاً آخر."
-        await query.message.reply_text(text, reply_markup=main_keyboard())
+        await query.message.reply_text(
+            f"حجز التصوير غير متاح من المحادثة. رقم الدعم: {SUPPORT_PHONE}",
+            reply_markup=main_keyboard(),
+        )
 
 
 async def post_reject(query, number: str, reason: str) -> None:
