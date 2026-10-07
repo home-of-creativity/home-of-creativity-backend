@@ -55,6 +55,9 @@
         <env name="WHATSAPP_PHONE_NUMBER_ID" value=""/>
         <env name="WHATSAPP_VERIFY_TOKEN" value="change-me-wa"/>
         <env name="WHATSAPP_APP_SECRET" value="change-me-wa-secret"/>
+        <env name="WHATSAPP_TRANSPORT" value="cloud" force="true"/>
+        <env name="WHATSAPP_WEB_URL" value="" force="true"/>
+        <env name="WHATSAPP_ENABLED" value="false" force="true"/>
         <env name="ODOO_ENABLED" value="false"/>
         <env name="ODOO_USE_JSON2" value="false"/>
         <env name="ODOO_URL" value=""/>

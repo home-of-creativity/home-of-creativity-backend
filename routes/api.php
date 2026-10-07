@@ -51,6 +51,7 @@ use App\Http\Controllers\SocialFeedController;
 use App\Http\Controllers\StaffBotController;
 use App\Http\Controllers\TelegramBotController;
 use App\Http\Controllers\ThreadsOAuthController;
+use App\Http\Controllers\WhatsAppWebController;
 use App\Http\Controllers\WhatsAppWebhookController;
 use App\Models\LegalPage;
 use Illuminate\Support\Facades\Route;
@@ -208,6 +209,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
 
     Route::middleware('ability:ops.channels')->group(function () {
         Route::put('ops-settings/client-channels', [AdminClientChannelController::class, 'update']);
+        Route::get('ops-settings/whatsapp-web', [AdminClientChannelController::class, 'whatsappWeb']);
         Route::get('ops-settings/work-calendar', [AdminWorkScheduleController::class, 'showCalendar']);
         Route::put('ops-settings/work-calendar', [AdminWorkScheduleController::class, 'updateCalendar']);
     });
@@ -356,6 +358,8 @@ Route::prefix('bot/whatsapp')->group(function () {
     Route::get('webhook', [WhatsAppWebhookController::class, 'verify']);
     Route::post('webhook', [WhatsAppWebhookController::class, 'incoming'])
         ->middleware(['whatsapp.signature', 'throttle:120,1']);
+    Route::post('web', [WhatsAppWebController::class, 'incoming'])
+        ->middleware(['shared.secret:services.whatsapp.web_secret', 'throttle:120,1']);
 });
 
 Route::prefix('bot/staff')->middleware('shared.secret:services.telegram.staff_bot_secret')->group(function () {

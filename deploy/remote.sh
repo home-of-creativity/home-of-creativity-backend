@@ -67,8 +67,8 @@ echo "Reloading API workers and scheduler..."
 
 # Bot containers bind-mount the code and keep the old Python in memory; restart
 # them after migrations so they load the new handlers and the drafts table exists.
-echo "Restarting Telegram bots..."
-"${COMPOSE[@]}" restart hoc-client-bot hoc-staff-bot hoc-admin-bot hoc-dev-bot || true
+echo "Restarting Telegram bots and WhatsApp Web..."
+"${COMPOSE[@]}" restart hoc-client-bot hoc-staff-bot hoc-admin-bot hoc-dev-bot hoc-whatsapp-web || true
 
 echo "Pushing missing Odoo CRM leads onto the Telegram pipeline..."
 "${COMPOSE[@]}" exec -T hoc-api php artisan odoo:push-telegram || true

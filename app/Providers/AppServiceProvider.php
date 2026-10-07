@@ -17,6 +17,13 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(OdooClient::class);
         $this->app->singleton(OdooLeadLog::class);
         $this->app->scoped(ClientReachability::class);
+        $this->app->singleton(\App\Contracts\WhatsAppMessenger::class, function (): \App\Contracts\WhatsAppMessenger {
+            if (config('services.whatsapp.transport') === 'web') {
+                return new \App\Services\WhatsAppWebClient;
+            }
+
+            return new \App\Services\WhatsAppCloudClient;
+        });
     }
 
     public function boot(): void

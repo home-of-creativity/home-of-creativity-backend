@@ -2,13 +2,14 @@
 
 namespace App\Services;
 
+use App\Contracts\WhatsAppMessenger;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
-class WhatsAppCloudClient
+class WhatsAppCloudClient implements WhatsAppMessenger
 {
     public function configured(): bool
     {

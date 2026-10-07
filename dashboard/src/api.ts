@@ -74,6 +74,7 @@ export type OpsSettings = {
   telegram_enabled: boolean;
   whatsapp_enabled: boolean;
   whatsapp_locked?: boolean;
+  whatsapp_transport?: "web" | "cloud";
 };
 
 export type FinanceSummary = {
@@ -90,6 +91,13 @@ export type ClientChannels = {
   telegram_enabled: boolean;
   whatsapp_enabled: boolean;
   whatsapp_locked?: boolean;
+  whatsapp_transport?: "web" | "cloud";
+};
+
+export type WhatsAppWebStatus = ClientChannels & {
+  connected: boolean;
+  qr: string | null;
+  reachable: boolean;
 };
 
 export type ProfilePdf = {
@@ -1005,6 +1013,9 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(payload),
     });
+  },
+  whatsappWebStatus() {
+    return request<Envelope<WhatsAppWebStatus>>("/admin/ops-settings/whatsapp-web");
   },
   async receiptBlob(requestId: number, fileId: number) {
     const headers = new Headers({ Accept: "application/octet-stream" });

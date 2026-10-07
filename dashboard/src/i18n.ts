@@ -553,7 +553,10 @@ export const copy = {
   channelsTelegram: { ar: "تيليجرام العملاء", en: "Client Telegram" },
   channelsWhatsapp: { ar: "واتساب العملاء", en: "Client WhatsApp" },
   channelsTelegramHelp: { ar: "بوت العملاء على تيليجرام: طلبات، عروض، تسليم Drive، وتذكيرات SLA.", en: "Client Telegram bot: requests, quotes, Drive delivery, and SLA reminders." },
-  channelsWhatsappHelp: { ar: "بوت العملاء على واتساب Cloud API. ويب هوك ميتا يبقى للتحقق حتى أثناء الإيقاف.", en: "Client WhatsApp Cloud API bot. The Meta webhook still verifies while paused." },
+  channelsWhatsappHelp: { ar: "بوت العملاء عبر واتساب ويب. امسح الرمز من الجوال لربط رقم الشركة، بلا حساب ميتا.", en: "Client bot on WhatsApp Web. Scan the code from the phone to link the company number, without a Meta account." },
+  channelsWhatsappScan: { ar: "من واتساب على الجوال: الأجهزة المرتبطة، ثم امسح هذا الرمز.", en: "On the phone: WhatsApp, Linked devices, then scan this code." },
+  channelsWhatsappLinked: { ar: "الرقم مربوط. رسائل العملاء تصل إلى نفس بوت الطلبات.", en: "The number is linked. Client messages use the same request bot." },
+  channelsWhatsappOffline: { ar: "جسر واتساب ويب لا يرد الآن. أعد تشغيل الخدمة ثم حدّث الصفحة.", en: "The WhatsApp Web bridge is not answering. Restart it, then refresh." },
   channelsLocked: { ar: "موقوف حتى ربط واتساب ويب", en: "Off until WhatsApp Web is linked" },
   channelsWhatsappLockedHelp: {
     ar: "القناة مغلقة من إعداد السيرفر. البوت لا يرد ولا ينشئ عميلاً ولا يرسل شيئاً. محادثات واتساب تتم يدوياً.",

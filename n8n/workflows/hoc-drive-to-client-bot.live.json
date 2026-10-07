@@ -1,27 +1,20 @@
 {
-  "id": "CxOPvNpUiT2nrHUj",
+  "id": "ZfYg68CwFXmShXds",
   "name": "HOC Drive to Client Bot",
-  "active": false,
-  "url": "https://prodesign.app.n8n.cloud/workflow/CxOPvNpUiT2nrHUj",
-  "capturedAt": "2026-09-20T12:10:00Z",
+  "active": true,
+  "url": "https://nivxtime.app.n8n.cloud/workflow/ZfYg68CwFXmShXds",
+  "capturedAt": "2026-10-07T11:46:00Z",
   "settings": {
-    "availableInMCP": true
+    "availableInMCP": true,
+    "executionTimeout": 60,
+    "timezone": "Asia/Damascus"
   },
-  "activeVersionId": "fb6cfb91-e418-4e27-af8e-b15b7b5f51db",
-  "disabledNodes": [
-    "New File In Hoc Client",
-    "Updated File In HOC Clients",
-    "New Folder In HOC Clients"
-  ],
+  "activeVersionId": "ade0dc6f-439e-4b58-9a91-3d3977157a56",
   "triggers": [
-    "Google Drive OAuth triggers disabled to stop resending every file in HOC Clients",
-    "Webhook GET+POST /webhook/hoc-drive-file remains for a manual kick"
+    "No Google Drive trigger, so existing HOC Clients files are not resent",
+    "Webhook GET+POST /webhook/hoc-drive-file is the manual kick"
   ],
-  "action": "POST https://api.hoc.agency/api/integrations/drive/poll with X-N8N-Secret (no $env). Nested request-folder uploads send via Laravel Google changes.watch. Files sitting on the HOC Clients root are ignored. Already-sent files are not resent unless the file actually changed.",
-  "laravel": "ops:poll-drive sends a file once; same Drive modified second is not a revision. Root folders are skipped.",
-  "webhook": "https://prodesign.app.n8n.cloud/webhook/hoc-drive-file",
-  "google": {
-    "credential": "Google Drive account",
-    "folderName": "HOC Clients"
-  }
+  "action": "POST https://api.hoc.agency/api/integrations/drive/poll with the incoming X-N8N-Secret (no $env). Nested request-folder uploads send via Laravel Google changes.watch.",
+  "laravel": "ops:poll-drive sends a file once; the same Drive modified second is not a revision. Root folders are skipped.",
+  "webhook": "https://nivxtime.app.n8n.cloud/webhook/hoc-drive-file"
 }

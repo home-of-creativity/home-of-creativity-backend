@@ -6721,6 +6721,14 @@ html[dir="rtl"] .placement-tile-toggle[data-state="checked"] .placement-tile-tog
   opacity: 0.92;
 }
 
+.wa-link-qr {
+  width: 220px;
+  height: 220px;
+  background: #fff;
+  border-radius: 1rem;
+  padding: 0.5rem;
+}
+
 .pdf-preview {
   width: 100%;
   min-height: 36rem;

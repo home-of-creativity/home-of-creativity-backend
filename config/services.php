@@ -193,11 +193,14 @@ return [
 
     'whatsapp' => [
         'enabled' => filter_var(env('WHATSAPP_ENABLED', false), FILTER_VALIDATE_BOOL),
+        'transport' => env('WHATSAPP_TRANSPORT', 'cloud'),
         'token' => env('WHATSAPP_TOKEN'),
         'phone_number_id' => env('WHATSAPP_PHONE_NUMBER_ID'),
         'verify_token' => env('WHATSAPP_VERIFY_TOKEN'),
         'app_secret' => env('WHATSAPP_APP_SECRET'),
         'graph_base' => env('WHATSAPP_GRAPH_URL', env('META_GRAPH_URL', 'https://graph.facebook.com/v21.0')),
+        'web_url' => env('WHATSAPP_WEB_URL'),
+        'web_secret' => env('WHATSAPP_WEB_SECRET') ?: env('TELEGRAM_BOT_SECRET'),
     ],
 
     'threads' => [

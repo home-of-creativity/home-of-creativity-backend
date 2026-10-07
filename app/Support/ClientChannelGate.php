@@ -25,12 +25,21 @@ class ClientChannelGate
     }
 
     /**
-     * WhatsApp Cloud API stays closed until WHATSAPP_ENABLED is set on the server,
-     * whatever the dashboard switch says.
+     * Cloud API stays closed until WHATSAPP_ENABLED is set.
+     * WhatsApp Web is open once WHATSAPP_TRANSPORT=web and the bridge URL is set.
      */
     public static function whatsappLocked(): bool
     {
+        if (self::usesWhatsAppWeb()) {
+            return ! filled(config('services.whatsapp.web_url'));
+        }
+
         return ! filter_var(config('services.whatsapp.enabled', false), FILTER_VALIDATE_BOOL);
+    }
+
+    public static function usesWhatsAppWeb(): bool
+    {
+        return config('services.whatsapp.transport') === 'web';
     }
 
     public static function whatsappEnabled(): bool
@@ -67,7 +76,7 @@ class ClientChannelGate
     }
 
     /**
-     * @return array{telegram_enabled: bool, whatsapp_enabled: bool, whatsapp_locked: bool}
+     * @return array{telegram_enabled: bool, whatsapp_enabled: bool, whatsapp_locked: bool, whatsapp_transport: string}
      */
     public static function payload(): array
     {
@@ -75,6 +84,7 @@ class ClientChannelGate
             'telegram_enabled' => self::telegramEnabled(),
             'whatsapp_enabled' => self::whatsappEnabled(),
             'whatsapp_locked' => self::whatsappLocked(),
+            'whatsapp_transport' => self::usesWhatsAppWeb() ? 'web' : 'cloud',
         ];
     }
 

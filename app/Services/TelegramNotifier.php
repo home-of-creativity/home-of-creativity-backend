@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Contracts\WhatsAppMessenger;
 use App\Models\Client;
 use App\Models\ServiceRequest;
 use App\Support\ClientChannelGate;
@@ -15,7 +16,7 @@ class TelegramNotifier
 {
     public ?int $lastMessageId = null;
 
-    public function __construct(private WhatsAppCloudClient $whatsApp) {}
+    public function __construct(private WhatsAppMessenger $whatsApp) {}
 
     public function configured(string $bot = 'client', mixed $chatId = null): bool
     {

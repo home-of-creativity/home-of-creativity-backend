@@ -12,7 +12,7 @@ use App\Models\RequestFile;
 use App\Models\ServiceRequest;
 use App\Services\RequestStatusTransitionService;
 use App\Services\TelegramNotifier;
-use App\Services\WhatsAppCloudClient;
+use App\Contracts\WhatsAppMessenger;
 use App\Support\BillingPeriod;
 use App\Support\ClientChannelGate;
 use App\Support\ClientProfileValue;
@@ -44,7 +44,7 @@ class HandleWhatsAppInbound
     public function __construct(
         private ResolveTelegramClient $resolveTelegramClient,
         private TelegramNotifier $telegram,
-        private WhatsAppCloudClient $whatsApp,
+        private WhatsAppMessenger $whatsApp,
         private PricingCatalog $pricingCatalog,
         private CreateCatalogRequest $createCatalogRequest,
         private SubmitServiceRequest $submitServiceRequest,
@@ -1130,7 +1130,22 @@ class HandleWhatsAppInbound
             'document' => $message['document'] ?? null,
             default => null,
         };
-        if (! is_array($node) || ! filled($node['id'] ?? null)) {
+        if (! is_array($node)) {
+            return null;
+        }
+
+        $inline = $node['file_base64'] ?? null;
+        if (is_string($inline) && $inline !== '') {
+            $mime = (string) ($node['mime_type'] ?? 'application/octet-stream');
+
+            return [
+                'file_name' => (string) ($node['filename'] ?? ($type.'.'.(str_contains($mime, 'pdf') ? 'pdf' : 'jpg'))),
+                'file_base64' => $inline,
+                'mime_type' => $mime,
+            ];
+        }
+
+        if (! filled($node['id'] ?? null)) {
             return null;
         }
 

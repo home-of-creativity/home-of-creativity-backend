@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { api, type ClientChannels } from "../api";
+import { api, type ClientChannels, type WhatsAppWebStatus } from "../api";
 import { ConfirmAction } from "../components/ConfirmAction";
 import { PageHeader } from "../components/PageHeader";
 import { copy, type Locale } from "../i18n";
@@ -9,6 +9,7 @@ const defaults: ClientChannels = { telegram_enabled: true, whatsapp_enabled: tru
 
 export function ClientChannelsPage({ t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
   const [channels, setChannels] = useState<ClientChannels>(defaults);
+  const [link, setLink] = useState<WhatsAppWebStatus | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<"telegram" | "whatsapp" | null>(null);
   const [hours, setHours] = useState("8");
@@ -22,6 +23,7 @@ export function ClientChannelsPage({ t }: { locale: Locale; t: (c: { ar: string;
           telegram_enabled: res.data.telegram_enabled !== false,
           whatsapp_enabled: res.data.whatsapp_enabled !== false,
           whatsapp_locked: res.data.whatsapp_locked === true,
+          whatsapp_transport: res.data.whatsapp_transport,
         });
       })
       .catch((err) => setError(err instanceof Error ? err.message : t(copy.saveFailed)));
@@ -33,6 +35,33 @@ export function ClientChannelsPage({ t }: { locale: Locale; t: (c: { ar: string;
       })
       .catch(() => undefined);
   }, [t]);
+
+  useEffect(() => {
+    if (channels.whatsapp_transport !== "web") {
+      return;
+    }
+    let stop = false;
+    const pull = () => {
+      api
+        .whatsappWebStatus()
+        .then((res) => {
+          if (!stop) {
+            setLink(res.data);
+          }
+        })
+        .catch(() => {
+          if (!stop) {
+            setLink(null);
+          }
+        });
+    };
+    pull();
+    const timer = window.setInterval(pull, 4000);
+    return () => {
+      stop = true;
+      window.clearInterval(timer);
+    };
+  }, [channels.whatsapp_transport]);
 
   async function saveCalendar() {
     setError("");
@@ -91,6 +120,22 @@ export function ClientChannelsPage({ t }: { locale: Locale; t: (c: { ar: string;
           onResume={() => void save({ ...channels, whatsapp_enabled: true }, "whatsapp")}
         />
       </div>
+      {channels.whatsapp_transport === "web" ? (
+        <section className="card stack">
+          {link?.connected ? (
+            <p>{t(copy.channelsWhatsappLinked)}</p>
+          ) : link && !link.reachable ? (
+            <p className="error">{t(copy.channelsWhatsappOffline)}</p>
+          ) : link?.qr ? (
+            <>
+              <p>{t(copy.channelsWhatsappScan)}</p>
+              <img className="wa-link-qr" alt="" src={link.qr} />
+            </>
+          ) : (
+            <p className="muted">{t(copy.channelsWhatsappScan)}</p>
+          )}
+        </section>
+      ) : null}
       <form
         className="form-grid"
         onSubmit={(event) => {

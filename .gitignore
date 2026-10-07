@@ -15,6 +15,8 @@
 /node_modules
 /bot/.venv
 /bot/__pycache__
+/bot/whatsapp-web/node_modules
+/storage/app/whatsapp-web
 /dashboard/dist
 /public/build
 /public/hot

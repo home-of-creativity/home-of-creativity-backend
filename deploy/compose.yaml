@@ -168,6 +168,25 @@ services:
       hoc-edge:
         condition: service_started
 
+  hoc-whatsapp-web:
+    image: node:22-bookworm
+    restart: unless-stopped
+    working_dir: /var/www/hoc/bot/whatsapp-web
+    volumes:
+      - ../:/var/www/hoc
+    env_file:
+      - ../.env
+    environment:
+      HOC_API_URL: http://hoc-edge/api
+      WHATSAPP_WEB_PORT: "8090"
+      WHATSAPP_WEB_AUTH_DIR: /var/www/hoc/storage/app/whatsapp-web
+    ports:
+      - "127.0.0.1:8090:8090"
+    command: sh -c "npm install --omit=dev && node index.js"
+    depends_on:
+      hoc-edge:
+        condition: service_started
+
 volumes:
   hoc_mysql:
   hoc_vendor:
