@@ -23,6 +23,7 @@ import { FileDropzone } from "../components/FileDropzone";
 import { LoadingLottie } from "../components/LoadingLottie";
 import { ReportGemini } from "../components/ReportGemini";
 import { addParagraphFontStyle, buildDocxFromParagraphs, buildReportDocx, legacyHtmlToParagraphs, type ReportTemplateId } from "../components/report/docxTemplate";
+import { addBodyBackground } from "../components/report/pictureLayout";
 import { clearReportDraft, readReportDraft, writeReportDraft } from "../components/report/draftStore";
 import { loadReportFonts, rememberReportFont, type StoredReportFont } from "../components/report/fontStore";
 import type { ReportDocHandle } from "../components/report/ReportDocEditor";
@@ -333,19 +334,39 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty, autoSaving]);
 
-  function start(id: ReportTemplateId) {
+  async function paintLetterhead(docx: Uint8Array) {
+    try {
+      const response = await fetch(`${import.meta.env.BASE_URL}report-templates/hoc-letterhead.png`);
+      if (!response.ok) return docx;
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if (bytes.byteLength < 8) return docx;
+      return addBodyBackground(docx, {
+        bytes,
+        mime: "image/png",
+        crop: { left: 0, top: 0, right: 0, bottom: 0 },
+        pageWidthPt: 595.3,
+        pageHeightPt: 841.9,
+      }, "all") ?? docx;
+    } catch {
+      return docx;
+    }
+  }
+
+  async function start(id: ReportTemplateId) {
     const company = client?.company_name || client?.name || "";
     const name = t(TEMPLATES.find((item) => item.id === id)?.name ?? copy.reportTemplateBlank);
     const docTitle = company ? `${name} — ${company}` : name;
     setTitle(docTitle);
     // Stored on the first edit, so an untouched template does not create a report.
-    setBytes(buildReportDocx(id, {
+    let bytes = buildReportDocx(id, {
       title: docTitle,
       header: company ? `${company} · دار الإبداع` : "دار الإبداع",
       footer: "Home of Creativity · hoc.agency",
       client: company,
       date: new Date().toLocaleDateString("ar-SA-u-nu-latn", { year: "numeric", month: "long", day: "numeric" }),
-    }));
+    });
+    if (id === "social") bytes = await paintLetterhead(bytes);
+    setBytes(bytes);
     setPhase("editing");
   }
 

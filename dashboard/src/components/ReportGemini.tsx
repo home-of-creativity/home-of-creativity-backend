@@ -159,7 +159,7 @@ export function ReportGemini({
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
   const [width, setWidth] = useState(55);
-  // "wrap": the picture fills the page behind the text. "place": it goes where the caret is.
+  // "wrap": the picture sits behind the text on every page except the cover. "place": it goes where the caret is.
   const [place, setPlace] = useState<"wrap" | "place">("place");
   const [imagePrompt, setImagePrompt] = useState("");
   const [boxWidth, setBoxWidth] = useState(60);
@@ -227,7 +227,7 @@ export function ReportGemini({
   }
 
   function placement(): ImagePlacement {
-    return place === "wrap" ? { mode: "background", page } : { mode: "place", widthPercent: width };
+    return place === "wrap" ? { mode: "background" } : { mode: "place", widthPercent: width };
   }
 
   async function insertPicture(file: File | undefined) {
@@ -393,16 +393,7 @@ export function ReportGemini({
           <button type="button" role="radio" aria-checked={place === "wrap"} className={place === "wrap" ? "is-active" : ""} onClick={() => setPlace("wrap")}>{t(copy.reportImageWrap)}</button>
           <button type="button" role="radio" aria-checked={place === "place"} className={place === "place" ? "is-active" : ""} onClick={() => setPlace("place")}>{t(copy.reportImageInPage)}</button>
         </div>
-        {place === "wrap" ? (
-          <label className="field-label">
-            {t(copy.reportGeminiPage)}
-            <select className="field" value={page} onChange={(event) => setPage(Number(event.target.value))}>
-              {Array.from({ length: pages }, (_, index) => (
-                <option key={index + 1} value={index + 1}>{index + 1}</option>
-              ))}
-            </select>
-          </label>
-        ) : (
+        {place === "wrap" ? null : (
           <label className="field-label">
             {t(copy.reportImageWidth)} ({width}%)
             <input className="field" type="range" min={20} max={100} step={5} value={width} onChange={(event) => setWidth(Number(event.target.value))} />

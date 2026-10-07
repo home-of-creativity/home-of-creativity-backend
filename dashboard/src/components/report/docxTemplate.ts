@@ -35,7 +35,7 @@ function bullets(items: string[]): Block {
   return items.map((item) => `<w:p><w:pPr><w:pStyle w:val="ListParagraph"/><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr><w:bidi/></w:pPr>${run(item)}</w:p>`).join("");
 }
 
-function table(rows: string[][]): Block {
+function table(rows: string[][], headerFill = "2E0E5C"): Block {
   const columns = rows[0]?.length ?? 1;
   const width = Math.floor(9638 / columns);
   const grid = Array.from({ length: columns }, () => `<w:gridCol w:w="${width}"/>`).join("");
@@ -44,7 +44,7 @@ function table(rows: string[][]): Block {
       const header = index === 0;
       const tr = cells
         .map((cell) => {
-          const shade = header ? '<w:shd w:val="clear" w:color="auto" w:fill="2E0E5C"/>' : "";
+          const shade = header ? `<w:shd w:val="clear" w:color="auto" w:fill="${headerFill}"/>` : "";
           const props = header ? '<w:b/><w:bCs/><w:color w:val="FFFFFF"/>' : "";
           return `<w:tc><w:tcPr><w:tcW w:w="${width}" w:type="dxa"/>${shade}</w:tcPr><w:p><w:pPr><w:bidi/><w:spacing w:after="0"/></w:pPr>${run(cell, props)}</w:p></w:tc>`;
         })
@@ -72,33 +72,115 @@ function coverBlocks(input: ReportTemplateInput): Block[] {
   ];
 }
 
+const MISSING = "غير متوفر";
+const PURPLE = "2B1A5E";
+const ORANGE = "F7A833";
+const BLUE = "1A3CFF";
+
+function paint(text: string, color: string, halfPoints: number, bold = false) {
+  const weight = bold ? "<w:b/><w:bCs/>" : "";
+  return run(text, `${weight}<w:color w:val="${color}"/><w:sz w:val="${halfPoints}"/><w:szCs w:val="${halfPoints}"/>`);
+}
+
+function socialLine(text: string, color: string, halfPoints: number, bold = false, extra = ""): Block {
+  return `<w:p><w:pPr><w:bidi/>${extra}</w:pPr>${paint(text, color, halfPoints, bold)}</w:p>`;
+}
+
+function labeled(label: string, value: string): Block {
+  return `<w:p><w:pPr><w:bidi/><w:spacing w:after="80"/></w:pPr>${paint(`${label}: `, PURPLE, 24, true)}${run(value)}</w:p>`;
+}
+
+function pageBreak(): Block {
+  return '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
+}
+
+/** Seven A4 pages. Missing facts stay «غير متوفر»; nothing is invented. */
+function socialPages(input: ReportTemplateInput): Block[] {
+  const client = input.client?.trim() || MISSING;
+  const blankRow = (cells: number) => Array.from({ length: cells }, () => MISSING);
+  return [
+    socialLine(input.title?.trim() || "تقرير التواصل الاجتماعي", PURPLE, 64, true, '<w:spacing w:after="200"/>'),
+    labeled("اسم العميل", client),
+    labeled("الهدف", MISSING),
+    socialLine("الاتجاه الإبداعي", PURPLE, 28, true, '<w:spacing w:before="200" w:after="40"/>'),
+    socialLine(`«${MISSING}»`, ORANGE, 32, true, '<w:jc w:val="center"/><w:spacing w:before="80" w:after="160"/>'),
+    labeled("الفكرة الأساسية", MISSING),
+    labeled("الهوية البصرية", MISSING),
+    labeled("دور الذكاء الاصطناعي", MISSING),
+    pageBreak(),
+    socialLine("01 — الاتجاه الاستراتيجي", PURPLE, 56, true, '<w:spacing w:after="160"/>'),
+    socialLine("الفرصة الحالية", ORANGE, 28, true, '<w:spacing w:before="80" w:after="40"/>'),
+    para(MISSING),
+    socialLine("الجمهور", PURPLE, 28, true, '<w:spacing w:before="200" w:after="80"/>'),
+    table([["الفئة", "الاحتياج", "زاوية المحتوى"], blankRow(3)], PURPLE),
+    socialLine("ركائز المحتوى", BLUE, 28, true, '<w:spacing w:before="80" w:after="80"/>'),
+    table([["الركيزة", "الهدف"], blankRow(2)], PURPLE),
+    socialLine("تحليل المحتوى للفترة", PURPLE, 28, true, '<w:spacing w:before="80" w:after="40"/>'),
+    labeled("الملاحظات", MISSING),
+    labeled("مراجعة الشهر الأخير", MISSING),
+    labeled("الفرصة الاستراتيجية", MISSING),
+    pageBreak(),
+    socialLine("02 — خطة المحتوى الأسبوعية", PURPLE, 56, true, '<w:spacing w:after="160"/>'),
+    labeled("المنتج / الخدمة المحورية", MISSING),
+    labeled("المنصات", MISSING),
+    labeled("الفترة", MISSING),
+    socialLine("المنشورات", PURPLE, 28, true, '<w:spacing w:before="160" w:after="80"/>'),
+    table([["التكرار", "المحتوى", "الدور"], blankRow(3)], PURPLE),
+    labeled("ثيم الأسبوع", MISSING),
+    socialLine("الستوريز اليومية", ORANGE, 28, true, '<w:spacing w:before="160" w:after="80"/>'),
+    table([["الصيغة", "الاستخدام"], blankRow(2)], PURPLE),
+    socialLine("معادلة الكابشن", BLUE, 28, true, '<w:spacing w:before="80" w:after="40"/>'),
+    socialLine("Hook → Value → Product → CTA", BLUE, 26, true, '<w:jc w:val="center"/><w:spacing w:before="40" w:after="80"/>'),
+    labeled("Hook", MISSING),
+    labeled("Value", MISSING),
+    labeled("Product", MISSING),
+    labeled("CTA", MISSING),
+    pageBreak(),
+    socialLine("03 — بريف الريل", PURPLE, 56, true, '<w:spacing w:after="160"/>'),
+    labeled("الفكرة", MISSING),
+    labeled("الـ Hook", MISSING),
+    socialLine("المشاهد", PURPLE, 28, true, '<w:spacing w:before="160" w:after="80"/>'),
+    table([["المشهد", "التوجيه"], blankRow(2)], PURPLE),
+    labeled("المبدأ التسويقي", MISSING),
+    pageBreak(),
+    socialLine("04 — بريف الكاروسيل", PURPLE, 56, true, '<w:spacing w:after="160"/>'),
+    labeled("الفكرة", MISSING),
+    socialLine("الشرائح", ORANGE, 28, true, '<w:spacing w:before="160" w:after="80"/>'),
+    table([["رقم الشريحة", "الرسالة"], blankRow(2)], PURPLE),
+    labeled("الهدف", MISSING),
+    pageBreak(),
+    socialLine("05 — المحتوى الإبداعي بالذكاء الاصطناعي", PURPLE, 56, true, '<w:spacing w:after="160"/>'),
+    table([["الاستخدام", "القيمة"], blankRow(2)], PURPLE),
+    labeled("القاعدة", MISSING),
+    pageBreak(),
+    socialLine("06 — الأداء والتحسين", PURPLE, 56, true, '<w:spacing w:after="160"/>'),
+    socialLine("الأرقام", PURPLE, 28, true, '<w:spacing w:before="40" w:after="80"/>'),
+    table([
+      ["المؤشر", "القيمة"],
+      ["Reach", MISSING],
+      ["Engagement", MISSING],
+      ["Followers", MISSING],
+      ["Saves", MISSING],
+      ["Shares", MISSING],
+      ["DMs", MISSING],
+    ], PURPLE),
+    socialLine("سير العمل الأسبوعي", ORANGE, 28, true, '<w:spacing w:before="80" w:after="80"/>'),
+    table([
+      ["الخطوة", "التوجيه"],
+      ["Plan", MISSING],
+      ["Publish", MISSING],
+      ["Measure", MISSING],
+      ["Optimize", MISSING],
+      ["Convert", MISSING],
+    ], PURPLE),
+    socialLine("قمع النجاح", BLUE, 28, true, '<w:spacing w:before="80" w:after="40"/>'),
+    socialLine("Attention → Interest → Consideration → Inquiry → Conversion", BLUE, 24, true, '<w:jc w:val="center"/><w:spacing w:before="40" w:after="120"/>'),
+    labeled("التوجيه النهائي", MISSING),
+  ];
+}
+
 function templateBody(id: ReportTemplateId): Block[] {
-  if (id === "social") {
-    return [
-      para("الملخص التنفيذي", "Heading1"),
-      para("اكتب هنا أهم ما حدث خلال الفترة وأبرز النتائج."),
-      para("مؤشرات الأداء", "Heading1"),
-      table([
-        ["المؤشر", "هذه الفترة", "الفترة السابقة", "التغيّر"],
-        ["الوصول", "", "", ""],
-        ["التفاعل", "", "", ""],
-        ["المتابعون الجدد", "", "", ""],
-        ["النقرات", "", "", ""],
-      ]),
-      para("أداء المنصات", "Heading1"),
-      table([
-        ["المنصة", "المنشورات", "الوصول", "التفاعل"],
-        ["إنستغرام", "", "", ""],
-        ["فيسبوك", "", "", ""],
-        ["تيك توك", "", "", ""],
-        ["لينكدإن", "", "", ""],
-      ]),
-      para("أفضل المنشورات", "Heading1"),
-      bullets(["المنشور الأول ولماذا نجح", "المنشور الثاني ولماذا نجح"]),
-      para("التوصيات للفترة القادمة", "Heading1"),
-      bullets(["توصية أولى", "توصية ثانية"]),
-    ];
-  }
+  if (id === "social") return [];
   if (id === "campaign") {
     return [
       para("هدف الحملة", "Heading1"),
@@ -200,6 +282,7 @@ const NUMBERING = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
  * with "page X of Y" fields. Built in the browser, no server.
  */
 export function buildReportDocx(id: ReportTemplateId, input: ReportTemplateInput): Uint8Array {
+  if (id === "social") return pack(input, socialPages(input), "social");
   return pack(input, templateBody(id));
 }
 
@@ -216,17 +299,26 @@ export function legacyHtmlToParagraphs(html: string): string[] {
   return lines.map((line) => line.replace(/\s+/g, " ").trim()).filter(Boolean);
 }
 
-function pack(input: ReportTemplateInput, blocks: Block[]): Uint8Array {
-  const body = [...coverBlocks(input), ...blocks].filter(Boolean).join("");
+function pack(input: ReportTemplateInput, blocks: Block[], kind: "default" | "social" = "default"): Uint8Array {
+  const social = kind === "social";
+  const body = (social ? blocks : [...coverBlocks(input), ...blocks]).filter(Boolean).join("");
+  // Social pages leave the letterhead's logo band and contact band empty.
+  const margins = social
+    ? '<w:pgMar w:top="2268" w:right="1134" w:bottom="1985" w:left="1134" w:header="284" w:footer="1134" w:gutter="0"/>'
+    : '<w:pgMar w:top="1440" w:right="1134" w:bottom="1304" w:left="1134" w:header="567" w:footer="567" w:gutter="0"/>';
   const document = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document ${W}><w:body>${body}<w:sectPr><w:headerReference w:type="first" r:id="rIdHeaderFirst"/><w:footerReference w:type="first" r:id="rIdFooterFirst"/><w:headerReference w:type="default" r:id="rIdHeader"/><w:footerReference w:type="default" r:id="rIdFooter"/><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1134" w:bottom="1304" w:left="1134" w:header="567" w:footer="567" w:gutter="0"/><w:titlePg/><w:bidi/></w:sectPr></w:body></w:document>`;
+<w:document ${W}><w:body>${body}<w:sectPr><w:headerReference w:type="first" r:id="rIdHeaderFirst"/><w:footerReference w:type="first" r:id="rIdFooterFirst"/><w:headerReference w:type="default" r:id="rIdHeader"/><w:footerReference w:type="default" r:id="rIdFooter"/><w:pgSz w:w="11906" w:h="16838"/>${margins}<w:titlePg/><w:bidi/></w:sectPr></w:body></w:document>`;
+  const client = input.client?.trim() || "غير متوفر";
+  const footerRuns = social
+    ? `${run(`${client} | غير متوفر | `)}${field("PAGE", "1")}`
+    : `${run(input.footer)}<w:r><w:tab/></w:r>${run("صفحة ")}${field("PAGE", "1")}${run(" من ")}${field("NUMPAGES", "1")}`;
   const header = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:hdr ${W}><w:p><w:pPr><w:pStyle w:val="Header"/><w:bidi/></w:pPr>${run(input.header)}</w:p></w:hdr>`;
+<w:hdr ${W}><w:p><w:pPr><w:pStyle w:val="Header"/><w:bidi/></w:pPr>${social ? "" : run(input.header)}</w:p></w:hdr>`;
   const footer = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:ftr ${W}><w:p><w:pPr><w:pStyle w:val="Footer"/><w:bidi/><w:tabs><w:tab w:val="right" w:pos="9638"/></w:tabs></w:pPr>${run(input.footer)}<w:r><w:tab/></w:r>${run("صفحة ")}${field("PAGE", "1")}${run(" من ")}${field("NUMPAGES", "1")}</w:p></w:ftr>`;
+<w:ftr ${W}><w:p><w:pPr><w:pStyle w:val="Footer"/><w:bidi/><w:tabs><w:tab w:val="right" w:pos="9638"/></w:tabs></w:pPr>${footerRuns}</w:p></w:ftr>`;
   const blankHeader = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:hdr ${W}><w:p><w:pPr><w:bidi/></w:pPr></w:p></w:hdr>`;
-  const blankFooter = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+  const blankFooter = social ? footer : `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:ftr ${W}><w:p><w:pPr><w:bidi/></w:pPr></w:p></w:ftr>`;
 
   return zipSync({

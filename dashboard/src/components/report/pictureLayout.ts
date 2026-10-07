@@ -29,6 +29,138 @@ function srcRect(crop: CropPercent) {
   return `<a:srcRect l="${value(crop.left)}" t="${value(crop.top)}" r="${value(crop.right)}" b="${value(crop.bottom)}"/>`;
 }
 
+const IMAGE_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
+const BODY_BACKGROUND = "HOC body background";
+
+export type BodyBackground = {
+  bytes: Uint8Array;
+  mime: "image/png" | "image/jpeg" | "image/gif";
+  crop: CropPercent;
+  pageWidthPt: number;
+  pageHeightPt: number;
+};
+
+/**
+ * Put the picture behind the text on every page that uses the ordinary header.
+ * The cover keeps the first-page header, so it is left alone. No page number is chosen.
+ */
+export function addBodyBackground(docx: Uint8Array, input: BodyBackground, scope: "body" | "all" = "body"): Uint8Array | null {
+  const files = unzipSync(docx);
+  const document = files["word/document.xml"];
+  const relsFile = files["word/_rels/document.xml.rels"];
+  if (!document || !relsFile) return null;
+
+  const targets = relationshipMap(strFromU8(relsFile));
+  const first = new Set<string>();
+  const defaults: string[] = [];
+  for (const ref of headerReferences(strFromU8(document))) {
+    const rel = targets.get(ref.id);
+    if (!rel || !rel.type.endsWith("/header")) continue;
+    const path = wordPath(rel.target);
+    if (ref.type === "first") first.add(path);
+    else if (ref.type === "default") defaults.push(path);
+  }
+  const headers = (scope === "all" ? [...new Set([...defaults, ...first])] : [...new Set(defaults)].filter((path) => !first.has(path)))
+    .filter((path) => files[path]);
+  if (headers.length === 0) return null;
+
+  const extension = input.mime === "image/jpeg" ? "jpeg" : input.mime === "image/gif" ? "gif" : "png";
+  let index = 1;
+  while (files[`word/media/hoc-body-bg-${index}.${extension}`]) index += 1;
+  const mediaPath = `word/media/hoc-body-bg-${index}.${extension}`;
+  files[mediaPath] = new Uint8Array(input.bytes);
+  ensureImageContentType(files, extension, input.mime);
+
+  const cx = Math.round(input.pageWidthPt * EMU_PER_POINT);
+  const cy = Math.round(input.pageHeightPt * EMU_PER_POINT);
+  for (const path of headers) {
+    const relsPath = `word/_rels/${path.slice("word/".length)}.rels`;
+    files[relsPath] = strToU8(upsertImageRel(
+      files[relsPath] ? strFromU8(files[relsPath]) : null,
+      "rIdHocBodyBg",
+      `media/${mediaPath.slice("word/media/".length)}`,
+    ));
+    files[path] = strToU8(putBackground(strFromU8(files[path]), backgroundDrawing(cx, cy, input.crop, "rIdHocBodyBg")));
+  }
+
+  return zipSync(files);
+}
+
+function relationshipMap(xml: string) {
+  const map = new Map<string, { type: string; target: string }>();
+  for (const tag of xml.match(/<Relationship\b[^>]*\/>/g) ?? []) {
+    const id = tag.match(/\bId="([^"]+)"/)?.[1];
+    const type = tag.match(/\bType="([^"]+)"/)?.[1];
+    const target = tag.match(/\bTarget="([^"]+)"/)?.[1];
+    if (id && type && target) map.set(id, { type, target });
+  }
+  return map;
+}
+
+function headerReferences(xml: string) {
+  return (xml.match(/<w:headerReference\b[^>]*\/>/g) ?? []).flatMap((tag) => {
+    const id = tag.match(/\br:id="([^"]+)"/)?.[1];
+    if (!id) return [];
+    return [{ type: tag.match(/\bw:type="([^"]+)"/)?.[1] ?? "default", id }];
+  });
+}
+
+function wordPath(target: string) {
+  const clean = target.replace(/\\/g, "/");
+  if (clean.startsWith("/")) return clean.slice(1);
+  if (clean.startsWith("word/")) return clean;
+  return `word/${clean.replace(/^\.\//, "")}`;
+}
+
+function upsertImageRel(xml: string | null, id: string, target: string) {
+  const tag = `<Relationship Id="${id}" Type="${IMAGE_REL}" Target="${target}"/>`;
+  if (!xml) {
+    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${tag}</Relationships>`;
+  }
+  if (xml.includes(`Id="${id}"`)) {
+    return xml.replace(new RegExp(`<Relationship\\b[^>]*\\bId="${id}"[^>]*/>`), tag);
+  }
+  return xml.replace("</Relationships>", `${tag}</Relationships>`);
+}
+
+function ensureImageContentType(files: Record<string, Uint8Array>, extension: string, mime: string) {
+  const types = files["[Content_Types].xml"];
+  if (!types) return;
+  const xml = strFromU8(types);
+  if (new RegExp(`<Default Extension="${extension}"`, "i").test(xml)) return;
+  files["[Content_Types].xml"] = strToU8(xml.replace("<Default ", `<Default Extension="${extension}" ContentType="${mime}"/><Default `));
+}
+
+function backgroundDrawing(cx: number, cy: number, crop: CropPercent, relationshipId: string) {
+  const value = (percent: number) => Math.round(Math.max(0, percent) * 1000);
+  return '<w:drawing xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"'
+    + ' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
+    + ' xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"'
+    + ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+    + '<wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="251658240"'
+    + ' behindDoc="1" locked="0" layoutInCell="0" allowOverlap="1"><wp:simplePos x="0" y="0"/>'
+    + '<wp:positionH relativeFrom="page"><wp:posOffset>0</wp:posOffset></wp:positionH>'
+    + '<wp:positionV relativeFrom="page"><wp:posOffset>0</wp:posOffset></wp:positionV>'
+    + `<wp:extent cx="${cx}" cy="${cy}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:wrapNone/>`
+    + `<wp:docPr id="88001" name="${BODY_BACKGROUND}"/><wp:cNvGraphicFramePr/>`
+    + `<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic>`
+    + '<pic:nvPicPr><pic:cNvPr id="0" name="body-background"/><pic:cNvPicPr/></pic:nvPicPr>'
+    + `<pic:blipFill><a:blip r:embed="${relationshipId}"/>`
+    + `<a:srcRect l="${value(crop.left)}" t="${value(crop.top)}" r="${value(crop.right)}" b="${value(crop.bottom)}"/>`
+    + '<a:stretch><a:fillRect/></a:stretch></pic:blipFill>'
+    + `<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>`
+    + '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:anchor></w:drawing>';
+}
+
+function putBackground(header: string, drawing: string) {
+  const without = header.replace(/<w:p\b[^>]*>[\s\S]*?name="HOC body background"[\s\S]*?<\/w:p>/g, "");
+  const open = without.match(/<w:hdr\b[^>]*>/);
+  if (!open || open.index === undefined) return header;
+  const at = open.index + open[0].length;
+  const paragraph = `<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="20" w:lineRule="exact"/></w:pPr><w:r>${drawing}</w:r></w:p>`;
+  return without.slice(0, at) + paragraph + without.slice(at);
+}
+
 /** The inline drawing as a page-sized picture behind the text. */
 function toBackground(drawing: string, layout: Extract<PictureLayout, { kind: "background" }>): string | null {
   const inline = drawing.match(/<wp:inline\b[^>]*>([\s\S]*?)<\/wp:inline>/);

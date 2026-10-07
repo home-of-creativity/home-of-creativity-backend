@@ -6,7 +6,7 @@ import "@docx-editor.dev/core/styles/editor.css";
 import type { Locale } from "../../i18n";
 import { editorArabic } from "./editorArabic";
 import { addCover, addShape, addTextBox, removeLastShape, type ShapeKind } from "./pageObjects";
-import { bodyDrawings, layoutNewDrawing } from "./pictureLayout";
+import { addBodyBackground, bodyDrawings, layoutNewDrawing } from "./pictureLayout";
 import { reportFontConfiguration, type ExtraFont } from "./fonts";
 import { pagesToPdf } from "./pdf";
 
@@ -44,13 +44,13 @@ export type ReportDocHandle = {
 };
 
 /**
- * `background`: the picture covers the whole page behind the text; the edges that do not fit
- * are cropped, never stretched. `place`: the picture goes on its own centred line after the
- * paragraph the caret is in (before it when the caret is at its start), at `widthPercent` of the
- * page's text width, with the text above and below it.
+ * `background`: the picture sits behind the text on every page except the cover. The cover
+ * keeps its own header, so no page is chosen. `place`: the picture goes on its own centred
+ * line after the paragraph the caret is in (before it when the caret is at its start), at
+ * `widthPercent` of the page's text width, with the text above and below it.
  */
 export type ImagePlacement =
-  | { mode: "background"; page: number }
+  | { mode: "background" }
   | { mode: "place"; widthPercent: number };
 
 export type ShapeRequest = {
@@ -342,11 +342,22 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
         : Math.max(1, normalized.heightPoints * (width / Math.max(1, normalized.widthPoints)));
       const saved = await host.save();
       if (!saved) return "refused";
+      if (background) {
+        if (normalized.mime !== "image/png" && normalized.mime !== "image/jpeg" && normalized.mime !== "image/gif") return "unsupported";
+        const next = addBodyBackground(new Uint8Array(saved), {
+          bytes: normalized.bytes,
+          mime: normalized.mime,
+          crop: coverCrop(normalized.widthPoints, normalized.heightPoints, pageWidth, pageHeight),
+          pageWidthPt: pageWidth,
+          pageHeightPt: pageHeight,
+        });
+        if (!next) return "refused";
+        await reload(next, current.getCurrentPage("viewport"));
+        return "ok";
+      }
       const before = bodyDrawings(new Uint8Array(saved));
-      // A background is anchored to the chosen page; a placed picture goes where the user clicked.
-      if (background) await placeCaret(placement.page);
       // A click on a picture selects it rather than placing the caret; use the page on screen then.
-      else if (current.getSelectedImage()) await placeCaret(current.getCurrentPage("viewport"));
+      if (current.getSelectedImage()) await placeCaret(current.getCurrentPage("viewport"));
       else current.focus();
       const command = {
         type: "insertImage" as const,
@@ -358,7 +369,7 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
       let result = await current.executeImageCommand(command);
       if (!result.ok) {
         // No usable caret (nothing clicked yet): fall back to the page on screen.
-        await placeCaret(background ? placement.page : current.getCurrentPage("viewport"));
+        await placeCaret(current.getCurrentPage("viewport"));
         result = await current.executeImageCommand(command);
       }
       if (!result.ok) return "refused";
@@ -366,9 +377,7 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
       const page = current.getCurrentPage("caret");
       const inserted = await host.save();
       const laidOut = inserted
-        ? layoutNewDrawing(before, new Uint8Array(inserted), background
-          ? { kind: "background", widthPt: pageWidth, heightPt: pageHeight, crop: coverCrop(normalized.widthPoints, normalized.heightPoints, pageWidth, pageHeight) }
-          : { kind: "place" })
+        ? layoutNewDrawing(before, new Uint8Array(inserted), { kind: "place" })
         : null;
       // If the XML could not be rewritten the picture stays inline where it was inserted.
       if (!laidOut) return "ok";
