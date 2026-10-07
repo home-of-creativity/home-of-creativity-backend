@@ -28,7 +28,7 @@ Seeded: `admin@example.com` / `password` (admin), `test@example.com` / `password
 | --- | --- |
 | GET | `/pricing` `/contact` `/reels` |
 | POST | `/contact/messages` (throttle 8/min; support interest → `support@`, else `sales@`, always CC `info@`; `contact` SMTP mailer) |
-| POST | `/site/ask` (throttle 8/min; `{question, locale, history[]}` → Gemini answers from `llms-full.txt` plus the live catalog. A price question compares packages in the same group using each package's published totals and listed features; 503 `unavailable` when Gemini has no key) |
+| POST | `/site/ask` (throttle 8/min; `{question, locale, history[]}` → Gemini answers from the company practice plus `llms-full.txt` and the live catalog. A business question recommends one published package; a price question compares packages in the same group using published totals and listed features. Other clients, invoices, staff, and internal costs stay closed. 503 `unavailable` when Gemini has no key) |
 | GET | `/articles` `/articles/{slug}` (published only; HTML `body_en`/`body_ar`) |
 | GET | `/legal` `/legal/{slug}` — privacy and terms. A missing or placeholder-only row is filled from `LegalDefaults` (migration `2026_09_28_140000` inserts those rows when the slug is absent). `/profile-pdf` `/profile-pdf/file` |
 | GET | `/portfolio/clients` `/portfolio/projects` `/portfolio/projects/{id}` (projects carry `body_en`/`body_ar`, rich text cleaned with `LegalHtml::clean` on save; the detail adds `related`, the published projects linked from it in dashboard order. Admin create/update take `body_*`, `related_ids[]`, and `related_sync=1` to clear the list) |

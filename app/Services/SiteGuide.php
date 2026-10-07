@@ -16,20 +16,40 @@ class SiteGuide
 {
     public function brief(): string
     {
-        $cached = Cache::get('site-guide-v2');
+        $cached = Cache::get('site-guide-v3');
         if (is_string($cached) && $cached !== '') {
             return $cached;
         }
 
         $published = $this->publishedBrief();
-        $brief = trim($this->packageComparison()."\n\n".$published."\n\n".$this->liveCatalog());
+        $brief = trim($this->practice()."\n\n".$this->packageComparison()."\n\n".$published."\n\n".$this->liveCatalog());
         if ($brief === '') {
             $brief = 'Published site brief could not be loaded. Tell the visitor to open https://hoc.agency/ and do not invent facts.';
         }
 
-        Cache::put('site-guide-v2', $brief, now()->addMinutes($published === '' ? 2 : 30));
+        Cache::put('site-guide-v3', $brief, now()->addMinutes($published === '' ? 2 : 30));
 
         return $brief;
+    }
+
+    private function practice(): string
+    {
+        return <<<'TEXT'
+Company practice. This is how Home of Creativity chooses work. Prices, package names, and features still come only from the package comparison below. If a package kind named here is missing from that comparison, do not invent it.
+
+The agency builds a recognizable brand: visual identity, social content, account management, marketing, and managed paid ads. A subscription is ongoing work. A reach package is one payment for one push, and it is for someone who is not on a subscription. Work starts in the chat or on https://hoc.agency/. The agency sends a quotation, and payment is confirmed before work. There is no self-checkout.
+
+"Best results" means the published work that matches the size of the business: a steady content rhythm, managed platforms, and a performance report. Do not promise sales, rankings, follower counts, or any result that is not written in the package comparison.
+
+Choose exactly one published package:
+- One shop, stall, or one-branch local business (a citrus shop, a bakery, a single clinic) that wants a subscription and better results: the package whose subtitle is منشآت صغيرة / small business. Explain why its listed features fit one shop, give its published monthly total, then one line on what the mid-size package adds if they grow.
+- Several branches, a competitor problem, or a need for Google Maps and an advisory team: the package whose subtitle is منشآت متوسطة / mid-size business.
+- A large company: the package whose subtitle is منشآت كبيرة / enterprise.
+- Posts and reels only, without the strategic layer: a production content pack, not a strategic subscription.
+- One seasonal advertisement, not a subscription: a one-time reach package, and say it is not a subscription.
+
+Private information stays closed. Never mention or guess other clients, their results, invoices, quotations, phone numbers, staff names, salaries, internal costs, margins, unpublished discounts, Odoo, ClickUp, or another person's conversation. If the visitor asks for any of that, say it is not shared, then continue from the published packages.
+TEXT;
     }
 
     private function publishedBrief(): string

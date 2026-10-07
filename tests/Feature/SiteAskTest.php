@@ -86,6 +86,49 @@ class SiteAskTest extends TestCase
         $this->assertStringContainsString('حلول استراتيجية', $brief);
         $this->assertStringContainsString('monthly $399', $brief);
         $this->assertStringContainsString('7 بوست غرافيك', $brief);
+        $this->assertStringContainsString('منشآت صغيرة', $brief);
+        $this->assertStringContainsString('Private information stays closed', $brief);
+    }
+
+    public function test_a_shop_recommendation_is_judged_from_practice_and_not_from_private_records(): void
+    {
+        config([
+            'services.gemini.e2e_stub' => false,
+            'services.gemini.api_key' => 'test-key',
+            'services.gemini.vertex_project' => '',
+            'services.site.guide_url' => 'https://hoc.agency/llms-full.txt',
+        ]);
+        Cache::flush();
+        Http::fake([
+            'https://hoc.agency/llms-full.txt' => Http::response('brief', 200),
+            'generativelanguage.googleapis.com/*' => Http::response([
+                'candidates' => [[
+                    'content' => [
+                        'parts' => [[
+                            'text' => '{"answer":"الباقة المناسبة لمحل واحد هي المنشآت الصغيرة."}',
+                        ]],
+                    ],
+                ]],
+            ], 200),
+        ]);
+
+        $this->postJson('/api/site/ask', [
+            'question' => 'لدي محل موالح اريد افضل باقة عندكم من اجل الاشتراك فيها',
+            'locale' => 'ar',
+        ])->assertOk();
+
+        Http::assertSent(function (\Illuminate\Http\Client\Request $request): bool {
+            if (! str_contains($request->url(), 'generativelanguage.googleapis.com')) {
+                return false;
+            }
+            $prompt = (string) data_get($request->data(), 'contents.0.parts.0.text');
+
+            return str_contains($prompt, 'لدي محل موالح')
+                && str_contains($prompt, 'recommend exactly one published package')
+                && str_contains($prompt, 'Private information is closed')
+                && str_contains($prompt, 'Odoo')
+                && ! str_contains($prompt, 'crm.lead');
+        });
     }
 
     public function test_the_answer_is_unavailable_without_a_gemini_key(): void

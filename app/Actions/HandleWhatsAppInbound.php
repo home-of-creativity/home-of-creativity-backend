@@ -45,6 +45,9 @@ class HandleWhatsAppInbound
     /** @var list<string> */
     private const NAV_ASK = ['استفسار', 'menu:ask'];
 
+    /** @var list<string> */
+    private const NAV_PROFILE = ['بياناتي', 'menu:profile'];
+
     public function __construct(
         private ResolveTelegramClient $resolveTelegramClient,
         private TelegramNotifier $telegram,
@@ -156,6 +159,11 @@ class HandleWhatsAppInbound
             }
 
             if ($this->isNav($text, self::NAV_NEW)) {
+                if (($session['step'] ?? '') === 'quote') {
+                    $this->showQuoteDecision($chatId, $phone, $session);
+
+                    return;
+                }
                 $this->resetCompose($session);
                 $this->putSession($phone, $session);
                 if (! $this->gateProfile($client, $chatId, $session)) {
@@ -169,6 +177,11 @@ class HandleWhatsAppInbound
                 $this->resetCompose($session);
                 $this->putSession($phone, $session);
                 $this->listRequests($client, $chatId);
+
+                return;
+            }
+            if ($this->isNav($text, self::NAV_PROFILE)) {
+                $this->showProfile($client, $chatId, $phone, $session);
 
                 return;
             }
@@ -189,6 +202,11 @@ class HandleWhatsAppInbound
             $step = (string) ($session['step'] ?? 'idle');
             if (in_array($step, ['name', 'phone', 'company_name'], true)) {
                 $this->captureProfile($client, $chatId, $phone, $session, $text);
+
+                return;
+            }
+            if ($step === 'profile_edit') {
+                $this->saveProfileEdit($client, $chatId, $phone, $session, $text);
 
                 return;
             }
@@ -232,34 +250,27 @@ class HandleWhatsAppInbound
 
                 return;
             }
-
-            $operation = $this->operationIntent((string) $text);
-            if ($operation === null && mb_strlen(trim((string) $text)) >= 8 && ! $this->looksLikeQuestion((string) $text)) {
-                $operation = app(GeminiService::class)->classifyClientIntent((string) $text);
-            }
-            if ($operation === 'requests') {
-                $this->listRequests($client, $chatId);
-
-                return;
-            }
-            if ($operation === 'edit') {
-                $this->startEdit($client, $chatId, $phone, $session);
-
-                return;
-            }
-            if ($operation === 'new') {
-                if ($this->gateProfile($client, $chatId, $session)) {
-                    $this->showCatalog($client, $chatId, $phone, $session);
+            if (in_array($step, ['quote', 'suggest', 'receipt', 'ask'], true) || $step === 'idle' || $step === '') {
+                if ($this->routeSentence($client, $chatId, $phone, $session, (string) $text)) {
+                    return;
                 }
+            }
+            if ($step === 'quote') {
+                $this->continueQuote($client, $chatId, $phone, $session, (string) $text);
 
                 return;
             }
-            if ($operation === 'help') {
-                $this->sendMenu($chatId, 'رقم الدعم: '.self::SUPPORT_PHONE);
+            if ($step === 'suggest') {
+                $this->continueSuggest($client, $chatId, $phone, $session, (string) $text);
 
                 return;
             }
-            if ($operation === 'ask') {
+            if ($step === 'receipt') {
+                $this->safeSend($chatId, 'بانتظار وصل الدفع. أرسل صورة التحويل أو ملف PDF.');
+
+                return;
+            }
+            if ($step === 'ask') {
                 $this->answerAsk($chatId, $phone, $session, (string) $text);
 
                 return;
@@ -409,11 +420,52 @@ class HandleWhatsAppInbound
     private function handleCallback(Client $client, string $chatId, string $phone, array $session, string $data): void
     {
         if ($data === 'menu:home') {
-            $this->sendMenu($chatId, 'اختر برقم الخيار: طلب جديد، طلباتي، استفسار، أو الدعم.');
+            if (filled($session['quote_ref'] ?? null)) {
+                $this->showQuoteDecision($chatId, $phone, $session);
+
+                return;
+            }
+            $session['step'] = 'idle';
+            unset($session['profile_field']);
+            $this->putSession($phone, $session);
+            $this->sendMenu($chatId, 'اختر برقم الخيار: طلب جديد، طلباتي، بياناتي، استفسار، أو الدعم.');
+
+            return;
+        }
+        if ($this->isNav($data, self::NAV_PROFILE) || $data === 'menu:profile') {
+            $this->showProfile($client, $chatId, $phone, $session);
+
+            return;
+        }
+        if (str_starts_with($data, 'prof:')) {
+            $field = substr($data, 5);
+            if (! in_array($field, ['name', 'phone', 'company_name'], true)) {
+                $this->showProfile($client, $chatId, $phone, $session);
+
+                return;
+            }
+            $session['step'] = 'profile_edit';
+            $session['profile_field'] = $field;
+            $this->putSession($phone, $session);
+            $prompt = match ($field) {
+                'name' => 'ما الاسم الكامل الجديد؟',
+                'phone' => 'ما رقم الهاتف الجديد؟',
+                default => 'ما اسم الشركة الجديد؟',
+            };
+            $this->safeSend($chatId, $prompt);
 
             return;
         }
         if ($this->isNav($data, self::NAV_NEW) || $data === 'menu:new') {
+            if (($session['step'] ?? '') === 'quote') {
+                $this->showQuoteDecision($chatId, $phone, $session);
+
+                return;
+            }
+            if (($session['step'] ?? '') === 'suggest') {
+                $session['step'] = 'idle';
+                unset($session['suggest_package'], $session['suggest_period']);
+            }
             if (! $this->gateProfile($client, $chatId, $session)) {
                 return;
             }
@@ -490,7 +542,13 @@ class HandleWhatsAppInbound
         }
         if (str_starts_with($data, 'per:')) {
             $parts = explode(':', $data, 3);
-            $this->createCatalog($client, $chatId, (int) ($parts[1] ?? 0), $parts[2] ?? null);
+            $this->createCatalog($client, $chatId, $phone, $session, (int) ($parts[1] ?? 0), $parts[2] ?? null);
+
+            return;
+        }
+        if (str_starts_with($data, 'pick:')) {
+            $parts = explode(':', $data, 3);
+            $this->createCatalog($client, $chatId, $phone, $session, (int) ($parts[1] ?? 0), $parts[2] ?? null);
 
             return;
         }
@@ -518,10 +576,15 @@ class HandleWhatsAppInbound
             return;
         }
         if (str_starts_with($data, 'approve:')) {
-            $this->runOwned($client, substr($data, 8), function (ServiceRequest $request) use ($chatId): void {
+            $ref = substr($data, 8);
+            $this->runOwned($client, $ref, function (ServiceRequest $request) use ($chatId): void {
                 $this->approveQuotation->handle($request);
-                $this->safeSend($chatId, 'تم تسجيل موافقتك على العرض.');
+                $this->safeSend($chatId, "تم تسجيل موافقتك.\nحوّل المبلغ عبر شام كاش، ثم أرسل صورة الوصل أو PDF هنا.");
             });
+            $session['step'] = 'receipt';
+            $session['receipt_ref'] = $ref;
+            unset($session['quote_ref']);
+            $this->putSession($phone, $session);
 
             return;
         }
@@ -545,8 +608,11 @@ class HandleWhatsAppInbound
             $ref = explode(':', $data, 2)[1] ?? '';
             $this->runOwned($client, $ref, function (ServiceRequest $request) use ($chatId, $reason): void {
                 $this->rejectQuotation->handle($request, $reason);
-                $this->sendMenu($chatId, 'تم رفض العرض.');
+                $this->sendMenu($chatId, 'تم رفض العرض. يمكن للفريق إرسال عرض جديد.');
             });
+            $session['step'] = 'idle';
+            unset($session['quote_ref'], $session['reject_ref']);
+            $this->putSession($phone, $session);
 
             return;
         }
@@ -681,7 +747,7 @@ class HandleWhatsAppInbound
                 fn (string $period): bool => BillingPeriod::isSubscription($period),
             ));
             if ($periods === []) {
-                $this->createCatalog($client, $chatId, (int) ($first['id'] ?? 0), null);
+                $this->createCatalog($client, $chatId, $phone, $session, (int) ($first['id'] ?? 0), null);
 
                 return;
             }
@@ -787,7 +853,10 @@ class HandleWhatsAppInbound
         $this->sendMenu($chatId, 'تم الرجوع للقائمة الرئيسية.');
     }
 
-    private function createCatalog(Client $client, string $chatId, int $packageId, ?string $period): void
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function createCatalog(Client $client, string $chatId, string $phone, array $session, int $packageId, ?string $period): void
     {
         abort_unless($client->profileComplete(), 422, 'Complete your name, phone, and company first.');
         $this->safeSend($chatId, "جاري إنشاء طلبك وانتظار عرض السعر…\nيرجى الانتظار لحظات، لا تغلق المحادثة.");
@@ -798,11 +867,19 @@ class HandleWhatsAppInbound
         $number = $fresh->number;
         $label = $fresh->status->labelAr();
         if ($this->createCatalogRequest->quotationDelivered) {
-            $this->sendMenu($chatId, "تم إنشاء الطلب #{$number}.\nالحالة: {$label}.\nسيصلك عرض السعر الآن في المحادثة.");
+            $ref = ResolveServiceRequest::displayNumber($fresh);
+            $session['step'] = 'quote';
+            $session['quote_ref'] = $ref;
+            $session['catalog_stack'] = [];
+            $this->putSession($phone, $session);
+            $this->safeSend($chatId, "تم إنشاء الطلب #{$number}.\nالحالة: {$label}.\nالعرض أعلاه. أكمل بالموافقة ثم الدفع، أو بالرفض وسببه.");
+            $this->showQuoteDecision($chatId, $phone, $session);
 
             return;
         }
 
+        $session['step'] = 'idle';
+        $this->putSession($phone, $session);
         $this->sendMenu($chatId, "تم إنشاء الطلب #{$number}.\nالحالة: {$label}.\nإذا لم يصلك عرض السعر خلال لحظات، افتح طلباتي.");
     }
 
@@ -973,6 +1050,123 @@ class HandleWhatsAppInbound
         unset($session['edit_number'], $session['edit_title']);
         $this->putSession($phone, $session);
         $this->showRequest($client, $chatId, (string) $item->number);
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function routeSentence(Client $client, string $chatId, string $phone, array $session, string $text): bool
+    {
+        $text = trim($text);
+        if ($text === '' || ClientProfileValue::isKeyboardLabel($text)) {
+            return false;
+        }
+
+        $step = (string) ($session['step'] ?? 'idle');
+        $target = $this->profileTarget($text);
+        if ($target !== null) {
+            $this->openProfileTarget($client, $chatId, $phone, $session, $target);
+
+            return true;
+        }
+
+        $intent = $this->operationIntent($text);
+        $word = $this->quoteWord($text);
+        if ($intent === null && $word === 'approve' && ($step === 'quote' || $step === 'suggest' || $this->openQuotation($client) !== null)) {
+            $intent = 'approve';
+        }
+        if ($intent === null && $word === 'reject' && in_array($step, ['quote', 'suggest'], true)) {
+            $intent = 'reject';
+        }
+        if ($intent === null && $step !== 'quote' && $this->wantsPackage($text)) {
+            $open = $this->openQuotation($client);
+            if ($open !== null) {
+                $session['quote_ref'] = ResolveServiceRequest::displayNumber($open);
+                $this->safeSend($chatId, 'عندك عرض سعر لم يُحسم بعد. أكمله بالموافقة أو الرفض قبل طلب جديد.');
+                $this->showQuoteDecision($chatId, $phone, $session);
+
+                return true;
+            }
+            if ($this->suggestPackage($client, $chatId, $phone, $session, $text)) {
+                return true;
+            }
+        }
+        if ($intent === null && mb_strlen($text) >= 8) {
+            $classified = app(GeminiService::class)->classifyClientIntent($text, $step === '' ? 'idle' : $step);
+            $intent = $classified === 'none' ? null : $classified;
+        }
+        if ($intent === null) {
+            return false;
+        }
+
+        if ($intent === 'new' && ($step === 'quote' || $this->openQuotation($client) !== null)) {
+            $open = $this->openQuotation($client);
+            if ($open !== null) {
+                $session['quote_ref'] = ResolveServiceRequest::displayNumber($open);
+            }
+            $this->safeSend($chatId, 'عندك عرض سعر لم يُحسم بعد. أكمله بالموافقة أو الرفض قبل طلب جديد.');
+            $this->showQuoteDecision($chatId, $phone, $session);
+
+            return true;
+        }
+        if ($intent === 'approve' && $step === 'suggest') {
+            $this->continueSuggest($client, $chatId, $phone, $session, '1');
+
+            return true;
+        }
+        if ($intent === 'reject' && $step === 'suggest') {
+            $this->continueSuggest($client, $chatId, $phone, $session, '2');
+
+            return true;
+        }
+        if ($intent === 'approve' && ($step === 'quote' || $this->openQuotation($client) !== null)) {
+            $open = $this->openQuotation($client);
+            if ($open !== null && ! filled($session['quote_ref'] ?? null)) {
+                $session['quote_ref'] = ResolveServiceRequest::displayNumber($open);
+            }
+            $this->continueQuote($client, $chatId, $phone, $session, '1');
+
+            return true;
+        }
+        if ($intent === 'reject' && $step === 'quote') {
+            $this->continueQuote($client, $chatId, $phone, $session, '2');
+
+            return true;
+        }
+        if ($intent === 'requests') {
+            $this->listRequests($client, $chatId);
+
+            return true;
+        }
+        if ($intent === 'edit') {
+            $this->startEdit($client, $chatId, $phone, $session);
+
+            return true;
+        }
+        if ($intent === 'profile') {
+            $this->showProfile($client, $chatId, $phone, $session);
+
+            return true;
+        }
+        if ($intent === 'new') {
+            if ($this->gateProfile($client, $chatId, $session)) {
+                $this->showCatalog($client, $chatId, $phone, $session);
+            }
+
+            return true;
+        }
+        if ($intent === 'help') {
+            $this->sendMenu($chatId, 'رقم الدعم: '.self::SUPPORT_PHONE);
+
+            return true;
+        }
+        if ($intent === 'ask') {
+            $this->answerAsk($chatId, $phone, $session, $text);
+
+            return true;
+        }
+
+        return false;
     }
 
     private function operationIntent(string $text): ?string
@@ -1255,6 +1449,7 @@ class HandleWhatsAppInbound
             $session['description'],
             $session['attachments'],
             $session['reject_ref'],
+            $session['profile_field'],
             $session['revision_ref'],
             $session['revision_delivery_id'],
             $session['receipt_ref'],
@@ -1368,9 +1563,112 @@ class HandleWhatsAppInbound
         $this->telegram->sendInlineKeyboard($chatId, $text, [[
             ['text' => 'طلب جديد', 'callback_data' => 'menu:new'],
             ['text' => 'طلباتي', 'callback_data' => 'menu:mine'],
+            ['text' => 'بياناتي', 'callback_data' => 'menu:profile'],
             ['text' => 'استفسار', 'callback_data' => 'menu:ask'],
             ['text' => 'الدعم', 'callback_data' => 'menu:help'],
         ]]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function profileTarget(?string $text): ?string
+    {
+        $text = trim((string) $text);
+        if ($text === '' || mb_strlen($text) < 4 || preg_match('/باقة|اشتراك|عرض سعر|طلب/u', $text) === 1) {
+            return null;
+        }
+        if (preg_match('/رقمي|رقم الهاتف|هاتفي|موبايلي|جوالي|رقم الموبايل|رقم الجوال/u', $text) === 1) {
+            return 'phone';
+        }
+        if (preg_match('/اسم الشركة|شركتي|اسم المحل|اسم النشاط/u', $text) === 1
+            || (preg_match('/الشركة|المحل/u', $text) === 1 && preg_match('/غير|عدل|تعديل|غلط|خطأ|بدل|حدّث|حدث/u', $text) === 1)) {
+            return 'company_name';
+        }
+        if (preg_match('/اسمي|الاسم الكامل|غير الاسم|عدل الاسم|تعديل الاسم/u', $text) === 1) {
+            return 'name';
+        }
+        if (preg_match('/بياناتي|معلوماتي|ملفي|حسابي|بيانات العميل/u', $text) === 1) {
+            return 'card';
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function openProfileTarget(Client $client, string $chatId, string $phone, array $session, string $target): void
+    {
+        if ($target === 'card') {
+            $this->showProfile($client, $chatId, $phone, $session);
+
+            return;
+        }
+        $this->handleCallback($client, $chatId, $phone, $session, 'prof:'.$target);
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function showProfile(Client $client, string $chatId, string $phone, array $session): void
+    {
+        $client = $client->fresh() ?? $client;
+        $session['step'] = 'idle';
+        unset($session['profile_field']);
+        $this->putSession($phone, $session);
+        $this->telegram->sendInlineKeyboard(
+            $chatId,
+            "بياناتك:\nالاسم: {$client->name}\nالهاتف: {$client->phone}\nالشركة: {$client->company_name}\nاختر الحقل الذي تريد تعديله.",
+            [
+                [['text' => 'تعديل الاسم', 'callback_data' => 'prof:name']],
+                [['text' => 'تعديل الهاتف', 'callback_data' => 'prof:phone']],
+                [['text' => 'تعديل الشركة', 'callback_data' => 'prof:company_name']],
+                [['text' => 'القائمة', 'callback_data' => 'menu:home']],
+            ],
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function saveProfileEdit(Client $client, string $chatId, string $phone, array $session, ?string $text): void
+    {
+        $field = (string) ($session['profile_field'] ?? '');
+        $value = trim((string) $text);
+        if ($value === '' || ClientProfileValue::isKeyboardLabel($value) || ! in_array($field, ['name', 'phone', 'company_name'], true)) {
+            $this->safeSend($chatId, 'أرسل القيمة الجديدة كتابة.');
+
+            return;
+        }
+
+        $stored = match ($field) {
+            'name' => ClientProfileValue::usableName($value),
+            'phone' => ClientProfileValue::usablePhone($value),
+            default => ClientProfileValue::usableCompanyName($value, $chatId),
+        };
+        if ($stored === null) {
+            $hint = match ($field) {
+                'name' => 'أرسل اسمك الكامل، وليس رقماً أو زر قائمة.',
+                'phone' => 'أرسل رقم هاتف صالح.',
+                default => 'أرسل اسم الشركة الحقيقي.',
+            };
+            $this->safeSend($chatId, $hint);
+
+            return;
+        }
+
+        $client->forceFill([$field => $stored])->save();
+        $fresh = $client->fresh() ?? $client;
+        $this->pushCompletedClientToOdoo($fresh);
+        $this->safeSend($chatId, 'تم تحديث بياناتك.');
+        if (filled($session['quote_ref'] ?? null)) {
+            $this->safeSend($chatId, "بياناتك:\nالاسم: {$fresh->name}\nالهاتف: {$fresh->phone}\nالشركة: {$fresh->company_name}");
+            $this->showQuoteDecision($chatId, $phone, $session);
+
+            return;
+        }
+        $this->showProfile($fresh, $chatId, $phone, $session);
     }
 
     /**
@@ -1380,7 +1678,7 @@ class HandleWhatsAppInbound
     {
         $session['step'] = 'ask';
         $this->putSession($phone, $session);
-        $this->safeSend($chatId, "اكتب سؤالك عن الخدمات أو المكتب أو الأسعار المنشورة.\nالجواب من معلومات الموقع فقط.");
+        $this->safeSend($chatId, "اكتب سؤالك عن الخدمات، أو عن الباقة الأنسب لنشاطك.\nالجواب من طريقة عمل الشركة والباقات المنشورة، ومن دون أي معلومة خاصة.");
     }
 
     /**
@@ -1424,6 +1722,169 @@ class HandleWhatsAppInbound
         }
 
         return mb_substr($answer, 0, 1200);
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function showQuoteDecision(string $chatId, string $phone, array $session): void
+    {
+        $ref = (string) ($session['quote_ref'] ?? '');
+        if ($ref === '') {
+            $this->sendMenu($chatId, 'لا يوجد عرض بانتظار قرارك. افتح طلباتي.');
+
+            return;
+        }
+        $session['step'] = 'quote';
+        $this->putSession($phone, $session);
+        $this->telegram->sendInlineKeyboard($chatId, 'لإكمال هذا الطلب:', [
+            [['text' => 'موافقة', 'callback_data' => 'approve:'.$ref]],
+            [['text' => 'رفض', 'callback_data' => 'reject:'.$ref]],
+        ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function continueQuote(Client $client, string $chatId, string $phone, array $session, string $text): void
+    {
+        $word = $this->quoteWord($text);
+        $ref = (string) ($session['quote_ref'] ?? '');
+        if ($word === 'approve' && $ref !== '') {
+            $this->handleCallback($client, $chatId, $phone, $session, 'approve:'.$ref);
+
+            return;
+        }
+        if ($word === 'reject' && $ref !== '') {
+            $this->handleCallback($client, $chatId, $phone, $session, 'reject:'.$ref);
+
+            return;
+        }
+
+        $this->safeSend($chatId, "العرض بانتظار قرارك.\n1 للموافقة، ثم يصل رمز الدفع وترسل الوصل.\n2 للرفض، ثم تكتب السبب.");
+        $this->showQuoteDecision($chatId, $phone, $session);
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function continueSuggest(Client $client, string $chatId, string $phone, array $session, string $text): void
+    {
+        $choice = $this->quoteWord($text);
+        if ($choice === 'approve') {
+            $this->createCatalog(
+                $client,
+                $chatId,
+                $phone,
+                $session,
+                (int) ($session['suggest_package'] ?? 0),
+                (string) ($session['suggest_period'] ?? ''),
+            );
+
+            return;
+        }
+        if ($choice === 'reject') {
+            $session['step'] = 'idle';
+            unset($session['suggest_package'], $session['suggest_period']);
+            $this->putSession($phone, $session);
+            $this->showCatalog($client, $chatId, $phone, $session);
+
+            return;
+        }
+
+        $this->safeSend($chatId, "1 ينشئ الطلب على الباقة المقترحة ويوصلك عرض السعر.\n2 يفتح قائمة الباقات لتختار بنفسك.");
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function suggestPackage(Client $client, string $chatId, string $phone, array $session, string $text): bool
+    {
+        if (! $client->profileComplete()) {
+            return false;
+        }
+        $catalog = $this->packageChoices();
+        if ($catalog === '') {
+            return false;
+        }
+        $history = is_array($session['ask_history'] ?? null) ? $session['ask_history'] : [];
+        $pick = app(GeminiService::class)->recommendPackage($text, $catalog, $history);
+        if ($pick === null) {
+            return false;
+        }
+
+        $session['step'] = 'suggest';
+        $session['suggest_package'] = $pick['id'];
+        $session['suggest_period'] = $pick['period'];
+        $history[] = ['role' => 'user', 'text' => mb_substr($text, 0, 400)];
+        $history[] = ['role' => 'assistant', 'text' => mb_substr($pick['answer'], 0, 400)];
+        $session['ask_history'] = array_slice($history, -6);
+        $this->putSession($phone, $session);
+        $this->telegram->sendInlineKeyboard($chatId, $pick['answer'], [
+            [['text' => 'أنشئ الطلب', 'callback_data' => 'pick:'.$pick['id'].':'.$pick['period']]],
+            [['text' => 'أختار بنفسي', 'callback_data' => 'menu:new']],
+        ]);
+
+        return true;
+    }
+
+    private function packageChoices(): string
+    {
+        $lines = [];
+        PricingPackage::query()
+            ->where('is_published', true)
+            ->with('subcategory')
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->limit(40)
+            ->get()
+            ->each(function (PricingPackage $package) use (&$lines): void {
+                $periods = BillingPeriod::availableFromPrices(is_array($package->prices) ? $package->prices : []);
+                if ($periods === [] && $package->price_usd) {
+                    $periods = ['one_time'];
+                }
+                if ($periods === []) {
+                    return;
+                }
+                $name = trim($package->name_ar.' / '.$package->name_en, ' /');
+                $subtitle = trim((string) $package->subtitle_ar.' / '.(string) $package->subtitle_en, ' /');
+                $lines[] = 'id:'.$package->id.'|'.$name.'|'.$subtitle.'|'.implode(',', $periods);
+            });
+
+        return implode("\n", $lines);
+    }
+
+    private function openQuotation(Client $client): ?ServiceRequest
+    {
+        $item = $client->requests()
+            ->where('status', RequestStatus::QuotationSent)
+            ->latest('id')
+            ->first();
+
+        return $item instanceof ServiceRequest ? $item : null;
+    }
+
+    private function quoteWord(string $text): ?string
+    {
+        $text = trim(strtr($text, ['٠' => '0', '١' => '1', '٢' => '2']));
+        if (in_array($text, ['1', 'موافقة', '✅ موافقة', 'نعم'], true)) {
+            return 'approve';
+        }
+        if (in_array($text, ['2', 'رفض', '❌ رفض'], true)) {
+            return 'reject';
+        }
+
+        return null;
+    }
+
+    private function wantsPackage(?string $text): bool
+    {
+        $text = trim((string) $text);
+        if (mb_strlen($text) < 12 || ClientProfileValue::isKeyboardLabel($text)) {
+            return false;
+        }
+
+        return preg_match('/باقة|اشتراك|محل|نشاط/u', $text) === 1;
     }
 
     private function looksLikeQuestion(string $text): bool

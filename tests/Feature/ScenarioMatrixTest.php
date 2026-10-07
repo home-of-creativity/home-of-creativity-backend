@@ -247,7 +247,7 @@ class ScenarioMatrixTest extends TestCase
             'services.gemini.e2e_stub' => false,
             'services.gemini.vertex_project' => '',
         ]);
-        Cache::put('site-guide-v2', 'Home of Creativity brief hoc.agency', now()->addHour());
+        Cache::put('site-guide-v3', 'Home of Creativity brief hoc.agency', now()->addHour());
 
         $this->postJson('/api/site/ask', ['question' => 'وين المكتب؟', 'locale' => 'ar'])->assertOk();
         $this->postJson('/api/site/ask', ['question' => 'وين المكتب؟', 'locale' => 'ar'])->assertOk();

@@ -31,7 +31,7 @@ class SiteAskController extends Controller
         $locale = ($data['locale'] ?? 'ar') === 'en' ? 'en' : 'ar';
         $history = array_values($data['history'] ?? []);
         $remember = $history === []
-            ? 'site-ask:v3:'.sha1($locale.'|'.mb_strtolower($question))
+            ? 'site-ask:v4:'.sha1($locale.'|'.mb_strtolower($question))
             : null;
 
         try {
