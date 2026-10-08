@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Actions\ConvertDocxToPdf;
 use App\Models\Client;
 use App\Models\ClientReport;
 use App\Models\User;
@@ -9,13 +10,14 @@ use App\Services\GoogleDriveClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Laravel\Sanctum\Sanctum;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 use Tests\TestCase;
 
 class ReportDrivePublishTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_publish_updates_the_same_word_and_pdf_in_the_current_folder(): void
+    public function test_publish_updates_the_same_word_file_in_the_current_folder(): void
     {
         $admin = User::factory()->create();
         $admin->forceFill(['is_admin' => true])->save();
@@ -27,15 +29,15 @@ class ReportDrivePublishTest extends TestCase
 
         $this->mock(GoogleDriveClient::class, function ($mock) use (&$uploads, &$replacements): void {
             $mock->shouldReceive('lastError')->andReturn(null);
-            $mock->shouldReceive('uploadFile')->times(2)->andReturnUsing(function (string $folder, string $name, string $contents, string $mime) use (&$uploads): array {
+            $mock->shouldReceive('uploadFile')->once()->andReturnUsing(function (string $folder, string $name, string $contents, string $mime) use (&$uploads): array {
                 $uploads[] = [$folder, $name, strlen($contents)];
 
                 return [
-                    'id' => str_ends_with($name, '.pdf') ? 'pdf-1' : 'doc-1',
-                    'url' => 'https://drive.google.com/file/d/'.(str_ends_with($name, '.pdf') ? 'pdf-1' : 'doc-1').'/view',
+                    'id' => 'doc-1',
+                    'url' => 'https://drive.google.com/file/d/doc-1/view',
                 ];
             });
-            $mock->shouldReceive('replaceFile')->times(2)->andReturnUsing(function (string $folder, string $id, string $name, string $contents, string $mime) use (&$replacements): array {
+            $mock->shouldReceive('replaceFile')->once()->andReturnUsing(function (string $folder, string $id, string $name, string $contents, string $mime) use (&$replacements): array {
                 $replacements[] = [$folder, $id, $name, strlen($contents)];
 
                 return [
@@ -48,26 +50,22 @@ class ReportDrivePublishTest extends TestCase
         $created = $this->post("/api/admin/clients/{$client->id}/reports", [
             'title' => 'محضر',
             'document' => UploadedFile::fake()->createWithContent('report.docx', 'docx-bytes'),
-            'pdf' => UploadedFile::fake()->createWithContent('report.pdf', 'pdf-bytes'),
             'publish' => '1',
         ]);
 
         $created->assertCreated()
             ->assertJsonPath('drive_error', null)
             ->assertJsonPath('data.drive_document_url', 'https://drive.google.com/file/d/doc-1/view')
-            ->assertJsonPath('data.drive_url', 'https://drive.google.com/file/d/pdf-1/view')
-            ->assertJsonPath('data.has_pdf', true);
+            ->assertJsonPath('data.drive_url', null);
 
         $this->assertSame('folder-a', $uploads[0][0]);
         $this->assertSame('محضر.docx', $uploads[0][1]);
         $this->assertGreaterThan(0, $uploads[0][2]);
-        $this->assertSame('folder-a', $uploads[1][0]);
-        $this->assertSame('محضر.pdf', $uploads[1][1]);
-        $this->assertGreaterThan(0, $uploads[1][2]);
+        $this->assertCount(1, $uploads);
 
         $report = ClientReport::query()->firstOrFail();
         $this->assertSame('doc-1', $report->drive_document_id);
-        $this->assertSame('pdf-1', $report->drive_file_id);
+        $this->assertNull($report->drive_file_id);
         $this->assertNotNull($report->published_at);
 
         $client->forceFill(['google_drive_folder_id' => 'folder-b'])->save();
@@ -75,36 +73,73 @@ class ReportDrivePublishTest extends TestCase
         $this->post("/api/admin/reports/{$report->id}", [
             'title' => 'محضر جديد',
             'document' => UploadedFile::fake()->createWithContent('report.docx', 'docx-bytes-2'),
-            'pdf' => UploadedFile::fake()->createWithContent('report.pdf', 'pdf-bytes-2'),
             'publish' => '1',
         ])->assertOk()
             ->assertJsonPath('drive_error', null);
 
         $this->assertSame(['folder-b', 'doc-1', 'محضر جديد.docx'], array_slice($replacements[0], 0, 3));
         $this->assertGreaterThan(0, $replacements[0][3]);
-        $this->assertSame(['folder-b', 'pdf-1', 'محضر جديد.pdf'], array_slice($replacements[1], 0, 3));
-        $this->assertGreaterThan(0, $replacements[1][3]);
+        $this->assertCount(1, $replacements);
         $this->assertSame('doc-1', $report->fresh()->drive_document_id);
-        $this->assertSame('pdf-1', $report->fresh()->drive_file_id);
+        $this->assertNull($report->fresh()->drive_file_id);
     }
 
-    public function test_publish_without_a_pdf_does_not_upload(): void
+    public function test_publish_without_a_pdf_uploads_the_word_file(): void
     {
         $admin = User::factory()->create();
         $admin->forceFill(['is_admin' => true])->save();
         Sanctum::actingAs($admin);
 
         $client = Client::factory()->create(['google_drive_folder_id' => 'folder-a']);
-        $this->mock(GoogleDriveClient::class);
+        $this->mock(GoogleDriveClient::class, function ($mock): void {
+            $mock->shouldReceive('lastError')->andReturn(null);
+            $mock->shouldReceive('uploadFile')->once()->andReturnUsing(function (string $folder, string $name, string $contents, string $mime): array {
+                return [
+                    'id' => 'doc-1',
+                    'url' => 'https://drive.google.com/file/d/doc-1/view',
+                ];
+            });
+        });
 
         $this->post("/api/admin/clients/{$client->id}/reports", [
             'title' => 'محضر',
             'document' => UploadedFile::fake()->createWithContent('report.docx', 'docx-bytes'),
             'publish' => '1',
         ])->assertCreated()
-            ->assertJsonPath('drive_error', 'The PDF was not included. Publish again from the editor.');
+            ->assertJsonPath('drive_error', null)
+            ->assertJsonPath('data.drive_document_url', 'https://drive.google.com/file/d/doc-1/view')
+            ->assertJsonPath('data.drive_url', null);
 
-        $this->assertNull(ClientReport::query()->firstOrFail()->drive_document_id);
+        $this->assertSame('doc-1', ClientReport::query()->firstOrFail()->drive_document_id);
+    }
+
+    public function test_word_to_pdf_returns_the_converted_file(): void
+    {
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        $this->mock(ConvertDocxToPdf::class, function ($mock): void {
+            $mock->shouldReceive('handle')->once()->andReturn('%PDF-1.4 converted');
+        });
+
+        $this->post('/api/admin/reports/to-pdf', [
+            'document' => UploadedFile::fake()->createWithContent('report.docx', 'docx-bytes'),
+        ])->assertOk()
+            ->assertHeader('content-type', 'application/pdf');
+    }
+
+    public function test_conversion_explains_a_missing_libreoffice(): void
+    {
+        config(['services.libreoffice.binary' => 'C:\\missing\\soffice.exe']);
+
+        try {
+            app(ConvertDocxToPdf::class)->handle('PK');
+            $this->fail('A missing LibreOffice binary should stop the conversion.');
+        } catch (HttpException $exception) {
+            $this->assertSame(422, $exception->getStatusCode());
+            $this->assertStringContainsString('LibreOffice', $exception->getMessage());
+        }
     }
 
     public function test_drive_folder_search_and_lookup(): void

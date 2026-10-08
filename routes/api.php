@@ -165,6 +165,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
     });
 
     Route::middleware('crud:ops.reports')->group(function () {
+        Route::post('reports/to-pdf', [AdminClientReportController::class, 'toPdf']);
         Route::get('reports/{client_report}/document', [AdminClientReportController::class, 'document']);
         Route::get('reports/{client_report}/pdf', [AdminClientReportController::class, 'pdf']);
         Route::get('reports', [AdminClientReportController::class, 'clients']);

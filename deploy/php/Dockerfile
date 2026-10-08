@@ -13,6 +13,8 @@ RUN apt-get update \
         libwebp-dev \
         libonig-dev \
         libxml2-dev \
+        libreoffice-writer \
+        fonts-noto-core \
     && docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
     && docker-php-ext-install -j$(nproc) pdo_mysql mbstring zip intl gd bcmath pcntl \
     && curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/bin --filename=composer \

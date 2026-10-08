@@ -7,8 +7,8 @@ use App\Services\GoogleDriveClient;
 use Illuminate\Support\Facades\Storage;
 
 /**
- * Upload a report into the client's current Drive folder: the same Word file and the same PDF.
- * A later publish updates those two files and moves them when the folder changes.
+ * Upload a report into the client's current Drive folder: the same Word file.
+ * A later publish updates that file and moves it when the folder changes.
  */
 class PublishClientReport
 {
@@ -20,7 +20,6 @@ class PublishClientReport
         $client = $report->client;
         abort_unless($client && filled($client->google_drive_folder_id), 422, 'Assign a Drive folder to this client first.');
         abort_unless($this->readable($report->document_path), 422, 'Open and save this report in the editor before publishing.');
-        abort_unless($this->readable($report->pdf_path), 422, 'The PDF was not included. Publish again from the editor.');
 
         $folderId = (string) $client->google_drive_folder_id;
 
@@ -34,18 +33,8 @@ class PublishClientReport
         $report->forceFill([
             'drive_document_id' => $document['id'],
             'drive_document_url' => $document['url'],
-        ])->save();
-
-        $pdf = $this->put(
-            $folderId,
-            (string) $report->drive_file_id,
-            $report->title.'.pdf',
-            (string) Storage::disk('local')->get((string) $report->pdf_path),
-            'application/pdf',
-        );
-        $report->forceFill([
-            'drive_file_id' => $pdf['id'],
-            'drive_url' => $pdf['url'],
+            'drive_file_id' => null,
+            'drive_url' => null,
             'published_at' => now(),
         ])->save();
 

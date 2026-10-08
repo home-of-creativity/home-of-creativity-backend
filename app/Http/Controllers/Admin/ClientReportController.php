@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Actions\ConvertDocxToPdf;
 use App\Actions\PublishClientReport;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreClientReportRequest;
@@ -12,6 +13,7 @@ use App\Models\ClientReport;
 use App\Models\ClientReportAttachment;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\Response;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use Symfony\Component\HttpKernel\Exception\HttpException;
@@ -120,8 +122,23 @@ class ClientReportController extends Controller
         );
     }
 
+    /** Convert the editor's Word file to a PDF. The pages are not photographed. */
+    public function toPdf(Request $request, ConvertDocxToPdf $convert): Response
+    {
+        $request->validate([
+            'document' => ['required', 'file', 'max:30720', 'extensions:docx'],
+        ]);
+
+        $pdf = $convert->handle((string) $request->file('document')->get());
+
+        return response($pdf, 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="report.pdf"',
+        ]);
+    }
+
     /**
-     * The PDF rendered in the browser at the last save.
+     * A PDF stored beside the report, when one was saved.
      */
     public function pdf(ClientReport $clientReport): StreamedResponse
     {

@@ -102,13 +102,13 @@ class ClientReportTest extends TestCase
             ->assertJsonValidationErrors('document');
     }
 
-    public function test_publishing_uploads_the_word_file_and_pdf_then_replaces_both(): void
+    public function test_publishing_uploads_the_word_file_then_replaces_it(): void
     {
         $folders = [];
         $replaced = [];
         $this->mock(GoogleDriveClient::class, function ($mock) use (&$folders, &$replaced): void {
             $mock->shouldReceive('lastError')->andReturn(null);
-            $mock->shouldReceive('uploadFile')->times(3)->andReturnUsing(function (string $folder, string $name, string $contents, string $mime) use (&$folders): array {
+            $mock->shouldReceive('uploadFile')->times(2)->andReturnUsing(function (string $folder, string $name, string $contents, string $mime) use (&$folders): array {
                 $folders[] = $folder;
 
                 return [
@@ -116,7 +116,7 @@ class ClientReportTest extends TestCase
                     'url' => 'https://drive.google.com/file/d/'.$name.'/view',
                 ];
             });
-            $mock->shouldReceive('replaceFile')->times(2)->andReturnUsing(function (string $folder, string $id, string $name, string $contents, string $mime) use (&$replaced): array {
+            $mock->shouldReceive('replaceFile')->once()->andReturnUsing(function (string $folder, string $id, string $name, string $contents, string $mime) use (&$replaced): array {
                 $replaced[] = [$folder, $id, $name];
 
                 return [
@@ -130,32 +130,30 @@ class ClientReportTest extends TestCase
         $id = $this->post("/api/admin/clients/{$client->id}/reports", [
             'title' => 'تقرير الربع',
             'document' => $this->docx(),
-            'pdf' => $this->pdf(),
             'attachments' => [UploadedFile::fake()->create('notes.pdf', 12, 'application/pdf')],
             'publish' => '1',
         ])->assertCreated()
             ->assertJsonPath('data.drive_document_url', 'https://drive.google.com/file/d/تقرير الربع.docx/view')
-            ->assertJsonPath('data.drive_url', 'https://drive.google.com/file/d/تقرير الربع.pdf/view')
+            ->assertJsonPath('data.drive_url', null)
             ->assertJsonPath('data.attachments.0.name', 'notes.pdf')
             ->assertJsonPath('drive_error', null)
             ->json('data.id');
 
-        $this->assertSame(['parent-1', 'parent-1', 'parent-1'], $folders);
+        $this->assertSame(['parent-1', 'parent-1'], $folders);
         $this->assertNotNull($client->reports()->first()?->published_at);
 
-        // Republishing replaces the same Word file and the same PDF, and does not upload the attachment again.
+        // Republishing replaces the same Word file and does not upload the attachment again.
         $this->post("/api/admin/reports/{$id}", [
             'title' => 'تقرير الربع',
             'document' => $this->docx(),
             'publish' => '1',
         ])->assertOk()
             ->assertJsonPath('data.drive_document_url', 'https://drive.google.com/file/d/id-تقرير الربع.docx/view')
-            ->assertJsonPath('data.drive_url', 'https://drive.google.com/file/d/id-تقرير الربع.pdf/view')
+            ->assertJsonPath('data.drive_url', null)
             ->assertJsonPath('drive_error', null);
 
         $this->assertSame([
             ['parent-1', 'id-تقرير الربع.docx', 'تقرير الربع.docx'],
-            ['parent-1', 'id-تقرير الربع.pdf', 'تقرير الربع.pdf'],
         ], $replaced);
     }
 

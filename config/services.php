@@ -99,6 +99,10 @@ return [
         ],
     ],
 
+    'libreoffice' => [
+        'binary' => env('LIBREOFFICE_BINARY', 'soffice'),
+    ],
+
     'google' => [
         'credentials_json' => env('GOOGLE_CREDENTIALS_JSON', env('GOOGLE_SERVICE_ACCOUNT_JSON', env('GOOGLE_APPLICATION_CREDENTIALS'))),
         'drive_parent_folder_id' => env('GOOGLE_DRIVE_PARENT_FOLDER_ID'),

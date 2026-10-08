@@ -3,13 +3,13 @@ import { DocxEditor, normalizeImageBytes, useFonts, type DocxEditorRef } from "@
 import { setHarfBuzzWasmUrl } from "@docx-editor.dev/core/layout";
 import harfbuzzWasm from "@docx-editor.dev/core/harfbuzz.wasm?url";
 import "@docx-editor.dev/core/styles/editor.css";
+import { api } from "../../api";
 import type { Locale } from "../../i18n";
 import { editorArabic } from "./editorArabic";
 import { TableLayoutChrome } from "./TableLayoutChrome";
 import { addBlankPage, addCover, addTextBox, type TextBoxShape } from "./pageObjects";
 import { addBodyBackground, bodyDrawings, layoutNewDrawing } from "./pictureLayout";
 import { reportFontConfiguration, type ExtraFont } from "./fonts";
-import { fallbackPdf, pagesToPdf } from "./pdf";
 
 // The text shaper is WebAssembly; point it at the copy Vite emits so dev and production both find it.
 setHarfBuzzWasmUrl(harfbuzzWasm);
@@ -19,7 +19,7 @@ export type ReportDocHandle = {
   ready(): boolean;
   /** The document as .docx bytes. */
   save(): Promise<Uint8Array>;
-  /** The painted pages as a PDF (one image per page). */
+  /** The current Word file converted to PDF on the server. */
   pdf(onProgress?: (done: number, total: number) => void): Promise<Uint8Array>;
   /** Plain text of every page, for search and the report list. Pictures are omitted. */
   text(): string;
@@ -115,39 +115,18 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
   const fonts = useFonts(useMemo(() => reportFontConfiguration(extraFonts), [extraFonts]));
   const fontKey = extraFonts.map((font) => font.family).join("|");
   const theme = useDashboardTheme();
-  // The PDF is always a light page, even when the dashboard (and so the editor) is in dark mode.
-  const [printLight, setPrintLight] = useState(false);
   const insertPageRef = useRef<() => Promise<boolean>>(async () => false);
-  const renderPdf = useCallback(async (onProgress?: (done: number, total: number) => void) => {
-    const host = root.current;
-    if (!host) return fallbackPdf();
-    setPrintLight(true);
-    try {
-      await document.fonts.ready.catch(() => undefined);
-      const started = performance.now();
-      while (
-        (host.querySelector(".docx-page") == null || host.querySelector(".table-layout-chrome") != null)
-        && performance.now() - started < 2500
-      ) {
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-      await new Promise<void>((resolve) => {
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-      });
-      await new Promise((resolve) => setTimeout(resolve, 180));
-      return await pagesToPdf(host, editor.current?.snapshot().zoom ?? 1, onProgress);
-    } catch {
-      return fallbackPdf();
-    } finally {
-      setPrintLight(false);
-    }
+  const wordToPdf = useCallback(async () => {
+    const buffer = await editor.current?.save();
+    if (!buffer) throw new Error("editor not ready");
+    return api.convertReportToPdf(new Uint8Array(buffer));
   }, []);
   const menu = useMemo(
     () => ({
       reportIssue: false,
       onSave,
       exporters: {
-        pdf: async () => ({ bytes: await renderPdf() }),
+        pdf: async () => ({ bytes: await wordToPdf() }),
       },
       children: (
         <DocxEditor.Menu.Insert>
@@ -157,7 +136,7 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
         </DocxEditor.Menu.Insert>
       ),
     }),
-    [locale, onSave, renderPdf],
+    [locale, onSave, wordToPdf],
   );
 
   const placeCaret = useCallback(async (page: number) => {
@@ -306,8 +285,8 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
       if (!buffer) throw new Error("editor not ready");
       return new Uint8Array(buffer);
     },
-    pdf(onProgress) {
-      return renderPdf(onProgress);
+    pdf() {
+      return wordToPdf();
     },
     text() {
       return Array.from(root.current?.querySelectorAll<HTMLElement>(".docx-page") ?? [])
@@ -465,13 +444,13 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
         }}
         onSave={onSave}
         menu={menu}
-        colorMode={printLight ? "light" : theme}
+        colorMode={theme}
         locale={locale === "ar" ? "ar-SA" : "en-US"}
         i18n={locale === "ar" ? editorArabic : undefined}
         renderTitleBarLeft={titleBarStart}
         renderTitleBarRight={titleBarEnd}
       />
-      {printLight ? null : <TableLayoutChrome editor={editor} host={root} locale={locale} />}
+      <TableLayoutChrome editor={editor} host={root} locale={locale} />
     </div>
   );
 });

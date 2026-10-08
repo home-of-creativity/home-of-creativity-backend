@@ -1232,6 +1232,25 @@ export const api = {
       `/admin/drive/folders${queryString({ folder: id })}`,
     );
   },
+  async convertReportToPdf(docx: Uint8Array) {
+    const form = new FormData();
+    const copy = new Uint8Array(docx.byteLength);
+    copy.set(docx);
+    form.append(
+      "document",
+      new Blob([copy], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }),
+      "report.docx",
+    );
+    const headers = new Headers({ Accept: "application/pdf" });
+    const token = getToken();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    const response = await fetch(`${API_URL}/admin/reports/to-pdf`, { method: "POST", headers, body: form });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(apiErrorMessage(body as Record<string, unknown>, response.status));
+    }
+    return new Uint8Array(await response.arrayBuffer());
+  },
   driveStorageAccount() {
     return request<Envelope<DriveStorageAccount>>("/admin/drive/storage-account");
   },

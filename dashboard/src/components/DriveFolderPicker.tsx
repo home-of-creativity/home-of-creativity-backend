@@ -5,6 +5,14 @@ import { copy } from "../i18n";
 
 const ROOT = "root";
 
+function folderIdFrom(value: string): string | null {
+  const text = value.trim();
+  const match = text.match(/folders\/([a-zA-Z0-9_-]+)/);
+  if (match) return match[1];
+  if (/^[a-zA-Z0-9_-]{10,}$/.test(text)) return text;
+  return null;
+}
+
 type NodeState = {
   folders: DriveFolder[];
   next: string | null;
@@ -26,7 +34,7 @@ export function DriveFolderPicker({
   const [nodes, setNodes] = useState<Record<string, NodeState>>({});
   const [open, setOpen] = useState<Record<string, boolean>>({ [ROOT]: true });
   const [selected, setSelected] = useState<DriveFolder | null>(null);
-  const [name, setName] = useState(client.company_name || client.name);
+  const [name, setName] = useState("");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<DriveFolder[] | null>(null);
   const [searchNext, setSearchNext] = useState<string | null>(null);
@@ -154,23 +162,19 @@ export function DriveFolderPicker({
       .finally(() => setSearching(false));
   }
 
-  function choose(folderId: string) {
-    const value = folderId.trim();
-    if (value === "") return;
-    setBusy(true);
-    api.assignClientDriveFolder(client.id, { mode: "existing", folder: value })
-      .then((res) => {
-        toast.success(t(copy.saveSuccess));
-        onSaved(res.data);
-      })
-      .catch((err) => toast.error(err instanceof Error ? err.message : t(copy.saveFailed)))
-      .finally(() => setBusy(false));
+  function holdLink() {
+    const id = folderIdFrom(link);
+    if (!id) {
+      toast.error(t(copy.driveLinkInvalid));
+      return;
+    }
+    setSelected({ id, name: link.trim() });
   }
 
   function createHere() {
     const folderName = name.trim();
-    if (folderName === "") return;
-    const parent = selected?.id;
+    if (!selected || folderName === "") return;
+    const parent = selected.id;
     setBusy(true);
     api.createDriveFolder(folderName, parent)
       .then((res) => api.assignClientDriveFolder(client.id, { mode: "existing", folder: res.data.id }))
@@ -206,7 +210,6 @@ export function DriveFolderPicker({
                   <span className="drive-chevron" aria-hidden="true" />
                   <span className="drive-name">{folder.name}</span>
                 </button>
-                <button type="button" className="btn" disabled={busy} onClick={() => choose(folder.id)}>{t(copy.driveUse)}</button>
               </div>
               {expanded ? (
                 <ul className="drive-children" role="group">
@@ -273,7 +276,6 @@ export function DriveFolderPicker({
                 <button type="button" className="drive-toggle" onClick={() => setSelected(folder)}>
                   <span className="drive-name">{folder.name}</span>
                 </button>
-                <button type="button" className="btn btn-primary" disabled={busy} onClick={() => choose(folder.id)}>{t(copy.driveUse)}</button>
               </div>
             </li>
           ))}
@@ -307,22 +309,26 @@ export function DriveFolderPicker({
             onKeyDown={(event) => {
               if (event.key === "Enter") {
                 event.preventDefault();
-                choose(link);
+                holdLink();
               }
             }}
           />
-          <button type="button" className="btn" disabled={busy || link.trim() === ""} onClick={() => choose(link)}>{t(copy.driveUseLink)}</button>
+          <button type="button" className="btn" disabled={busy || link.trim() === ""} onClick={holdLink}>{t(copy.driveUseLink)}</button>
         </span>
       </label>
       <label className="field-label field-span">
         {t(copy.driveFolderName)}
-        <input className="field" value={name} onChange={(event) => setName(event.target.value)} required />
+        <input
+          className="field"
+          value={name}
+          placeholder={client.company_name || client.name}
+          onChange={(event) => setName(event.target.value)}
+          required
+        />
       </label>
+      <p className="drive-target field-span">{t(copy.driveNameThenCreate)}</p>
       <div className="row-actions field-span">
-        <button className="btn btn-primary" type="submit" disabled={busy}>{t(copy.driveCreateAndUse)}</button>
-        {selected ? (
-          <button type="button" className="btn" disabled={busy} onClick={() => choose(selected.id)}>{t(copy.driveChooseCurrent)}</button>
-        ) : null}
+        <button className="btn btn-primary" type="submit" disabled={busy || !selected || name.trim() === ""}>{t(copy.driveCreateAndUse)}</button>
         <button className="btn" type="button" onClick={onClose}>{t(copy.cancel)}</button>
       </div>
     </form>
