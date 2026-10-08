@@ -102,19 +102,28 @@ class ClientReportTest extends TestCase
             ->assertJsonValidationErrors('document');
     }
 
-    public function test_publishing_uploads_the_word_file_and_attachment_then_replaces_the_word_file(): void
+    public function test_publishing_uploads_the_word_file_and_pdf_then_replaces_both(): void
     {
-        $this->mock(GoogleDriveClient::class, function ($mock): void {
-            $mock->shouldReceive('ensureFolderPath')->andReturn('sub-folder');
+        $folders = [];
+        $replaced = [];
+        $this->mock(GoogleDriveClient::class, function ($mock) use (&$folders, &$replaced): void {
             $mock->shouldReceive('lastError')->andReturn(null);
-            $mock->shouldReceive('uploadFile')->times(2)->andReturnUsing(fn (string $folder, string $name): array => [
-                'id' => 'id-'.$name,
-                'url' => 'https://drive.google.com/file/d/'.$name.'/view',
-            ]);
-            $mock->shouldReceive('replaceFile')->once()->andReturnUsing(fn (string $folder, string $id): array => [
-                'id' => $id,
-                'url' => 'https://drive.google.com/file/d/'.$id.'/view',
-            ]);
+            $mock->shouldReceive('uploadFile')->times(3)->andReturnUsing(function (string $folder, string $name, string $contents, string $mime) use (&$folders): array {
+                $folders[] = $folder;
+
+                return [
+                    'id' => 'id-'.$name,
+                    'url' => 'https://drive.google.com/file/d/'.$name.'/view',
+                ];
+            });
+            $mock->shouldReceive('replaceFile')->times(2)->andReturnUsing(function (string $folder, string $id, string $name, string $contents, string $mime) use (&$replaced): array {
+                $replaced[] = [$folder, $id, $name];
+
+                return [
+                    'id' => $id,
+                    'url' => 'https://drive.google.com/file/d/'.$id.'/view',
+                ];
+            });
         });
         $client = Client::factory()->create(['google_drive_folder_id' => 'parent-1']);
 
@@ -126,25 +135,34 @@ class ClientReportTest extends TestCase
             'publish' => '1',
         ])->assertCreated()
             ->assertJsonPath('data.drive_document_url', 'https://drive.google.com/file/d/تقرير الربع.docx/view')
-            ->assertJsonPath('data.drive_url', null)
+            ->assertJsonPath('data.drive_url', 'https://drive.google.com/file/d/تقرير الربع.pdf/view')
             ->assertJsonPath('data.attachments.0.name', 'notes.pdf')
             ->assertJsonPath('drive_error', null)
             ->json('data.id');
 
+        $this->assertSame(['parent-1', 'parent-1', 'parent-1'], $folders);
         $this->assertNotNull($client->reports()->first()?->published_at);
 
-        // Republishing replaces the same Word file and does not upload the attachment again.
+        // Republishing replaces the same Word file and the same PDF, and does not upload the attachment again.
         $this->post("/api/admin/reports/{$id}", [
             'title' => 'تقرير الربع',
             'document' => $this->docx(),
             'publish' => '1',
-        ])->assertOk()->assertJsonPath('drive_error', null);
+        ])->assertOk()
+            ->assertJsonPath('data.drive_document_url', 'https://drive.google.com/file/d/id-تقرير الربع.docx/view')
+            ->assertJsonPath('data.drive_url', 'https://drive.google.com/file/d/id-تقرير الربع.pdf/view')
+            ->assertJsonPath('drive_error', null);
+
+        $this->assertSame([
+            ['parent-1', 'id-تقرير الربع.docx', 'تقرير الربع.docx'],
+            ['parent-1', 'id-تقرير الربع.pdf', 'تقرير الربع.pdf'],
+        ], $replaced);
     }
 
     public function test_a_drive_failure_keeps_the_saved_report_and_explains_why(): void
     {
         $this->mock(GoogleDriveClient::class, function ($mock): void {
-            $mock->shouldReceive('ensureFolderPath')->andReturn(null);
+            $mock->shouldReceive('uploadFile')->twice()->andReturn(null);
             $mock->shouldReceive('lastError')->andReturn('Drive is down.');
         });
         $client = Client::factory()->create(['google_drive_folder_id' => 'parent-1']);
@@ -152,6 +170,7 @@ class ClientReportTest extends TestCase
         $id = $this->post("/api/admin/clients/{$client->id}/reports", [
             'title' => 'تقرير',
             'document' => $this->docx(),
+            'pdf' => $this->pdf(),
             'publish' => '1',
         ])->assertCreated()
             ->assertJsonPath('drive_error', 'Drive is down.')
