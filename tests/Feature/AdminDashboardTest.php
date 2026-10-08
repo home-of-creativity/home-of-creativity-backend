@@ -7,6 +7,7 @@ use App\Enums\EmployeeProfession;
 use App\Enums\RequestStatus;
 use App\Enums\SocialPostStatus;
 use App\Jobs\ClassifyWithGeminiJob;
+use App\Mail\ClientDocumentMail;
 use App\Models\Client;
 use App\Models\DriveDelivery;
 use App\Models\Employee;
@@ -19,6 +20,7 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Mail;
 use Laravel\Sanctum\Sanctum;
 use Tests\Concerns\FakesOdooDocuments;
 use Tests\TestCase;
@@ -937,6 +939,85 @@ class AdminDashboardTest extends TestCase
             ->assertJsonPath('data.id', 880)
             ->assertJsonPath('data.name', 'S00880')
             ->assertJsonPath('data.state', 'draft');
+    }
+
+    public function test_admin_sends_an_odoo_quotation_to_the_request_email(): void
+    {
+        Mail::fake();
+        Http::preventStrayRequests();
+        config([
+            'mail.mailers.reports.username' => 'reports@hoc.agency',
+            'mail.mailers.reports.password' => 'secret',
+            'services.odoo.enabled' => true,
+            'services.odoo.url' => 'https://odoo.test',
+            'services.odoo.db' => 'hoc',
+            'services.odoo.username' => 'admin',
+            'services.odoo.api_key' => 'secret-key',
+            'services.odoo.use_json2' => false,
+        ]);
+        Http::fake([
+            'https://odoo.test/jsonrpc' => function (Request $request) {
+                $params = $request->data()['params'] ?? [];
+                if (($params['service'] ?? '') === 'common') {
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => 2], 200);
+                }
+
+                $args = $params['args'] ?? [];
+                if (($args[3] ?? null) === 'sale.order' && ($args[4] ?? null) === 'create') {
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => 880], 200);
+                }
+                if (($args[3] ?? null) === 'sale.order' && ($args[4] ?? null) === 'search_read') {
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => [[
+                        'id' => 880,
+                        'name' => 'S00880',
+                        'partner_id' => [44, 'Damastech'],
+                        'amount_total' => 150,
+                        'currency_id' => [1, 'USD'],
+                        'state' => 'sent',
+                        'client_order_ref' => 'HOC-44',
+                        'origin' => 'HOC-44',
+                        'date_order' => '2026-10-08 10:00:00',
+                    ]]], 200);
+                }
+
+                return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => []], 200);
+            },
+        ]);
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+        $client = Client::factory()->create([
+            'company_name' => 'Damastech',
+            'email' => 'client@example.com',
+            'odoo_partner_id' => '44',
+        ]);
+        $serviceRequest = ServiceRequest::factory()->create([
+            'client_id' => $client->id,
+            'status' => RequestStatus::Submitted,
+        ]);
+
+        $this->postJson('/api/admin/odoo/quotations', [
+            'client_id' => $client->id,
+            'request_id' => $serviceRequest->id,
+            'action' => 'send',
+            'deliver' => 'email',
+            'lines' => [
+                ['title' => 'تصميم', 'amount' => 150, 'units' => 1],
+            ],
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.state', 'sent')
+            ->assertJsonPath('message', 'تم إرسال عرض السعر وربطه بالطلب.');
+
+        $serviceRequest->refresh();
+        $this->assertSame(RequestStatus::QuotationSent, $serviceRequest->status);
+        $this->assertSame('880', (string) $serviceRequest->odoo_quotation_id);
+        Mail::assertSent(ClientDocumentMail::class, function (ClientDocumentMail $mail): bool {
+            return $mail->mailer === 'reports'
+                && $mail->hasTo('client@example.com')
+                && $mail->hasFrom('reports@hoc.agency');
+        });
     }
 
     public function test_admin_creates_an_odoo_invoice_linked_to_a_quotation(): void

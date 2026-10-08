@@ -1,11 +1,17 @@
 # Laravel API
 
-Last updated: 8 October 2026 (`POST /admin/reports/to-pdf` installs Google Sans into the LibreOffice profile and renames IBM Plex Sans Arabic to Google Sans. `w:sz` is not changed, so the point size stays.)
+Last updated: 8 October 2026 (Quotation, invoice, and client emails use the `reports` SMTP mailer: `REPORT_MAIL_USERNAME` defaults to reports@hoc.agency, with `REPORT_MAIL_PASSWORD`. The website form still uses the `contact` mailer and `CONTACT_MAIL_USERNAME`.)
+
+Previous: 8 October 2026 (Client import matches an existing row by email or by phone digits, including spaced numbers. `odoo_lead_id` and `odoo_partner_id` are unique. A second Odoo partner with the same phone updates that row and does not replace its partner id.)
+
+Previous: 8 October 2026 (`POST /admin/odoo/quotations` with `action=send` and `POST /admin/odoo/invoices` with `action=post` require a client request and `deliver=email|phone`. Quotation send marks the Odoo order sent and moves the request to quotation sent. Invoice post posts the move and stores `odoo_invoice_id` on the request.)
+
+Previous: 8 October 2026 (`POST /admin/reports/to-pdf` installs Google Sans into the LibreOffice profile and renames IBM Plex Sans Arabic to Google Sans. `w:sz` is not changed, so the point size stays.)
 
 Previous: 8 October 2026 (`POST /admin/odoo/invoices` with `quotation_id` confirms a draft sale order when needed, then uses Odoo's `sale.advance.payment.inv` wizard so the invoice copies the quotation lines.)
 
 Previous: 8 October 2026 (Report publish writes only the Word file into the client's current Drive folder. `POST /admin/reports/to-pdf` converts that .docx to PDF with LibreOffice (`LIBREOFFICE_BINARY=soffice` on the server). The API image installs `libreoffice-writer` and `fonts-noto-core`. Choosing a Drive folder does not assign it; create-and-use does.)
-Last updated: 8 October 2026 (Financial vouchers: `GET/POST /admin/vouchers`, `GET/PUT/DELETE /admin/vouchers/{id}`, and `GET/POST /admin/voucher-templates`, `GET/DELETE /admin/voucher-templates/{id}`, ability `ops.vouchers` via `crud:`. Kinds `delivery`, `receipt`, `payment`, `journal`, `settlement`. A delivery amount is the sum of its lines. `background` is a JPEG, PNG, or WebP data URL behind the text and is omitted from the voucher list. A template stores that data; the same name replaces it. Signatures are PNG data URLs. A journal must balance. Serials look like `HOC-V-2026-0001`. The list omits signature images.)
+Last updated: 8 October 2026 (Financial vouchers: `GET/POST /admin/vouchers`, `GET/PUT/DELETE /admin/vouchers/{id}`, and `GET/POST /admin/voucher-templates`, `GET/DELETE /admin/voucher-templates/{id}`, ability `ops.vouchers` via `crud:`. Kinds `delivery`, `receipt`, `payment`, `journal`, `settlement`. A delivery amount is the sum of its lines. `background` is a JPEG, PNG, or WebP data URL that covers the whole sheet behind the content and is omitted from the voucher list. A template stores that data; the same name replaces it. Signatures are PNG data URLs. A journal must balance. Serials look like `HOC-V-2026-0001`. The list omits signature images.)
 Previous: 8 October 2026 (`POST /admin/odoo/quotations` and `POST /admin/odoo/invoices` create an Odoo sale order and customer invoice for a client that already has `odoo_partner_id`. An invoice can set `invoice_origin` from a quotation.)
 Last updated: 8 October 2026 (Odoo quotation and invoice PDFs share the company letterhead on one A4 page. The cover is 206mm by 278mm so the right edge and the bottom contact row are not clipped. Paper margins are 0. Text inset is padding. Smart shrinking is off.)
 Last updated: 6 October 2026 (`POST /site/ask` answers published-site questions with Gemini; the key stays on the server)

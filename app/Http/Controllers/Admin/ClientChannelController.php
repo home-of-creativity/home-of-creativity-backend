@@ -27,4 +27,20 @@ class ClientChannelController extends Controller
             'data' => array_merge(ClientChannelGate::payload(), $whatsAppWeb->status()),
         ]);
     }
+
+    public function unlinkWhatsapp(WhatsAppWebClient $whatsAppWeb): JsonResponse
+    {
+        try {
+            $status = $whatsAppWeb->unlink();
+        } catch (\Throwable) {
+            return response()->json([
+                'message' => 'WhatsApp Web could not unlink the phone.',
+            ], 422);
+        }
+
+        return response()->json([
+            'data' => array_merge(ClientChannelGate::payload(), $status),
+            'message' => 'ok',
+        ]);
+    }
 }

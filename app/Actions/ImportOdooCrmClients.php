@@ -32,6 +32,8 @@ class ImportOdooCrmClients
             ];
         }
 
+        app(CollapseDuplicateClients::class)->handle();
+
         $fromCrm = ['synced' => 0, 'created' => 0, 'updated' => 0];
         $fromPartners = ['synced' => 0, 'created' => 0, 'updated' => 0, 'pushed' => 0];
 
@@ -71,6 +73,7 @@ class ImportOdooCrmClients
         $leads = $this->odoo->listCrmClients($limit);
         $created = 0;
         $updated = 0;
+        Client::forgetContactIndex();
 
         foreach ($leads as $lead) {
             $result = $this->upsertClient(
@@ -120,8 +123,8 @@ class ImportOdooCrmClients
             $client = Client::query()->where('email', $email)->first();
         }
 
-        if (! $client && filled($phone)) {
-            $client = Client::query()->where('phone', $phone)->first();
+        if (! $client) {
+            $client = Client::findByContact($email, $phone);
         }
 
         $payload = array_filter([
@@ -144,13 +147,19 @@ class ImportOdooCrmClients
             if (filled($client->company_name) && ! ClientProfileValue::looksLikePhone($client->company_name)) {
                 unset($payload['company_name']);
             }
+            if (filled($client->odoo_partner_id)) {
+                unset($payload['odoo_partner_id']);
+            }
+            if (filled($client->odoo_lead_id)) {
+                unset($payload['odoo_lead_id']);
+            }
             $client->fill($payload)->save();
 
             return 'updated';
         }
 
         try {
-            Client::query()->create([
+            $created = Client::query()->create([
                 'name' => $name,
                 'email' => $email,
                 'phone' => $phone,
@@ -159,9 +168,26 @@ class ImportOdooCrmClients
                 'odoo_lead_id' => $odooLeadId,
                 'odoo_stage_name' => $odooStageName,
             ]);
+            Client::rememberContact($created);
 
             return 'created';
         } catch (\Throwable $exception) {
+            $existing = filled($odooLeadId) || filled($odooPartnerId)
+                ? Client::query()
+                    ->where(function ($query) use ($odooLeadId, $odooPartnerId): void {
+                        if (filled($odooLeadId)) {
+                            $query->orWhere('odoo_lead_id', $odooLeadId);
+                        }
+                        if (filled($odooPartnerId)) {
+                            $query->orWhere('odoo_partner_id', $odooPartnerId);
+                        }
+                    })
+                    ->first()
+                : null;
+            if ($existing) {
+                return 'updated';
+            }
+
             Log::warning('Odoo CRM client import skipped a row.', [
                 'name' => $name,
                 'email' => $email,

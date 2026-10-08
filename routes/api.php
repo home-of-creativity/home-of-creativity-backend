@@ -245,6 +245,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
     Route::middleware('ability:ops.channels')->group(function () {
         Route::put('ops-settings/client-channels', [AdminClientChannelController::class, 'update']);
         Route::get('ops-settings/whatsapp-web', [AdminClientChannelController::class, 'whatsappWeb']);
+        Route::post('ops-settings/whatsapp-web/logout', [AdminClientChannelController::class, 'unlinkWhatsapp']);
         Route::get('ops-settings/work-calendar', [AdminWorkScheduleController::class, 'showCalendar']);
         Route::put('ops-settings/work-calendar', [AdminWorkScheduleController::class, 'updateCalendar']);
     });

@@ -1,6 +1,14 @@
 # Staff dashboard (Vite SPA)
 
-Last updated: 8 October 2026 (Selecting a table replaces the Home formatting bar with تخطيط الجدول. There is no blank band above it. Choosing ملف / تنسيق / إدراج / مراجعة brings the Home bar back. The report face is Google Sans, and the PDF keeps that face and the point size.)
+Last updated: 8 October 2026 (The clients page lists each client once. The same phone does not appear as another row.)
+
+Previous: 8 October 2026 (Quotation and invoice create forms show the Odoo status bar, a request search, and send by email or phone.)
+
+Previous: 8 October 2026 (Bot channels: a linked WhatsApp number can be changed, and days off are a month calendar.)
+
+Previous: 8 October 2026 (A financial voucher picture covers the whole sheet behind the content, cropped to fill the page.)
+
+Previous: 8 October 2026 (Selecting a table replaces the Home formatting bar with تخطيط الجدول. There is no blank band above it. Choosing ملف / تنسيق / إدراج / مراجعة brings the Home bar back. The report face is Google Sans, and the PDF keeps that face and the point size.)
 
 Previous: 8 October 2026 (Financial vouchers can be saved as a named template with their data. A picture can sit behind the voucher text. A delivery total is the sum of the lines, not a second amount field.)
 
@@ -41,8 +49,8 @@ Demo: `admin@example.com` / `password`.
 | `/profile-pdf` | Company profile PDF: iframe preview of `GET /api/profile-pdf/file` (framed from hoc.agency), upload/replace, delete. The empty-file sentence shows only when there is no name and no URL. The published file appears as **الملف التعريفي / Profile** in the marketing footer and navbar. |
 | `/payments` | Client Sham Cash QR studio: Telegram-style preview, upload/replace, 4-step payment path |
 | `/finance` | Finance (`ops.finance`): received follows the live Odoo invoice (`paid` / `partial` count, `cancel` drops out immediately and the local invoice is marked cancelled). Filters: search, invoice state, client, date range, expense category. Same desk as the admin bot (`GET /admin/finance`, `POST /admin/finance/expenses`) |
-| `/vouchers` `/vouchers/new` `/vouchers/:id` | Financial vouchers (`ops.vouchers` view/create/update/delete). Template picker: delivery, receipt, payment, journal, settlement, plus named templates from `GET/POST/DELETE /admin/voucher-templates` (same ability). Saving a template keeps the party, lines, words, and background image, and opening it starts a new voucher with today's date and no signatures. The same name replaces the template. Form beside an A4 sheet. An uploaded picture sits behind the body text. A delivery total is the sum of the line amounts and is not typed again. Two signature pads (staff and the other party) draw on the sheet and are stored with the voucher. Print hides the form and the sidebar. Journal lines must balance. List search is by serial or party. Roles that already had `ops.finance` were granted the four verbs. |
-| `/channels` | Pause/resume **client** Telegram and WhatsApp independently (`GET /admin/ops-settings` + `PUT /admin/ops-settings/client-channels`). Staff/admin bots stay up. Pausing asks for confirm. With `WHATSAPP_TRANSPORT=web` the page shows the WhatsApp Web QR (`GET /admin/ops-settings/whatsapp-web`) until the company phone is linked. Meta stays locked unless `WHATSAPP_ENABLED=true`. |
+| `/vouchers` `/vouchers/new` `/vouchers/:id` | Financial vouchers (`ops.vouchers` view/create/update/delete). Template picker: delivery, receipt, payment, journal, settlement, plus named templates from `GET/POST/DELETE /admin/voucher-templates` (same ability). Saving a template keeps the party, lines, words, and background image, and opening it starts a new voucher with today's date and no signatures. The same name replaces the template. Form beside an A4 sheet. An uploaded picture covers the whole sheet behind the content, cropped to fill the page. The hummingbird mark stays only while no picture is set. A delivery total is the sum of the line amounts and is not typed again. Two signature pads (staff and the other party) draw on the sheet and are stored with the voucher. Print hides the form and the sidebar. Journal lines must balance. List search is by serial or party. Roles that already had `ops.finance` were granted the four verbs. |
+| `/channels` | Pause/resume **client** Telegram and WhatsApp independently (`GET /admin/ops-settings` + `PUT /admin/ops-settings/client-channels`). Staff/admin bots stay up. Pausing asks for confirm. With `WHATSAPP_TRANSPORT=web` the page shows the WhatsApp Web QR (`GET /admin/ops-settings/whatsapp-web`) until the company phone is linked, then the linked digits and **تغيير الرقم** (`POST /admin/ops-settings/whatsapp-web/logout`) which drops the session and shows a new code. Days off are a month calendar on the same page (`GET/PUT /admin/ops-settings/work-calendar`); tap a day, then save. Friday stays the weekly day off. Meta stays locked unless `WHATSAPP_ENABLED=true`. |
 | `/pricing` | Pricing CMS — every category `requires_full_payment` + `allows_renewal` badges; package partial-pay inherit/true/false |
 | `/projects` `/categories` | Portfolio |
 | `/reels` | Landing reels CMS — upload/replace/publish/sort; cover image can be removed (`DELETE /admin/reels/{id}/poster` or `remove_poster` on update); empty until staff add clips |

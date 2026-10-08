@@ -16,12 +16,31 @@ class WhatsAppWebClient implements WhatsAppMessenger
     }
 
     /**
-     * @return array{connected: bool, qr: string|null, reachable: bool}
+     * Drop the linked phone so the next status poll can show a fresh scan code.
+     *
+     * @return array{connected: bool, qr: string|null, phone: string|null, reachable: bool}
+     */
+    public function unlink(): array
+    {
+        if (! $this->configured()) {
+            throw new RuntimeException('WhatsApp Web bridge is not configured.');
+        }
+
+        $response = $this->http()->post($this->baseUrl().'/logout');
+        if (! $response->successful()) {
+            throw new RuntimeException($this->failureMessage($response));
+        }
+
+        return $this->status();
+    }
+
+    /**
+     * @return array{connected: bool, qr: string|null, phone: string|null, reachable: bool}
      */
     public function status(): array
     {
         if (! $this->configured()) {
-            return ['connected' => false, 'qr' => null, 'reachable' => false];
+            return ['connected' => false, 'qr' => null, 'phone' => null, 'reachable' => false];
         }
 
         try {
@@ -29,18 +48,20 @@ class WhatsAppWebClient implements WhatsAppMessenger
         } catch (\Throwable $exception) {
             Log::info('WhatsApp Web bridge is not reachable.', ['error' => $exception->getMessage()]);
 
-            return ['connected' => false, 'qr' => null, 'reachable' => false];
+            return ['connected' => false, 'qr' => null, 'phone' => null, 'reachable' => false];
         }
 
         if (! $response->successful()) {
-            return ['connected' => false, 'qr' => null, 'reachable' => false];
+            return ['connected' => false, 'qr' => null, 'phone' => null, 'reachable' => false];
         }
 
         $qr = $response->json('qr');
+        $phone = preg_replace('/\D+/', '', (string) $response->json('phone')) ?? '';
 
         return [
             'connected' => $response->json('connected') === true,
             'qr' => is_string($qr) && str_starts_with($qr, 'data:image/') ? $qr : null,
+            'phone' => $phone !== '' ? $phone : null,
             'reachable' => true,
         ];
     }

@@ -67,6 +67,81 @@ class Client extends Model
             : null;
     }
 
+    /** @var array{email: array<string, int>, phone: array<string, int>}|null */
+    private static ?array $contactIndex = null;
+
+    public static function forgetContactIndex(): void
+    {
+        self::$contactIndex = null;
+    }
+
+    public static function rememberContact(self $client): void
+    {
+        if (self::$contactIndex === null) {
+            return;
+        }
+
+        $email = strtolower(trim((string) $client->email));
+        if (str_contains($email, '@') && ! isset(self::$contactIndex['email'][$email])) {
+            self::$contactIndex['email'][$email] = $client->id;
+        }
+
+        $digits = preg_replace('/\D+/', '', (string) $client->phone) ?? '';
+        if (strlen($digits) >= 8) {
+            self::$contactIndex['phone'][$digits] = self::$contactIndex['phone'][$digits] ?? $client->id;
+            self::$contactIndex['phone'][substr($digits, -8)] = self::$contactIndex['phone'][substr($digits, -8)] ?? $client->id;
+        }
+    }
+
+    public static function findByContact(?string $email, ?string $phone): ?self
+    {
+        $index = self::contactIndex();
+        $email = strtolower(trim((string) $email));
+        if (str_contains($email, '@') && isset($index['email'][$email])) {
+            $found = static::query()->find($index['email'][$email]);
+            if ($found) {
+                return $found;
+            }
+        }
+
+        $digits = preg_replace('/\D+/', '', (string) $phone) ?? '';
+        if (strlen($digits) < 8) {
+            return null;
+        }
+
+        $id = $index['phone'][$digits] ?? $index['phone'][substr($digits, -8)] ?? null;
+
+        return $id ? static::query()->find($id) : null;
+    }
+
+    /**
+     * @return array{email: array<string, int>, phone: array<string, int>}
+     */
+    private static function contactIndex(): array
+    {
+        if (self::$contactIndex !== null) {
+            return self::$contactIndex;
+        }
+
+        $email = [];
+        $phone = [];
+
+        static::query()->orderBy('id')->get(['id', 'email', 'phone'])->each(function (self $client) use (&$email, &$phone): void {
+            $address = strtolower(trim((string) $client->email));
+            if (str_contains($address, '@')) {
+                $email[$address] ??= $client->id;
+            }
+
+            $digits = preg_replace('/\D+/', '', (string) $client->phone) ?? '';
+            if (strlen($digits) >= 8) {
+                $phone[$digits] ??= $client->id;
+                $phone[substr($digits, -8)] ??= $client->id;
+            }
+        });
+
+        return self::$contactIndex = ['email' => $email, 'phone' => $phone];
+    }
+
     public static function findForTelegram(?string $telegramUserId): ?self
     {
         if (! filled($telegramUserId)) {

@@ -46,6 +46,7 @@ class SendQuotation
         bool $skipStatusTransition = false,
         ?bool $requiresFullPayment = null,
         ?array $prepared = null,
+        ?string $channel = null,
     ): Quotation {
         $this->deliveredToClient = false;
 
@@ -56,13 +57,15 @@ class SendQuotation
         }
 
         if ($lines !== null && $lines !== []) {
-            $amount = (float) collect($lines)->sum(
-                fn (array $line): float => (float) $line['amount'] * (float) ($line['units'] ?? 1),
-            );
+            $amount = (float) collect($lines)->sum(function (array $line): float {
+                $discount = min(100, max(0, (float) ($line['discount'] ?? 0)));
+
+                return (float) $line['amount'] * (float) ($line['units'] ?? 1) * (1 - ($discount / 100));
+            });
             $notes = $this->formatQuotationLines($lines);
         }
 
-        $quotation = DB::transaction(function () use ($request, $amount, $notes, $actor, $lines, $skipStatusTransition, $requiresFullPayment, $prepared): Quotation {
+        $quotation = DB::transaction(function () use ($request, $amount, $notes, $actor, $lines, $skipStatusTransition, $requiresFullPayment, $prepared, $channel): Quotation {
             $version = ((int) $request->quotations()->max('version')) + 1;
             $pdfPath = $prepared !== null
                 ? $this->adoptPreparedPdf($request, $prepared, $version)
@@ -94,6 +97,18 @@ class SendQuotation
 
             try {
                 $caption = $this->quotationCaption($request, $amount, $notes, $version);
+                if ($channel === 'email' || $channel === 'phone') {
+                    $absolute = $pdfPath !== '' ? Storage::disk('local')->path($pdfPath) : null;
+                    $this->deliveredToClient = $request->client !== null && app(DeliverClientDocument::class)->send(
+                        $request->client,
+                        $channel,
+                        $caption,
+                        $absolute,
+                        $request->number.'.pdf',
+                    );
+
+                    return $quotation->fresh() ?? $quotation;
+                }
                 $chatId = $request->client?->telegram_user_id;
                 $keyboard = $chatId ? $this->quotationKeyboard($request) : null;
                 if ($pdfPath !== '') {

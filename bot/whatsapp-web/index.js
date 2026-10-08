@@ -21,6 +21,7 @@ const logger = pino({ level: "warn" });
 let sock = null;
 let connected = false;
 let qrDataUrl = "";
+let linkedPhone = "";
 let generation = 0;
 const jidByDigits = new Map();
 const menuByDigits = new Map();
@@ -212,16 +213,19 @@ async function start() {
       }
       if (update.qr) {
         connected = false;
+        linkedPhone = "";
         qrDataUrl = await QRCode.toDataURL(update.qr);
         logger.warn("WhatsApp Web is waiting for a phone scan");
       }
       if (update.connection === "open") {
         connected = true;
+        linkedPhone = phoneFromJid(sock?.user?.id);
         qrDataUrl = "";
         logger.warn("WhatsApp Web is linked");
       }
       if (update.connection === "close") {
         connected = false;
+        linkedPhone = "";
         const code = update.lastDisconnect?.error?.output?.statusCode;
         const loggedOut = code === DisconnectReason.loggedOut;
         if (loggedOut) {
@@ -306,6 +310,23 @@ async function sendToWhatsApp(body) {
   return sent?.key?.id || "ok";
 }
 
+async function unlinkPhone() {
+  const current = sock;
+  generation += 1;
+  sock = null;
+  connected = false;
+  linkedPhone = "";
+  qrDataUrl = "";
+  try {
+    await current?.logout();
+  } catch {
+    // The session is already gone. Clearing the files still starts a fresh code.
+  }
+  fs.rmSync(authDir, { recursive: true, force: true });
+  fs.mkdirSync(authDir, { recursive: true });
+  start();
+}
+
 const server = http.createServer(async (req, res) => {
   if (!authorized(req)) {
     sendJson(res, 401, { message: "Invalid webhook secret." });
@@ -314,7 +335,12 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || "/", "http://localhost");
   try {
     if (req.method === "GET" && url.pathname === "/status") {
-      sendJson(res, 200, { connected, qr: qrDataUrl || null });
+      sendJson(res, 200, { connected, qr: qrDataUrl || null, phone: linkedPhone || null });
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/logout") {
+      await unlinkPhone();
+      sendJson(res, 200, { connected: false, qr: null, phone: null });
       return;
     }
     if (req.method === "POST" && url.pathname === "/send") {

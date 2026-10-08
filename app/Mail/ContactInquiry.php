@@ -29,7 +29,7 @@ class ContactInquiry extends Mailable
         $from = (string) config('mail.mailers.contact.username');
 
         return new Envelope(
-            from: new Address($from !== '' ? $from : 'info@hoc.agency', 'Home of Creativity'),
+            from: new Address($from !== '' ? $from : 'contact@hoc.agency', 'Home of Creativity'),
             to: [new Address($this->toAddress)],
             cc: [new Address($this->ccAddress)],
             replyTo: [new Address($this->senderEmail, $this->senderName)],

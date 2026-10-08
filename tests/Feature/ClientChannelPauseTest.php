@@ -164,6 +164,34 @@ class ClientChannelPauseTest extends TestCase
             ->assertJsonPath('message', ClientChannelGate::TELEGRAM_PAUSED_PHONE_MESSAGE);
     }
 
+    public function test_admin_can_unlink_the_whatsapp_web_phone(): void
+    {
+        config([
+            'services.whatsapp.web_url' => 'http://wa-bridge.test',
+            'services.whatsapp.web_secret' => 'bridge-secret',
+        ]);
+        Http::fake([
+            'http://wa-bridge.test/logout' => Http::response(['ok' => true], 200),
+            'http://wa-bridge.test/status' => Http::response([
+                'connected' => false,
+                'qr' => 'data:image/png;base64,abc',
+                'phone' => null,
+            ], 200),
+        ]);
+
+        $this->actingAdmin()
+            ->postJson('/api/admin/ops-settings/whatsapp-web/logout')
+            ->assertOk()
+            ->assertJsonPath('data.connected', false)
+            ->assertJsonPath('data.qr', 'data:image/png;base64,abc');
+
+        Http::assertSent(function (Request $request) {
+            return $request->url() === 'http://wa-bridge.test/logout'
+                && $request->method() === 'POST'
+                && $request->hasHeader('X-Webhook-Secret', 'bridge-secret');
+        });
+    }
+
     private function actingAdmin()
     {
         $admin = User::factory()->create();

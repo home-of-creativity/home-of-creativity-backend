@@ -35,8 +35,13 @@ class NotifyClientChannels
 
             $email = $request->client?->email;
             if (filled($email)) {
-                Mail::raw($text, function ($message) use ($email): void {
+                $from = (string) config('mail.mailers.reports.username');
+                $mailer = filled(config('mail.mailers.reports.password')) ? 'reports' : (string) config('mail.default');
+                Mail::mailer($mailer)->raw($text, function ($message) use ($email, $from): void {
                     $message->to((string) $email)->subject('Home of Creativity');
+                    if ($from !== '') {
+                        $message->from($from, 'Home of Creativity');
+                    }
                 });
             }
         } catch (Throwable $exception) {

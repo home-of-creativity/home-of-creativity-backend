@@ -7,13 +7,14 @@ import { copy, type Locale } from "../i18n";
 
 const defaults: ClientChannels = { telegram_enabled: true, whatsapp_enabled: true };
 
-export function ClientChannelsPage({ t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
+export function ClientChannelsPage({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
   const [channels, setChannels] = useState<ClientChannels>(defaults);
   const [link, setLink] = useState<WhatsAppWebStatus | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<"telegram" | "whatsapp" | null>(null);
   const [hours, setHours] = useState("8");
-  const [holidays, setHolidays] = useState("");
+  const [holidays, setHolidays] = useState<string[]>([]);
+  const [unlinking, setUnlinking] = useState(false);
 
   useEffect(() => {
     api
@@ -31,7 +32,7 @@ export function ClientChannelsPage({ t }: { locale: Locale; t: (c: { ar: string;
       .workCalendar()
       .then((res) => {
         setHours(String(res.data.hours_per_day));
-        setHolidays(res.data.holidays.join("\n"));
+        setHolidays(res.data.holidays);
       })
       .catch(() => undefined);
   }, [t]);
@@ -68,16 +69,31 @@ export function ClientChannelsPage({ t }: { locale: Locale; t: (c: { ar: string;
     try {
       const res = await api.saveWorkCalendar({
         hours_per_day: Number(hours) || 8,
-        holidays: holidays
-          .split(/\n/)
-          .map((row) => row.trim())
-          .filter(Boolean),
+        holidays,
       });
       setHours(String(res.data.hours_per_day));
-      setHolidays(res.data.holidays.join("\n"));
+      setHolidays(res.data.holidays);
       toast.success(t(copy.channelsSaved));
     } catch (err) {
       setError(err instanceof Error ? err.message : t(copy.saveFailed));
+    }
+  }
+
+  function toggleHoliday(iso: string) {
+    setHolidays((current) => (current.includes(iso) ? current.filter((day) => day !== iso) : [...current, iso].sort()));
+  }
+
+  async function changeNumber() {
+    setUnlinking(true);
+    setError("");
+    try {
+      const res = await api.unlinkWhatsappWeb();
+      setLink(res.data);
+      toast.success(t(copy.channelsSaved));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t(copy.saveFailed));
+    } finally {
+      setUnlinking(false);
     }
   }
 
@@ -123,7 +139,22 @@ export function ClientChannelsPage({ t }: { locale: Locale; t: (c: { ar: string;
       {channels.whatsapp_transport === "web" ? (
         <section className="card stack">
           {link?.connected ? (
-            <p>{t(copy.channelsWhatsappLinked)}</p>
+            <>
+              <p>{t(copy.channelsWhatsappLinked)}</p>
+              {link.phone ? (
+                <p className="wa-link-phone">
+                  {t(copy.channelsWhatsappPhone)} <strong dir="ltr">+{link.phone}</strong>
+                </p>
+              ) : null}
+              <ConfirmAction
+                label={t(copy.channelsWhatsappChange)}
+                confirmLabel={t(copy.channelsWhatsappChangeConfirm)}
+                yesLabel={t(copy.channelsWhatsappChange)}
+                noLabel={t(copy.cancel)}
+                disabled={unlinking}
+                onConfirm={() => void changeNumber()}
+              />
+            </>
           ) : link && !link.reachable ? (
             <p className="error">{t(copy.channelsWhatsappOffline)}</p>
           ) : link?.qr ? (
@@ -144,18 +175,83 @@ export function ClientChannelsPage({ t }: { locale: Locale; t: (c: { ar: string;
         }}
       >
         <label className="field-label">
-          ساعات يوم العمل
-          <input className="field" value={hours} onChange={(event) => setHours(event.target.value)} />
+          {t(copy.channelsHours)}
+          <input className="field" value={hours} onChange={(event) => setHours(event.target.value)} inputMode="numeric" />
         </label>
-        <label className="field-label">
-          أيام العطل (YYYY-MM-DD)
-          <textarea className="field" rows={4} value={holidays} onChange={(event) => setHolidays(event.target.value)} />
-        </label>
+        <fieldset className="holiday-calendar">
+          <legend>{t(copy.channelsHolidays)}</legend>
+          <p className="muted">{t(copy.channelsHolidayHint)}</p>
+          <HolidayMonth locale={locale} dates={holidays} onToggle={toggleHoliday} t={t} />
+        </fieldset>
         <button className="btn btn-teal" type="submit">
-          حفظ التقويم
+          {t(copy.channelsSaveCalendar)}
         </button>
       </form>
     </>
+  );
+}
+
+function HolidayMonth({
+  locale,
+  dates,
+  onToggle,
+  t,
+}: {
+  locale: Locale;
+  dates: string[];
+  onToggle: (iso: string) => void;
+  t: (c: { ar: string; en: string }) => string;
+}) {
+  const [cursor, setCursor] = useState(() => new Date());
+  const year = cursor.getFullYear();
+  const month = cursor.getMonth();
+  const selected = new Set(dates);
+  const first = new Date(year, month, 1);
+  const offset = (first.getDay() + 1) % 7;
+  const count = new Date(year, month + 1, 0).getDate();
+  const cells = [...Array<number | null>(offset).fill(null), ...Array.from({ length: count }, (_, index) => index + 1)];
+  const language = locale === "ar" ? "ar" : "en";
+  const title = first.toLocaleDateString(language, { month: "long", year: "numeric" });
+  const weekdays = locale === "ar"
+    ? ["س", "ح", "ن", "ث", "ر", "خ", "ج"]
+    : ["Sa", "Su", "Mo", "Tu", "We", "Th", "Fr"];
+
+  return (
+    <div className="holiday-month">
+      <div className="holiday-month-nav">
+        <button type="button" className="btn btn-ghost" onClick={() => setCursor(new Date(year, month - 1, 1))}>
+          {t(copy.channelsPrevMonth)}
+        </button>
+        <strong>{title}</strong>
+        <button type="button" className="btn btn-ghost" onClick={() => setCursor(new Date(year, month + 1, 1))}>
+          {t(copy.channelsNextMonth)}
+        </button>
+      </div>
+      <div className="holiday-week" aria-hidden="true">
+        {weekdays.map((day) => <span key={day}>{day}</span>)}
+      </div>
+      <div className="holiday-grid">
+        {cells.map((day, index) => {
+          if (day === null) {
+            return <span key={`empty-${index}`} />;
+          }
+          const iso = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+          const friday = new Date(year, month, day).getDay() === 5;
+          const on = selected.has(iso);
+          return (
+            <button
+              key={iso}
+              type="button"
+              className={on ? "holiday-day is-off" : friday ? "holiday-day is-friday" : "holiday-day"}
+              aria-pressed={on}
+              onClick={() => onToggle(iso)}
+            >
+              {day}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

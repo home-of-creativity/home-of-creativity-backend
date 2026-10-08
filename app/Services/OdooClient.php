@@ -1199,13 +1199,7 @@ class OdooClient
         }
 
         $values['invoice_line_ids'] = array_map(
-            fn (array $line): array => [0, 0, $this->invoiceLine([
-                'name' => filled($line['notes'] ?? null)
-                    ? "{$line['title']}\n{$line['notes']}"
-                    : (string) $line['title'],
-                'quantity' => (float) ($line['units'] ?? 1),
-                'price_unit' => (float) $line['amount'],
-            ])],
+            fn (array $line): array => [0, 0, $this->staffInvoiceLine($line)],
             $lines,
         );
 
@@ -1254,13 +1248,7 @@ class OdooClient
 
         if ($lines !== null && $lines !== []) {
             $orderValues['order_line'] = array_map(
-                fn (array $line): array => [0, 0, $this->saleOrderLine([
-                    'name' => filled($line['notes'] ?? null)
-                        ? "{$line['title']}\n{$line['notes']}"
-                        : (string) $line['title'],
-                    'product_uom_qty' => (float) ($line['units'] ?? 1),
-                    'price_unit' => (float) $line['amount'],
-                ])],
+                fn (array $line): array => [0, 0, $this->staffSaleLine($line)],
                 $lines,
             );
         } elseif ($amount !== null && $amount > 0) {
@@ -1288,6 +1276,64 @@ class OdooClient
             'odoo_partner_id' => (string) $partnerId,
             'odoo_quotation_id' => (string) $orderId,
         ];
+    }
+
+    public function writeSaleDates(int $id, ?string $dateOrder, ?string $validity): void
+    {
+        if ($id <= 0 || ! $this->configured()) {
+            return;
+        }
+
+        $vals = [];
+        if (filled($dateOrder)) {
+            $vals['date_order'] = $dateOrder.' 00:00:00';
+        }
+        if (filled($validity)) {
+            $vals['validity_date'] = $validity;
+        }
+        if ($vals === []) {
+            return;
+        }
+
+        $this->call('sale.order', 'write', ['ids' => [$id], 'vals' => $vals]);
+    }
+
+    public function writeInvoiceDates(int $id, ?string $invoiceDate, ?string $dueDate): void
+    {
+        if ($id <= 0 || ! $this->configured()) {
+            return;
+        }
+
+        $vals = [];
+        if (filled($invoiceDate)) {
+            $vals['invoice_date'] = $invoiceDate;
+        }
+        if (filled($dueDate)) {
+            $vals['invoice_date_due'] = $dueDate;
+        }
+        if ($vals === []) {
+            return;
+        }
+
+        $this->call('account.move', 'write', ['ids' => [$id], 'vals' => $vals]);
+    }
+
+    public function markQuotationSent(int $id): void
+    {
+        if ($id <= 0 || ! $this->configured()) {
+            return;
+        }
+
+        $this->call('sale.order', 'action_quotation_sent', ['ids' => [$id]]);
+    }
+
+    public function postInvoice(int $id): void
+    {
+        if ($id <= 0 || ! $this->configured()) {
+            return;
+        }
+
+        $this->call('account.move', 'action_post', ['ids' => [$id]]);
     }
 
     public function downloadSaleOrderPdf(int|string $orderId): ?string
@@ -1368,9 +1414,10 @@ class OdooClient
             }
         }
 
-        if (filled($phone)) {
+        $digits = preg_replace('/\D+/', '', (string) $phone) ?? '';
+        if (strlen($digits) >= 8) {
             $existing = $this->call('res.partner', 'search', [
-                'domain' => [['phone', '=', $phone]],
+                'domain' => [['phone', 'ilike', substr($digits, -8)]],
                 'limit' => 1,
             ]);
             if (is_array($existing) && isset($existing[0])) {
@@ -1829,6 +1876,64 @@ class OdooClient
      * @param  array<string, mixed>  $values
      * @return array<string, mixed>
      */
+    /**
+     * @param  array{title?: string, amount?: float|int|string|null, units?: float|int|string|null, notes?: string|null, discount?: float|int|string|null, display_type?: string|null}  $line
+     * @return array<string, mixed>
+     */
+    private function staffSaleLine(array $line): array
+    {
+        $type = $line['display_type'] ?? null;
+        if ($type === 'line_section' || $type === 'line_note') {
+            return [
+                'display_type' => $type,
+                'name' => (string) ($line['title'] ?? ''),
+            ];
+        }
+
+        $values = [
+            'name' => filled($line['notes'] ?? null)
+                ? "{$line['title']}\n{$line['notes']}"
+                : (string) ($line['title'] ?? ''),
+            'product_uom_qty' => (float) ($line['units'] ?? 1),
+            'price_unit' => (float) ($line['amount'] ?? 0),
+        ];
+        $discount = (float) ($line['discount'] ?? 0);
+        if ($discount > 0) {
+            $values['discount'] = $discount;
+        }
+
+        return $this->saleOrderLine($values);
+    }
+
+    /**
+     * @param  array{title?: string, amount?: float|int|string|null, units?: float|int|string|null, notes?: string|null, discount?: float|int|string|null, display_type?: string|null}  $line
+     * @return array<string, mixed>
+     */
+    private function staffInvoiceLine(array $line): array
+    {
+        $type = $line['display_type'] ?? null;
+        if ($type === 'line_section' || $type === 'line_note') {
+            return [
+                'display_type' => $type,
+                'name' => (string) ($line['title'] ?? ''),
+            ];
+        }
+
+        $values = [
+            'name' => filled($line['notes'] ?? null)
+                ? "{$line['title']}\n{$line['notes']}"
+                : (string) ($line['title'] ?? ''),
+            'quantity' => (float) ($line['units'] ?? 1),
+            'price_unit' => (float) ($line['amount'] ?? 0),
+        ];
+        $discount = (float) ($line['discount'] ?? 0);
+        if ($discount > 0) {
+            $values['discount'] = $discount;
+        }
+
+        return $this->invoiceLine($values);
+    }
+
     private function saleOrderLine(array $values): array
     {
         return array_merge($values, [
@@ -1888,7 +1993,7 @@ class OdooClient
             ];
         }
 
-        if (in_array($method, ['action_post', 'action_create_payments', 'action_confirm', 'create_invoices'], true)) {
+        if (in_array($method, ['action_post', 'action_create_payments', 'action_confirm', 'action_quotation_sent', 'create_invoices'], true)) {
             return [
                 'ids' => $payload['ids'] ?? [],
             ];
@@ -2006,7 +2111,7 @@ class OdooClient
             ]);
         }
 
-        if (in_array($method, ['action_post', 'action_create_payments', 'action_confirm', 'create_invoices'], true)) {
+        if (in_array($method, ['action_post', 'action_create_payments', 'action_confirm', 'action_quotation_sent', 'create_invoices'], true)) {
             return $this->execute($uid, $model, $method, [
                 $payload['ids'] ?? [],
             ]);

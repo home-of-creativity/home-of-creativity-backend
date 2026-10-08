@@ -201,6 +201,7 @@ export type ClientChannels = {
 export type WhatsAppWebStatus = ClientChannels & {
   connected: boolean;
   qr: string | null;
+  phone: string | null;
   reachable: boolean;
 };
 
@@ -1177,6 +1178,9 @@ export const api = {
   whatsappWebStatus() {
     return request<Envelope<WhatsAppWebStatus>>("/admin/ops-settings/whatsapp-web");
   },
+  unlinkWhatsappWeb() {
+    return request<Envelope<WhatsAppWebStatus>>("/admin/ops-settings/whatsapp-web/logout", { method: "POST" });
+  },
   async receiptBlob(requestId: number, fileId: number) {
     const headers = new Headers({ Accept: "application/octet-stream" });
     const token = getToken();
@@ -1395,9 +1399,14 @@ export const api = {
   },
   createOdooQuotation(payload: {
     client_id: number;
+    request_id?: number;
+    action?: "draft" | "send";
+    deliver?: "email" | "phone";
     reference?: string;
     notes?: string;
-    lines: { title: string; amount: number; units: number; notes?: string }[];
+    date_order?: string;
+    validity_date?: string;
+    lines: { title: string; amount?: number; units?: number; notes?: string; discount?: number; display_type?: "line_section" | "line_note" }[];
   }) {
     return request<{ data: OdooQuotation; message?: string }>("/admin/odoo/quotations", {
       method: "POST",
@@ -1406,9 +1415,14 @@ export const api = {
   },
   createOdooInvoice(payload: {
     client_id: number;
+    request_id?: number;
+    action?: "draft" | "post";
+    deliver?: "email" | "phone";
     quotation_id?: number;
     reference?: string;
-    lines?: { title: string; amount: number; units: number; notes?: string }[];
+    invoice_date?: string;
+    due_date?: string;
+    lines?: { title: string; amount?: number; units?: number; notes?: string; discount?: number; display_type?: "line_section" | "line_note" }[];
   }) {
     return request<{ data: OdooInvoice; message?: string }>("/admin/odoo/invoices", {
       method: "POST",

@@ -679,7 +679,7 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
         </form>
 
         <article className="voucher-sheet is-letter" dir="rtl">
-          <img className="voucher-watermark" src={`${import.meta.env.BASE_URL}hummingbird.svg`} alt="" />
+          {draft.background ? <img className="voucher-page-bg" src={draft.background} alt="" /> : <img className="voucher-watermark" src={`${import.meta.env.BASE_URL}hummingbird.svg`} alt="" />}
           <span className="voucher-corner is-top" aria-hidden="true" />
           <span className="voucher-corner is-bottom" aria-hidden="true" />
           <header className="voucher-lockup" dir="ltr">
@@ -693,7 +693,6 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
             <p><span>{t(copy.voucherSerial)}</span><strong dir="ltr">{shortSerial(serial)}</strong></p>
           </div>
           <div className="voucher-text">
-            {draft.background ? <img className="voucher-text-bg" src={draft.background} alt="" /> : null}
           {draft.kind === "delivery" ? (
             <div className="voucher-copy">
               <p><span>{t(copy.voucherRecipient)}</span><strong>{[draft.party_name, draft.reference].filter(Boolean).join(" / ") || "………………"}</strong></p>

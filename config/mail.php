@@ -84,8 +84,18 @@ return [
             'scheme' => env('CONTACT_MAIL_SCHEME', 'smtps'),
             'host' => env('CONTACT_MAIL_HOST', 'premium319.web-hosting.com'),
             'port' => env('CONTACT_MAIL_PORT', 465),
-            'username' => env('CONTACT_MAIL_USERNAME', 'info@hoc.agency'),
+            'username' => env('CONTACT_MAIL_USERNAME', 'contact@hoc.agency'),
             'password' => env('CONTACT_MAIL_PASSWORD'),
+            'timeout' => 15,
+        ],
+
+        'reports' => [
+            'transport' => 'smtp',
+            'scheme' => env('REPORT_MAIL_SCHEME', env('CONTACT_MAIL_SCHEME', 'smtps')),
+            'host' => env('REPORT_MAIL_HOST', env('CONTACT_MAIL_HOST', 'premium319.web-hosting.com')),
+            'port' => env('REPORT_MAIL_PORT', env('CONTACT_MAIL_PORT', 465)),
+            'username' => env('REPORT_MAIL_USERNAME', 'reports@hoc.agency'),
+            'password' => env('REPORT_MAIL_PASSWORD'),
             'timeout' => 15,
         ],
 

@@ -26,17 +26,21 @@ class SyncOdooPartners
         $partners = $this->odoo->listPartners($limit);
         $created = 0;
         $updated = 0;
+        Client::forgetContactIndex();
 
         foreach ($partners as $partner) {
             $odooId = (string) $partner['id'];
             $client = Client::query()->where('odoo_partner_id', $odooId)->first();
 
-            if (! $client && filled($partner['email'])) {
-                $client = Client::query()->where('email', $partner['email'])->first();
+            if (! $client) {
+                $client = Client::findByContact($partner['email'] ?? null, $partner['phone'] ?? null);
             }
 
             if ($client) {
-                $payload = ['odoo_partner_id' => $odooId];
+                $payload = [];
+                if (! filled($client->odoo_partner_id)) {
+                    $payload['odoo_partner_id'] = $odooId;
+                }
                 if (! filled($client->email) && filled($partner['email'])) {
                     $payload['email'] = $partner['email'];
                 }
@@ -53,12 +57,13 @@ class SyncOdooPartners
             }
 
             try {
-                Client::query()->create([
+                $client = Client::query()->create([
                     'name' => $partner['name'],
                     'email' => $partner['email'],
                     'phone' => $partner['phone'],
                     'odoo_partner_id' => $odooId,
                 ]);
+                Client::rememberContact($client);
                 $created++;
             } catch (\Throwable $exception) {
                 Log::warning('Odoo partner sync skipped a row.', [
