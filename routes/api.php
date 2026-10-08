@@ -8,6 +8,7 @@ use App\Http\Controllers\Admin\ContactChannelController as AdminContactChannelCo
 use App\Http\Controllers\Admin\DriveFolderController as AdminDriveFolderController;
 use App\Http\Controllers\Admin\EmployeeController as AdminEmployeeController;
 use App\Http\Controllers\Admin\FinanceController as AdminFinanceController;
+use App\Http\Controllers\Admin\FinancialVoucherController as AdminFinancialVoucherController;
 use App\Http\Controllers\Admin\LandingReelController as AdminLandingReelController;
 use App\Http\Controllers\Admin\LegalPageController as AdminLegalPageController;
 use App\Http\Controllers\Admin\LiveController;
@@ -20,6 +21,7 @@ use App\Http\Controllers\Admin\PricingPackageController as AdminPricingPackageCo
 use App\Http\Controllers\Admin\PricingSubcategoryController as AdminPricingSubcategoryController;
 use App\Http\Controllers\Admin\ProfilePdfController as AdminProfilePdfController;
 use App\Http\Controllers\Admin\ReportGeminiController;
+use App\Http\Controllers\Admin\ReportTemplateController;
 use App\Http\Controllers\Admin\RoleController;
 use App\Http\Controllers\Admin\ServiceRequestController as AdminServiceRequestController;
 use App\Http\Controllers\Admin\ShowcaseClientController as AdminShowcaseClientController;
@@ -129,7 +131,9 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::post('odoo/import-crm-clients', [AdminOdooController::class, 'importCrmClients']);
         Route::post('odoo/import-crm-clients/excel', [AdminOdooController::class, 'importCrmClientsExcel']);
         Route::get('odoo/quotations', [AdminOdooController::class, 'quotations']);
+        Route::post('odoo/quotations', [AdminOdooController::class, 'storeQuotation']);
         Route::get('odoo/invoices', [AdminOdooController::class, 'invoices']);
+        Route::post('odoo/invoices', [AdminOdooController::class, 'storeInvoice']);
     });
 
     Route::middleware('crud:ops.clients,ops.reports')->group(function () {
@@ -138,12 +142,29 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::put('clients/{client}/drive-folder', [AdminClientController::class, 'driveFolder']);
     });
 
-    Route::middleware('crud:ops.reports')->group(function () {
+    Route::middleware('ability:ops.report_gemini')->group(function () {
         Route::get('report-memories', [ReportGeminiController::class, 'memories']);
         Route::post('report-memories', [ReportGeminiController::class, 'storeMemory']);
         Route::delete('report-memories/{reportMemory}', [ReportGeminiController::class, 'destroyMemory']);
         Route::post('reports/gemini', [ReportGeminiController::class, 'edit']);
         Route::post('reports/gemini-image', [ReportGeminiController::class, 'image'])->middleware('throttle:4,1');
+    });
+
+    Route::middleware('ability:ops.drive')->group(function () {
+        Route::get('drive/storage-account', [GoogleDriveAccountController::class, 'show']);
+        Route::put('drive/storage-account/client', [GoogleDriveAccountController::class, 'updateClient']);
+        Route::post('drive/storage-account/connect', [GoogleDriveAccountController::class, 'connect'])->middleware('throttle:10,1');
+        Route::delete('drive/storage-account', [GoogleDriveAccountController::class, 'destroy']);
+    });
+
+    Route::middleware('ability:ops.report_templates')->group(function () {
+        Route::get('report-templates', [ReportTemplateController::class, 'index']);
+        Route::post('report-templates', [ReportTemplateController::class, 'store']);
+        Route::get('report-templates/{report_template}/document', [ReportTemplateController::class, 'document']);
+        Route::delete('report-templates/{report_template}', [ReportTemplateController::class, 'destroy']);
+    });
+
+    Route::middleware('crud:ops.reports')->group(function () {
         Route::get('reports/{client_report}/document', [AdminClientReportController::class, 'document']);
         Route::get('reports/{client_report}/pdf', [AdminClientReportController::class, 'pdf']);
         Route::get('reports', [AdminClientReportController::class, 'clients']);
@@ -152,10 +173,6 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::get('reports/{client_report}', [AdminClientReportController::class, 'show']);
         Route::match(['put', 'post'], 'reports/{client_report}', [AdminClientReportController::class, 'update']);
         Route::delete('reports/{client_report}', [AdminClientReportController::class, 'destroy']);
-        Route::get('drive/storage-account', [GoogleDriveAccountController::class, 'show']);
-        Route::put('drive/storage-account/client', [GoogleDriveAccountController::class, 'updateClient']);
-        Route::post('drive/storage-account/connect', [GoogleDriveAccountController::class, 'connect'])->middleware('throttle:10,1');
-        Route::delete('drive/storage-account', [GoogleDriveAccountController::class, 'destroy']);
     });
 
     Route::middleware('crud:ops.employees')->group(function () {
@@ -193,8 +210,19 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
     Route::middleware('ability:ops.payments')->group(function () {
         Route::get('ops-settings/sham-cash-qr', [AdminServiceRequestController::class, 'shamCashQrPreview']);
         Route::post('ops-settings/sham-cash-qr', [AdminServiceRequestController::class, 'uploadShamCashQr']);
+    });
+
+    Route::middleware('ability:ops.finance')->group(function () {
         Route::get('finance', [AdminFinanceController::class, 'index']);
         Route::post('finance/expenses', [AdminFinanceController::class, 'storeExpense']);
+    });
+
+    Route::middleware('crud:ops.vouchers')->group(function () {
+        Route::get('vouchers', [AdminFinancialVoucherController::class, 'index']);
+        Route::post('vouchers', [AdminFinancialVoucherController::class, 'store']);
+        Route::get('vouchers/{voucher}', [AdminFinancialVoucherController::class, 'show']);
+        Route::put('vouchers/{voucher}', [AdminFinancialVoucherController::class, 'update']);
+        Route::delete('vouchers/{voucher}', [AdminFinancialVoucherController::class, 'destroy']);
     });
 
     Route::middleware('ability:site.profile_pdf')->group(function () {

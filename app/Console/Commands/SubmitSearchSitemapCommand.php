@@ -39,7 +39,8 @@ class SubmitSearchSitemapCommand extends Command
         $submit = Http::withToken($token)
             ->timeout(15)
             ->connectTimeout(5)
-            ->put($endpoint);
+            ->withBody('{}', 'application/json')
+            ->send('PUT', $endpoint);
 
         if ($submit->successful()) {
             $this->info('Search Console sitemap submitted.');
@@ -67,17 +68,7 @@ class SubmitSearchSitemapCommand extends Command
             'host' => $host,
             'key' => $key,
             'keyLocation' => $origin.'/'.$key.'.txt',
-            'urlList' => [
-                $origin.'/',
-                $origin.'/pricing/',
-                $origin.'/social/',
-                $origin.'/locations/',
-                $origin.'/privacy/',
-                $origin.'/terms/',
-                $origin.'/llms.txt',
-                $origin.'/llms-full.txt',
-                $sitemap,
-            ],
+            'urlList' => $this->indexNowUrls($sitemap, $origin),
         ];
 
         $ping = Http::timeout(12)
@@ -93,5 +84,55 @@ class SubmitSearchSitemapCommand extends Command
         }
 
         $this->warn('IndexNow returned HTTP '.$ping->status().'.');
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function indexNowUrls(string $sitemap, string $origin): array
+    {
+        $fallback = [
+            $origin.'/',
+            $origin.'/about/',
+            $origin.'/services/',
+            $origin.'/services/booth-design/',
+            $origin.'/pricing/',
+            $origin.'/social/',
+            $origin.'/locations/',
+            $origin.'/locations/damascus/',
+            $origin.'/locations/riyadh/',
+            $origin.'/privacy/',
+            $origin.'/terms/',
+            $origin.'/llms.txt',
+            $origin.'/llms-full.txt',
+            $sitemap,
+        ];
+
+        $response = Http::timeout(12)
+            ->connectTimeout(5)
+            ->get($sitemap);
+
+        if (! $response->successful()) {
+            return $fallback;
+        }
+
+        preg_match_all('#<loc>\s*(https://[^<\s]+)\s*</loc>#i', $response->body(), $matches);
+        $locs = array_values(array_unique($matches[1] ?? []));
+        $locs = array_values(array_filter(
+            $locs,
+            fn (string $url): bool => str_starts_with($url, $origin.'/'),
+        ));
+
+        if ($locs === []) {
+            return $fallback;
+        }
+
+        foreach ([$origin.'/llms.txt', $origin.'/llms-full.txt', $sitemap] as $extra) {
+            if (! in_array($extra, $locs, true)) {
+                $locs[] = $extra;
+            }
+        }
+
+        return array_slice($locs, 0, 10000);
     }
 }

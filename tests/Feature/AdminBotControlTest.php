@@ -7,9 +7,11 @@ use App\Models\Client;
 use App\Models\Invoice;
 use App\Models\OpsExpense;
 use App\Models\ServiceRequest;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
+use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 class AdminBotControlTest extends TestCase
@@ -125,6 +127,80 @@ class AdminBotControlTest extends TestCase
                 && (int) ($payload['priority'] ?? 0) === 1
                 && isset($payload['due_date']);
         });
+    }
+
+    public function test_finance_drops_received_money_when_the_odoo_invoice_is_cancelled(): void
+    {
+        Http::preventStrayRequests();
+        config([
+            'services.telegram.admin_telegram_ids' => ['8260054672'],
+            'services.odoo.enabled' => true,
+            'services.odoo.url' => 'https://odoo.test',
+            'services.odoo.db' => 'hoc',
+            'services.odoo.username' => 'admin',
+            'services.odoo.api_key' => 'secret-key',
+            'services.odoo.use_json2' => false,
+        ]);
+
+        $client = Client::factory()->create(['company_name' => 'Damastech']);
+        $request = ServiceRequest::factory()->for($client)->create([
+            'amount_paid' => 400,
+            'amount_remaining' => 0,
+            'status' => RequestStatus::PaymentConfirmed,
+        ]);
+        $invoice = Invoice::query()->create([
+            'request_id' => $request->id,
+            'invoice_number' => 'INV-CANCEL',
+            'amount' => 400,
+            'kind' => 'received',
+            'status' => 'paid',
+            'odoo_invoice_id' => '501',
+            'issued_at' => now(),
+        ]);
+
+        Http::fake([
+            'https://odoo.test/jsonrpc' => function (Request $http) {
+                $params = $http->data()['params'] ?? [];
+                if (($params['service'] ?? '') === 'common') {
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => 2], 200);
+                }
+
+                return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => [[
+                    'id' => 501,
+                    'name' => 'INV/2026/0001',
+                    'partner_id' => [44, 'Damastech'],
+                    'amount_total' => 400,
+                    'amount_residual' => 0,
+                    'currency_id' => [1, 'USD'],
+                    'state' => 'cancel',
+                    'payment_state' => 'not_paid',
+                    'invoice_origin' => false,
+                    'ref' => 'REQ-1',
+                    'invoice_date' => '2026-10-08',
+                ]]], 200);
+            },
+        ]);
+
+        $this->adminBot()->getJson('/api/bot/admin/finance?telegram_user_id=8260054672')
+            ->assertOk()
+            ->assertJsonPath('data.revenue_paid', 0)
+            ->assertJsonPath('data.invoices.0.state', 'cancelled');
+
+        $this->assertSame('cancelled', $invoice->fresh()->status);
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        $this->getJson('/api/admin/finance?invoice_state=paid')
+            ->assertOk()
+            ->assertJsonPath('data.revenue_paid', 0)
+            ->assertJsonCount(0, 'data.invoices');
+
+        $this->getJson('/api/admin/finance?invoice_state=cancelled&client=Damastech')
+            ->assertOk()
+            ->assertJsonPath('data.invoices.0.state', 'cancelled')
+            ->assertJsonPath('data.revenue_paid', 0);
     }
 
     public function test_non_admin_cannot_open_desk(): void

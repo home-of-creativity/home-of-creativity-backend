@@ -144,9 +144,13 @@ class StaffAccessController extends Controller
                 default => 'social',
             };
 
+            $labels = $ability->labels();
+
             return [
                 'key' => $ability->value,
                 'group' => $group,
+                'label_ar' => $labels['ar'],
+                'label_en' => $labels['en'],
                 'actions' => in_array($ability->value, StaffAbility::crudResources(), true)
                     ? StaffAbility::crudActions()
                     : [],

@@ -20,7 +20,13 @@ const abilityLabels: Record<StaffModule, { ar: string; en: string }> = {
   "ops.reports": { ar: "التقارير", en: "Reports" },
   "ops.employees": { ar: "الموظفون", en: "Employees" },
   "ops.payments": { ar: "المدفوعات", en: "Payments" },
+  "ops.finance": { ar: "المالية", en: "Finance" },
+  "ops.vouchers": { ar: "المسندات المالية", en: "Financial vouchers" },
   "ops.channels": { ar: "قنوات البوت", en: "Bot channels" },
+  "ops.report_gemini": { ar: "مساعد التقارير", en: "Report assistant" },
+  "ops.report_templates": { ar: "قوالب التقارير", en: "Report templates" },
+  "ops.report_media": { ar: "صور التقارير ومربع النص", en: "Report pictures and text box" },
+  "ops.drive": { ar: "حساب تخزين Drive", en: "Drive storage account" },
   "site.projects": { ar: "المشاريع", en: "Projects" },
   "site.categories": { ar: "التصنيفات", en: "Categories" },
   "site.reels": { ar: "الريلز", en: "Reels" },
@@ -46,7 +52,7 @@ const crudLabels: Record<CrudAction, { ar: string; en: string }> = {
 
 const pageAbilities = ["social.content", "social.approve", "social.engage", "social.messages"] as const;
 
-type AbilityModule = { key: StaffModule; group: "ops" | "site" | "social"; actions: CrudAction[] };
+type AbilityModule = { key: StaffModule; group: "ops" | "site" | "social"; actions: CrudAction[]; label_ar?: string; label_en?: string };
 
 type Draft = {
   id: number | null;
@@ -92,6 +98,29 @@ function withoutModule(abilities: string[], item: AbilityModule) {
   return abilities.filter((ability) => ability !== item.key && !ability.startsWith(`${item.key}.`));
 }
 
+function generatePassword() {
+  const lower = "abcdefghijkmnopqrstuvwxyz";
+  const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const digits = "23456789";
+  const symbols = "!@#$%&*";
+  const all = lower + upper + digits + symbols;
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  const pick = (alphabet: string, index: number) => alphabet[bytes[index] % alphabet.length];
+  const chars = [
+    pick(lower, 0),
+    pick(upper, 1),
+    pick(digits, 2),
+    pick(symbols, 3),
+    ...Array.from({ length: 12 }, (_, index) => pick(all, index + 4)),
+  ];
+  for (let index = chars.length - 1; index > 0; index -= 1) {
+    const swap = bytes[index % bytes.length] % (index + 1);
+    [chars[index], chars[swap]] = [chars[swap], chars[index]];
+  }
+  return chars.join("");
+}
+
 function moduleFilled(abilities: string[], item: AbilityModule) {
   return moduleKeys(item).filter((key) => {
     const action = item.actions.find((verb) => key.endsWith(`.${verb}`));
@@ -99,7 +128,7 @@ function moduleFilled(abilities: string[], item: AbilityModule) {
   }).length;
 }
 
-export function Permissions({ t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
+export function Permissions({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
   const [roles, setRoles] = useState<StaffRole[]>([]);
   const [staff, setStaff] = useState<StaffAccessRow[]>([]);
   const [pages, setPages] = useState<SocialPageOption[]>([]);
@@ -108,6 +137,7 @@ export function Permissions({ t }: { locale: Locale; t: (c: { ar: string; en: st
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [passwords, setPasswords] = useState<Record<number, string>>({});
+  const [shownPasswords, setShownPasswords] = useState<Record<number, boolean>>({});
 
   function load() {
     return Promise.all([api.roles(), api.staffAccess()]).then(([roleRes, access]) => {
@@ -204,6 +234,31 @@ export function Permissions({ t }: { locale: Locale; t: (c: { ar: string; en: st
     }
   }
 
+  function abilityName(key: string) {
+    const item = groups.find((module) => module.key === key);
+    const label = item?.label_ar && item.label_en
+      ? { ar: item.label_ar, en: item.label_en }
+      : abilityLabels[key as StaffModule];
+    return label ? label[locale] : key;
+  }
+
+  function fillPassword(id: number) {
+    const password = generatePassword();
+    setPasswords((current) => ({ ...current, [id]: password }));
+    setShownPasswords((current) => ({ ...current, [id]: true }));
+  }
+
+  async function copyPassword(id: number) {
+    const password = passwords[id];
+    if (!password) return;
+    try {
+      await navigator.clipboard.writeText(password);
+      toast.success(t(copy.passwordCopied));
+    } catch {
+      toast.error(t(copy.saveFailed));
+    }
+  }
+
   function setModules(items: AbilityModule[], on: boolean) {
     setDraft((current) => {
       let abilities = current.abilities;
@@ -274,7 +329,7 @@ export function Permissions({ t }: { locale: Locale; t: (c: { ar: string; en: st
                     return item.actions.length === 0 ? (
                       <label key={item.key} className="check-row">
                         <input type="checkbox" checked={holds(draft.abilities, item.key)} onChange={() => toggleAbility(item.key)} />
-                        {t(abilityLabels[item.key])}
+                        {abilityName(item.key)}
                       </label>
                     ) : (
                       <div key={item.key} className="permission-part">
@@ -287,7 +342,7 @@ export function Permissions({ t }: { locale: Locale; t: (c: { ar: string; en: st
                             }}
                             onChange={(event) => setModules([item], event.target.checked)}
                           />
-                          <strong>{t(abilityLabels[item.key])}</strong>
+                          <strong>{abilityName(item.key)}</strong>
                         </label>
                         {item.actions.map((action) => (
                           <label key={action} className="check-row">
@@ -364,13 +419,23 @@ export function Permissions({ t }: { locale: Locale; t: (c: { ar: string; en: st
                       </select>
                     </td>
                     <td>
-                      <input
-                        type="password"
-                        autoComplete="new-password"
-                        placeholder={row.has_account ? t(copy.passwordHint) : ""}
-                        value={passwords[row.id] ?? ""}
-                        onChange={(event) => setPasswords((current) => ({ ...current, [row.id]: event.target.value }))}
-                      />
+                      <div className="password-field">
+                        <input
+                          type={shownPasswords[row.id] ? "text" : "password"}
+                          autoComplete="new-password"
+                          placeholder={row.has_account ? t(copy.passwordHint) : ""}
+                          value={passwords[row.id] ?? ""}
+                          onChange={(event) => setPasswords((current) => ({ ...current, [row.id]: event.target.value }))}
+                        />
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => fillPassword(row.id)}>
+                          {t(copy.generatePassword)}
+                        </button>
+                        {passwords[row.id] ? (
+                          <button type="button" className="btn btn-ghost btn-sm" onClick={() => void copyPassword(row.id)}>
+                            {t(copy.copyPassword)}
+                          </button>
+                        ) : null}
+                      </div>
                     </td>
                     <td>
                       {grantedPages.length === 0 ? (
@@ -399,7 +464,7 @@ export function Permissions({ t }: { locale: Locale; t: (c: { ar: string; en: st
                                     setStaff((current) => current.map((item) => (item.id === row.id ? { ...item, page_grants } : item)));
                                   }}
                                 />
-                                <strong>{t(abilityLabels[ability])}</strong>
+                                <strong>{abilityName(ability)}</strong>
                               </label>
                               {pages.map((page) => (
                                 <label key={page.key} className="check-row">

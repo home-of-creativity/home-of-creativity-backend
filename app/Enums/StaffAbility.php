@@ -10,7 +10,13 @@ enum StaffAbility: string
     case OpsReports = 'ops.reports';
     case OpsEmployees = 'ops.employees';
     case OpsPayments = 'ops.payments';
+    case OpsFinance = 'ops.finance';
+    case OpsVouchers = 'ops.vouchers';
     case OpsChannels = 'ops.channels';
+    case OpsReportGemini = 'ops.report_gemini';
+    case OpsReportTemplates = 'ops.report_templates';
+    case OpsReportMedia = 'ops.report_media';
+    case OpsDrive = 'ops.drive';
     case SiteProjects = 'site.projects';
     case SiteCategories = 'site.categories';
     case SiteReels = 'site.reels';
@@ -33,6 +39,7 @@ enum StaffAbility: string
             self::OpsRequests->value,
             self::OpsClients->value,
             self::OpsReports->value,
+            self::OpsVouchers->value,
             self::OpsEmployees->value,
             self::SiteProjects->value,
             self::SiteCategories->value,
@@ -58,6 +65,73 @@ enum StaffAbility: string
             self::SocialEngage->value,
             self::SocialMessages->value,
         ];
+    }
+
+    /**
+     * @return array{ar: string, en: string}
+     */
+    public function labels(): array
+    {
+        return match ($this) {
+            self::OpsOverview => ['ar' => 'نظرة عامة', 'en' => 'Overview'],
+            self::OpsRequests => ['ar' => 'الطلبات', 'en' => 'Requests'],
+            self::OpsClients => ['ar' => 'العملاء', 'en' => 'Clients'],
+            self::OpsReports => ['ar' => 'التقارير', 'en' => 'Reports'],
+            self::OpsEmployees => ['ar' => 'الموظفون', 'en' => 'Employees'],
+            self::OpsPayments => ['ar' => 'المدفوعات', 'en' => 'Payments'],
+            self::OpsFinance => ['ar' => 'المالية', 'en' => 'Finance'],
+            self::OpsVouchers => ['ar' => 'المسندات المالية', 'en' => 'Financial vouchers'],
+            self::OpsChannels => ['ar' => 'قنوات البوت', 'en' => 'Bot channels'],
+            self::OpsReportGemini => ['ar' => 'مساعد التقارير', 'en' => 'Report assistant'],
+            self::OpsReportTemplates => ['ar' => 'قوالب التقارير', 'en' => 'Report templates'],
+            self::OpsReportMedia => ['ar' => 'صور التقارير ومربع النص', 'en' => 'Report pictures and text box'],
+            self::OpsDrive => ['ar' => 'حساب تخزين Drive', 'en' => 'Drive storage account'],
+            self::SiteProjects => ['ar' => 'المشاريع', 'en' => 'Projects'],
+            self::SiteCategories => ['ar' => 'التصنيفات', 'en' => 'Categories'],
+            self::SiteReels => ['ar' => 'الريلز', 'en' => 'Reels'],
+            self::SiteArticles => ['ar' => 'المقالات', 'en' => 'Articles'],
+            self::SitePricing => ['ar' => 'الأسعار', 'en' => 'Pricing'],
+            self::SiteContact => ['ar' => 'التواصل', 'en' => 'Contact'],
+            self::SiteLegal => ['ar' => 'الخصوصية والشروط', 'en' => 'Privacy and terms'],
+            self::SiteProfilePdf => ['ar' => 'الملف التعريفي', 'en' => 'Profile PDF'],
+            self::SocialContent => ['ar' => 'إدارة المحتوى', 'en' => 'Content'],
+            self::SocialApprove => ['ar' => 'النشر والموافقة', 'en' => 'Publish and approve'],
+            self::SocialEngage => ['ar' => 'التفاعل والتعليقات', 'en' => 'Engagement'],
+            self::SocialMessages => ['ar' => 'الرسائل', 'en' => 'Messages'],
+            self::SocialAccounts => ['ar' => 'ربط الحسابات', 'en' => 'Accounts'],
+            self::SocialLinks => ['ar' => 'الروابط والمظهر', 'en' => 'Links and design'],
+        };
+    }
+
+    /**
+     * Roles that already edit reports or open payments keep the features that used to share those abilities.
+     *
+     * @param  list<string>  $abilities
+     * @return list<string>
+     */
+    public static function inheritFeatureAbilities(array $abilities): array
+    {
+        $next = array_values(array_filter($abilities, is_string(...)));
+        $editsReports = false;
+        foreach ($next as $ability) {
+            if ($ability === self::OpsReports->value || str_starts_with($ability, self::OpsReports->value.'.create') || str_starts_with($ability, self::OpsReports->value.'.update')) {
+                $editsReports = true;
+            }
+        }
+
+        if ($editsReports) {
+            foreach ([self::OpsReportGemini, self::OpsReportTemplates, self::OpsReportMedia, self::OpsDrive] as $feature) {
+                if (! in_array($feature->value, $next, true)) {
+                    $next[] = $feature->value;
+                }
+            }
+        }
+
+        if (in_array(self::OpsPayments->value, $next, true) && ! in_array(self::OpsFinance->value, $next, true)) {
+            $next[] = self::OpsFinance->value;
+        }
+
+        return array_values(array_unique($next));
     }
 
     /** @return list<string> */

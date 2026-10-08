@@ -6,6 +6,7 @@ import { api, type Client, type OdooInvoice, type OdooQuotation, type PageMeta }
 import { ConfirmAction } from "../components/ConfirmAction";
 import { DriveFolderPicker } from "../components/DriveFolderPicker";
 import { LoadingTableRow } from "../components/LoadingTableRow";
+import { OdooPaperForm } from "../components/OdooPaperForm";
 import { PageHeader } from "../components/PageHeader";
 import { Pagination } from "../components/Pagination";
 import { Tabs } from "../components/Tabs";
@@ -108,6 +109,8 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
   const [invoiceState, setInvoiceState] = useState("");
   const [invoicePayment, setInvoicePayment] = useState("");
   const [folderClient, setFolderClient] = useState<Client | null>(null);
+  const [paper, setPaper] = useState<null | { kind: "quotation" | "invoice"; quotation?: OdooQuotation }>(null);
+  const [refresh, setRefresh] = useState(0);
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedQuery(query.trim()), 300);
     return () => window.clearTimeout(timer);
@@ -192,7 +195,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [tab, page, debouncedQuery, odooFilter, companyFilter, phoneFilter, channelFilter, stageFilter, driveFilter, partnerFilter, papersUnlinked, t]);
+  }, [tab, page, debouncedQuery, odooFilter, companyFilter, phoneFilter, channelFilter, stageFilter, driveFilter, partnerFilter, papersUnlinked, refresh, t]);
 
   useEffect(() => {
     setPage(1);
@@ -323,6 +326,14 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                 {t(copy.signupCta)}
               </a>
             </>
+          ) : tab === "quotations" && odooReady ? (
+            <button type="button" className="btn btn-primary" onClick={() => setPaper({ kind: "quotation" })}>
+              {t(copy.createQuotation)}
+            </button>
+          ) : tab === "invoices" && odooReady ? (
+            <button type="button" className="btn btn-primary" onClick={() => setPaper({ kind: "invoice" })}>
+              {t(copy.createInvoice)}
+            </button>
           ) : undefined
         }
       />
@@ -331,14 +342,15 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
         value={tab}
         onValueChange={(next) => {
           setTab(next as Tab);
+          setPaper(null);
           setError("");
         }}
         ariaLabel={t(copy.clients)}
         items={tabs.map((key) => ({ value: key, label: tabLabel(key, t) }))}
       />
 
-      {tab === "clients" && notice ? <p className="notice">{notice}</p> : null}
-      {tab === "clients" && error ? <p className="error">{error}</p> : null}
+      {tab !== "logos" && notice ? <p className="notice">{notice}</p> : null}
+      {tab !== "logos" && error ? <p className="error">{error}</p> : null}
       {folderClient ? (
         <DriveFolderPicker
           client={folderClient}
@@ -536,6 +548,20 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
 
       {tab === "quotations" ? (
         <>
+        {paper?.kind === "quotation" ? (
+          <OdooPaperForm
+            kind="quotation"
+            partnerId={partnerFilter || undefined}
+            t={t}
+            onCancel={() => setPaper(null)}
+            onCreated={(message) => {
+              setNotice(message);
+              toast.success(message);
+              setPaper(null);
+              setRefresh((value) => value + 1);
+            }}
+          />
+        ) : null}
         <div className="toolbar filter-bar filter-grid">
           <label className="field-label">
             {t(copy.search)}
@@ -570,18 +596,19 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                 <th>{t(copy.odooState)}</th>
                 <th>{t(copy.odooReference)}</th>
                 <th>{t(copy.odooDate)}</th>
+                <th>{t(copy.createInvoice)}</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <LoadingTableRow colSpan={6} label={t(copy.loading)} />
+                <LoadingTableRow colSpan={7} label={t(copy.loading)} />
               ) : !odooReady ? (
                 <tr>
-                  <td colSpan={6}>{t(copy.odooNotConfigured)}</td>
+                  <td colSpan={7}>{t(copy.odooNotConfigured)}</td>
                 </tr>
               ) : filteredQuotations.length === 0 ? (
                 <tr>
-                  <td colSpan={6}>{quoteQuery || quoteState ? t(copy.noSearchResults) : t(copy.empty)}</td>
+                  <td colSpan={7}>{quoteQuery || quoteState ? t(copy.noSearchResults) : t(copy.empty)}</td>
                 </tr>
               ) : (
                 filteredQuotations.map((item) => {
@@ -597,6 +624,21 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                     <td><span className={odooStatusClass(item.state)}>{t(quoteStateLabel[item.state] ?? { ar: item.state, en: item.state })}</span></td>
                     <td dir="ltr">{item.client_order_ref ?? item.origin ?? "—"}</td>
                     <td className="nowrap">{formatOdooWhen(item.date_order, locale)}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        onClick={() => {
+                          const params: Record<string, string> = { tab: "invoices" };
+                          if (item.partner_id) params.partner = String(item.partner_id);
+                          if (item.partner_name) params.client = item.partner_name;
+                          setSearchParams(params);
+                          setPaper({ kind: "invoice", quotation: item });
+                        }}
+                      >
+                        {t(copy.invoiceFromQuote)}
+                      </button>
+                    </td>
                   </tr>
                   );
                 })
@@ -609,6 +651,21 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
 
       {tab === "invoices" ? (
         <>
+        {paper?.kind === "invoice" ? (
+          <OdooPaperForm
+            kind="invoice"
+            partnerId={partnerFilter || undefined}
+            quotation={paper.quotation}
+            t={t}
+            onCancel={() => setPaper(null)}
+            onCreated={(message) => {
+              setNotice(message);
+              toast.success(message);
+              setPaper(null);
+              setRefresh((value) => value + 1);
+            }}
+          />
+        ) : null}
         <div className="toolbar filter-bar filter-grid">
           <label className="field-label">
             {t(copy.search)}

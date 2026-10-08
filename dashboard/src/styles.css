@@ -12,6 +12,8 @@
   --brand-telegram: #30b0f0;
   --brand-surface: #ffffff;
   --tint-base: #ffffff;
+  --on-brand: #fbf7f0;
+  --link: var(--brand-purple);
   --font-en: Inter, ui-sans-serif, system-ui, sans-serif;
   --font-ar: "IBM Plex Sans Arabic", Inter, sans-serif;
   --radius: 1.15rem;
@@ -21,15 +23,34 @@
 }
 
 [data-theme="dark"] {
-  --brand-ink: #f1ecf9;
-  --brand-cream: #241a3d;
-  --brand-off-white: #180f2c;
-  --brand-muted: #b3a8c9;
-  --brand-line: color-mix(in srgb, var(--brand-ink) 16%, transparent);
-  --brand-surface: #241a3d;
-  --tint-base: #2c2148;
-  --brand-orange-soft: #c98a4a;
-  --shadow: 0 18px 44px color-mix(in srgb, black 45%, transparent);
+  --brand-ink: #f6f1fc;
+  --brand-cream: #261c40;
+  --brand-off-white: #100a1c;
+  --brand-muted: #d4c8e8;
+  --brand-line: color-mix(in srgb, var(--brand-ink) 24%, transparent);
+  --brand-surface: #322652;
+  --tint-base: #3c2e60;
+  --on-brand: #fbf7f0;
+  --link: #e6d6ff;
+  --shadow: 0 18px 44px color-mix(in srgb, black 55%, transparent);
+}
+
+[data-theme="dark"] .error,
+[data-theme="dark"] .error-inline,
+[data-theme="dark"] .login-feedback--error {
+  color: #ffc2bc;
+}
+
+[data-theme="dark"] .source-telegram {
+  color: #9adfff;
+}
+
+[data-theme="dark"] .source-whatsapp {
+  color: #9dffc4;
+}
+
+[data-theme="dark"] tbody tr:nth-child(even) {
+  background: color-mix(in srgb, white 5%, transparent);
 }
 
 [data-theme="dark"] body {
@@ -59,6 +80,8 @@ html[dir="ltr"] {
 html,
 body,
 #root {
+  width: 100%;
+  max-width: 100%;
   min-height: 100%;
 }
 
@@ -554,6 +577,8 @@ html[dir="rtl"] .command-palette-content {
 
 .app-shell {
   display: grid;
+  width: 100%;
+  max-width: 100%;
   min-height: 100svh;
   height: 100svh;
   min-width: 0;
@@ -575,7 +600,7 @@ html[dir="rtl"] .command-palette-content {
   height: 100svh;
   padding: 1.35rem 0.95rem 1.1rem;
   overflow: auto;
-  color: var(--brand-cream);
+  color: var(--on-brand);
   background:
     radial-gradient(circle at 18% 0%, color-mix(in srgb, var(--brand-orange) 24%, transparent), transparent 12rem),
     linear-gradient(180deg, var(--brand-purple), var(--brand-purple-deep));
@@ -665,12 +690,12 @@ html[dir="rtl"] .command-palette-content {
 }
 
 .nav-links a:hover {
-  color: var(--brand-cream);
+  color: var(--on-brand);
   background: rgb(255 255 255 / 0.1);
 }
 
 .nav-links a[aria-current="page"] {
-  color: var(--brand-cream);
+  color: var(--on-brand);
   background: rgb(255 255 255 / 0.14);
   border-inline-start-color: var(--brand-orange);
 }
@@ -901,7 +926,7 @@ html[dir="rtl"] .btn-logout svg {
   height: 2rem;
   border-radius: 0.65rem;
   background: color-mix(in srgb, var(--brand-orange) 18%, var(--tint-base));
-  color: var(--brand-purple);
+  color: var(--link);
 }
 
 .card-icon svg {
@@ -1102,7 +1127,7 @@ td[colspan] {
 }
 
 .table-link {
-  color: var(--brand-purple);
+  color: var(--link);
   font-weight: 600;
 }
 
@@ -1189,7 +1214,9 @@ td[colspan] {
 }
 
 .filter-bar .field {
-  max-width: 18rem;
+  flex: 1 1 12rem;
+  max-width: none;
+  min-width: 0;
 }
 
 .filter-grid {
@@ -1209,6 +1236,13 @@ td[colspan] {
 .filter-grid .field {
   max-width: none;
   width: 100%;
+}
+
+.filter-grid .field-label > .field {
+  flex: 0 0 auto;
+  width: 100%;
+  height: auto;
+  min-height: 2.75rem;
 }
 
 .filter-grid .search-bar {
@@ -1296,6 +1330,10 @@ td[colspan] {
 
 .action-card {
   padding: 1.1rem 1.2rem 1.2rem;
+}
+
+.odoo-paper-card {
+  margin-bottom: 1rem;
 }
 
 .quotation-form {
@@ -1482,11 +1520,16 @@ td[colspan] {
   border-color: color-mix(in srgb, var(--brand-purple) 24%, transparent);
 }
 
+[data-theme="dark"] .btn-ghost:hover {
+  background: var(--tint-base);
+  border-color: color-mix(in srgb, var(--link) 40%, var(--brand-line));
+}
+
 .sidebar .btn-ghost,
 .login .btn-ghost {
   border-color: rgb(255 255 255 / 0.28);
   background: rgb(255 255 255 / 0.06);
-  color: var(--brand-cream);
+  color: var(--on-brand);
 }
 
 .sidebar .btn-ghost:hover,
@@ -1631,7 +1674,7 @@ td[colspan] {
 
 .signup-card {
   counter-reset: signup;
-  color: var(--brand-cream);
+  color: var(--on-brand);
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--brand-purple) 70%, black), var(--brand-purple-deep));
   border-color: color-mix(in srgb, var(--brand-orange) 35%, transparent);
@@ -1752,7 +1795,7 @@ html[dir="rtl"] .back-link span {
 }
 
 .back-link:hover {
-  color: var(--brand-purple);
+  color: var(--link);
 }
 
 .detail-card p {
@@ -1914,6 +1957,18 @@ html[dir="rtl"] .back-link span {
   gap: 0.5rem;
   align-self: center;
   min-height: 2.9rem;
+}
+
+.password-field {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.password-field input {
+  flex: 1 1 9rem;
+  min-width: 9rem;
 }
 
 .permission-fieldset {
@@ -2280,8 +2335,9 @@ html[dir="ltr"] .report-panel {
 .report-start {
   display: grid;
   gap: 1.5rem;
-  width: min(100%, 68rem);
-  margin: 0 auto;
+  width: 100%;
+  max-width: none;
+  margin: 0;
   padding: 1.25rem 0.5rem 2.5rem;
 }
 
@@ -2422,8 +2478,8 @@ html[dir="ltr"] .report-panel {
 .template-card.is-import .template-sheet {
   place-items: center;
   align-content: center;
-  color: var(--brand-purple);
-  background: color-mix(in srgb, var(--brand-purple) 6%, #fff);
+  color: var(--link);
+  background: color-mix(in srgb, var(--brand-purple) 6%, var(--brand-surface));
 }
 
 /* Small shared controls, first used by the report pages */
@@ -2555,8 +2611,8 @@ html[dir="ltr"] .report-panel {
   margin-inline-start: 0.35rem;
 }
 
-@media (max-width: 900px) {
-  /* On phones the shell scrolls as a page; the studio needs a fixed-height frame instead. */
+@media (max-width: 1180px) {
+  /* On a short window the shell scrolls as a page; the studio needs a fixed-height frame instead. */
   .app-shell:has(.report-studio) {
     grid-template-rows: auto minmax(0, 1fr);
     height: 100svh;
@@ -2807,7 +2863,7 @@ html[dir="ltr"] .report-panel {
   justify-content: space-between;
   gap: 0.75rem;
   padding: max(0.75rem, env(safe-area-inset-top)) 1rem 0.75rem;
-  color: var(--brand-cream);
+  color: var(--on-brand);
   background: linear-gradient(180deg, var(--brand-purple), var(--brand-purple-deep));
 }
 
@@ -2820,7 +2876,7 @@ html[dir="ltr"] .report-panel {
   border: 1px solid rgb(255 255 255 / 0.28);
   border-radius: 999px;
   background: transparent;
-  color: var(--brand-cream);
+  color: var(--on-brand);
   cursor: pointer;
 }
 
@@ -2851,7 +2907,7 @@ html[dir="ltr"] .report-panel {
   transform: translateY(-3.5px) rotate(-45deg);
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1180px) {
   .login {
     padding:
       max(1.25rem, env(safe-area-inset-top))
@@ -2982,6 +3038,17 @@ html[dir="ltr"] .report-panel {
   }
 }
 
+@media (max-width: 480px) {
+  .main {
+    padding: 0.65rem max(0.45rem, env(safe-area-inset-right)) 1rem max(0.45rem, env(safe-area-inset-left));
+  }
+
+  .cards,
+  .template-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .logo-showcase-card {
   margin-bottom: 1.25rem;
   padding: 1.35rem;
@@ -3091,7 +3158,22 @@ html[dir="ltr"] .report-panel {
 }
 
 .portfolio-form {
-  max-width: 56rem;
+  width: 100%;
+  max-width: none;
+}
+
+.split-panels {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, 1.15fr) minmax(18rem, 0.85fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+@media (max-width: 960px) {
+  .split-panels {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .gallery-preview-grid {
@@ -3583,7 +3665,7 @@ html[dir="ltr"] .report-panel {
   width: min(100%, 16.5rem);
   padding: 0.72rem;
   border-radius: 1.85rem;
-  background: color-mix(in srgb, var(--brand-ink) 92%, var(--brand-purple));
+  background: #120a22;
   box-shadow: var(--shadow);
 }
 
@@ -3605,7 +3687,7 @@ html[dir="ltr"] .report-panel {
   aspect-ratio: 9 / 16;
   border-radius: 1.25rem;
   background: var(--brand-purple-deep);
-  color: var(--brand-cream);
+  color: var(--on-brand);
 }
 
 .social-phone-screen-body {
@@ -3707,7 +3789,7 @@ html[dir="ltr"] .report-panel {
   margin: 0;
   padding: 1.25rem;
   text-align: center;
-  color: color-mix(in srgb, var(--brand-cream) 82%, var(--tint-base));
+  color: color-mix(in srgb, var(--on-brand) 78%, transparent);
   font-size: 0.86rem;
   line-height: 1.5;
 }
@@ -4541,7 +4623,7 @@ div.ig-studio-tile {
 .social-phone-feed-bar.is-instagram,
 .social-phone-feed-bar.is-threads,
 .social-phone-feed-bar.is-linkedin {
-  background: #fff;
+  background: var(--brand-surface);
 }
 
 .social-phone-empty-feed {
@@ -4553,7 +4635,7 @@ div.ig-studio-tile {
 }
 
 .social-phone-feed-post {
-  background: #fff;
+  background: var(--brand-surface);
   border-bottom: 1px solid var(--brand-line);
 }
 
@@ -7020,7 +7102,7 @@ html[dir="rtl"] .placement-tile-toggle[data-state="checked"] .placement-tile-tog
 }
 
 .legal-html-preview a {
-  color: var(--brand-purple);
+  color: var(--link);
   text-decoration: underline;
 }
 
@@ -7063,7 +7145,7 @@ html[dir="rtl"] .placement-tile-toggle[data-state="checked"] .placement-tile-tog
   padding: 0.45rem 0.75rem;
   border: 1px solid var(--brand-line);
   border-radius: 0.65rem;
-  background: #fff;
+  background: var(--brand-off-white);
   color: var(--brand-ink);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.95rem;
@@ -7073,8 +7155,8 @@ html[dir="rtl"] .placement-tile-toggle[data-state="checked"] .placement-tile-tog
 }
 
 .html-editor-btn:hover:not(:disabled) {
-  border-color: var(--brand-purple);
-  color: var(--brand-purple);
+  border-color: var(--link);
+  color: var(--link);
 }
 
 .html-editor-btn:disabled {
@@ -7088,9 +7170,9 @@ html[dir="rtl"] .placement-tile-toggle[data-state="checked"] .placement-tile-tog
 }
 
 .html-editor-btn.is-active {
-  border-color: var(--brand-purple);
-  background: color-mix(in srgb, var(--brand-purple) 12%, #fff);
-  color: var(--brand-purple);
+  border-color: var(--link);
+  background: color-mix(in srgb, var(--link) 16%, var(--brand-surface));
+  color: var(--link);
 }
 
 .html-editor-btn-wide {
@@ -7138,12 +7220,12 @@ html[dir="rtl"] .placement-tile-toggle[data-state="checked"] .placement-tile-tog
 .html-editor-preview pre {
   padding: 0.75rem;
   border-radius: 0.65rem;
-  background: color-mix(in srgb, var(--brand-ink) 6%, #fff);
+  background: color-mix(in srgb, var(--brand-ink) 6%, var(--brand-surface));
   overflow-x: auto;
 }
 
 .html-editor-preview a {
-  color: var(--brand-purple);
+  color: var(--link);
   text-decoration: underline;
 }
 
@@ -7179,3 +7261,303 @@ html[dir="rtl"] .placement-tile-toggle[data-state="checked"] .placement-tile-tog
 .article-preview ol { margin: 0.5rem 1.35rem; }
 .article-preview li { margin: 0.2rem 0; }
 .article-preview a { color: var(--brand-orange); text-decoration: underline; }
+
+.template-card.is-receipt .template-sheet i:nth-child(3),
+.template-card.is-payment .template-sheet i:nth-child(3),
+.template-card.is-settlement .template-sheet i:nth-child(3) {
+  width: 78%;
+}
+
+.template-card.is-journal .template-sheet i:nth-child(3) {
+  height: 1.3rem;
+  border-radius: 0.25rem;
+  background: repeating-linear-gradient(90deg, #efe9f6 0 30%, #fff 30% 33%);
+  box-shadow: inset 0 0.3rem 0 var(--brand-purple);
+}
+
+.template-card.is-receipt .template-sheet i:nth-child(4),
+.template-card.is-payment .template-sheet i:nth-child(4),
+.template-card.is-journal .template-sheet i:nth-child(4),
+.template-card.is-settlement .template-sheet i:nth-child(4) {
+  width: 38%;
+  height: 0.7rem;
+  margin-top: 0.35rem;
+  border-bottom: 2px solid var(--brand-purple);
+  border-radius: 0;
+  background: transparent;
+}
+
+.voucher-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(12rem, 0.7fr);
+  align-items: end;
+  gap: 0.85rem;
+}
+
+.voucher-filters .field-label {
+  min-width: 0;
+  flex: none;
+}
+
+.voucher-page {
+  display: grid;
+  gap: 1rem;
+}
+
+.voucher-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.voucher-studio {
+  display: grid;
+  grid-template-columns: minmax(18rem, 24rem) minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.voucher-editor {
+  display: grid;
+  gap: 0.85rem;
+  align-content: start;
+  position: sticky;
+  top: 1rem;
+}
+
+.voucher-editor:hover {
+  box-shadow: var(--shadow);
+}
+
+.voucher-editor .field {
+  min-height: 2.75rem;
+}
+
+.voucher-editor textarea.field {
+  min-height: 6.5rem;
+  resize: vertical;
+}
+
+.voucher-split,
+.voucher-line {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.voucher-split {
+  grid-template-columns: 1fr 0.8fr;
+}
+
+.voucher-lines {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.voucher-line {
+  grid-template-columns: minmax(0, 1.4fr) minmax(4.5rem, 0.8fr) minmax(4.5rem, 0.8fr);
+  align-items: center;
+}
+
+.voucher-line-head {
+  color: var(--brand-muted);
+  font-size: 0.78rem;
+}
+
+.signature-pad {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.signature-pad-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-weight: 650;
+}
+
+.signature-canvas {
+  width: 100%;
+  height: 8.5rem;
+  border: 1px dashed color-mix(in srgb, var(--brand-purple) 45%, var(--brand-line));
+  border-radius: 0.9rem;
+  background: #fff;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.voucher-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 1.35rem;
+  width: min(100%, 210mm);
+  margin-inline: auto;
+  padding: 1.5rem 1.6rem 1.75rem;
+  border: 1px solid var(--brand-line);
+  background: #fff;
+  color: #1a0838;
+  box-shadow: var(--shadow);
+}
+
+.voucher-sheet-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.9rem;
+  border-bottom: 3px solid #2e0e5c;
+}
+
+.voucher-brand {
+  margin: 0 0 0.25rem;
+  color: #e7993a;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.voucher-sheet h1 {
+  margin: 0;
+  color: #2e0e5c;
+  font-size: 1.7rem;
+}
+
+.voucher-sheet-head dl {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+  text-align: end;
+}
+
+.voucher-sheet-head div {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.voucher-sheet-head dt {
+  color: #6b6280;
+  font-size: 0.75rem;
+}
+
+.voucher-sheet-head dd {
+  margin: 0;
+  font-weight: 700;
+}
+
+.voucher-facts {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.voucher-facts p {
+  display: grid;
+  grid-template-columns: 8.5rem minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0.75rem;
+  margin: 0;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px solid #efe9f6;
+}
+
+.voucher-facts span,
+.voucher-signs span {
+  color: #6b6280;
+  font-size: 0.82rem;
+}
+
+.voucher-facts strong {
+  font-size: 1.05rem;
+}
+
+.voucher-ack {
+  grid-template-columns: 1fr;
+  line-height: 1.75;
+  padding-top: 0.35rem;
+  border-bottom: 0;
+}
+
+.voucher-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.voucher-table th,
+.voucher-table td {
+  padding: 0.45rem 0.35rem;
+  border-bottom: 1px solid #e6e0ee;
+  text-align: start;
+}
+
+.voucher-signs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-top: 0.5rem;
+}
+
+.voucher-signs div {
+  display: grid;
+  align-content: end;
+  justify-items: center;
+  gap: 0.35rem;
+  min-height: 8.5rem;
+  padding: 0.75rem 0.6rem 0.65rem;
+  border: 1px solid #e6e0ee;
+  border-radius: 0.7rem;
+  text-align: center;
+}
+
+.voucher-signs img,
+.voucher-signs i {
+  display: block;
+  width: min(100%, 11rem);
+  height: 4.4rem;
+  object-fit: contain;
+}
+
+.voucher-signs i {
+  border-bottom: 1.5px solid #2e0e5c;
+}
+
+@media (max-width: 1100px) {
+  .voucher-filters,
+  .voucher-studio,
+  .voucher-split {
+    grid-template-columns: 1fr;
+  }
+
+  .voucher-editor {
+    position: static;
+  }
+}
+
+@media print {
+  body:has(.voucher-sheet) {
+    background: #fff !important;
+  }
+
+  body:has(.voucher-sheet) :is(.sidebar, .mobile-bar, .nav-backdrop, .skip-link, .voucher-editor, .voucher-toolbar, .error) {
+    display: none !important;
+  }
+
+  body:has(.voucher-sheet) :is(.app-shell, .main, .main-pane, .voucher-page, .voucher-studio) {
+    display: block !important;
+    width: auto !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+  }
+
+  .voucher-sheet {
+    width: auto !important;
+    min-height: 270mm !important;
+    margin: 0 !important;
+    border: 0 !important;
+    box-shadow: none !important;
+  }
+
+  .voucher-signs {
+    margin-top: auto !important;
+  }
+}

@@ -134,6 +134,8 @@ export function ReportGemini({
   onInsertTextBox,
   fonts = [],
   onInstallFont,
+  showAssistant = true,
+  showMedia = true,
 }: {
   t: (c: { ar: string; en: string }) => string;
   /** Text currently selected in the document. */
@@ -151,6 +153,8 @@ export function ReportGemini({
   onInsertTextBox: (options: { kind: TextBoxShape; text: string }) => Promise<boolean>;
   fonts: Array<{ family: string }>;
   onInstallFont: (family: string, file: File) => Promise<void>;
+  showAssistant?: boolean;
+  showMedia?: boolean;
 }) {
   const fontRows = Array.isArray(fonts) ? fonts : [];
   const [instruction, setInstruction] = useState("");
@@ -176,10 +180,11 @@ export function ReportGemini({
   }, [pageCount, scope, busy]);
 
   useEffect(() => {
+    if (!showAssistant) return;
     api.reportMemories()
       .then((res) => setMemories(asMemories(res.data)))
       .catch(() => setMemories([]));
-  }, []);
+  }, [showAssistant]);
 
   async function ask(text = instruction) {
     const request = text.trim();
@@ -388,9 +393,12 @@ export function ReportGemini({
 
   return (
     <div className="report-gemini" aria-label={t(copy.reportGemini)}>
+      {showMedia || showAssistant ? (
       <fieldset className="report-picture">
         <legend>{t(copy.reportImage)}</legend>
-        <p className="muted">{t(copy.reportImageHint)}</p>
+        {showMedia ? <p className="muted">{t(copy.reportImageHint)}</p> : null}
+        {showMedia ? (
+        <>
         <div className="segmented" role="radiogroup" aria-label={t(copy.reportImagePlace)}>
           <button type="button" role="radio" aria-checked={place === "wrap"} className={place === "wrap" ? "is-active" : ""} onClick={() => setPlace("wrap")}>{t(copy.reportImageWrap)}</button>
           <button type="button" role="radio" aria-checked={place === "place"} className={place === "place" ? "is-active" : ""} onClick={() => setPlace("place")}>{t(copy.reportImageInPage)}</button>
@@ -405,6 +413,10 @@ export function ReportGemini({
           {t(copy.reportImageInsert)}
           <input type="file" accept="image/png,image/jpeg,image/gif" hidden disabled={busy} onChange={(event) => { void insertPicture(event.target.files?.[0]); event.target.value = ""; }} />
         </label>
+        </>
+        ) : null}
+        {showAssistant ? (
+        <>
         {source ? (
           <div className="report-gemini-attach">
             <img src={source.preview} alt="" />
@@ -426,7 +438,12 @@ export function ReportGemini({
           <textarea className="field field-area" rows={2} value={imagePrompt} onChange={(event) => setImagePrompt(event.target.value)} />
         </label>
         <button type="button" className="btn btn-sm" disabled={busy || imagePrompt.trim() === ""} onClick={() => void generatePicture()}>{t(copy.reportImageGenerate)}</button>
+        </>
+        ) : null}
       </fieldset>
+      ) : null}
+      {showMedia ? (
+      <>
       <fieldset className="report-picture">
         <legend>{t(copy.reportCover)}</legend>
         <p className="muted">{t(copy.reportCoverHint)}</p>
@@ -448,6 +465,10 @@ export function ReportGemini({
           {t(copy.reportTextBoxInsert)}
         </button>
       </fieldset>
+      </>
+      ) : null}
+      {showAssistant ? (
+      <>
       <div className="segmented is-stack" role="radiogroup">
         <button type="button" role="radio" aria-checked={scope === "selection"} className={scope === "selection" ? "is-active" : ""} onClick={() => setScope("selection")}>{t(copy.reportGeminiScopeSelection)}</button>
         <button type="button" role="radio" aria-checked={scope === "write"} className={scope === "write" ? "is-active" : ""} onClick={() => setScope("write")}>{t(copy.reportGeminiScopeWrite)}</button>
@@ -519,23 +540,6 @@ export function ReportGemini({
           </div>
         </div>
       ) : null}
-      <fieldset className="report-picture">
-        <legend>{t(copy.reportFont)}</legend>
-        <p className="muted">{t(copy.reportFontHint)}</p>
-        <label className="field-label">
-          {t(copy.reportFontName)}
-          <input className="field" value={fontName} onChange={(event) => setFontName(event.target.value)} maxLength={80} />
-        </label>
-        <label className="btn btn-sm">
-          {t(copy.reportFontFile)}
-          <input type="file" accept=".ttf,.otf,font/ttf,font/otf" hidden disabled={busy} onChange={(event) => { void installFont(event.target.files?.[0]); event.target.value = ""; }} />
-        </label>
-        {fontRows.length > 0 ? (
-          <ul className="report-font-list">
-            {fontRows.map((font) => <li key={font.family}>{font.family}</li>)}
-          </ul>
-        ) : null}
-      </fieldset>
       <details className="report-memory">
         <summary>{t(copy.reportMemory)} <span className="count-badge">{memories.length}</span></summary>
         <label className="field-label">
@@ -553,6 +557,25 @@ export function ReportGemini({
           ))}
         </ul>
       </details>
+      </>
+      ) : null}
+      <fieldset className="report-picture">
+        <legend>{t(copy.reportFont)}</legend>
+        <p className="muted">{t(copy.reportFontHint)}</p>
+        <label className="field-label">
+          {t(copy.reportFontName)}
+          <input className="field" value={fontName} onChange={(event) => setFontName(event.target.value)} maxLength={80} />
+        </label>
+        <label className="btn btn-sm">
+          {t(copy.reportFontFile)}
+          <input type="file" accept=".ttf,.otf,font/ttf,font/otf" hidden disabled={busy} onChange={(event) => { void installFont(event.target.files?.[0]); event.target.value = ""; }} />
+        </label>
+        {fontRows.length > 0 ? (
+          <ul className="report-font-list">
+            {fontRows.map((font) => <li key={font.family}>{font.family}</li>)}
+          </ul>
+        ) : null}
+      </fieldset>
     </div>
   );
 }

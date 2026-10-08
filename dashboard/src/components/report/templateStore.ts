@@ -1,6 +1,6 @@
 /**
- * Word files staff keep as templates. They live in this browser, show on the template
- * picker, and opening one copies the file into a new report.
+ * Word files saved as templates before the API stored them. The picker uploads each
+ * file once, then deletes it here. New templates go to `/admin/report-templates`.
  */
 
 export type SavedReportTemplate = {

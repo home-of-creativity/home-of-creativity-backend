@@ -49,6 +49,8 @@ import { RequestDetail } from "./pages/RequestDetail";
 import { Requests } from "./pages/Requests";
 import { Payments } from "./pages/Payments";
 import { Finance } from "./pages/Finance";
+import { Vouchers } from "./pages/Vouchers";
+import { VoucherStudio } from "./pages/VoucherStudio";
 import {
   IconCategories,
   IconClients,
@@ -66,6 +68,7 @@ import {
   IconReels,
   IconRequests,
   IconSocial,
+  IconVoucher,
 } from "./components/icons";
 
 const LandingReels = lazy(() => import("./pages/LandingReels"));
@@ -131,6 +134,7 @@ function Shell({
     { id: "terms", label: t(copy.legalTermsTitle), to: "/terms", icon: <IconLegal aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
     { id: "sham-cash", label: t(copy.navPayments), to: "/payments", icon: <IconQr aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
     { id: "finance", label: t(copy.navFinance), to: "/finance", icon: <IconPricing aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
+    { id: "vouchers", label: t(copy.navVouchers), to: "/vouchers", icon: <IconVoucher aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
     { id: "channels", label: t(copy.navChannels), to: "/channels", icon: <IconChannels aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
     { id: "add-employee", label: t(copy.addEmployee), to: "/employees/new", icon: <IconEmployees aria-hidden width={18} height={18} />, group: t(copy.commandGroupActions) },
     { id: "add-client", label: t(copy.addClient), to: "/clients/new", icon: <IconClients aria-hidden width={18} height={18} />, group: t(copy.commandGroupActions) },
@@ -231,10 +235,16 @@ function Shell({
             <span>{t(copy.navPayments)}</span>
           </NavLink>
           ) : null}
-          {canAbility(user, "ops.payments") ? (
+          {canAbility(user, "ops.finance") ? (
           <NavLink to="/finance">
             <IconPricing aria-hidden />
             <span>{t(copy.navFinance)}</span>
+          </NavLink>
+          ) : null}
+          {canAbility(user, "ops.vouchers.view") ? (
+          <NavLink to="/vouchers">
+            <IconVoucher aria-hidden />
+            <span>{t(copy.navVouchers)}</span>
           </NavLink>
           ) : null}
           {canAbility(user, "ops.channels") ? (
@@ -488,6 +498,9 @@ export function App() {
           </Route>
           <Route path="/payments" element={<Payments locale={locale} t={t} />} />
           <Route path="/finance" element={<Finance locale={locale} t={t} />} />
+          <Route path="/vouchers" element={<Vouchers locale={locale} t={t} />} />
+          <Route path="/vouchers/new" element={<VoucherStudio locale={locale} t={t} />} />
+          <Route path="/vouchers/:id" element={<VoucherStudio locale={locale} t={t} />} />
           <Route path="/channels" element={<ClientChannelsPage locale={locale} t={t} />} />
           <Route path="/client-logos" element={<Navigate to="/clients?tab=logos" replace />} />
           <Route path="/projects" element={<PortfolioProjects locale={locale} t={t} />} />
@@ -557,7 +570,8 @@ const commandAbility: Record<string, StaffAbility | "social" | "owner"> = {
   privacy: "site.legal",
   terms: "site.legal",
   "sham-cash": "ops.payments",
-  finance: "ops.payments",
+  finance: "ops.finance",
+  vouchers: "ops.vouchers",
   channels: "ops.channels",
   "add-employee": "ops.employees",
   "add-client": "ops.clients",
@@ -590,7 +604,13 @@ function pathAllowed(user: User | null, pathname: string) {
   if (pathname.startsWith("/requests")) return canAbility(user, `ops.requests.${verb}`);
   if (pathname.startsWith("/employees")) return canAbility(user, `ops.employees.${verb}`);
   if (pathname.startsWith("/clients")) return canAbility(user, `ops.clients.${verb}`);
-  if (pathname.startsWith("/payments") || pathname.startsWith("/finance")) return canAbility(user, "ops.payments");
+  if (pathname.startsWith("/payments")) return canAbility(user, "ops.payments");
+  if (pathname.startsWith("/finance")) return canAbility(user, "ops.finance");
+  if (pathname.startsWith("/vouchers")) {
+    if (pathname.includes("/new")) return canAbility(user, "ops.vouchers.create");
+    if (/^\/vouchers\/\d+/.test(pathname)) return canAbility(user, "ops.vouchers.view") || canAbility(user, "ops.vouchers.update");
+    return canAbility(user, "ops.vouchers.view");
+  }
   if (pathname.startsWith("/channels")) return canAbility(user, "ops.channels");
   if (pathname.startsWith("/projects")) return canAbility(user, `site.projects.${verb}`);
   if (pathname.startsWith("/reels")) return canAbility(user, `site.reels.${verb}`);
@@ -608,6 +628,6 @@ function pathAllowed(user: User | null, pathname: string) {
 }
 
 function homeFor(user: User) {
-  const candidates = ["/", "/requests", "/employees", "/clients", "/reports", "/social", "/payments", "/finance", "/channels", "/projects", "/reels", "/articles", "/categories", "/pricing", "/contact", "/profile-pdf", "/privacy", "/permissions"];
+  const candidates = ["/", "/requests", "/employees", "/clients", "/reports", "/social", "/payments", "/finance", "/vouchers", "/channels", "/projects", "/reels", "/articles", "/categories", "/pricing", "/contact", "/profile-pdf", "/privacy", "/permissions"];
   return candidates.find((path) => pathAllowed(user, path)) ?? "/";
 }

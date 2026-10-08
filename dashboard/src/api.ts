@@ -28,7 +28,13 @@ export type StaffModule =
   | "ops.reports"
   | "ops.employees"
   | "ops.payments"
+  | "ops.finance"
+  | "ops.vouchers"
   | "ops.channels"
+  | "ops.report_gemini"
+  | "ops.report_templates"
+  | "ops.report_media"
+  | "ops.drive"
   | "site.projects"
   | "site.categories"
   | "site.reels"
@@ -44,7 +50,7 @@ export type StaffModule =
   | "social.accounts"
   | "social.links";
 
-export type StaffAbility = StaffModule | `${Extract<StaffModule, "ops.requests" | "ops.clients" | "ops.reports" | "ops.employees" | "site.projects" | "site.categories" | "site.reels" | "site.articles" | "site.pricing" | "site.contact">}.${CrudAction}`;
+export type StaffAbility = StaffModule | `${Extract<StaffModule, "ops.requests" | "ops.clients" | "ops.reports" | "ops.vouchers" | "ops.employees" | "site.projects" | "site.categories" | "site.reels" | "site.articles" | "site.pricing" | "site.contact">}.${CrudAction}`;
 
 const crudActions: CrudAction[] = ["view", "create", "update", "delete"];
 
@@ -77,14 +83,72 @@ export type OpsSettings = {
   whatsapp_transport?: "web" | "cloud";
 };
 
+export type FinanceInvoice = {
+  id: number;
+  name?: string | null;
+  amount: number;
+  collected: number;
+  state: "paid" | "open" | "partial" | "cancelled" | string;
+  payment_state?: string | null;
+  partner_name?: string | null;
+  request_number: string | null;
+  title: string | null;
+  issued_at: string | null;
+  odoo_url?: string | null;
+};
+
 export type FinanceSummary = {
   revenue_paid: number;
   revenue_open: number;
   expenses: number;
   net: number;
-  invoices: { id: number; amount: number; request_number: string | null; title: string | null; issued_at: string | null }[];
+  invoices: FinanceInvoice[];
+  clients?: string[];
   expense_rows: { id: number; amount: number; category: string; note: string | null; spent_at: string | null }[];
   categories: string[];
+};
+
+export type VoucherKind = "receipt" | "payment" | "journal" | "settlement";
+
+export type VoucherLine = { memo: string; debit: number; credit: number };
+
+export type FinancialVoucherSummary = {
+  id: number;
+  serial: string;
+  kind: VoucherKind;
+  party_name: string;
+  amount: number;
+  currency: "USD" | "SYP";
+  issued_on: string | null;
+  signed: boolean;
+  updated_at: string | null;
+};
+
+export type FinancialVoucher = FinancialVoucherSummary & {
+  amount_words: string | null;
+  purpose: string | null;
+  reference: string | null;
+  lines: VoucherLine[];
+  signer_name: string | null;
+  counter_signer_name: string | null;
+  signature: string | null;
+  counter_signature: string | null;
+};
+
+export type VoucherDraft = {
+  kind: VoucherKind;
+  party_name: string;
+  amount: number;
+  currency: "USD" | "SYP";
+  amount_words?: string;
+  issued_on: string;
+  purpose?: string;
+  reference?: string;
+  lines: VoucherLine[];
+  signer_name?: string;
+  counter_signer_name?: string;
+  signature?: string;
+  counter_signature?: string;
 };
 
 export type ClientChannels = {
@@ -176,7 +240,7 @@ export type SocialPageOption = {
 export type StaffAccessPayload = {
   data: StaffAccessRow[];
   pages: SocialPageOption[];
-  abilities: { key: StaffModule; group: "ops" | "site" | "social"; actions: CrudAction[] }[];
+  abilities: { key: StaffModule; group: "ops" | "site" | "social"; actions: CrudAction[]; label_ar: string; label_en: string }[];
   message: string;
 };
 
@@ -344,9 +408,21 @@ export type ClientReport = {
   updated_at?: string | null;
 };
 
+export type ReportTemplateFile = {
+  id: number;
+  name: string;
+  saved_at: string | null;
+};
+
+export type ReportTemplateCatalog = {
+  builtin: Array<{ id: string; name_ar: string; name_en: string }>;
+  saved: ReportTemplateFile[];
+};
+
 export type OdooQuotation = {
   id: number;
   name: string;
+  partner_id?: number | null;
   partner_name: string | null;
   amount_total: number;
   currency: string | null;
@@ -923,14 +999,43 @@ export const api = {
       body: JSON.stringify({ decision, reason: reason || undefined }),
     });
   },
-  finance() {
-    return request<Envelope<FinanceSummary>>("/admin/finance");
+  finance(filters: {
+    from?: string;
+    to?: string;
+    client?: string;
+    invoice_state?: string;
+    category?: string;
+    q?: string;
+  } = {}) {
+    return request<Envelope<FinanceSummary>>(`/admin/finance${queryString({
+      from: filters.from,
+      to: filters.to,
+      client: filters.client,
+      invoice_state: filters.invoice_state,
+      category: filters.category,
+      q: filters.q,
+    })}`);
   },
   addExpense(payload: { amount: number; category: string; note?: string }) {
     return request<Envelope<FinanceSummary>>("/admin/finance/expenses", {
       method: "POST",
       body: JSON.stringify(payload),
     });
+  },
+  vouchers() {
+    return request<Envelope<FinancialVoucherSummary[]>>("/admin/vouchers");
+  },
+  voucher(id: number) {
+    return request<Envelope<FinancialVoucher>>(`/admin/vouchers/${id}`);
+  },
+  saveVoucher(payload: VoucherDraft, id?: number) {
+    return request<Envelope<FinancialVoucher>>(id ? `/admin/vouchers/${id}` : "/admin/vouchers", {
+      method: id ? "PUT" : "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  deleteVoucher(id: number) {
+    return request<Envelope<null>>(`/admin/vouchers/${id}`, { method: "DELETE" });
   },
   ensureDriveFolder(id: number) {
     return request<Envelope<ServiceRequest>>(`/admin/requests/${id}/ensure-drive-folder`, { method: "POST" });
@@ -1033,9 +1138,11 @@ export const api = {
     channel?: string;
     stage?: string;
     drive?: string;
+    per_page?: number;
   } = {}) {
     return request<Paginated<Client> & { stages?: string[] }>(`/admin/clients${queryString({
       page,
+      per_page: filters.per_page,
       search: filters.search || undefined,
       odoo: filters.odoo,
       company: filters.company,
@@ -1073,6 +1180,23 @@ export const api = {
   },
   deleteClientReport(id: number) {
     return request<Envelope<null>>(`/admin/reports/${id}`, { method: "DELETE" });
+  },
+  reportTemplates() {
+    return request<Envelope<ReportTemplateCatalog>>("/admin/report-templates");
+  },
+  saveReportTemplate(form: FormData) {
+    return request<Envelope<ReportTemplateCatalog>>("/admin/report-templates", { method: "POST", body: form });
+  },
+  deleteReportTemplate(id: number) {
+    return request<Envelope<ReportTemplateCatalog>>(`/admin/report-templates/${id}`, { method: "DELETE" });
+  },
+  async reportTemplateFile(id: number) {
+    const headers = new Headers({ Accept: "application/octet-stream" });
+    const token = getToken();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    const response = await fetch(`${API_URL}/admin/report-templates/${id}/document`, { headers });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return new Uint8Array(await response.arrayBuffer());
   },
   reportMemories() {
     return request<Envelope<Array<{ id: number; body: string }>>>("/admin/report-memories");
@@ -1189,6 +1313,28 @@ export const api = {
   odooInvoices(partner?: string) {
     const query = partner ? `?partner=${encodeURIComponent(partner)}` : "";
     return request<{ data: OdooInvoice[] }>(`/admin/odoo/invoices${query}`);
+  },
+  createOdooQuotation(payload: {
+    client_id: number;
+    reference?: string;
+    notes?: string;
+    lines: { title: string; amount: number; units: number; notes?: string }[];
+  }) {
+    return request<{ data: OdooQuotation; message?: string }>("/admin/odoo/quotations", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  createOdooInvoice(payload: {
+    client_id: number;
+    quotation_id?: number;
+    reference?: string;
+    lines?: { title: string; amount: number; units: number; notes?: string }[];
+  }) {
+    return request<{ data: OdooInvoice; message?: string }>("/admin/odoo/invoices", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
   },
   employees(filters: {
     search?: string;

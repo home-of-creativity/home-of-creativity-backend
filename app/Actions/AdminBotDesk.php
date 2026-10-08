@@ -7,11 +7,15 @@ use App\Models\Client;
 use App\Models\Invoice;
 use App\Models\OpsExpense;
 use App\Models\ServiceRequest;
+use App\Services\OdooClient;
 use App\Support\ResolveServiceRequest;
 use App\Support\StatusLabel;
+use Throwable;
 
 class AdminBotDesk
 {
+    public function __construct(private OdooClient $odoo) {}
+
     /**
      * @return array<string, mixed>
      */
@@ -94,50 +98,67 @@ class AdminBotDesk
     }
 
     /**
+     * @param  array{from?: string|null, to?: string|null, client?: string|null, invoice_state?: string|null, category?: string|null, q?: string|null}  $filters
      * @return array<string, mixed>
      */
-    public function finance(): array
+    public function finance(array $filters = []): array
     {
-        $revenuePaid = round((float) Invoice::query()->where('kind', 'received')->sum('amount'), 2);
-        if ($revenuePaid <= 0) {
+        $invoiceRows = $this->financeInvoices();
+        $expenseRows = OpsExpense::query()
+            ->latest('id')
+            ->limit(200)
+            ->get()
+            ->map(fn (OpsExpense $expense): array => [
+                'id' => $expense->id,
+                'amount' => (float) $expense->amount,
+                'category' => $expense->category,
+                'note' => $expense->note,
+                'spent_at' => $expense->spent_at?->toDateString(),
+            ])
+            ->all();
+
+        $clients = array_values(array_unique(array_filter(array_map(
+            fn (array $row): string => trim((string) ($row['partner_name'] ?? '')),
+            $invoiceRows,
+        ))));
+        sort($clients);
+
+        $filteredInvoices = array_values(array_filter(
+            $invoiceRows,
+            fn (array $row): bool => $this->invoiceMatches($row, $filters),
+        ));
+        $filteredExpenses = array_values(array_filter(
+            $expenseRows,
+            fn (array $row): bool => $this->expenseMatches($row, $filters),
+        ));
+
+        $revenuePaid = round(array_sum(array_map(
+            fn (array $row): float => (float) $row['collected'],
+            $filteredInvoices,
+        )), 2);
+        if ($revenuePaid <= 0 && $invoiceRows === [] && $this->filtersAreEmpty($filters)) {
             $revenuePaid = round((float) ServiceRequest::query()->sum('amount_paid'), 2);
         }
-        $revenueOpen = round((float) ServiceRequest::query()
-            ->whereNotIn('status', [RequestStatus::Cancelled])
-            ->sum('amount_remaining'), 2);
-        $expenses = round((float) OpsExpense::query()->sum('amount'), 2);
+
+        $openQuery = ServiceRequest::query()->whereNotIn('status', [RequestStatus::Cancelled]);
+        $client = trim((string) ($filters['client'] ?? ''));
+        if ($client !== '') {
+            $openQuery->whereHas('client', function ($query) use ($client): void {
+                $like = '%'.addcslashes($client, '%_\\').'%';
+                $query->where('name', 'like', $like)->orWhere('company_name', 'like', $like);
+            });
+        }
+        $revenueOpen = round((float) $openQuery->sum('amount_remaining'), 2);
+        $expenses = round(array_sum(array_column($filteredExpenses, 'amount')), 2);
 
         return [
             'revenue_paid' => $revenuePaid,
             'revenue_open' => $revenueOpen,
             'expenses' => $expenses,
             'net' => round($revenuePaid - $expenses, 2),
-            'invoices' => Invoice::query()
-                ->with('request:id,number,title')
-                ->where('kind', 'received')
-                ->latest('id')
-                ->limit(8)
-                ->get()
-                ->map(fn (Invoice $invoice): array => [
-                    'id' => $invoice->id,
-                    'amount' => (float) $invoice->amount,
-                    'request_number' => $invoice->request?->number,
-                    'title' => $invoice->request?->title,
-                    'issued_at' => $invoice->issued_at?->toDateString(),
-                ])
-                ->all(),
-            'expense_rows' => OpsExpense::query()
-                ->latest('id')
-                ->limit(8)
-                ->get()
-                ->map(fn (OpsExpense $expense): array => [
-                    'id' => $expense->id,
-                    'amount' => (float) $expense->amount,
-                    'category' => $expense->category,
-                    'note' => $expense->note,
-                    'spent_at' => $expense->spent_at?->toDateString(),
-                ])
-                ->all(),
+            'invoices' => $filteredInvoices,
+            'clients' => $clients,
+            'expense_rows' => $filteredExpenses,
             'categories' => OpsExpense::categories(),
         ];
     }
@@ -230,5 +251,240 @@ class AdminBotDesk
                 'brief' => $operation['brief'] ?? null,
             ], $operations),
         ];
+    }
+
+    /**
+     * Received money follows the live invoice state. A cancelled Odoo invoice
+     * contributes nothing, even when it was paid before.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function financeInvoices(): array
+    {
+        $local = Invoice::query()
+            ->with('request.client:id,name,company_name')
+            ->where('kind', 'received')
+            ->latest('id')
+            ->limit(200)
+            ->get();
+
+        $live = $this->liveOdooInvoices();
+        $liveById = [];
+        foreach ($live as $row) {
+            $liveById[(string) $row['id']] = $row;
+        }
+
+        $cancelIds = [];
+        $paidIds = [];
+        foreach ($live as $row) {
+            $id = (string) $row['id'];
+            if (($row['state'] ?? '') === 'cancel') {
+                $cancelIds[] = $id;
+            } elseif (in_array((string) ($row['payment_state'] ?? ''), ['paid', 'in_payment'], true)) {
+                $paidIds[] = $id;
+            }
+        }
+        if ($cancelIds !== []) {
+            Invoice::query()->whereIn('odoo_invoice_id', $cancelIds)->update(['status' => 'cancelled']);
+        }
+        if ($paidIds !== []) {
+            Invoice::query()->whereIn('odoo_invoice_id', $paidIds)->where('status', '!=', 'cancelled')->update(['status' => 'paid']);
+        }
+
+        $rows = [];
+        $linked = [];
+        foreach ($local as $invoice) {
+            $odooId = filled($invoice->odoo_invoice_id) ? (string) $invoice->odoo_invoice_id : '';
+            $remote = $odooId !== '' ? ($liveById[$odooId] ?? null) : null;
+            if ($odooId !== '') {
+                $linked[$odooId] = true;
+            }
+            if ($remote !== null) {
+                $rows[] = $this->financeInvoiceRow($remote, $invoice);
+                continue;
+            }
+            if (in_array((string) $invoice->status, ['cancelled', 'void'], true)) {
+                $rows[] = $this->localInvoiceRow($invoice, 'cancelled', 0.0);
+                continue;
+            }
+            $rows[] = $this->localInvoiceRow($invoice, 'paid', (float) $invoice->amount);
+        }
+
+        foreach ($live as $row) {
+            if (isset($linked[(string) $row['id']])) {
+                continue;
+            }
+            $rows[] = $this->financeInvoiceRow($row, null);
+        }
+
+        return $rows;
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function liveOdooInvoices(): array
+    {
+        if (! $this->odoo->configured()) {
+            return [];
+        }
+
+        try {
+            return $this->odoo->listInvoices(200);
+        } catch (Throwable) {
+            return [];
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $remote
+     * @return array<string, mixed>
+     */
+    private function financeInvoiceRow(array $remote, ?Invoice $invoice): array
+    {
+        $state = (string) ($remote['state'] ?? '');
+        $payment = (string) ($remote['payment_state'] ?? '');
+        $collected = 0.0;
+        if ($state !== 'cancel' && in_array($payment, ['paid', 'in_payment', 'partial'], true)) {
+            $collected = round(max((float) $remote['amount_total'] - (float) $remote['amount_residual'], 0), 2);
+        }
+        $bucket = match (true) {
+            $state === 'cancel' => 'cancelled',
+            in_array($payment, ['paid', 'in_payment'], true) => 'paid',
+            $payment === 'partial' => 'partial',
+            default => 'open',
+        };
+        $partner = (string) ($remote['partner_name'] ?? '');
+        if ($partner === '' && $invoice?->request?->client) {
+            $partner = (string) ($invoice->request->client->company_name ?: $invoice->request->client->name);
+        }
+
+        return [
+            'id' => $invoice?->id ?? (int) $remote['id'],
+            'name' => (string) ($remote['name'] ?? $invoice?->invoice_number ?? ''),
+            'amount' => (float) ($remote['amount_total'] ?? $invoice?->amount ?? 0),
+            'collected' => $collected,
+            'state' => $bucket,
+            'payment_state' => $payment,
+            'partner_name' => $partner !== '' ? $partner : null,
+            'request_number' => $invoice?->request?->number ?? ($remote['ref'] ?? $remote['invoice_origin'] ?? null),
+            'title' => $invoice?->request?->title,
+            'issued_at' => $remote['invoice_date'] ?? $invoice?->issued_at?->toDateString(),
+            'odoo_url' => $remote['odoo_url'] ?? null,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function localInvoiceRow(Invoice $invoice, string $bucket, float $collected): array
+    {
+        $client = $invoice->request?->client;
+        $partner = $client ? (string) ($client->company_name ?: $client->name) : '';
+
+        return [
+            'id' => $invoice->id,
+            'name' => (string) $invoice->invoice_number,
+            'amount' => (float) $invoice->amount,
+            'collected' => round($collected, 2),
+            'state' => $bucket,
+            'payment_state' => $bucket === 'paid' ? 'paid' : ($bucket === 'cancelled' ? 'cancel' : 'not_paid'),
+            'partner_name' => $partner !== '' ? $partner : null,
+            'request_number' => $invoice->request?->number,
+            'title' => $invoice->request?->title,
+            'issued_at' => $invoice->issued_at?->toDateString(),
+            'odoo_url' => null,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     * @param  array<string, mixed>  $filters
+     */
+    private function invoiceMatches(array $row, array $filters): bool
+    {
+        $state = (string) ($filters['invoice_state'] ?? '');
+        if ($state !== '' && (string) $row['state'] !== $state) {
+            return false;
+        }
+        $client = trim((string) ($filters['client'] ?? ''));
+        if ($client !== '' && ! str_contains(mb_strtolower((string) ($row['partner_name'] ?? '')), mb_strtolower($client))) {
+            return false;
+        }
+        if (! $this->dateMatches((string) ($row['issued_at'] ?? ''), $filters)) {
+            return false;
+        }
+        $needle = mb_strtolower(trim((string) ($filters['q'] ?? '')));
+        if ($needle === '') {
+            return true;
+        }
+
+        $haystack = mb_strtolower(implode(' ', array_filter([
+            $row['name'] ?? null,
+            $row['partner_name'] ?? null,
+            $row['request_number'] ?? null,
+            $row['title'] ?? null,
+        ])));
+
+        return str_contains($haystack, $needle);
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     * @param  array<string, mixed>  $filters
+     */
+    private function expenseMatches(array $row, array $filters): bool
+    {
+        $category = (string) ($filters['category'] ?? '');
+        if ($category !== '' && (string) $row['category'] !== $category) {
+            return false;
+        }
+        if (! $this->dateMatches((string) ($row['spent_at'] ?? ''), $filters)) {
+            return false;
+        }
+        $needle = mb_strtolower(trim((string) ($filters['q'] ?? '')));
+        if ($needle === '') {
+            return true;
+        }
+
+        return str_contains(mb_strtolower((string) ($row['note'] ?? '').' '.(string) $row['category']), $needle);
+    }
+
+    /**
+     * @param  array<string, mixed>  $filters
+     */
+    private function dateMatches(string $value, array $filters): bool
+    {
+        $from = (string) ($filters['from'] ?? '');
+        $to = (string) ($filters['to'] ?? '');
+        if ($from === '' && $to === '') {
+            return true;
+        }
+        $day = substr($value, 0, 10);
+        if ($day === '') {
+            return false;
+        }
+        if ($from !== '' && $day < $from) {
+            return false;
+        }
+        if ($to !== '' && $day > $to) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * @param  array<string, mixed>  $filters
+     */
+    private function filtersAreEmpty(array $filters): bool
+    {
+        foreach (['from', 'to', 'client', 'invoice_state', 'category', 'q'] as $key) {
+            if (trim((string) ($filters[$key] ?? '')) !== '') {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

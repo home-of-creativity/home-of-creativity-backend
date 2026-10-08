@@ -170,4 +170,83 @@ class StaffAccessTest extends TestCase
         $this->assertNotContains('ops.clients', $role->abilities);
         $this->assertContains('ops.payments', $role->abilities);
     }
+
+    public function test_feature_abilities_appear_on_the_permissions_catalog(): void
+    {
+        $admin = User::factory()->admin()->create();
+        Sanctum::actingAs($admin);
+
+        $catalog = collect($this->getJson('/api/admin/staff-access')->assertOk()->json('abilities'));
+        $this->assertSame(
+            array_map(fn (StaffAbility $ability): string => $ability->value, StaffAbility::cases()),
+            $catalog->pluck('key')->all(),
+        );
+
+        foreach ([
+            StaffAbility::OpsFinance,
+            StaffAbility::OpsReportGemini,
+            StaffAbility::OpsReportTemplates,
+            StaffAbility::OpsReportMedia,
+            StaffAbility::OpsDrive,
+        ] as $ability) {
+            $row = $catalog->firstWhere('key', $ability->value);
+            $this->assertNotNull($row);
+            $this->assertSame($ability->labels()['ar'], $row['label_ar']);
+            $this->assertSame([], $row['actions']);
+        }
+    }
+
+    public function test_report_editor_keeps_feature_abilities_and_payments_keep_finance(): void
+    {
+        $granted = StaffAbility::inheritFeatureAbilities(['ops.reports.update', 'ops.payments']);
+
+        $this->assertContains(StaffAbility::OpsReportGemini->value, $granted);
+        $this->assertContains(StaffAbility::OpsReportTemplates->value, $granted);
+        $this->assertContains(StaffAbility::OpsReportMedia->value, $granted);
+        $this->assertContains(StaffAbility::OpsDrive->value, $granted);
+        $this->assertContains(StaffAbility::OpsFinance->value, $granted);
+        $this->assertNotContains(
+            StaffAbility::OpsReportGemini->value,
+            StaffAbility::inheritFeatureAbilities(['ops.reports.view']),
+        );
+    }
+
+    public function test_report_features_and_finance_are_separate_from_the_older_sections(): void
+    {
+        $reports = Role::query()->create([
+            'name' => 'تقارير',
+            'abilities' => ['ops.reports.view', 'ops.reports.create', 'ops.reports.update'],
+        ]);
+        $payments = Role::query()->create([
+            'name' => 'مدفوعات',
+            'abilities' => [StaffAbility::OpsPayments->value],
+        ]);
+        $editor = User::factory()->create(['role_id' => $reports->id]);
+        $cashier = User::factory()->create(['role_id' => $payments->id]);
+
+        Sanctum::actingAs($editor);
+        $this->postJson('/api/admin/reports/gemini', [])->assertForbidden();
+        $this->getJson('/api/admin/drive/storage-account')->assertForbidden();
+        $this->getJson('/api/admin/finance')->assertForbidden();
+
+        Sanctum::actingAs($cashier);
+        $this->getJson('/api/admin/finance')->assertForbidden();
+        $this->getJson('/api/admin/ops-settings')->assertOk();
+
+        $reports->forceFill([
+            'abilities' => [
+                'ops.reports.view',
+                StaffAbility::OpsReportGemini->value,
+                StaffAbility::OpsDrive->value,
+            ],
+        ])->save();
+        $payments->forceFill(['abilities' => [StaffAbility::OpsFinance->value]])->save();
+
+        Sanctum::actingAs($editor->fresh());
+        $this->postJson('/api/admin/reports/gemini', [])->assertUnprocessable();
+        $this->getJson('/api/admin/drive/storage-account')->assertOk();
+
+        Sanctum::actingAs($cashier->fresh());
+        $this->getJson('/api/admin/finance')->assertOk();
+    }
 }

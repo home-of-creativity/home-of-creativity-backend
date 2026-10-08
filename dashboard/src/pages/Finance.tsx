@@ -1,4 +1,4 @@
-import { useMemo, useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Search } from "lucide-react";
 import { toast } from "sonner";
 import { LoadingLottie } from "../components/LoadingLottie";
@@ -18,18 +18,49 @@ export function Finance({ t }: { locale: Locale; t: (c: { ar: string; en: string
   const [category, setCategory] = useState("");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
-  const [expenseQuery, setExpenseQuery] = useState("");
+  const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [invoiceState, setInvoiceState] = useState("");
+  const [client, setClient] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const [expenseCategory, setExpenseCategory] = useState("");
+  const [refresh, setRefresh] = useState(0);
 
   useEffect(() => {
-    api
-      .finance()
-      .then((res) => {
-        setData(res.data);
-        setCategory(res.data.categories[0] ?? "");
-      })
-      .catch((err) => setError(err instanceof Error ? err.message : t(copy.saveFailed)));
-  }, [t]);
+    const timer = window.setTimeout(() => setDebouncedQuery(query.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+
+  useEffect(() => {
+    let cancelled = false;
+    function load() {
+      api
+        .finance({
+          q: debouncedQuery || undefined,
+          invoice_state: invoiceState || undefined,
+          client: client || undefined,
+          from: from || undefined,
+          to: to || undefined,
+          category: expenseCategory || undefined,
+        })
+        .then((res) => {
+          if (cancelled) return;
+          setData(res.data);
+          setCategory((current) => current || res.data.categories[0] || "");
+          setError("");
+        })
+        .catch((err) => {
+          if (!cancelled) setError(err instanceof Error ? err.message : t(copy.saveFailed));
+        });
+    }
+    load();
+    const timer = window.setInterval(load, 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [debouncedQuery, invoiceState, client, from, to, expenseCategory, refresh, t]);
 
   async function addExpense(event: FormEvent) {
     event.preventDefault();
@@ -42,9 +73,9 @@ export function Finance({ t }: { locale: Locale; t: (c: { ar: string; en: string
     setBusy(true);
     try {
       const res = await api.addExpense({ amount: value, category, note: note.trim() || undefined });
-      setData(res.data);
       setAmount("");
       setNote("");
+      setRefresh((value) => value + 1);
       toast.success(res.message ?? t(copy.saveSuccess));
     } catch (err) {
       setError(err instanceof Error ? err.message : t(copy.saveFailed));
@@ -53,15 +84,13 @@ export function Finance({ t }: { locale: Locale; t: (c: { ar: string; en: string
     }
   }
 
-  const expenseRows = useMemo(() => {
-    if (!data) return [];
-    const needle = expenseQuery.trim().toLowerCase();
-    return data.expense_rows.filter((row) => {
-      if (expenseCategory && row.category !== expenseCategory) return false;
-      if (!needle) return true;
-      return (row.note ?? "").toLowerCase().includes(needle);
-    });
-  }, [data, expenseQuery, expenseCategory]);
+  const stateLabel: Record<string, { ar: string; en: string }> = {
+    paid: copy.financeRevenuePaid,
+    open: copy.payNotPaid,
+    partial: copy.payPartial,
+    cancelled: copy.quoteStateCancel,
+  };
+  const filtered = Boolean(query || invoiceState || client || from || to || expenseCategory);
 
   if (!data && !error) return <LoadingLottie variant="page" label={t(copy.loading)} />;
 
@@ -119,8 +148,35 @@ export function Finance({ t }: { locale: Locale; t: (c: { ar: string; en: string
               {t(copy.search)}
               <span className="search-bar">
                 <Search size={16} aria-hidden="true" />
-                <input type="search" className="field" placeholder={t(copy.searchExpenses)} value={expenseQuery} onChange={(e) => setExpenseQuery(e.target.value)} aria-label={t(copy.search)} />
+                <input type="search" className="field" placeholder={t(copy.search)} value={query} onChange={(e) => setQuery(e.target.value)} aria-label={t(copy.search)} />
               </span>
+            </label>
+            <label className="field-label">
+              {t(copy.odooState)}
+              <select className="field" value={invoiceState} onChange={(e) => setInvoiceState(e.target.value)}>
+                <option value="">{t(copy.all)}</option>
+                <option value="paid">{t(copy.financeRevenuePaid)}</option>
+                <option value="partial">{t(copy.payPartial)}</option>
+                <option value="open">{t(copy.payNotPaid)}</option>
+                <option value="cancelled">{t(copy.quoteStateCancel)}</option>
+              </select>
+            </label>
+            <label className="field-label">
+              {t(copy.financeClient)}
+              <select className="field" value={client} onChange={(e) => setClient(e.target.value)}>
+                <option value="">{t(copy.all)}</option>
+                {(data.clients ?? []).map((name) => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field-label">
+              {t(copy.financeFrom)}
+              <input className="field" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+            </label>
+            <label className="field-label">
+              {t(copy.financeTo)}
+              <input className="field" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
             </label>
             <label className="field-label">
               {t(copy.financeCategory)}
@@ -132,6 +188,49 @@ export function Finance({ t }: { locale: Locale; t: (c: { ar: string; en: string
               </select>
             </label>
           </div>
+          <section className="panel recent-panel">
+            <div className="panel-head">
+              <h2>{t(copy.financeInvoices)}</h2>
+            </div>
+            <div className="table-wrap table-flush">
+              <table>
+                <thead>
+                  <tr>
+                    <th>{t(copy.number)}</th>
+                    <th>{t(copy.financeClient)}</th>
+                    <th>{t(copy.amount)}</th>
+                    <th>{t(copy.financeRevenuePaid)}</th>
+                    <th>{t(copy.odooState)}</th>
+                    <th>{t(copy.odooDate)}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.invoices.length === 0 ? (
+                    <tr>
+                      <td colSpan={6}>{filtered ? t(copy.noSearchResults) : t(copy.empty)}</td>
+                    </tr>
+                  ) : (
+                    data.invoices.map((row) => (
+                      <tr key={`${row.id}-${row.name ?? ""}`}>
+                        <td dir="ltr">
+                          {row.odoo_url ? (
+                            <a className="table-link" href={row.odoo_url} target="_blank" rel="noreferrer">{row.name || row.request_number || row.id}</a>
+                          ) : (
+                            row.name || row.request_number || row.id
+                          )}
+                        </td>
+                        <td>{row.partner_name ?? "—"}</td>
+                        <td dir="ltr">{usd(row.amount)}</td>
+                        <td dir="ltr">{usd(row.collected)}</td>
+                        <td>{t(stateLabel[row.state] ?? { ar: row.state, en: row.state })}</td>
+                        <td className="nowrap">{row.issued_at ?? "—"}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
           <section className="panel recent-panel">
             <div className="panel-head">
               <h2>{t(copy.financeExpenses)}</h2>
@@ -146,12 +245,12 @@ export function Finance({ t }: { locale: Locale; t: (c: { ar: string; en: string
                   </tr>
                 </thead>
                 <tbody>
-                  {expenseRows.length === 0 ? (
+                  {data.expense_rows.length === 0 ? (
                     <tr>
-                      <td colSpan={3}>{expenseQuery || expenseCategory ? t(copy.noSearchResults) : t(copy.empty)}</td>
+                      <td colSpan={3}>{filtered ? t(copy.noSearchResults) : t(copy.empty)}</td>
                     </tr>
                   ) : (
-                    expenseRows.map((row) => (
+                    data.expense_rows.map((row) => (
                       <tr key={row.id}>
                         <td dir="ltr">{usd(row.amount)}</td>
                         <td>{row.category}</td>

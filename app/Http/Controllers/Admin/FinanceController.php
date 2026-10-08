@@ -11,9 +11,19 @@ use Illuminate\Validation\Rule;
 
 class FinanceController extends Controller
 {
-    public function index(AdminBotDesk $desk): JsonResponse
+    public function index(Request $request, AdminBotDesk $desk): JsonResponse
     {
-        return response()->json(['data' => $desk->finance(), 'message' => 'ok']);
+        return response()->json([
+            'data' => $desk->finance([
+                'from' => $request->query('from'),
+                'to' => $request->query('to'),
+                'client' => $request->query('client'),
+                'invoice_state' => $request->query('invoice_state'),
+                'category' => $request->query('category'),
+                'q' => $request->query('q'),
+            ]),
+            'message' => 'ok',
+        ]);
     }
 
     public function storeExpense(Request $request, AdminBotDesk $desk): JsonResponse

@@ -1,5 +1,8 @@
 # Laravel API
 
+Last updated: 8 October 2026 (Financial vouchers: `GET/POST /admin/vouchers`, `GET/PUT/DELETE /admin/vouchers/{id}`, ability `ops.vouchers` via `crud:`. Kinds `receipt`, `payment`, `journal`, `settlement`. Signatures are PNG data URLs. A journal must balance. Serials look like `HOC-V-2026-0001`. The list omits signature images.)
+Last updated: 8 October 2026 (`POST /admin/odoo/quotations` and `POST /admin/odoo/invoices` create an Odoo sale order and customer invoice for a client that already has `odoo_partner_id`. An invoice can set `invoice_origin` from a quotation.)
+Last updated: 8 October 2026 (Odoo quotation and invoice PDFs share the company letterhead on one A4 page. The cover is 206mm by 278mm so the right edge and the bottom contact row are not clipped. Paper margins are 0. Text inset is padding. Smart shrinking is off.)
 Last updated: 6 October 2026 (`POST /site/ask` answers published-site questions with Gemini; the key stays on the server)
 Last updated: 7 October 2026 (GitHub `workflow_job` webhooks post to `POST /api/integrations/github`, signed with `X-Hub-Signature-256` and `GITHUB_WEBHOOK_SECRET`, and `DevAlert` sends the result to the developer bot. A skipped design schedule stays silent. Client photography booking routes return 422.)
 Last updated: 1 October 2026 (project gallery files under `/storage/portfolio/projects` are `Cache-Control: no-cache`, and each image includes `updated_at`)

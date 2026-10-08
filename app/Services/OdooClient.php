@@ -85,6 +85,7 @@ class OdooClient
         return [
             'id' => (int) $row['id'],
             'name' => (string) ($row['name'] ?? ''),
+            'partner_id' => $this->relationId($row['partner_id'] ?? null),
             'partner_name' => $this->relationName($row['partner_id'] ?? null),
             'amount_total' => (float) ($row['amount_total'] ?? 0),
             'currency' => $this->relationName($row['currency_id'] ?? null),
@@ -1069,6 +1070,118 @@ class OdooClient
     }
 
     /**
+     * @param  list<array{title: string, amount: float|int|string, units?: float|int|string|null, notes?: string|null}>  $lines
+     * @return array<string, mixed>
+     */
+    public function createStaffQuotation(
+        string $partnerId,
+        string $partnerName,
+        ?string $email,
+        ?string $phone,
+        array $lines,
+        ?string $notes,
+        ?string $reference,
+        int|string|null $opportunityId,
+    ): array {
+        $created = $this->createQuotation(
+            $partnerName,
+            $email,
+            $phone,
+            filled($reference) ? $reference : 'DASH',
+            'عرض سعر',
+            null,
+            $notes,
+            $lines,
+            $partnerId,
+            $opportunityId,
+        );
+        $id = (int) $created['odoo_quotation_id'];
+        $snapshot = $this->quotationSnapshot($id);
+
+        return $snapshot ?? [
+            'id' => $id,
+            'name' => '',
+            'odoo_url' => $this->recordUrl('sale.order', $id),
+        ];
+    }
+
+    /**
+     * Partner, name, and total of a sale order, used to attach a customer invoice.
+     *
+     * @return array{id: int, name: string, partner_id: int, amount_total: float, client_order_ref: string|null}|null
+     */
+    public function quotationLink(int $id): ?array
+    {
+        if ($id <= 0 || ! $this->configured()) {
+            return null;
+        }
+
+        $row = $this->firstRecord($this->searchRead('sale.order', [['id', '=', $id]], [
+            'id', 'name', 'partner_id', 'amount_total', 'client_order_ref',
+        ], 1, 0, 'id desc'));
+
+        if ($row === null) {
+            return null;
+        }
+
+        $partnerId = $this->relationId($row['partner_id'] ?? null);
+        if ($partnerId === null) {
+            return null;
+        }
+
+        return [
+            'id' => (int) $row['id'],
+            'name' => (string) ($row['name'] ?? ''),
+            'partner_id' => $partnerId,
+            'amount_total' => (float) ($row['amount_total'] ?? 0),
+            'client_order_ref' => $this->optionalString($row['client_order_ref'] ?? null),
+        ];
+    }
+
+    /**
+     * @param  list<array{title: string, amount: float|int|string, units?: float|int|string|null, notes?: string|null}>  $lines
+     * @return array<string, mixed>
+     */
+    public function createStaffInvoice(
+        string $partnerId,
+        array $lines,
+        ?string $reference = null,
+        ?string $origin = null,
+    ): array {
+        $values = [
+            'move_type' => 'out_invoice',
+            'partner_id' => (int) $partnerId,
+            'invoice_origin' => filled($origin) ? $origin : null,
+            'ref' => filled($reference) ? $reference : null,
+            'invoice_date' => now()->toDateString(),
+        ];
+
+        if ($currencyId = $this->resolveCurrencyId()) {
+            $values['currency_id'] = $currencyId;
+        }
+
+        $values['invoice_line_ids'] = array_map(
+            fn (array $line): array => [0, 0, $this->invoiceLine([
+                'name' => filled($line['notes'] ?? null)
+                    ? "{$line['title']}\n{$line['notes']}"
+                    : (string) $line['title'],
+                'quantity' => (float) ($line['units'] ?? 1),
+                'price_unit' => (float) $line['amount'],
+            ])],
+            $lines,
+        );
+
+        $id = (int) $this->call('account.move', 'create', [$values]);
+        $snapshot = $this->invoiceSnapshot($id);
+
+        return $snapshot ?? [
+            'id' => $id,
+            'name' => '',
+            'odoo_url' => $this->recordUrl('account.move', $id),
+        ];
+    }
+
+    /**
      * @param  list<array{title: string, amount: float|int|string, units?: float|int|string|null, notes?: string|null}>|null  $lines
      * @return array{odoo_partner_id: string, odoo_quotation_id: string}
      */
@@ -1504,6 +1617,19 @@ class OdooClient
         }
 
         return [['partner_id', 'child_of', $scope > 0 ? $scope : $partnerId]];
+    }
+
+    private function relationId(mixed $value): ?int
+    {
+        if (is_array($value) && isset($value[0]) && (int) $value[0] > 0) {
+            return (int) $value[0];
+        }
+
+        if (is_numeric($value) && (int) $value > 0) {
+            return (int) $value;
+        }
+
+        return null;
     }
 
     private function relationName(mixed $value): ?string

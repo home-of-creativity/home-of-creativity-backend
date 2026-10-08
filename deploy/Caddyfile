@@ -177,6 +177,13 @@
 		respond "Gone" 410
 	}
 
+	# Old project shell still receiving Search Console impressions.
+	@removedProjectDetail path /projects/detail /projects/detail/
+	handle @removedProjectDetail {
+		header Cache-Control "no-cache"
+		respond "Gone" 410
+	}
+
 	handle {
 		root * /var/www/design
 		encode zstd gzip
@@ -201,18 +208,24 @@
 		@indexFile path_regexp indexfile ^(.*/)index.html$
 		redir @indexFile https://hoc.agency{re.indexfile.1} 301
 
-		# Old query URLs. Unknown /articles/{slug}/ has no file and falls through to 404.
+		# Old query URLs. An empty slug goes to the articles index. Unknown /articles/{slug}/ has no file and falls through to 404.
+		@legacyArticleEmpty {
+			path /articles/detail /articles/detail/ /articles /articles/
+			query slug=
+		}
+		redir @legacyArticleEmpty https://hoc.agency/articles/ 301
+
 		@legacyArticleDetail {
 			path /articles/detail /articles/detail/
 			query slug=*
 		}
-		redir @legacyArticleDetail /articles/{query.slug}/ 301
+		redir @legacyArticleDetail https://hoc.agency/articles/{query.slug}/ 301
 
 		@legacyArticleQuery {
 			path /articles /articles/
 			query slug=*
 		}
-		redir @legacyArticleQuery /articles/{query.slug}/ 301
+		redir @legacyArticleQuery https://hoc.agency/articles/{query.slug}/ 301
 
 		@static file {
 			try_files {path} {path}/index.html

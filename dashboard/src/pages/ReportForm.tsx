@@ -16,7 +16,8 @@ import {
   Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
-import { api, type Client, type ClientReport, type ClientReportAttachment } from "../api";
+import { api, canAbility, type Client, type ClientReport, type ClientReportAttachment, type ReportTemplateFile } from "../api";
+import { useAuth } from "../auth";
 import { ConfirmAction } from "../components/ConfirmAction";
 import { DriveFolderPicker } from "../components/DriveFolderPicker";
 import { FileDropzone } from "../components/FileDropzone";
@@ -25,7 +26,7 @@ import { ReportGemini } from "../components/ReportGemini";
 import { addParagraphFontStyle, buildDocxFromParagraphs, buildReportDocx, legacyHtmlToParagraphs, type ReportTemplateId } from "../components/report/docxTemplate";
 import { addBodyBackground } from "../components/report/pictureLayout";
 import { clearReportDraft, readReportDraft, writeReportDraft } from "../components/report/draftStore";
-import { forgetReportTemplate, loadSavedTemplates, rememberReportTemplate, type SavedReportTemplate } from "../components/report/templateStore";
+import { forgetReportTemplate, loadSavedTemplates } from "../components/report/templateStore";
 import { loadReportFonts, rememberReportFont, type StoredReportFont } from "../components/report/fontStore";
 import type { ReportDocHandle } from "../components/report/ReportDocEditor";
 import { copy, type Locale } from "../i18n";
@@ -78,6 +79,10 @@ function fill(template: string, values: Record<string, string | number>) {
 }
 
 export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
+  const { user } = useAuth();
+  const templatesAllowed = canAbility(user, "ops.report_templates");
+  const assistantAllowed = canAbility(user, "ops.report_gemini");
+  const mediaAllowed = canAbility(user, "ops.report_media");
   const navigate = useNavigate();
   const params = useParams();
   const clientId = params.clientId ? Number(params.clientId) : null;
@@ -101,7 +106,7 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
   const [panel, setPanel] = useState<PanelTab | null>(() => (window.matchMedia("(min-width: 1180px)").matches ? "gemini" : null));
   const [folderOpen, setFolderOpen] = useState(false);
   const [extraFonts, setExtraFonts] = useState<StoredReportFont[]>([]);
-  const [savedTemplates, setSavedTemplates] = useState<SavedReportTemplate[]>([]);
+  const [savedTemplates, setSavedTemplates] = useState<ReportTemplateFile[]>([]);
   const [templateSaveOpen, setTemplateSaveOpen] = useState(false);
   const [templateName, setTemplateName] = useState("");
   const ownerId = report?.client_id ?? clientId;
@@ -357,9 +362,36 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
   }
 
   useEffect(() => {
-    if (phase !== "template") return;
-    void loadSavedTemplates().then(setSavedTemplates);
-  }, [phase]);
+    if (phase !== "template" || !templatesAllowed) return;
+    let live = true;
+    void (async () => {
+      let failed = false;
+      try {
+        const local = await loadSavedTemplates();
+        for (const item of local) {
+          const form = new FormData();
+          form.append("name", item.name);
+          form.append("document", new File([item.bytes], `${item.name}.docx`, { type: DOCX_MIME }));
+          await api.saveReportTemplate(form);
+          await forgetReportTemplate(item.id);
+        }
+      } catch {
+        failed = true;
+      }
+      try {
+        const catalog = await api.reportTemplates();
+        if (live) setSavedTemplates(catalog.data.saved);
+      } catch {
+        failed = true;
+      }
+      if (failed && live) toast.error(t(copy.reportLoadFailed));
+    })();
+    return () => {
+      live = false;
+    };
+    // `t` is a new function every render; the catalog only needs to load when the picker opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, templatesAllowed]);
 
   async function start(id: ReportTemplateId) {
     const company = client?.company_name || client?.name || "";
@@ -379,12 +411,17 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
     setPhase("editing");
   }
 
-  function startSaved(item: SavedReportTemplate) {
-    const copy = new Uint8Array(item.bytes.byteLength);
-    copy.set(new Uint8Array(item.bytes));
-    setTitle(item.name);
-    setBytes(copy);
-    setPhase("editing");
+  async function startSaved(item: ReportTemplateFile) {
+    try {
+      const file = await api.reportTemplateFile(item.id);
+      const copy = new Uint8Array(file.byteLength);
+      copy.set(file);
+      setTitle(item.name);
+      setBytes(copy);
+      setPhase("editing");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t(copy.reportLoadFailed));
+    }
   }
 
   async function keepAsTemplate(event: FormEvent) {
@@ -393,9 +430,22 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
     const docx = await editor.current?.save();
     if (!name || !docx) return;
     try {
-      setSavedTemplates(await rememberReportTemplate(name, docx));
+      const form = new FormData();
+      form.append("name", name);
+      form.append("document", new File([docx as BlobPart], `${name}.docx`, { type: DOCX_MIME }));
+      const catalog = await api.saveReportTemplate(form);
+      setSavedTemplates(catalog.data.saved);
       setTemplateSaveOpen(false);
       toast.success(t(copy.reportTemplateSaved));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t(copy.saveFailed));
+    }
+  }
+
+  async function removeSavedTemplate(id: number) {
+    try {
+      const catalog = await api.deleteReportTemplate(id);
+      setSavedTemplates(catalog.data.saved);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t(copy.saveFailed));
     }
@@ -489,14 +539,14 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
           {!client?.google_drive_folder_id ? <p className="notice">{t(copy.reportNoFolderPublish)}</p> : null}
         </header>
         <div className="template-grid">
-          {TEMPLATES.map((template) => (
+          {TEMPLATES.filter((template) => template.id === "blank" || templatesAllowed).map((template) => (
             <button key={template.id} type="button" className={`template-card is-${template.id}`} onClick={() => start(template.id)}>
               <span className="template-sheet" aria-hidden="true"><i /><i /><i /><i /></span>
               <strong>{t(template.name)}</strong>
               <span>{t(template.hint)}</span>
             </button>
           ))}
-          {savedTemplates.map((item) => (
+          {templatesAllowed ? savedTemplates.map((item) => (
             <div key={item.id} className="template-card is-saved">
               <button type="button" className="template-card-body" onClick={() => startSaved(item)}>
                 <span className="template-sheet" aria-hidden="true"><i /><i /><i /><i /></span>
@@ -506,12 +556,12 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
-                onClick={() => void forgetReportTemplate(item.id).then(setSavedTemplates)}
+                onClick={() => void removeSavedTemplate(item.id)}
               >
                 {t(copy.delete)}
               </button>
             </div>
-          ))}
+          )) : null}
           <label className="template-card is-import">
             <span className="template-sheet" aria-hidden="true"><FileUp size={28} /></span>
             <strong>{t(copy.reportTemplateImport)}</strong>
@@ -535,6 +585,7 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
   const titleBarEnd = () => (
     <div className="report-bar" dir={locale === "ar" ? "rtl" : "ltr"}>
       <span className={`status-dot${dirty || autoFailed ? " is-dirty" : report?.published_at && !editedSincePublish ? " is-live" : ""}${busy || autoSaving ? " is-busy" : ""}`} role="status" aria-live="polite">{status}</span>
+      {templatesAllowed ? (
       <button
         type="button"
         className="btn btn-sm"
@@ -546,6 +597,7 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
       >
         <span className="btn-label">{t(copy.reportSaveTemplate)}</span>
       </button>
+      ) : null}
       <button type="button" className="btn btn-sm" disabled={busy !== null} onClick={() => void save("manual")} title="Ctrl+S">
         <Save size={15} aria-hidden="true" /><span className="btn-label">{t(copy.reportSaveDraft)}</span>
       </button>
@@ -557,7 +609,7 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
         className="btn btn-ghost btn-icon"
         aria-label={panel ? t(copy.reportPanelHide) : t(copy.reportPanelShow)}
         title={panel ? t(copy.reportPanelHide) : t(copy.reportPanelShow)}
-        onClick={() => setPanel((current) => (current ? null : "gemini"))}
+        onClick={() => setPanel((current) => (current ? null : assistantAllowed || mediaAllowed ? "gemini" : "files"))}
       >
         {panel ? <PanelLeftClose size={17} aria-hidden="true" /> : <PanelLeftOpen size={17} aria-hidden="true" />}
       </button>
@@ -620,6 +672,8 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
               {panel === "gemini" ? (
                 <ReportGemini
                   t={t}
+                  showAssistant={assistantAllowed}
+                  showMedia={mediaAllowed}
                   selectedText={() => editor.current?.selectedText() ?? ""}
                   documentText={() => editor.current?.text() ?? ""}
                   pageCount={() => editor.current?.pageCount() ?? 1}
