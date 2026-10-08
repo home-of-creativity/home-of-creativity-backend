@@ -5,7 +5,7 @@ import harfbuzzWasm from "@docx-editor.dev/core/harfbuzz.wasm?url";
 import "@docx-editor.dev/core/styles/editor.css";
 import type { Locale } from "../../i18n";
 import { editorArabic } from "./editorArabic";
-import { addCover, addTextBox, type TextBoxShape } from "./pageObjects";
+import { addBlankPage, addCover, addTextBox, type TextBoxShape } from "./pageObjects";
 import { addBodyBackground, bodyDrawings, layoutNewDrawing } from "./pictureLayout";
 import { reportFontConfiguration, type ExtraFont } from "./fonts";
 import { pagesToPdf } from "./pdf";
@@ -116,6 +116,7 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
   const theme = useDashboardTheme();
   // The PDF is always a light page, even when the dashboard (and so the editor) is in dark mode.
   const [printLight, setPrintLight] = useState(false);
+  const insertPageRef = useRef<() => Promise<boolean>>(async () => false);
   const renderPdf = useCallback(async (onProgress?: (done: number, total: number) => void) => {
     if (!root.current) throw new Error("editor not mounted");
     const host = root.current;
@@ -134,8 +135,15 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
       exporters: {
         pdf: async () => ({ bytes: await renderPdf() }),
       },
+      children: (
+        <DocxEditor.Menu.Insert>
+          <DocxEditor.Menu.Row onSelect={() => { void insertPageRef.current(); }}>
+            {locale === "ar" ? "صفحة جديدة" : "New page"}
+          </DocxEditor.Menu.Row>
+        </DocxEditor.Menu.Insert>
+      ),
     }),
-    [onSave, renderPdf],
+    [locale, onSave, renderPdf],
   );
 
   const placeCaret = useCallback(async (page: number) => {
@@ -230,6 +238,15 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
     await reload(next, current.getCurrentPage("caret"));
     return true;
   }, [placeCaret, reload]);
+
+  insertPageRef.current = async () => {
+    const ok = await rewriteAtCaret((docx, paraId) => addBlankPage(docx, paraId));
+    if (!ok) return false;
+    const current = editor.current?.getEditor();
+    const page = current?.getCurrentPage("caret") ?? 1;
+    current?.scrollToPage(page + 1);
+    return true;
+  };
 
   useEffect(() => {
     const host = root.current;

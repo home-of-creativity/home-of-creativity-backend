@@ -76,6 +76,31 @@ function paragraphEnd(xml: string, start: number) {
   return -1;
 }
 
+const PAGE_BREAK = '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
+
+/**
+ * A blank page after the caret's paragraph.
+ *
+ * The break alone does not paint a page when it is the last thing in the story, so an empty
+ * paragraph follows it. A second break is added only when more content follows, so that content
+ * starts on the page after the blank one.
+ */
+export function addBlankPage(docx: Uint8Array, paraId: string): Uint8Array | null {
+  const doc = unpack(docx);
+  if (!doc) return null;
+  const start = doc.xml.search(new RegExp(`<w:p\\b[^>]*w14:paraId="${paraId}"`));
+  if (start < 0) return null;
+  const end = paragraphEnd(doc.xml, start);
+  if (end < 0) return null;
+  const after = doc.xml.slice(end).replace(/<w:sectPr\b[\s\S]*?<\/w:sectPr>/g, "");
+  const hasMore = /<w:p\b|<w:tbl\b/.test(after);
+  // A page break that is already next does the second split. Adding another one leaves an extra empty page.
+  const nextIsBreak = /^\s*<w:p\b[^>]*>\s*(?:<w:pPr\b[\s\S]*?<\/w:pPr>\s*)?<w:r\b[^>]*>\s*<w:br\b[^>]*w:type="page"/.test(after);
+  const blank = '<w:p><w:pPr><w:bidi/></w:pPr></w:p>';
+  const next = insertAfterParagraph(doc.xml, paraId, PAGE_BREAK + blank + (hasMore && !nextIsBreak ? PAGE_BREAK : ""));
+  return next ? pack(doc.files, next) : null;
+}
+
 /** Insert `block` after the body paragraph with this `w14:paraId`; null when it is not found. */
 function insertAfterParagraph(xml: string, paraId: string, block: string) {
   const start = xml.search(new RegExp(`<w:p\\b[^>]*w14:paraId="${paraId}"`));

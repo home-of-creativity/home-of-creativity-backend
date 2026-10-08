@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ArrowLeft, ArrowRight, Printer } from "lucide-react";
+import { ArrowLeft, ArrowRight, Globe, Mail, MapPin, Phone, Printer } from "lucide-react";
 import { toast } from "sonner";
 import { api, canAbility, type FinancialVoucher, type VoucherKind, type VoucherLine } from "../api";
 import { useAuth } from "../auth";
@@ -471,40 +471,57 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
             </>
           )}
           <p className="muted">{t(copy.voucherSignHint)}</p>
-          <label className="field-label">
-            {t(copy.voucherSignerName)}
-            <input className="field" value={draft.signer_name} disabled={!canWrite} maxLength={120} onChange={(event) => patch({ signer_name: event.target.value })} />
-          </label>
-          <SignaturePad label={t(copy.voucherSigner)} clearLabel={t(copy.voucherClearSign)} value={draft.signature} disabled={!canWrite} onChange={(signature) => patch({ signature })} />
-          <label className="field-label">
-            {t(copy.voucherSignerName)}
-            <input className="field" value={draft.counter_signer_name} disabled={!canWrite} maxLength={120} onChange={(event) => patch({ counter_signer_name: event.target.value })} />
-          </label>
-          <SignaturePad label={t(copy.voucherCounterSigner)} clearLabel={t(copy.voucherClearSign)} value={draft.counter_signature} disabled={!canWrite} onChange={(counter_signature) => patch({ counter_signature })} />
+          {draft.kind === "delivery" ? null : (
+            <label className="field-label">
+              {t(copy.voucherSignerName)}
+              <input className="field" value={draft.signer_name} disabled={!canWrite} maxLength={120} onChange={(event) => patch({ signer_name: event.target.value })} />
+            </label>
+          )}
+          <SignaturePad label={draft.kind === "delivery" ? t(copy.voucherSignRecipient) : t(copy.voucherSigner)} clearLabel={t(copy.voucherClearSign)} value={draft.signature} disabled={!canWrite} onChange={(signature) => patch({ signature })} />
+          {draft.kind === "delivery" ? null : (
+            <label className="field-label">
+              {t(copy.voucherSignerName)}
+              <input className="field" value={draft.counter_signer_name} disabled={!canWrite} maxLength={120} onChange={(event) => patch({ counter_signer_name: event.target.value })} />
+            </label>
+          )}
+          <SignaturePad label={draft.kind === "delivery" ? t(copy.voucherSignGiver) : t(copy.voucherCounterSigner)} clearLabel={t(copy.voucherClearSign)} value={draft.counter_signature} disabled={!canWrite} onChange={(counter_signature) => patch({ counter_signature })} />
           {canWrite ? (
             <button className="btn btn-primary" type="submit" disabled={busy} aria-busy={busy}>{t(copy.voucherSave)}</button>
           ) : null}
         </form>
 
-        <article className="voucher-sheet" dir={locale === "ar" ? "rtl" : "ltr"}>
-          <header className="voucher-sheet-head">
-            <div>
-              <p className="voucher-brand">Home of Creativity</p>
-              <h1>{t(voucherKindCopy[draft.kind].name)}</h1>
-            </div>
-            <dl>
-              <div>
-                <dt>{t(copy.voucherSerial)}</dt>
-                <dd dir="ltr">{serial || "—"}</dd>
-              </div>
-              <div>
-                <dt>{t(copy.voucherDate)}</dt>
-                <dd dir="ltr">{showDate(draft.issued_on)}</dd>
-              </div>
-            </dl>
+        <article className="voucher-sheet is-letter" dir="rtl">
+          <img className="voucher-watermark" src={`${import.meta.env.BASE_URL}hummingbird.svg`} alt="" />
+          <span className="voucher-corner is-top" aria-hidden="true" />
+          <span className="voucher-corner is-bottom" aria-hidden="true" />
+          <header className="voucher-lockup" dir="ltr">
+            <img src={`${import.meta.env.BASE_URL}hummingbird.svg`} alt="" width={72} height={52} />
+            <span>Home of Creativity</span>
           </header>
-
-          {draft.kind === "journal" ? (
+          <h1 className="voucher-doc-title">{t(voucherKindCopy[draft.kind].name)}</h1>
+          <div className="voucher-meta">
+            <p><span>{t(copy.voucherDate)}</span><strong dir="ltr">{showDate(draft.issued_on)}</strong></p>
+            <p><span>{t(copy.voucherCompany)}</span><strong>{t(copy.voucherCompanyValue)}</strong></p>
+            <p><span>{t(copy.voucherSerial)}</span><strong dir="ltr">{shortSerial(serial)}</strong></p>
+          </div>
+          {draft.kind === "delivery" ? (
+            <div className="voucher-copy">
+              <p><span>{t(copy.voucherRecipient)}</span><strong>{[draft.party_name, draft.reference].filter(Boolean).join(" / ") || "………………"}</strong></p>
+              <p><span>{t(copy.voucherGiver)}</span><strong>{[draft.counter_signer_name, draft.purpose].filter(Boolean).join(" / ") || "………………"}</strong></p>
+              <p><span>{t(copy.voucherAmountDigits)}</span><strong dir="ltr">{figures(shownAmount, draft.currency)}</strong></p>
+              <p><span>{t(copy.voucherAmountWords)}</span><strong>{draft.amount_words || "………………"}</strong></p>
+              <p className="voucher-statement-label">{t(copy.voucherStatement)}</p>
+              <ul>
+                {draft.lines.filter((line) => line.memo || line.debit).map((line, index) => (
+                  <li key={index}>
+                    <span>{line.memo || "………………"}</span>
+                    {line.debit ? <b dir="ltr">{figures(Number(line.debit) || 0, draft.currency)}</b> : null}
+                  </li>
+                ))}
+              </ul>
+              <p className="voucher-ack">{t(copy.voucherAck)}</p>
+            </div>
+          ) : draft.kind === "journal" ? (
             <table className="voucher-table">
               <thead>
                 <tr>
@@ -522,44 +539,37 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
                   </tr>
                 ))}
               </tbody>
-              <tfoot>
-                <tr>
-                  <th>{t(copy.voucherTotal)}</th>
-                  <td dir="ltr">{money(totals.debit, draft.currency)}</td>
-                  <td dir="ltr">{money(totals.credit, draft.currency)}</td>
-                </tr>
-              </tfoot>
             </table>
           ) : (
-            <div className="voucher-facts">
+            <div className="voucher-copy">
               <p><span>{partyLabel}</span><strong>{draft.party_name || "………………"}</strong></p>
-              <p><span>{t(copy.voucherAmountOf)}</span><strong dir="ltr">{money(shownAmount, draft.currency)}</strong></p>
+              <p><span>{t(copy.voucherAmountDigits)}</span><strong dir="ltr">{figures(shownAmount, draft.currency)}</strong></p>
               {draft.amount_words ? <p><span>{t(copy.voucherAmountWords)}</span><strong>{draft.amount_words}</strong></p> : null}
               <p><span>{t(copy.voucherFor)}</span><strong>{draft.purpose || "………………"}</strong></p>
-              {draft.reference ? <p><span>{t(copy.voucherReference)}</span><strong>{draft.reference}</strong></p> : null}
-              {draft.kind === "settlement" ? <p className="voucher-ack">{t(copy.voucherSettlementBody)}</p> : null}
             </div>
           )}
-
-          {draft.kind === "journal" && (draft.purpose || draft.amount_words || draft.party_name) ? (
-            <div className="voucher-facts">
-              {draft.party_name ? <p><span>{t(copy.voucherParty)}</span><strong>{draft.party_name}</strong></p> : null}
-              {draft.amount_words ? <p><span>{t(copy.voucherAmountWords)}</span><strong>{draft.amount_words}</strong></p> : null}
-              {draft.purpose ? <p><span>{t(copy.voucherPurpose)}</span><strong>{draft.purpose}</strong></p> : null}
-            </div>
-          ) : null}
-
           <footer className="voucher-signs">
             <div>
-              <span>{t(copy.voucherStaffSign)}</span>
+              <span>{draft.kind === "delivery" ? t(copy.voucherSignRecipient) : t(copy.voucherStaffSign)}</span>
+              <strong>{draft.signer_name || draft.party_name || "………………"}</strong>
               {draft.signature ? <img src={draft.signature} alt="" /> : <i />}
-              <strong>{draft.signer_name || "………………"}</strong>
             </div>
             <div>
-              <span>{t(copy.voucherOtherSign)}</span>
-              {draft.counter_signature ? <img src={draft.counter_signature} alt="" /> : <i />}
+              <span>{draft.kind === "delivery" ? t(copy.voucherSignGiver) : t(copy.voucherOtherSign)}</span>
               <strong>{draft.counter_signer_name || "………………"}</strong>
+              {draft.counter_signature ? <img src={draft.counter_signature} alt="" /> : <i />}
             </div>
+          </footer>
+          <footer className="voucher-contact" dir="ltr">
+            <ul>
+              <li><Phone size={14} aria-hidden="true" />+963 968 862 822</li>
+              <li><Phone size={14} aria-hidden="true" />+963 954 187 154</li>
+              <li><Globe size={14} aria-hidden="true" />www.hoc.agency</li>
+              <li><Mail size={14} aria-hidden="true" />info@hoc.agency</li>
+              <li><MapPin size={14} aria-hidden="true" />Riyadh, Al Murabaa</li>
+              <li><MapPin size={14} aria-hidden="true" />Damascus, Al Hamra st</li>
+            </ul>
+            <img src={`${import.meta.env.BASE_URL}hoc-site-qr.svg`} alt="hoc.agency" />
           </footer>
         </article>
       </div>
