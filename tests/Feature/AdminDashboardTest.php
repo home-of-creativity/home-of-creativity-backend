@@ -965,12 +965,14 @@ class AdminDashboardTest extends TestCase
                         'partner_id' => [44, 'Damastech'],
                         'amount_total' => 150,
                         'client_order_ref' => 'HOC-44',
+                        'state' => 'sale',
                     ]]], 200);
                 }
-                if (($args[3] ?? null) === 'account.move' && ($args[4] ?? null) === 'create') {
-                    $vals = $args[5][0][0] ?? [];
-
-                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => ($vals['invoice_origin'] ?? null) === 'S00880' ? 990 : 0], 200);
+                if (($args[3] ?? null) === 'sale.advance.payment.inv' && ($args[4] ?? null) === 'create') {
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => 77], 200);
+                }
+                if (($args[3] ?? null) === 'sale.advance.payment.inv' && ($args[4] ?? null) === 'create_invoices') {
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => true], 200);
                 }
                 if (($args[3] ?? null) === 'account.move' && ($args[4] ?? null) === 'search_read') {
                     return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => [[

@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import type { DocxEditorRef } from "@docx-editor.dev/react";
 import type { Locale } from "../../i18n";
 
@@ -48,9 +49,8 @@ export function TableLayoutChrome({
   const [borderColor, setBorderColor] = useState("1A1224");
   const [fill, setFill] = useState("2E0E5C");
   const [tabBox, setTabBox] = useState<{ top: number; left: number; height: number } | null>(null);
-  const [ribbonBox, setRibbonBox] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
   const [handleBox, setHandleBox] = useState<{ top: number; left: number } | null>(null);
-  const ribbonRef = useRef<HTMLDivElement>(null);
   const tabRef = useRef<HTMLButtonElement>(null);
   const shifted = useRef<HTMLElement | null>(null);
   const opening = useRef(false);
@@ -112,6 +112,24 @@ export function TableLayoutChrome({
     };
   }, [editor, host]);
 
+  useEffect(() => {
+    const root = host.current;
+    if (!root) return;
+    const onClick = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element) || target.closest(".table-layout-chrome") || target.closest(".table-layout-slot")) return;
+      if (target.closest("[data-menu]")) setRibbonOn(false);
+    };
+    root.addEventListener("click", onClick);
+    return () => root.removeEventListener("click", onClick);
+  }, [host]);
+
+  useEffect(() => () => {
+    const root = host.current;
+    if (!root) return;
+    restoreToolbar(root);
+  }, [host]);
+
   useLayoutEffect(() => {
     const root = host.current;
     if (!root) return;
@@ -129,10 +147,11 @@ export function TableLayoutChrome({
           : null);
       }
 
+      holdToolbar(root, ribbonOn, setSlot);
+
       if (!tabOn) {
         clearGap(root, shifted);
         setTabBox(null);
-        setRibbonBox(null);
         return;
       }
 
@@ -143,7 +162,7 @@ export function TableLayoutChrome({
       const menuBox = menu.getBoundingClientRect();
       const next = menu.nextElementSibling instanceof HTMLElement ? menu.nextElementSibling : null;
       const tabWidth = tabRef.current?.offsetWidth ?? 132;
-      if (next) {
+      if (next && !next.classList.contains("table-layout-tab")) {
         shifted.current = next;
         next.style.marginLeft = `${tabWidth + 8}px`;
       }
@@ -152,18 +171,7 @@ export function TableLayoutChrome({
         left: menuBox.right - hostBox.left + 4,
         height: menuBox.height,
       });
-      const barBox = bar.getBoundingClientRect();
-      const ribbonHeight = ribbonOn ? (ribbonRef.current?.offsetHeight ?? 0) : 0;
-      const toolbar = root.querySelector<HTMLElement>(".docx-toolbar");
       bar.style.marginBottom = "";
-      if (toolbar) toolbar.style.marginTop = ribbonHeight > 0 ? `${ribbonHeight + 6}px` : "";
-      setRibbonBox(ribbonOn
-        ? {
-            top: barBox.bottom - hostBox.top + 4,
-            left: 8,
-            width: Math.max(280, hostBox.width - 16),
-          }
-        : null);
     };
     place();
     frame = window.requestAnimationFrame(place);
@@ -294,12 +302,10 @@ export function TableLayoutChrome({
         </button>
       ) : null}
 
-      {tabOn && ribbonOn && ribbonBox ? (
+      {slot && ribbonOn ? createPortal(
         <div
-          ref={ribbonRef}
           className="table-layout-ribbon"
           dir={locale === "ar" ? "rtl" : "ltr"}
-          style={{ top: ribbonBox.top, left: ribbonBox.left, width: ribbonBox.width }}
           onMouseDown={(event) => {
             if ((event.target as HTMLElement).closest("input, select")) return;
             event.preventDefault();
@@ -411,7 +417,8 @@ export function TableLayoutChrome({
             </Group>
           </div>
           <p className={note ? "table-layout-note is-warn" : "table-layout-note"}>{note || where}</p>
-        </div>
+        </div>,
+        slot,
       ) : null}
     </div>
   );
@@ -480,6 +487,38 @@ function scrollParent(node: HTMLElement) {
     parent = parent.parentElement;
   }
   return document.documentElement;
+}
+
+function holdToolbar(
+  root: HTMLElement,
+  ribbonOn: boolean,
+  setSlot: (slot: HTMLElement | null) => void,
+) {
+  const toolbar = root.querySelector<HTMLElement>(".docx-toolbar");
+  if (!ribbonOn || !toolbar?.parentElement) {
+    restoreToolbar(root);
+    setSlot(null);
+    return;
+  }
+  toolbar.style.marginTop = "";
+  let slot = root.querySelector<HTMLElement>(".table-layout-slot");
+  if (!slot?.isConnected) {
+    slot = document.createElement("div");
+    slot.className = "table-layout-slot";
+    toolbar.parentElement.insertBefore(slot, toolbar);
+  }
+  toolbar.style.display = "none";
+  setSlot(slot);
+}
+
+function restoreToolbar(root: HTMLElement) {
+  const toolbar = root.querySelector<HTMLElement>(".docx-toolbar");
+  if (toolbar) {
+    toolbar.hidden = false;
+    toolbar.style.display = "";
+    toolbar.style.marginTop = "";
+  }
+  root.querySelector(".table-layout-slot")?.remove();
 }
 
 function clearGap(root: HTMLElement, shifted: { current: HTMLElement | null }) {

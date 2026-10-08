@@ -28,6 +28,7 @@ class FinancialVoucher extends Model
         'counter_signer_name',
         'signature',
         'counter_signature',
+        'background',
         'signed_at',
         'user_id',
     ];

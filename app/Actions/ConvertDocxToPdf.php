@@ -19,9 +19,11 @@ class ConvertDocxToPdf
         $dir = sys_get_temp_dir().DIRECTORY_SEPARATOR.'hoc-docx-'.bin2hex(random_bytes(6));
         File::makeDirectory($dir, 0700, true);
         $profile = $dir.DIRECTORY_SEPARATOR.'profile';
-        File::makeDirectory($profile, 0700, true);
+        $fonts = $profile.DIRECTORY_SEPARATOR.'user'.DIRECTORY_SEPARATOR.'fonts';
+        File::makeDirectory($fonts, 0700, true);
+        $this->installFonts($fonts);
         $docx = $dir.DIRECTORY_SEPARATOR.'report.docx';
-        file_put_contents($docx, $contents);
+        file_put_contents($docx, $this->useGoogleSans($contents));
 
         try {
             $result = Process::timeout(120)->run([
@@ -80,6 +82,57 @@ class ConvertDocxToPdf
         }
 
         return null;
+    }
+
+    /**
+     * LibreOffice only keeps the point size when it has the face the file names.
+     * Google Sans is installed into this conversion profile, and the report face is renamed to it.
+     * w:sz values are left as they are.
+     */
+    private function installFonts(string $directory): void
+    {
+        $source = resource_path('fonts');
+        foreach ([
+            'GoogleSans-Regular.ttf',
+            'GoogleSans-Bold.ttf',
+        ] as $file) {
+            $from = $source.DIRECTORY_SEPARATOR.$file;
+            if (is_file($from)) {
+                File::copy($from, $directory.DIRECTORY_SEPARATOR.$file);
+            }
+        }
+    }
+
+    private function useGoogleSans(string $contents): string
+    {
+        $zip = new \ZipArchive();
+        $path = tempnam(sys_get_temp_dir(), 'hoc-font');
+        if ($path === false) {
+            return $contents;
+        }
+        file_put_contents($path, $contents);
+        if ($zip->open($path) !== true) {
+            @unlink($path);
+
+            return $contents;
+        }
+
+        for ($index = 0; $index < $zip->numFiles; $index++) {
+            $name = (string) $zip->getNameIndex($index);
+            if (! str_starts_with($name, 'word/') || ! str_ends_with($name, '.xml')) {
+                continue;
+            }
+            $xml = $zip->getFromIndex($index);
+            if (! is_string($xml) || ! str_contains($xml, 'IBM Plex Sans Arabic')) {
+                continue;
+            }
+            $zip->addFromString($name, str_replace('IBM Plex Sans Arabic', 'Google Sans', $xml));
+        }
+        $zip->close();
+        $rewritten = (string) file_get_contents($path);
+        @unlink($path);
+
+        return $rewritten !== '' ? $rewritten : $contents;
     }
 
     private function fileUrl(string $path): string

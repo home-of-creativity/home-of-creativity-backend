@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\StaffAbility;
 use App\Models\FinancialVoucher;
+use App\Models\FinancialVoucherTemplate;
 use App\Models\Role;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -95,6 +96,7 @@ class FinancialVoucherTest extends TestCase
 
         $this->getJson('/api/admin/vouchers')->assertOk();
         $this->postJson('/api/admin/vouchers', [])->assertForbidden();
+        $this->postJson('/api/admin/voucher-templates', [])->assertForbidden();
 
         $locked = User::factory()->create([
             'role_id' => Role::query()->create([
@@ -116,5 +118,96 @@ class FinancialVoucherTest extends TestCase
         $this->assertNotNull($row);
         $this->assertSame('المسندات المالية', $row['label_ar']);
         $this->assertSame(StaffAbility::crudActions(), $row['actions']);
+    }
+
+    public function test_delivery_total_is_the_sum_of_the_lines(): void
+    {
+        Sanctum::actingAs(User::factory()->admin()->create());
+
+        $saved = $this->postJson('/api/admin/vouchers', [
+            'kind' => 'delivery',
+            'party_name' => 'موظف',
+            'amount' => 999,
+            'currency' => 'USD',
+            'issued_on' => '2026-10-08',
+            'lines' => [
+                ['memo' => 'بدل', 'debit' => 40],
+                ['memo' => 'سلفة', 'debit' => 10],
+            ],
+        ])->assertCreated()->json('data');
+
+        $this->assertEquals(50, $saved['amount']);
+    }
+
+    public function test_a_background_image_is_stored_on_the_voucher_and_not_the_list(): void
+    {
+        Sanctum::actingAs(User::factory()->admin()->create());
+        $image = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
+
+        $created = $this->postJson('/api/admin/vouchers', [
+            'kind' => 'receipt',
+            'party_name' => 'محل النور',
+            'amount' => 20,
+            'currency' => 'USD',
+            'issued_on' => '2026-10-08',
+            'background' => $image,
+        ])->assertCreated()->json('data');
+
+        $this->assertSame($image, $created['background']);
+        $this->assertArrayNotHasKey('background', $this->getJson('/api/admin/vouchers')->json('data.0'));
+
+        $this->postJson('/api/admin/vouchers', [
+            'kind' => 'receipt',
+            'party_name' => 'محل النور',
+            'amount' => 20,
+            'currency' => 'USD',
+            'issued_on' => '2026-10-08',
+            'background' => 'not-an-image',
+        ])->assertUnprocessable()->assertJsonValidationErrors('background');
+    }
+
+    public function test_a_template_keeps_the_voucher_data(): void
+    {
+        Sanctum::actingAs(User::factory()->admin()->create());
+        $image = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
+
+        $this->postJson('/api/admin/voucher-templates', [
+            'name' => 'تسليم رواتب',
+            'kind' => 'delivery',
+            'party_name' => 'القسم',
+            'currency' => 'USD',
+            'amount' => 1,
+            'lines' => [
+                ['memo' => 'راتب', 'debit' => 80],
+            ],
+            'background' => $image,
+        ])->assertCreated()
+            ->assertJsonPath('data.name', 'تسليم رواتب')
+            ->assertJsonPath('data.data.amount', 80)
+            ->assertJsonPath('data.data.background', $image);
+
+        $list = $this->getJson('/api/admin/voucher-templates')->assertOk()->json('data');
+        $this->assertSame('تسليم رواتب', $list[0]['name']);
+        $this->assertArrayNotHasKey('data', $list[0]);
+
+        $this->postJson('/api/admin/voucher-templates', [
+            'name' => 'تسليم رواتب',
+            'kind' => 'delivery',
+            'party_name' => 'قسم آخر',
+            'currency' => 'SYP',
+            'lines' => [
+                ['memo' => 'راتب', 'debit' => 90],
+            ],
+        ])->assertOk()->assertJsonPath('data.data.party_name', 'قسم آخر');
+
+        $this->assertSame(1, FinancialVoucherTemplate::query()->count());
+
+        $id = FinancialVoucherTemplate::query()->value('id');
+        $this->getJson('/api/admin/voucher-templates/'.$id)
+            ->assertOk()
+            ->assertJsonPath('data.data.amount', 90);
+
+        $this->deleteJson('/api/admin/voucher-templates/'.$id)->assertOk();
+        $this->assertSame(0, FinancialVoucherTemplate::query()->count());
     }
 }

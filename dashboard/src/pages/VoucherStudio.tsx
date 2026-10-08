@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ArrowLeft, ArrowRight, Globe, Mail, MapPin, Phone, Printer } from "lucide-react";
 import { toast } from "sonner";
-import { api, canAbility, type FinancialVoucher, type VoucherKind, type VoucherLine } from "../api";
+import { api, canAbility, type FinancialVoucher, type VoucherKind, type VoucherLine, type VoucherTemplate, type VoucherTemplateSummary } from "../api";
 import { useAuth } from "../auth";
+import { ConfirmAction } from "../components/ConfirmAction";
 import { LoadingLottie } from "../components/LoadingLottie";
 import { copy, type Locale } from "../i18n";
 
@@ -33,6 +34,7 @@ type Draft = {
   counter_signer_name: string;
   signature: string;
   counter_signature: string;
+  background: string;
 };
 
 function today() {
@@ -60,7 +62,62 @@ function emptyDraft(kind: VoucherKind): Draft {
     counter_signer_name: "",
     signature: "",
     counter_signature: "",
+    background: "",
   };
+}
+
+function fromTemplate(template: VoucherTemplate): Draft {
+  const data = template.data;
+  const lines = data.lines && data.lines.length > 0
+    ? data.lines.map((line) => ({
+      memo: line.memo,
+      debit: line.debit ? String(line.debit) : "",
+      credit: line.credit ? String(line.credit) : "",
+    }))
+    : blankLines();
+  return {
+    kind: template.kind,
+    party_name: data.party_name ?? "",
+    amount: data.amount ? String(data.amount) : "",
+    currency: data.currency === "SYP" ? "SYP" : "USD",
+    amount_words: data.amount_words ?? "",
+    issued_on: today(),
+    purpose: data.purpose ?? "",
+    reference: data.reference ?? "",
+    lines,
+    signer_name: data.signer_name ?? "",
+    counter_signer_name: data.counter_signer_name ?? "",
+    signature: "",
+    counter_signature: "",
+    background: data.background ?? "",
+  };
+}
+
+function readBackground(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const max = 1400;
+      const scale = Math.min(1, max / Math.max(img.width, img.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(img.width * scale));
+      canvas.height = Math.max(1, Math.round(img.height * scale));
+      const ctx = canvas.getContext("2d");
+      URL.revokeObjectURL(url);
+      if (!ctx) {
+        reject(new Error("canvas"));
+        return;
+      }
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL("image/jpeg", 0.82));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("image"));
+    };
+    img.src = url;
+  });
 }
 
 function fromVoucher(voucher: FinancialVoucher): Draft {
@@ -85,6 +142,7 @@ function fromVoucher(voucher: FinancialVoucher): Draft {
     counter_signer_name: voucher.counter_signer_name ?? "",
     signature: voucher.signature ?? "",
     counter_signature: voucher.counter_signature ?? "",
+    background: voucher.background ?? "",
   };
 }
 
@@ -206,18 +264,50 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
   const [search] = useSearchParams();
   const voucherId = params.id ? Number(params.id) : null;
   const requestedKind = search.get("kind");
+  const templateQuery = search.get("template");
   const BackIcon = locale === "ar" ? ArrowRight : ArrowLeft;
   const canWrite = voucherId ? canAbility(user, "ops.vouchers.update") : canAbility(user, "ops.vouchers.create");
   const [phase, setPhase] = useState<"loading" | "template" | "edit" | "error">(voucherId ? "loading" : "template");
   const [serial, setSerial] = useState("");
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [templates, setTemplates] = useState<VoucherTemplateSummary[]>([]);
+  const [templateName, setTemplateName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const tRef = useRef(t);
   tRef.current = t;
 
   useEffect(() => {
+    if (!voucherId && !templateQuery && !KINDS.includes(requestedKind as VoucherKind)) {
+      api.voucherTemplates()
+        .then((res) => setTemplates(res.data))
+        .catch(() => setTemplates([]));
+    }
+  }, [voucherId, requestedKind, templateQuery]);
+
+  useEffect(() => {
     if (!voucherId) {
+      const templateId = Number(templateQuery);
+      if (templateId > 0) {
+        let cancelled = false;
+        setPhase("loading");
+        api.voucherTemplate(templateId)
+          .then((res) => {
+            if (cancelled) return;
+            setSerial("");
+            setDraft(fromTemplate(res.data));
+            setTemplateName(res.data.name);
+            setPhase("edit");
+          })
+          .catch((err) => {
+            if (cancelled) return;
+            setError(err instanceof Error ? err.message : tRef.current(copy.saveFailed));
+            setPhase("error");
+          });
+        return () => {
+          cancelled = true;
+        };
+      }
       if (KINDS.includes(requestedKind as VoucherKind)) {
         setDraft((current) => (current?.kind === requestedKind ? current : emptyDraft(requestedKind as VoucherKind)));
         setPhase("edit");
@@ -244,7 +334,7 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
     return () => {
       cancelled = true;
     };
-  }, [voucherId, requestedKind]);
+  }, [voucherId, requestedKind, templateQuery]);
 
   const totals = useMemo(() => {
     const lines = draft?.lines ?? [];
@@ -273,7 +363,7 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
       return;
     }
     const amount = Number(draft.amount) || 0;
-    const deliveryAmount = amount > 0 ? amount : totals.debit;
+    const deliveryAmount = totals.debit > 0 ? totals.debit : amount;
     if ((draft.kind === "receipt" || draft.kind === "payment" || draft.kind === "delivery") && (draft.kind === "delivery" ? deliveryAmount : amount) <= 0) {
       setError(t(copy.voucherAmountRequired));
       return;
@@ -306,6 +396,7 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
         counter_signer_name: draft.counter_signer_name.trim() || undefined,
         signature: draft.signature || undefined,
         counter_signature: draft.counter_signature || undefined,
+        background: draft.background || undefined,
       }, voucherId ?? undefined);
       setSerial(res.data.serial);
       toast.success(res.message ?? t(copy.voucherSaved));
@@ -315,6 +406,57 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
     } finally {
       setBusy(false);
     }
+  }
+
+  async function saveTemplate() {
+    if (!draft || !canWrite) return;
+    const name = templateName.trim();
+    if (name === "") {
+      setError(t(copy.voucherTemplateNameRequired));
+      return;
+    }
+    const lines: VoucherLine[] = draft.lines
+      .map((line) => ({
+        memo: line.memo.trim(),
+        debit: Number(line.debit) || 0,
+        credit: Number(line.credit) || 0,
+      }))
+      .filter((line) => line.memo || line.debit || line.credit);
+    const lineSum = totals.debit;
+    setError("");
+    setBusy(true);
+    try {
+      await api.saveVoucherTemplate({
+        name,
+        kind: draft.kind,
+        party_name: draft.party_name.trim(),
+        amount: draft.kind === "journal" || draft.kind === "delivery"
+          ? (lineSum > 0 ? lineSum : Number(draft.amount) || 0)
+          : Number(draft.amount) || 0,
+        currency: draft.currency,
+        amount_words: draft.amount_words.trim() || undefined,
+        purpose: draft.purpose.trim() || undefined,
+        reference: draft.reference.trim() || undefined,
+        lines,
+        signer_name: draft.signer_name.trim() || undefined,
+        counter_signer_name: draft.counter_signer_name.trim() || undefined,
+        background: draft.background || undefined,
+      });
+      toast.success(t(copy.voucherTemplateSaved));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t(copy.saveFailed));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function removeTemplate(id: number) {
+    api.deleteVoucherTemplate(id)
+      .then(() => {
+        setTemplates((current) => current.filter((row) => row.id !== id));
+        toast.success(t(copy.voucherTemplateDeleted));
+      })
+      .catch((err) => toast.error(err instanceof Error ? err.message : t(copy.saveFailed)));
   }
 
   if (phase === "loading") return <LoadingLottie variant="page" label={t(copy.loading)} />;
@@ -345,6 +487,29 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
             </button>
           ))}
         </div>
+        <h2 className="section-title">{t(copy.voucherSavedTemplates)}</h2>
+        {templates.length === 0 ? <p className="muted">{t(copy.voucherNoTemplates)}</p> : (
+          <div className="template-grid">
+            {templates.map((template) => (
+              <div key={template.id} className="template-card is-saved">
+                <button type="button" onClick={() => navigate(`/vouchers/new?template=${template.id}`)}>
+                  <strong>{template.name}</strong>
+                  <span>{t(voucherKindCopy[template.kind].name)}</span>
+                </button>
+                {canAbility(user, "ops.vouchers.delete") ? (
+                  <ConfirmAction
+                    label={t(copy.delete)}
+                    confirmLabel={t(copy.confirmDelete)}
+                    yesLabel={t(copy.delete)}
+                    noLabel={t(copy.cancel)}
+                    className="btn btn-ghost btn-sm btn-danger"
+                    onConfirm={() => removeTemplate(template.id)}
+                  />
+                ) : null}
+              </div>
+            ))}
+          </div>
+        )}
       </section>
     );
   }
@@ -352,7 +517,7 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
   const shownAmount = draft.kind === "journal"
     ? totals.debit
     : draft.kind === "delivery"
-      ? (Number(draft.amount) || totals.debit)
+      ? (totals.debit > 0 ? totals.debit : Number(draft.amount) || 0)
       : Number(draft.amount) || 0;
   const partyLabel = draft.kind === "payment" ? t(copy.voucherPaidTo) : t(copy.voucherReceivedFrom);
 
@@ -426,6 +591,7 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
                   {t(copy.voucherAddLine)}
                 </button>
               ) : null}
+              <p className="muted" role="status">{t(copy.voucherTotal)} <span dir="ltr">{figures(shownAmount, draft.currency)}</span></p>
             </div>
           ) : (
             <label className="field-label">
@@ -433,12 +599,6 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
               <input className="field" dir="ltr" inputMode="decimal" min="0" step="0.01" value={draft.amount} disabled={!canWrite} required onChange={(event) => patch({ amount: event.target.value })} />
             </label>
           )}
-          {draft.kind === "delivery" ? (
-            <label className="field-label">
-              {t(copy.voucherAmountDigits)}
-              <input className="field" dir="ltr" inputMode="decimal" min="0" step="0.01" value={draft.amount} disabled={!canWrite} onChange={(event) => patch({ amount: event.target.value })} />
-            </label>
-          ) : null}
           <label className="field-label">
             {t(copy.voucherAmountWords)}
             <input className="field" value={draft.amount_words} disabled={!canWrite} maxLength={240} onChange={(event) => patch({ amount_words: event.target.value })} />
@@ -470,6 +630,27 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
               </label>
             </>
           )}
+          <label className="field-label">
+            {t(copy.voucherBackground)}
+            <input
+              className="field"
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              disabled={!canWrite}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = "";
+                if (!file) return;
+                void readBackground(file)
+                  .then((background) => patch({ background }))
+                  .catch(() => toast.error(t(copy.voucherBackgroundInvalid)));
+              }}
+            />
+          </label>
+          <p className="muted">{t(copy.voucherBackgroundHint)}</p>
+          {draft.background ? (
+            <button type="button" className="btn btn-ghost btn-sm" disabled={!canWrite} onClick={() => patch({ background: "" })}>{t(copy.voucherBackgroundClear)}</button>
+          ) : null}
           <p className="muted">{t(copy.voucherSignHint)}</p>
           {draft.kind === "delivery" ? null : (
             <label className="field-label">
@@ -486,7 +667,14 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
           )}
           <SignaturePad label={draft.kind === "delivery" ? t(copy.voucherSignGiver) : t(copy.voucherCounterSigner)} clearLabel={t(copy.voucherClearSign)} value={draft.counter_signature} disabled={!canWrite} onChange={(counter_signature) => patch({ counter_signature })} />
           {canWrite ? (
-            <button className="btn btn-primary" type="submit" disabled={busy} aria-busy={busy}>{t(copy.voucherSave)}</button>
+            <>
+              <button className="btn btn-primary" type="submit" disabled={busy} aria-busy={busy}>{t(copy.voucherSave)}</button>
+              <label className="field-label">
+                {t(copy.voucherTemplateName)}
+                <input className="field" value={templateName} maxLength={120} disabled={busy} onChange={(event) => setTemplateName(event.target.value)} />
+              </label>
+              <button className="btn" type="button" disabled={busy} onClick={() => void saveTemplate()}>{t(copy.voucherSaveTemplate)}</button>
+            </>
           ) : null}
         </form>
 
@@ -504,6 +692,8 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
             <p><span>{t(copy.voucherCompany)}</span><strong>{t(copy.voucherCompanyValue)}</strong></p>
             <p><span>{t(copy.voucherSerial)}</span><strong dir="ltr">{shortSerial(serial)}</strong></p>
           </div>
+          <div className="voucher-text">
+            {draft.background ? <img className="voucher-text-bg" src={draft.background} alt="" /> : null}
           {draft.kind === "delivery" ? (
             <div className="voucher-copy">
               <p><span>{t(copy.voucherRecipient)}</span><strong>{[draft.party_name, draft.reference].filter(Boolean).join(" / ") || "………………"}</strong></p>
@@ -548,6 +738,7 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
               <p><span>{t(copy.voucherFor)}</span><strong>{draft.purpose || "………………"}</strong></p>
             </div>
           )}
+          </div>
           <footer className="voucher-signs">
             <div>
               <span>{draft.kind === "delivery" ? t(copy.voucherSignRecipient) : t(copy.voucherStaffSign)}</span>

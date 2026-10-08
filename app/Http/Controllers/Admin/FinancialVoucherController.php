@@ -100,6 +100,7 @@ class FinancialVoucherController extends Controller
             'counter_signer_name' => ['nullable', 'string', 'max:120'],
             'signature' => ['nullable', 'string', 'max:700000'],
             'counter_signature' => ['nullable', 'string', 'max:700000'],
+            'background' => ['nullable', 'string', 'max:900000'],
         ]);
 
         $lines = collect($validated['lines'] ?? [])
@@ -125,7 +126,7 @@ class FinancialVoucherController extends Controller
             $amount = $debit;
         } elseif ($kind === 'delivery') {
             $sum = round(array_sum(array_column($lines, 'debit')), 2);
-            if ($amount <= 0) {
+            if ($sum > 0) {
                 $amount = $sum;
             }
             if ($amount <= 0) {
@@ -162,6 +163,7 @@ class FinancialVoucherController extends Controller
             'counter_signer_name' => $this->blank($validated['counter_signer_name'] ?? null),
             'signature' => $signature,
             'counter_signature' => $counter,
+            'background' => $this->image($validated['background'] ?? null),
             'signed_at' => $signedAt,
         ];
     }
@@ -176,6 +178,22 @@ class FinancialVoucherController extends Controller
         if (! preg_match('#^data:image/png;base64,[A-Za-z0-9+/=\r\n]+$#', $value)) {
             throw ValidationException::withMessages([
                 $field => 'التوقيع يجب أن يكون صورة PNG.',
+            ]);
+        }
+
+        return $value;
+    }
+
+    private function image(?string $value): ?string
+    {
+        $value = trim((string) $value);
+        if ($value === '') {
+            return null;
+        }
+
+        if (! preg_match('#^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=\r\n]+$#', $value)) {
+            throw ValidationException::withMessages([
+                'background' => 'الخلفية يجب أن تكون صورة.',
             ]);
         }
 
@@ -222,6 +240,7 @@ class FinancialVoucherController extends Controller
             'counter_signer_name' => $voucher->counter_signer_name,
             'signature' => $voucher->signature,
             'counter_signature' => $voucher->counter_signature,
+            'background' => $voucher->background,
         ];
     }
 }

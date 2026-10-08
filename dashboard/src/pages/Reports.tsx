@@ -1,17 +1,14 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Search } from "lucide-react";
-import { api, canAbility, type Client, type PageMeta } from "../api";
-import { useAuth } from "../auth";
+import { api, type Client, type PageMeta } from "../api";
 import { DriveFolderPicker } from "../components/DriveFolderPicker";
-import { DriveStorageCard } from "../components/DriveStorageCard";
 import { LoadingTableRow } from "../components/LoadingTableRow";
 import { PageHeader } from "../components/PageHeader";
 import { Pagination } from "../components/Pagination";
 import { copy, type Locale } from "../i18n";
 
 export function Reports({ t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
-  const { user } = useAuth();
   const [items, setItems] = useState<Client[]>([]);
   const [meta, setMeta] = useState<PageMeta | null>(null);
   const [page, setPage] = useState(1);
@@ -50,7 +47,6 @@ export function Reports({ t }: { locale: Locale; t: (c: { ar: string; en: string
   return (
     <section>
       <PageHeader title={t(copy.reportsTitle)} lede={t(copy.reportsLede)} />
-      {canAbility(user, "ops.drive") ? <DriveStorageCard t={t} /> : null}
       {error ? <p className="error">{error}</p> : null}
       <div className="toolbar filter-bar filter-grid">
         <label className="field-label">

@@ -229,7 +229,6 @@ class OdooController extends Controller
 
         $lines = $request->validated('lines') ?? [];
         $reference = $request->validated('reference');
-        $origin = null;
         $quotationId = $request->integer('quotation_id');
 
         try {
@@ -241,26 +240,19 @@ class OdooController extends Controller
                 if ((string) $link['partner_id'] !== (string) $client->odoo_partner_id) {
                     return response()->json(['message' => 'عرض السعر يخص عميلاً آخر في أودو.'], 422);
                 }
-                $origin = $link['name'] !== '' ? $link['name'] : null;
-                $reference = filled($reference) ? $reference : $link['client_order_ref'];
-                if ($lines === []) {
-                    if ($link['amount_total'] <= 0) {
-                        return response()->json(['message' => 'أضف بنود الفاتورة.'], 422);
-                    }
-                    $lines = [[
-                        'title' => $origin ?: 'فاتورة',
-                        'amount' => $link['amount_total'],
-                        'units' => 1,
-                    ]];
+                if ($link['state'] === 'cancel') {
+                    return response()->json(['message' => 'عرض السعر ملغى في أودو.'], 422);
                 }
-            }
 
-            $created = $odoo->createStaffInvoice(
-                (string) $client->odoo_partner_id,
-                $lines,
-                $reference,
-                $origin,
-            );
+                $created = $odoo->invoiceFromSaleOrder($link);
+            } else {
+                $created = $odoo->createStaffInvoice(
+                    (string) $client->odoo_partner_id,
+                    $lines,
+                    $reference,
+                    null,
+                );
+            }
         } catch (\Throwable $exception) {
             Log::warning('Odoo invoice create failed.', ['error' => $exception->getMessage()]);
 

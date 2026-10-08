@@ -1108,7 +1108,7 @@ class OdooClient
     /**
      * Partner, name, and total of a sale order, used to attach a customer invoice.
      *
-     * @return array{id: int, name: string, partner_id: int, amount_total: float, client_order_ref: string|null}|null
+     * @return array{id: int, name: string, partner_id: int, amount_total: float, client_order_ref: string|null, state: string}|null
      */
     public function quotationLink(int $id): ?array
     {
@@ -1117,7 +1117,7 @@ class OdooClient
         }
 
         $row = $this->firstRecord($this->searchRead('sale.order', [['id', '=', $id]], [
-            'id', 'name', 'partner_id', 'amount_total', 'client_order_ref',
+            'id', 'name', 'partner_id', 'amount_total', 'client_order_ref', 'state',
         ], 1, 0, 'id desc'));
 
         if ($row === null) {
@@ -1135,7 +1135,45 @@ class OdooClient
             'partner_id' => $partnerId,
             'amount_total' => (float) ($row['amount_total'] ?? 0),
             'client_order_ref' => $this->optionalString($row['client_order_ref'] ?? null),
+            'state' => (string) ($row['state'] ?? ''),
         ];
+    }
+
+    /**
+     * The same invoice Odoo creates from a sales order: confirm a draft, then the regular invoice wizard.
+     *
+     * @param  array{id: int, name: string, state: string}  $order
+     * @return array<string, mixed>
+     */
+    public function invoiceFromSaleOrder(array $order): array
+    {
+        $orderId = (int) $order['id'];
+        if (in_array($order['state'], ['draft', 'sent'], true)) {
+            $this->call('sale.order', 'action_confirm', ['ids' => [$orderId]]);
+        }
+
+        $wizardId = $this->call('sale.advance.payment.inv', 'create', [[
+            'advance_payment_method' => 'delivered',
+            'sale_order_ids' => [[6, 0, [$orderId]]],
+        ]]);
+        $wizardId = is_array($wizardId) ? (int) ($wizardId[0] ?? 0) : (int) $wizardId;
+        if ($wizardId <= 0) {
+            throw new RuntimeException('Odoo did not open the invoice wizard.');
+        }
+
+        $this->call('sale.advance.payment.inv', 'create_invoices', ['ids' => [$wizardId]]);
+
+        $row = $order['name'] !== ''
+            ? $this->firstRecord($this->searchRead('account.move', [
+                ['move_type', '=', 'out_invoice'],
+                ['invoice_origin', '=', $order['name']],
+            ], $this->invoiceFields(), 1, 0, 'id desc'))
+            : null;
+        if ($row === null) {
+            throw new RuntimeException('Odoo created no customer invoice for this quotation.');
+        }
+
+        return $this->mapInvoice($row);
     }
 
     /**
@@ -1850,7 +1888,7 @@ class OdooClient
             ];
         }
 
-        if (in_array($method, ['action_post', 'action_create_payments'], true)) {
+        if (in_array($method, ['action_post', 'action_create_payments', 'action_confirm', 'create_invoices'], true)) {
             return [
                 'ids' => $payload['ids'] ?? [],
             ];
@@ -1968,7 +2006,7 @@ class OdooClient
             ]);
         }
 
-        if (in_array($method, ['action_post', 'action_create_payments'], true)) {
+        if (in_array($method, ['action_post', 'action_create_payments', 'action_confirm', 'create_invoices'], true)) {
             return $this->execute($uid, $model, $method, [
                 $payload['ids'] ?? [],
             ]);

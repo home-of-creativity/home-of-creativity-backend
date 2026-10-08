@@ -2,7 +2,7 @@ import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import { cachedReportFontFamilies } from "./fontStore";
 
 /** Font every new report starts with. Served from public/fonts and loaded into the editor. */
-export const REPORT_FONT = "IBM Plex Sans Arabic";
+export const REPORT_FONT = "Google Sans";
 
 export type ReportTemplateId = "blank" | "social" | "campaign" | "minutes";
 

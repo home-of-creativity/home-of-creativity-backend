@@ -9,6 +9,7 @@ use App\Http\Controllers\Admin\DriveFolderController as AdminDriveFolderControll
 use App\Http\Controllers\Admin\EmployeeController as AdminEmployeeController;
 use App\Http\Controllers\Admin\FinanceController as AdminFinanceController;
 use App\Http\Controllers\Admin\FinancialVoucherController as AdminFinancialVoucherController;
+use App\Http\Controllers\Admin\FinancialVoucherTemplateController as AdminFinancialVoucherTemplateController;
 use App\Http\Controllers\Admin\LandingReelController as AdminLandingReelController;
 use App\Http\Controllers\Admin\LegalPageController as AdminLegalPageController;
 use App\Http\Controllers\Admin\LiveController;
@@ -219,6 +220,10 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
     });
 
     Route::middleware('crud:ops.vouchers')->group(function () {
+        Route::get('voucher-templates', [AdminFinancialVoucherTemplateController::class, 'index']);
+        Route::post('voucher-templates', [AdminFinancialVoucherTemplateController::class, 'store']);
+        Route::get('voucher-templates/{template}', [AdminFinancialVoucherTemplateController::class, 'show']);
+        Route::delete('voucher-templates/{template}', [AdminFinancialVoucherTemplateController::class, 'destroy']);
         Route::get('vouchers', [AdminFinancialVoucherController::class, 'index']);
         Route::post('vouchers', [AdminFinancialVoucherController::class, 'store']);
         Route::get('vouchers/{voucher}', [AdminFinancialVoucherController::class, 'show']);

@@ -133,6 +133,30 @@ export type FinancialVoucher = FinancialVoucherSummary & {
   counter_signer_name: string | null;
   signature: string | null;
   counter_signature: string | null;
+  background: string | null;
+};
+
+export type VoucherTemplateSummary = {
+  id: number;
+  name: string;
+  kind: VoucherKind;
+};
+
+export type VoucherTemplateData = {
+  party_name?: string | null;
+  amount?: number | null;
+  currency?: "USD" | "SYP";
+  amount_words?: string | null;
+  purpose?: string | null;
+  reference?: string | null;
+  lines?: VoucherLine[];
+  signer_name?: string | null;
+  counter_signer_name?: string | null;
+  background?: string | null;
+};
+
+export type VoucherTemplate = VoucherTemplateSummary & {
+  data: VoucherTemplateData;
 };
 
 export type VoucherDraft = {
@@ -149,6 +173,22 @@ export type VoucherDraft = {
   counter_signer_name?: string;
   signature?: string;
   counter_signature?: string;
+  background?: string;
+};
+
+export type VoucherTemplateDraft = {
+  name: string;
+  kind: VoucherKind;
+  party_name?: string;
+  amount?: number;
+  currency: "USD" | "SYP";
+  amount_words?: string;
+  purpose?: string;
+  reference?: string;
+  lines: VoucherLine[];
+  signer_name?: string;
+  counter_signer_name?: string;
+  background?: string;
 };
 
 export type ClientChannels = {
@@ -1036,6 +1076,21 @@ export const api = {
   },
   deleteVoucher(id: number) {
     return request<Envelope<null>>(`/admin/vouchers/${id}`, { method: "DELETE" });
+  },
+  voucherTemplates() {
+    return request<Envelope<VoucherTemplateSummary[]>>("/admin/voucher-templates");
+  },
+  voucherTemplate(id: number) {
+    return request<Envelope<VoucherTemplate>>(`/admin/voucher-templates/${id}`);
+  },
+  saveVoucherTemplate(payload: VoucherTemplateDraft) {
+    return request<Envelope<VoucherTemplate>>("/admin/voucher-templates", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  deleteVoucherTemplate(id: number) {
+    return request<Envelope<null>>(`/admin/voucher-templates/${id}`, { method: "DELETE" });
   },
   ensureDriveFolder(id: number) {
     return request<Envelope<ServiceRequest>>(`/admin/requests/${id}/ensure-drive-folder`, { method: "POST" });

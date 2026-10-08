@@ -3,18 +3,26 @@ import { REPORT_FONT } from "./docxTemplate";
 
 const base = import.meta.env.BASE_URL;
 
-/** IBM Plex Sans Arabic (SIL OFL), served from public/fonts so nothing is fetched from outside. */
+/** Google Sans (SIL OFL), served from public/fonts so nothing is fetched from outside. */
 export const REPORT_FONT_FILES = {
+  regular: `${base}fonts/GoogleSans-Regular.ttf`,
+  bold: `${base}fonts/GoogleSans-Bold.ttf`,
+};
+
+const PLEX_FONT_FILES = {
   regular: `${base}fonts/IBMPlexSansArabic-Regular.ttf`,
   bold: `${base}fonts/IBMPlexSansArabic-Bold.ttf`,
 };
 
 /**
- * Families mapped onto the Arabic font. Word files written in Arabic usually name one of these,
- * and the editor needs real Arabic glyph metrics for them to measure lines and pages correctly.
+ * Word files written in Arabic usually name one of these.
+ * The editor needs real Arabic glyph metrics for them to measure lines and pages correctly.
+ * The report face is Google Sans. A file that still names IBM Plex Sans Arabic is drawn with
+ * Google Sans too, and the PDF keeps that face and the same point size.
  */
-const FAMILIES = [
-  REPORT_FONT,
+const GOOGLE_FAMILIES = [REPORT_FONT, "IBM Plex Sans Arabic"];
+
+const PLEX_FAMILIES = [
   "Arial",
   "Tahoma",
   "Times New Roman",
@@ -29,10 +37,16 @@ const FAMILIES = [
 
 export type ExtraFont = { family: string; url: string };
 
-const bundled = FAMILIES.flatMap((family) => [
-  { url: REPORT_FONT_FILES.regular, family, weight: 400, style: "normal" as const },
-  { url: REPORT_FONT_FILES.bold, family, weight: 700, style: "normal" as const },
-]);
+const bundled = [
+  ...GOOGLE_FAMILIES.flatMap((family) => [
+    { url: REPORT_FONT_FILES.regular, family, weight: 400, style: "normal" as const },
+    { url: REPORT_FONT_FILES.bold, family, weight: 700, style: "normal" as const },
+  ]),
+  ...PLEX_FAMILIES.flatMap((family) => [
+    { url: PLEX_FONT_FILES.regular, family, weight: 400, style: "normal" as const },
+    { url: PLEX_FONT_FILES.bold, family, weight: 700, style: "normal" as const },
+  ]),
+];
 
 /** Bundled faces plus any font the staff uploaded. The same file covers regular and bold. */
 export function reportFontConfiguration(extra: ExtraFont[] = []) {
