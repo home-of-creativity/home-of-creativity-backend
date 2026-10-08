@@ -8,13 +8,14 @@ import { LoadingLottie } from "../components/LoadingLottie";
 import { copy, type Locale } from "../i18n";
 
 export const voucherKindCopy: Record<VoucherKind, { name: { ar: string; en: string }; hint: { ar: string; en: string } }> = {
+  delivery: { name: copy.voucherDelivery, hint: copy.voucherDeliveryHint },
   receipt: { name: copy.voucherReceipt, hint: copy.voucherReceiptHint },
   payment: { name: copy.voucherPayment, hint: copy.voucherPaymentHint },
   journal: { name: copy.voucherJournal, hint: copy.voucherJournalHint },
   settlement: { name: copy.voucherSettlement, hint: copy.voucherSettlementHint },
 };
 
-const KINDS: VoucherKind[] = ["receipt", "payment", "journal", "settlement"];
+const KINDS: VoucherKind[] = ["delivery", "receipt", "payment", "journal", "settlement"];
 
 type LineDraft = { memo: string; debit: string; credit: string };
 
@@ -89,6 +90,16 @@ function fromVoucher(voucher: FinancialVoucher): Draft {
 
 function money(amount: number, currency: string) {
   return `${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
+}
+
+function figures(amount: number, currency: string) {
+  const value = amount.toLocaleString("en-US", { maximumFractionDigits: 2 });
+  return currency === "USD" ? `${value}$` : `${value} ${currency}`;
+}
+
+function shortSerial(serial: string) {
+  const digits = serial.match(/(\d+)$/)?.[1] ?? "";
+  return digits ? `N${digits.slice(-4).padStart(4, "0")}` : "N0001";
 }
 
 function showDate(value: string) {
@@ -262,7 +273,8 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
       return;
     }
     const amount = Number(draft.amount) || 0;
-    if ((draft.kind === "receipt" || draft.kind === "payment") && amount <= 0) {
+    const deliveryAmount = amount > 0 ? amount : totals.debit;
+    if ((draft.kind === "receipt" || draft.kind === "payment" || draft.kind === "delivery") && (draft.kind === "delivery" ? deliveryAmount : amount) <= 0) {
       setError(t(copy.voucherAmountRequired));
       return;
     }
@@ -283,14 +295,14 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
       const res = await api.saveVoucher({
         kind: draft.kind,
         party_name: draft.party_name.trim(),
-        amount: draft.kind === "journal" ? totals.debit : amount,
+        amount: draft.kind === "journal" ? totals.debit : draft.kind === "delivery" ? deliveryAmount : amount,
         currency: draft.currency,
         amount_words: draft.amount_words.trim() || undefined,
         issued_on: draft.issued_on,
         purpose: draft.purpose.trim() || undefined,
         reference: draft.reference.trim() || undefined,
         lines,
-        signer_name: draft.signer_name.trim() || undefined,
+        signer_name: (draft.signer_name.trim() || (draft.kind === "delivery" ? draft.party_name.trim() : "")) || undefined,
         counter_signer_name: draft.counter_signer_name.trim() || undefined,
         signature: draft.signature || undefined,
         counter_signature: draft.counter_signature || undefined,
@@ -337,7 +349,11 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
     );
   }
 
-  const shownAmount = draft.kind === "journal" ? totals.debit : Number(draft.amount) || 0;
+  const shownAmount = draft.kind === "journal"
+    ? totals.debit
+    : draft.kind === "delivery"
+      ? (Number(draft.amount) || totals.debit)
+      : Number(draft.amount) || 0;
   const partyLabel = draft.kind === "payment" ? t(copy.voucherPaidTo) : t(copy.voucherReceivedFrom);
 
   return (
@@ -354,7 +370,7 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
         <form className="card voucher-editor" onSubmit={(event) => void save(event)}>
           <h2 className="form-title">{t(voucherKindCopy[draft.kind].name)}</h2>
           <label className="field-label">
-            {t(copy.voucherParty)}
+            {draft.kind === "delivery" ? t(copy.voucherRecipient) : t(copy.voucherParty)}
             <input className="field" value={draft.party_name} disabled={!canWrite} required maxLength={160} placeholder={t(copy.voucherPartyPh)} onChange={(event) => patch({ party_name: event.target.value })} />
           </label>
           <div className="voucher-split">
@@ -393,24 +409,67 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
                 {t(copy.voucherDebit)} {money(totals.debit, draft.currency)} · {t(copy.voucherCredit)} {money(totals.credit, draft.currency)}
               </p>
             </div>
+          ) : draft.kind === "delivery" ? (
+            <div className="voucher-lines">
+              <div className="voucher-line is-delivery voucher-line-head" aria-hidden="true">
+                <span>{t(copy.voucherItem)}</span>
+                <span>{t(copy.voucherAmount)}</span>
+              </div>
+              {draft.lines.map((line, index) => (
+                <div className="voucher-line is-delivery" key={index}>
+                  <input className="field" aria-label={t(copy.voucherItem)} placeholder={t(copy.voucherItem)} value={line.memo} disabled={!canWrite} maxLength={180} onChange={(event) => patchLine(index, { memo: event.target.value })} />
+                  <input className="field" dir="ltr" inputMode="decimal" aria-label={t(copy.voucherAmount)} placeholder={t(copy.voucherAmount)} value={line.debit} disabled={!canWrite} onChange={(event) => patchLine(index, { debit: event.target.value })} />
+                </div>
+              ))}
+              {draft.lines.length < 8 && canWrite ? (
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => patch({ lines: [...draft.lines, { memo: "", debit: "", credit: "" }] })}>
+                  {t(copy.voucherAddLine)}
+                </button>
+              ) : null}
+            </div>
           ) : (
             <label className="field-label">
               {t(copy.voucherAmount)}
               <input className="field" dir="ltr" inputMode="decimal" min="0" step="0.01" value={draft.amount} disabled={!canWrite} required onChange={(event) => patch({ amount: event.target.value })} />
             </label>
           )}
+          {draft.kind === "delivery" ? (
+            <label className="field-label">
+              {t(copy.voucherAmountDigits)}
+              <input className="field" dir="ltr" inputMode="decimal" min="0" step="0.01" value={draft.amount} disabled={!canWrite} onChange={(event) => patch({ amount: event.target.value })} />
+            </label>
+          ) : null}
           <label className="field-label">
             {t(copy.voucherAmountWords)}
             <input className="field" value={draft.amount_words} disabled={!canWrite} maxLength={240} onChange={(event) => patch({ amount_words: event.target.value })} />
           </label>
-          <label className="field-label">
-            {t(copy.voucherPurpose)}
-            <textarea className="field" rows={3} value={draft.purpose} disabled={!canWrite} maxLength={2000} onChange={(event) => patch({ purpose: event.target.value })} />
-          </label>
-          <label className="field-label">
-            {t(copy.voucherReference)}
-            <input className="field" value={draft.reference} disabled={!canWrite} maxLength={120} onChange={(event) => patch({ reference: event.target.value })} />
-          </label>
+          {draft.kind === "delivery" ? (
+            <>
+              <label className="field-label">
+                {t(copy.voucherRecipientTitle)}
+                <input className="field" value={draft.reference} disabled={!canWrite} maxLength={120} onChange={(event) => patch({ reference: event.target.value })} />
+              </label>
+              <label className="field-label">
+                {t(copy.voucherGiver)}
+                <input className="field" value={draft.counter_signer_name} disabled={!canWrite} maxLength={120} onChange={(event) => patch({ counter_signer_name: event.target.value })} />
+              </label>
+              <label className="field-label">
+                {t(copy.voucherGiverRole)}
+                <input className="field" value={draft.purpose} disabled={!canWrite} maxLength={120} onChange={(event) => patch({ purpose: event.target.value })} />
+              </label>
+            </>
+          ) : (
+            <>
+              <label className="field-label">
+                {t(copy.voucherPurpose)}
+                <textarea className="field" rows={3} value={draft.purpose} disabled={!canWrite} maxLength={2000} onChange={(event) => patch({ purpose: event.target.value })} />
+              </label>
+              <label className="field-label">
+                {t(copy.voucherReference)}
+                <input className="field" value={draft.reference} disabled={!canWrite} maxLength={120} onChange={(event) => patch({ reference: event.target.value })} />
+              </label>
+            </>
+          )}
           <p className="muted">{t(copy.voucherSignHint)}</p>
           <label className="field-label">
             {t(copy.voucherSignerName)}

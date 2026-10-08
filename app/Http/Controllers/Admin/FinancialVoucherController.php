@@ -123,6 +123,16 @@ class FinancialVoucherController extends Controller
                 ]);
             }
             $amount = $debit;
+        } elseif ($kind === 'delivery') {
+            $sum = round(array_sum(array_column($lines, 'debit')), 2);
+            if ($amount <= 0) {
+                $amount = $sum;
+            }
+            if ($amount <= 0) {
+                throw ValidationException::withMessages([
+                    'amount' => 'اكتب مبلغاً أكبر من صفر.',
+                ]);
+            }
         } elseif (in_array($kind, ['receipt', 'payment'], true) && $amount <= 0) {
             throw ValidationException::withMessages([
                 'amount' => 'اكتب مبلغاً أكبر من صفر.',

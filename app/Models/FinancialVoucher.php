@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class FinancialVoucher extends Model
 {
     /** @var list<string> */
-    public const KINDS = ['receipt', 'payment', 'journal', 'settlement'];
+    public const KINDS = ['delivery', 'receipt', 'payment', 'journal', 'settlement'];
 
     /** @var list<string> */
     public const CURRENCIES = ['USD', 'SYP'];

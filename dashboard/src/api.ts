@@ -108,7 +108,7 @@ export type FinanceSummary = {
   categories: string[];
 };
 
-export type VoucherKind = "receipt" | "payment" | "journal" | "settlement";
+export type VoucherKind = "delivery" | "receipt" | "payment" | "journal" | "settlement";
 
 export type VoucherLine = { memo: string; debit: number; credit: number };
 

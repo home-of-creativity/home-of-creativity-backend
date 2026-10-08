@@ -78,7 +78,7 @@ export function Vouchers({ locale, t }: { locale: Locale; t: (c: { ar: string; e
           {t(copy.voucherKind)}
           <select className="field" value={kind} onChange={(event) => setKind(event.target.value as "" | VoucherKind)}>
             <option value="">{t(copy.all)}</option>
-            {(["receipt", "payment", "journal", "settlement"] as const).map((item) => (
+            {(["delivery", "receipt", "payment", "journal", "settlement"] as const).map((item) => (
               <option key={item} value={item}>{t(voucherKindCopy[item].name)}</option>
             ))}
           </select>
