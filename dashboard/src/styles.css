@@ -1390,6 +1390,64 @@ td[colspan] {
   gap: 0.4rem;
 }
 
+.odoo-product-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11.5rem, 1fr));
+  gap: 0.65rem;
+}
+
+.odoo-product-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-height: 8.5rem;
+  padding: 0.8rem;
+  border: 1px solid var(--brand-line);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--brand-ink) 6%, transparent);
+}
+
+.odoo-product-card strong {
+  font-size: 0.92rem;
+  line-height: 1.35;
+}
+
+.odoo-product-price {
+  margin-top: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.odoo-product-card .btn,
+.odoo-qty {
+  margin-top: 0.2rem;
+}
+
+.odoo-qty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+  padding: 0.2rem;
+  border: 1px solid var(--brand-line);
+  border-radius: var(--radius);
+}
+
+.odoo-qty button {
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid var(--brand-line);
+  border-radius: var(--radius);
+  background: var(--brand-surface);
+  color: var(--brand-ink);
+  cursor: pointer;
+}
+
+.odoo-qty span {
+  min-width: 1.5rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
 .odoo-line-table .field {
   min-width: 4.5rem;
 }

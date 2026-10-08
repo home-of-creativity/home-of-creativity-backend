@@ -25,6 +25,7 @@ use App\Support\ClientProfileValue;
 use App\Support\PricingCatalog;
 use App\Support\ResolveServiceRequest;
 use App\Support\StatusLabel;
+use App\Support\WorkCalendar;
 use App\Support\WorkLines;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -144,6 +145,14 @@ class HandleWhatsAppInbound
         if (! ClientChannelGate::whatsappEnabled()) {
             $this->whatsApp->markRead($wamid);
             $this->replyPausedOnce($phone);
+
+            return;
+        }
+
+        $calendar = app(WorkCalendar::class);
+        if (! $calendar->isWhatsAppOpen()) {
+            $this->whatsApp->markRead($wamid);
+            $this->replyClosedOnce($phone, $calendar);
 
             return;
         }
@@ -345,6 +354,28 @@ class HandleWhatsAppInbound
         } catch (Throwable $exception) {
             Log::info('WhatsApp pause notice skipped.', [
                 'phone' => $phone,
+                'error' => $exception->getMessage(),
+            ]);
+        }
+    }
+
+    private function replyClosedOnce(string $phone, WorkCalendar $calendar): void
+    {
+        $until = $calendar->nextWhatsAppOpen();
+        if (! Cache::add('hoc:wa-closed-notice:'.$phone, 1, $until)) {
+            return;
+        }
+
+        try {
+            $session = $this->session($phone);
+            $this->replyLang = ($session['lang'] ?? 'ar') === 'en' ? 'en' : 'ar';
+            $hours = $calendar->whatsappHours();
+            $this->whatsApp->sendText($phone, $this->tx(
+                $calendar->whatsappClosedNotice(),
+                "We work {$hours['open']} to {$hours['close']} Damascus time, Saturday to Thursday. Friday is off. Send your message during working hours.",
+            ));
+        } catch (Throwable $exception) {
+            Log::info('WhatsApp closed-hours notice skipped.', [
                 'error' => $exception->getMessage(),
             ]);
         }

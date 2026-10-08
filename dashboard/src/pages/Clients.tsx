@@ -574,7 +574,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
             {t(copy.odooState)}
             <select className="field" value={quoteState} onChange={(e) => setQuoteState(e.target.value)}>
               <option value="">{t(copy.all)}</option>
-              {["draft", "sent", "sale", "cancel"].map((state) => (
+              {["draft", "sent", "cancel"].map((state) => (
                 <option key={state} value={state}>{t(quoteStateLabel[state])}</option>
               ))}
             </select>

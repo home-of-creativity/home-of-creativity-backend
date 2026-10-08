@@ -131,6 +131,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::post('odoo/sync-partners', [AdminOdooController::class, 'syncPartners']);
         Route::post('odoo/import-crm-clients', [AdminOdooController::class, 'importCrmClients']);
         Route::post('odoo/import-crm-clients/excel', [AdminOdooController::class, 'importCrmClientsExcel']);
+        Route::get('odoo/products', [AdminOdooController::class, 'products']);
         Route::get('odoo/quotations', [AdminOdooController::class, 'quotations']);
         Route::post('odoo/quotations', [AdminOdooController::class, 'storeQuotation']);
         Route::get('odoo/invoices', [AdminOdooController::class, 'invoices']);

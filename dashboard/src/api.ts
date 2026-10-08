@@ -460,6 +460,12 @@ export type ReportTemplateCatalog = {
   saved: ReportTemplateFile[];
 };
 
+export type OdooProduct = {
+  id: number;
+  name: string;
+  price: number;
+};
+
 export type OdooQuotation = {
   id: number;
   name: string;
@@ -1124,10 +1130,10 @@ export const api = {
     });
   },
   workCalendar() {
-    return request<Envelope<{ hours_per_day: number; holidays: string[] }>>("/admin/ops-settings/work-calendar");
+    return request<Envelope<{ hours_per_day: number; holidays: string[]; whatsapp_open: string; whatsapp_close: string }>>("/admin/ops-settings/work-calendar");
   },
-  saveWorkCalendar(payload: { hours_per_day: number; holidays: string[] }) {
-    return request<Envelope<{ hours_per_day: number; holidays: string[] }>>("/admin/ops-settings/work-calendar", {
+  saveWorkCalendar(payload: { hours_per_day: number; holidays: string[]; whatsapp_open: string; whatsapp_close: string }) {
+    return request<Envelope<{ hours_per_day: number; holidays: string[]; whatsapp_open: string; whatsapp_close: string }>>("/admin/ops-settings/work-calendar", {
       method: "PUT",
       body: JSON.stringify(payload),
     });
@@ -1389,6 +1395,9 @@ export const api = {
       }>
     >("/admin/odoo/import-crm-clients/excel", "POST", form);
   },
+  odooProducts() {
+    return request<{ data: OdooProduct[] }>("/admin/odoo/products");
+  },
   odooQuotations(partner?: string) {
     const query = partner ? `?partner=${encodeURIComponent(partner)}` : "";
     return request<{ data: OdooQuotation[] }>(`/admin/odoo/quotations${query}`);
@@ -1401,12 +1410,12 @@ export const api = {
     client_id: number;
     request_id?: number;
     action?: "draft" | "send";
-    deliver?: "email" | "phone";
+    deliver?: "email" | "whatsapp" | "both";
     reference?: string;
     notes?: string;
     date_order?: string;
     validity_date?: string;
-    lines: { title: string; amount?: number; units?: number; notes?: string; discount?: number; display_type?: "line_section" | "line_note" }[];
+    lines: { title: string; amount?: number; units?: number; notes?: string; discount?: number; product_id?: number; display_type?: "line_section" | "line_note" }[];
   }) {
     return request<{ data: OdooQuotation; message?: string }>("/admin/odoo/quotations", {
       method: "POST",
@@ -1417,12 +1426,12 @@ export const api = {
     client_id: number;
     request_id?: number;
     action?: "draft" | "post";
-    deliver?: "email" | "phone";
+    deliver?: "email" | "whatsapp" | "both";
     quotation_id?: number;
     reference?: string;
     invoice_date?: string;
     due_date?: string;
-    lines?: { title: string; amount?: number; units?: number; notes?: string; discount?: number; display_type?: "line_section" | "line_note" }[];
+    lines?: { title: string; amount?: number; units?: number; notes?: string; discount?: number; product_id?: number; display_type?: "line_section" | "line_note" }[];
   }) {
     return request<{ data: OdooInvoice; message?: string }>("/admin/odoo/invoices", {
       method: "POST",

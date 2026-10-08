@@ -1,9 +1,9 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { api, type Client, type OdooQuotation, type ServiceRequest } from "../api";
+import { api, type Client, type OdooProduct, type OdooQuotation } from "../api";
 import { copy } from "../i18n";
 
 type LineKind = "product" | "section" | "note";
-type Line = { id: string; kind: LineKind; title: string; amount: string; units: string; discount: string };
+type Line = { id: string; kind: LineKind; title: string; amount: string; units: string; discount: string; productId?: number };
 type SendMode = "draft" | "send";
 
 function blankLine(kind: LineKind = "product"): Line {
@@ -52,24 +52,20 @@ export function OdooPaperForm({
 }) {
   const clientListId = useId();
   const quoteListId = useId();
-  const requestListId = useId();
   const clientBox = useRef<HTMLLabelElement>(null);
   const quoteBox = useRef<HTMLLabelElement>(null);
-  const requestBox = useRef<HTMLLabelElement>(null);
   const sendMode = useRef<SendMode>("draft");
   const [clients, setClients] = useState<Client[]>([]);
   const [clientQuery, setClientQuery] = useState("");
   const [clientId, setClientId] = useState("");
   const [clientOpen, setClientOpen] = useState(false);
   const [clientActive, setClientActive] = useState(0);
-  const [requests, setRequests] = useState<ServiceRequest[]>([]);
-  const [requestQuery, setRequestQuery] = useState("");
-  const [requestId, setRequestId] = useState("");
-  const [requestOpen, setRequestOpen] = useState(false);
-  const [requestActive, setRequestActive] = useState(0);
   const [reference, setReference] = useState("");
   const [notes, setNotes] = useState("");
-  const [deliver, setDeliver] = useState<"email" | "phone">("email");
+  const [emailOn, setEmailOn] = useState(true);
+  const [whatsappOn, setWhatsappOn] = useState(true);
+  const [products, setProducts] = useState<OdooProduct[]>([]);
+  const [productsReady, setProductsReady] = useState(false);
   const [quoteDate, setQuoteDate] = useState(isoDate());
   const [validityDate, setValidityDate] = useState(isoDate(7));
   const [invoiceDate, setInvoiceDate] = useState(isoDate());
@@ -83,6 +79,23 @@ export function OdooPaperForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const typedClient = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.odooProducts()
+      .then((res) => {
+        if (!cancelled) setProducts(res.data);
+      })
+      .catch(() => {
+        if (!cancelled) setProducts([]);
+      })
+      .finally(() => {
+        if (!cancelled) setProductsReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -118,29 +131,6 @@ export function OdooPaperForm({
   const selected = clients.find((item) => String(item.id) === clientId);
 
   useEffect(() => {
-    if (!selected) {
-      setRequests([]);
-      return;
-    }
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      api.requests({ search: requestQuery.trim() || clientLabel(selected), page: 1 })
-        .then((res) => {
-          if (cancelled) return;
-          setRequests(res.data.filter((item) => item.client?.id === selected.id));
-          setRequestActive(0);
-        })
-        .catch(() => {
-          if (!cancelled) setRequests([]);
-        });
-    }, 250);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [selected, requestQuery]);
-
-  useEffect(() => {
     if (kind !== "invoice" || !selected?.odoo_partner_id) {
       setQuotations(quotation ? [quotation] : []);
       return;
@@ -167,7 +157,6 @@ export function OdooPaperForm({
       if (!(target instanceof Node)) return;
       if (!clientBox.current?.contains(target)) setClientOpen(false);
       if (!quoteBox.current?.contains(target)) setQuoteOpen(false);
-      if (!requestBox.current?.contains(target)) setRequestOpen(false);
     };
     document.addEventListener("pointerdown", onPointer);
     return () => document.removeEventListener("pointerdown", onPointer);
@@ -179,20 +168,12 @@ export function OdooPaperForm({
     return item.name.toLowerCase().includes(needle);
   });
 
-  const visibleRequests = requests.filter((item) => {
-    const needle = requestQuery.trim().toLowerCase();
-    if (!needle || (needle === item.number.toLowerCase() && String(item.id) === requestId)) return true;
-    return `${item.number} ${item.title}`.toLowerCase().includes(needle);
-  });
-
   function pickClient(item: Client) {
     typedClient.current = true;
     setClientId(String(item.id));
     setClientQuery(clientLabel(item));
     setClientOpen(false);
     if (String(item.id) !== clientId) {
-      setRequestId("");
-      setRequestQuery("");
       setQuotationId(quotation && item.odoo_partner_id === String(quotation.partner_id) ? String(quotation.id) : "");
       setQuoteQuery(quotation && item.odoo_partner_id === String(quotation.partner_id) ? quotation.name : "");
     }
@@ -237,31 +218,36 @@ export function OdooPaperForm({
     }
   }
 
-  function pickRequest(item: ServiceRequest) {
-    setRequestId(String(item.id));
-    setRequestQuery(`${item.number} — ${item.title}`);
-    setRequestOpen(false);
-  }
-
-  function onRequestKey(event: KeyboardEvent<HTMLInputElement>) {
-    const rows = visibleRequests;
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      setRequestOpen(true);
-      setRequestActive((index) => Math.min(index + 1, Math.max(rows.length - 1, 0)));
-    } else if (event.key === "ArrowUp") {
-      event.preventDefault();
-      setRequestActive((index) => Math.max(index - 1, 0));
-    } else if (event.key === "Enter" && requestOpen && rows[requestActive]) {
-      event.preventDefault();
-      pickRequest(rows[requestActive]);
-    } else if (event.key === "Escape") {
-      setRequestOpen(false);
-    }
-  }
-
   function updateLine(id: string, patch: Partial<Line>) {
     setLines((current) => current.map((line) => (line.id === id ? { ...line, ...patch } : line)));
+  }
+
+  function addProduct(product: OdooProduct) {
+    setLines((current) => {
+      if (current.some((line) => line.productId === product.id)) return current;
+      const next: Line = {
+        id: `odoo-${product.id}`,
+        kind: "product",
+        productId: product.id,
+        title: product.name,
+        amount: String(product.price),
+        units: "1",
+        discount: "0",
+      };
+      const kept = current.filter((line) => line.title.trim() !== "" || line.kind !== "product" || line.productId);
+      return [...kept, next];
+    });
+  }
+
+  function setProductUnits(productId: number, units: number) {
+    const nextUnits = Math.max(0, Math.round(units));
+    setLines((current) => {
+      if (nextUnits <= 0) {
+        const next = current.filter((line) => line.productId !== productId);
+        return next.length > 0 ? next : [blankLine()];
+      }
+      return current.map((line) => (line.productId === productId ? { ...line, units: String(nextUnits) } : line));
+    });
   }
 
   async function onSubmit(event: FormEvent) {
@@ -272,12 +258,12 @@ export function OdooPaperForm({
       setClientOpen(true);
       return;
     }
-    if (mode === "send" && !requestId) {
-      setError(t(copy.paperChooseRequest));
-      setRequestOpen(true);
+    if (mode === "send" && !emailOn && !whatsappOn) {
+      setError(t(copy.paperChooseChannel));
       return;
     }
-    const filled: Array<{ title: string; amount?: number; units?: number; discount?: number; display_type?: "line_section" | "line_note" }> = [];
+    const deliver = emailOn && whatsappOn ? "both" : emailOn ? "email" : "whatsapp";
+    const filled: Array<{ title: string; amount?: number; units?: number; discount?: number; product_id?: number; display_type?: "line_section" | "line_note" }> = [];
     for (const line of lines) {
       const title = line.title.trim();
       if (title === "") continue;
@@ -293,6 +279,7 @@ export function OdooPaperForm({
         amount,
         units: Number(line.units || "1"),
         discount: Number.isFinite(discount) && discount > 0 ? discount : undefined,
+        product_id: line.productId,
       });
     }
     const products = filled.filter((line) => line.display_type === undefined);
@@ -310,7 +297,6 @@ export function OdooPaperForm({
       if (kind === "quotation") {
         const res = await api.createOdooQuotation({
           client_id: selected.id,
-          request_id: requestId ? Number(requestId) : undefined,
           action: mode === "send" ? "send" : "draft",
           deliver: mode === "send" ? deliver : undefined,
           reference: reference.trim() || undefined,
@@ -324,7 +310,6 @@ export function OdooPaperForm({
       }
       const res = await api.createOdooInvoice({
         client_id: selected.id,
-        request_id: requestId ? Number(requestId) : undefined,
         action: mode === "send" ? "post" : "draft",
         deliver: mode === "send" ? deliver : undefined,
         quotation_id: quotationId ? Number(quotationId) : undefined,
@@ -343,7 +328,7 @@ export function OdooPaperForm({
 
   const showLines = kind === "quotation" || !quotationId;
   const steps = kind === "quotation"
-    ? [copy.paperStatusQuotation, copy.paperStatusSent, copy.paperStatusSale]
+    ? [copy.paperStatusQuotation, copy.paperStatusSent]
     : [copy.paperStatusDraft, copy.paperStatusPosted];
   const total = lines.reduce((sum, line) => sum + lineTotal(line), 0);
 
@@ -374,8 +359,6 @@ export function OdooPaperForm({
                   typedClient.current = true;
                   setClientQuery(event.target.value);
                   setClientId("");
-                  setRequestId("");
-                  setRequestQuery("");
                   setClientOpen(true);
                 }}
                 onFocus={() => setClientOpen(true)}
@@ -396,49 +379,6 @@ export function OdooPaperForm({
                       >
                         <span>{clientLabel(item)}</span>
                         {item.phone ? <span className="cell-detail">{item.phone}</span> : null}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </span>
-          </label>
-          <label className="field-label" ref={requestBox}>
-            {t(copy.paperRequest)}
-            <span className="paper-suggest">
-              <input
-                className="field"
-                role="combobox"
-                aria-expanded={requestOpen}
-                aria-controls={requestListId}
-                aria-autocomplete="list"
-                value={requestQuery}
-                placeholder={t(copy.paperSearchRequest)}
-                disabled={!selected}
-                onChange={(event) => {
-                  setRequestQuery(event.target.value);
-                  setRequestId("");
-                  setRequestOpen(true);
-                  setRequestActive(0);
-                }}
-                onFocus={() => setRequestOpen(true)}
-                onKeyDown={onRequestKey}
-              />
-              {requestOpen && selected ? (
-                <ul id={requestListId} className="paper-suggest-list" role="listbox">
-                  {visibleRequests.length === 0 ? (
-                    <li className="paper-suggest-empty">{t(copy.paperNoRequests)}</li>
-                  ) : visibleRequests.map((item, index) => (
-                    <li key={item.id}>
-                      <button
-                        type="button"
-                        role="option"
-                        aria-selected={index === requestActive || String(item.id) === requestId}
-                        onMouseEnter={() => setRequestActive(index)}
-                        onClick={() => pickRequest(item)}
-                      >
-                        <span dir="ltr">{item.number}</span>
-                        <span className="cell-detail">{item.title}</span>
                       </button>
                     </li>
                   ))}
@@ -533,16 +473,43 @@ export function OdooPaperForm({
         <fieldset className="odoo-deliver">
           <legend>{t(copy.paperDeliver)}</legend>
           <label>
-            <input type="radio" name="deliver" checked={deliver === "email"} onChange={() => setDeliver("email")} />
+            <input type="checkbox" checked={emailOn} onChange={(event) => setEmailOn(event.target.checked)} />
             {t(copy.paperDeliverEmail)}
             {selected?.email ? <span dir="ltr">{selected.email}</span> : null}
           </label>
           <label>
-            <input type="radio" name="deliver" checked={deliver === "phone"} onChange={() => setDeliver("phone")} />
-            {t(copy.paperDeliverPhone)}
+            <input type="checkbox" checked={whatsappOn} onChange={(event) => setWhatsappOn(event.target.checked)} />
+            {t(copy.paperDeliverWhatsApp)}
             {selected?.phone ? <span dir="ltr">{selected.phone}</span> : null}
           </label>
         </fieldset>
+
+        {showLines ? (
+          <div className="odoo-product-grid">
+            {!productsReady ? null : products.length === 0 ? (
+              <p className="muted">{t(copy.paperNoProducts)}</p>
+            ) : products.map((product) => {
+              const qty = Number(lines.find((line) => line.productId === product.id)?.units || "0");
+              return (
+                <article className="odoo-product-card" key={product.id}>
+                  <strong>{product.name}</strong>
+                  <span className="odoo-product-price" dir="ltr">{money(product.price)}</span>
+                  {qty > 0 ? (
+                    <div className="odoo-qty" role="group" aria-label={t(copy.paperQty)}>
+                      <button type="button" onClick={() => setProductUnits(product.id, qty - 1)} disabled={busy}>−</button>
+                      <span>{qty}</span>
+                      <button type="button" onClick={() => setProductUnits(product.id, qty + 1)} disabled={busy}>+</button>
+                    </div>
+                  ) : (
+                    <button type="button" className="btn btn-ghost" onClick={() => addProduct(product)} disabled={busy}>
+                      {t(copy.paperAdd)}
+                    </button>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        ) : null}
 
         {showLines ? (
           <div className="table-wrap">

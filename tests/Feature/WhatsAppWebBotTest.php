@@ -14,6 +14,7 @@ use App\Models\ServiceRequest;
 use App\Support\ClientChannelGate;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -37,6 +38,13 @@ class WhatsAppWebBotTest extends TestCase
         Http::fake([
             'http://wa-web.test/*' => Http::response(['id' => 'wa-web-1'], 200),
         ]);
+        Carbon::setTestNow(Carbon::parse('2026-10-10 22:00:00', 'Asia/Damascus'));
+    }
+
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+        parent::tearDown();
     }
 
     public function test_web_transport_unlocks_without_meta(): void
@@ -53,6 +61,47 @@ class WhatsAppWebBotTest extends TestCase
             'message_id' => 'web-1',
             'text' => 'مرحبا',
         ])->assertUnauthorized();
+    }
+
+    public function test_whatsapp_outside_working_hours_states_the_hours_and_does_not_open_a_client(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-10-08 15:00:00', 'Asia/Damascus'));
+
+        $this->withHeaders(['X-Webhook-Secret' => 'web-secret'])
+            ->postJson('/api/bot/whatsapp/web', [
+                'phone' => '963922222222',
+                'message_id' => 'web-closed',
+                'text' => 'مرحبا',
+            ])
+            ->assertOk();
+
+        $this->assertNull(Client::query()->where('telegram_user_id', 'wa:963922222222')->first());
+        Http::assertSent(fn (Request $request): bool => $request->url() === 'http://wa-web.test/send'
+            && str_contains((string) data_get($request->data(), 'text'), '21:00')
+            && str_contains((string) data_get($request->data(), 'text'), '09:00'));
+    }
+
+    public function test_whatsapp_night_shift_continues_until_morning_and_friday_night_stays_closed(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-10-09 08:30:00', 'Asia/Damascus'));
+        $this->withHeaders(['X-Webhook-Secret' => 'web-secret'])
+            ->postJson('/api/bot/whatsapp/web', [
+                'phone' => '963933333333',
+                'message_id' => 'web-friday-morning',
+                'text' => 'مرحبا',
+            ])
+            ->assertOk();
+        $this->assertNotNull(Client::query()->where('telegram_user_id', 'wa:963933333333')->first());
+
+        Carbon::setTestNow(Carbon::parse('2026-10-09 22:00:00', 'Asia/Damascus'));
+        $this->withHeaders(['X-Webhook-Secret' => 'web-secret'])
+            ->postJson('/api/bot/whatsapp/web', [
+                'phone' => '963944444444',
+                'message_id' => 'web-friday-night',
+                'text' => 'مرحبا',
+            ])
+            ->assertOk();
+        $this->assertNull(Client::query()->where('telegram_user_id', 'wa:963944444444')->first());
     }
 
     public function test_web_inbound_links_the_client_and_replies_through_the_bridge(): void

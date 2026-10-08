@@ -14,6 +14,7 @@ use App\Models\ServiceRequest;
 use App\Support\ClientChannelGate;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -34,6 +35,7 @@ class ScenarioMatrixTest extends TestCase
             'services.telegram.bot_token' => 'test-token',
             'services.n8n.webhook_secret' => 'change-me',
         ]);
+        Carbon::setTestNow(Carbon::parse('2026-10-10 22:00:00', 'Asia/Damascus'));
         Http::preventStrayRequests();
         Http::fake([
             'http://wa-web.test/*' => Http::response(['id' => 'wa-1'], 200),
@@ -44,6 +46,12 @@ class ScenarioMatrixTest extends TestCase
                 ]],
             ], 200),
         ]);
+    }
+
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+        parent::tearDown();
     }
 
     public function test_data_cannot_change_after_the_quotation_is_sent(): void

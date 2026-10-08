@@ -13,6 +13,8 @@ export function ClientChannelsPage({ locale, t }: { locale: Locale; t: (c: { ar:
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<"telegram" | "whatsapp" | null>(null);
   const [hours, setHours] = useState("8");
+  const [openAt, setOpenAt] = useState("21:00");
+  const [closeAt, setCloseAt] = useState("09:00");
   const [holidays, setHolidays] = useState<string[]>([]);
   const [unlinking, setUnlinking] = useState(false);
 
@@ -32,6 +34,8 @@ export function ClientChannelsPage({ locale, t }: { locale: Locale; t: (c: { ar:
       .workCalendar()
       .then((res) => {
         setHours(String(res.data.hours_per_day));
+        setOpenAt(res.data.whatsapp_open || "21:00");
+        setCloseAt(res.data.whatsapp_close || "09:00");
         setHolidays(res.data.holidays);
       })
       .catch(() => undefined);
@@ -70,8 +74,12 @@ export function ClientChannelsPage({ locale, t }: { locale: Locale; t: (c: { ar:
       const res = await api.saveWorkCalendar({
         hours_per_day: Number(hours) || 8,
         holidays,
+        whatsapp_open: openAt,
+        whatsapp_close: closeAt,
       });
       setHours(String(res.data.hours_per_day));
+      setOpenAt(res.data.whatsapp_open);
+      setCloseAt(res.data.whatsapp_close);
       setHolidays(res.data.holidays);
       toast.success(t(copy.channelsSaved));
     } catch (err) {
@@ -178,6 +186,20 @@ export function ClientChannelsPage({ locale, t }: { locale: Locale; t: (c: { ar:
           {t(copy.channelsHours)}
           <input className="field" value={hours} onChange={(event) => setHours(event.target.value)} inputMode="numeric" />
         </label>
+        <fieldset className="holiday-calendar">
+          <legend>{t(copy.channelsWhatsappHours)}</legend>
+          <p className="muted">{t(copy.channelsWhatsappHoursHint)}</p>
+          <div className="odoo-deliver">
+            <label>
+              {t(copy.channelsWhatsappOpen)}
+              <input className="field" type="time" value={openAt} onChange={(event) => setOpenAt(event.target.value)} />
+            </label>
+            <label>
+              {t(copy.channelsWhatsappClose)}
+              <input className="field" type="time" value={closeAt} onChange={(event) => setCloseAt(event.target.value)} />
+            </label>
+          </div>
+        </fieldset>
         <fieldset className="holiday-calendar">
           <legend>{t(copy.channelsHolidays)}</legend>
           <p className="muted">{t(copy.channelsHolidayHint)}</p>

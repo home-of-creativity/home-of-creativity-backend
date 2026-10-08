@@ -1140,40 +1140,84 @@ class OdooClient
     }
 
     /**
-     * The same invoice Odoo creates from a sales order: confirm a draft, then the regular invoice wizard.
+     * A customer invoice copied from the quotation lines. The quotation stays a quotation.
      *
-     * @param  array{id: int, name: string, state: string}  $order
+     * @param  array{id: int, name: string, partner_id: int, client_order_ref?: string|null}  $order
      * @return array<string, mixed>
      */
     public function invoiceFromSaleOrder(array $order): array
     {
-        $orderId = (int) $order['id'];
-        if (in_array($order['state'], ['draft', 'sent'], true)) {
-            $this->call('sale.order', 'action_confirm', ['ids' => [$orderId]]);
+        return $this->createStaffInvoice(
+            (string) $order['partner_id'],
+            $this->quotationLines((int) $order['id']),
+            $order['client_order_ref'] ?? null,
+            $order['name'],
+        );
+    }
+
+    /**
+     * @return list<array{id: int, name: string, price: float}>
+     */
+    public function listSaleProducts(int $limit = 80): array
+    {
+        $rows = $this->searchRead('product.product', [
+            ['sale_ok', '=', true],
+        ], ['id', 'name', 'list_price'], $limit, 0, 'name asc');
+
+        $products = [];
+        foreach ($rows as $row) {
+            if (! is_array($row) || ! isset($row['id'])) {
+                continue;
+            }
+            $name = $row['name'] ?? '';
+            if (! is_string($name) || trim($name) === '') {
+                continue;
+            }
+            $products[] = [
+                'id' => (int) $row['id'],
+                'name' => $name,
+                'price' => (float) ($row['list_price'] ?? 0),
+            ];
         }
 
-        $wizardId = $this->call('sale.advance.payment.inv', 'create', [[
-            'advance_payment_method' => 'delivered',
-            'sale_order_ids' => [[6, 0, [$orderId]]],
-        ]]);
-        $wizardId = is_array($wizardId) ? (int) ($wizardId[0] ?? 0) : (int) $wizardId;
-        if ($wizardId <= 0) {
-            throw new RuntimeException('Odoo did not open the invoice wizard.');
+        return $products;
+    }
+
+    /**
+     * @return list<array{title: string, amount?: float, units?: float, discount?: float, display_type?: string}>
+     */
+    public function quotationLines(int $orderId): array
+    {
+        if ($orderId <= 0) {
+            return [];
         }
 
-        $this->call('sale.advance.payment.inv', 'create_invoices', ['ids' => [$wizardId]]);
+        $rows = $this->searchRead('sale.order.line', [
+            ['order_id', '=', $orderId],
+        ], ['name', 'price_unit', 'product_uom_qty', 'discount', 'display_type'], 40, 0, 'id asc');
 
-        $row = $order['name'] !== ''
-            ? $this->firstRecord($this->searchRead('account.move', [
-                ['move_type', '=', 'out_invoice'],
-                ['invoice_origin', '=', $order['name']],
-            ], $this->invoiceFields(), 1, 0, 'id desc'))
-            : null;
-        if ($row === null) {
-            throw new RuntimeException('Odoo created no customer invoice for this quotation.');
+        $lines = [];
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $display = $row['display_type'] ?? null;
+            if ($display === 'line_section' || $display === 'line_note') {
+                $lines[] = [
+                    'title' => (string) ($row['name'] ?? ''),
+                    'display_type' => $display,
+                ];
+                continue;
+            }
+            $lines[] = [
+                'title' => (string) ($row['name'] ?? ''),
+                'amount' => (float) ($row['price_unit'] ?? 0),
+                'units' => (float) ($row['product_uom_qty'] ?? 1),
+                'discount' => (float) ($row['discount'] ?? 0),
+            ];
         }
 
-        return $this->mapInvoice($row);
+        return $lines;
     }
 
     /**
@@ -1897,6 +1941,9 @@ class OdooClient
             'product_uom_qty' => (float) ($line['units'] ?? 1),
             'price_unit' => (float) ($line['amount'] ?? 0),
         ];
+        if (isset($line['product_id']) && (int) $line['product_id'] > 0) {
+            $values['product_id'] = (int) $line['product_id'];
+        }
         $discount = (float) ($line['discount'] ?? 0);
         if ($discount > 0) {
             $values['discount'] = $discount;
@@ -1926,6 +1973,9 @@ class OdooClient
             'quantity' => (float) ($line['units'] ?? 1),
             'price_unit' => (float) ($line['amount'] ?? 0),
         ];
+        if (isset($line['product_id']) && (int) $line['product_id'] > 0) {
+            $values['product_id'] = (int) $line['product_id'];
+        }
         $discount = (float) ($line['discount'] ?? 0);
         if ($discount > 0) {
             $values['discount'] = $discount;

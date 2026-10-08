@@ -12,6 +12,10 @@ class WorkCalendar
 
     public const HOLIDAYS_KEY = 'work_holidays';
 
+    public const WHATSAPP_OPEN_KEY = 'whatsapp_bot_open';
+
+    public const WHATSAPP_CLOSE_KEY = 'whatsapp_bot_close';
+
     public const DAY_START_HOUR = 9;
 
     /** @return list<int> */
@@ -62,6 +66,64 @@ class WorkCalendar
     public function saveHoursPerDay(int $hours): void
     {
         OpsSetting::setValue(self::HOURS_KEY, (string) max(1, $hours));
+    }
+
+    /**
+     * @return array{open: string, close: string}
+     */
+    public function whatsappHours(): array
+    {
+        return [
+            'open' => $this->clock(self::WHATSAPP_OPEN_KEY, '21:00'),
+            'close' => $this->clock(self::WHATSAPP_CLOSE_KEY, '09:00'),
+        ];
+    }
+
+    public function saveWhatsAppHours(string $open, string $close): void
+    {
+        OpsSetting::setValue(self::WHATSAPP_OPEN_KEY, $this->clockValue($open, '21:00'));
+        OpsSetting::setValue(self::WHATSAPP_CLOSE_KEY, $this->clockValue($close, '09:00'));
+    }
+
+    public function isWhatsAppOpen(?CarbonInterface $moment = null): bool
+    {
+        $local = ($moment ?? Carbon::now('Asia/Damascus'))->copy()->timezone('Asia/Damascus');
+        [$open, $close] = $this->windowMinutes();
+        $minute = ($local->hour * 60) + $local->minute;
+
+        if ($close > $open) {
+            return $this->isWorkDay($local) && $minute >= $open && $minute < $close;
+        }
+
+        if ($minute >= $open) {
+            return $this->isWorkDay($local);
+        }
+
+        if ($minute < $close) {
+            return $this->isWorkDay($local->copy()->subDay());
+        }
+
+        return false;
+    }
+
+    public function nextWhatsAppOpen(?CarbonInterface $from = null): CarbonInterface
+    {
+        $local = ($from ?? Carbon::now('Asia/Damascus'))->copy()->timezone('Asia/Damascus');
+        [$openHour, $openMinute] = array_map('intval', explode(':', $this->whatsappHours()['open']));
+        $start = $local->copy()->setTime($openHour, $openMinute);
+        if ($this->isWorkDay($local) && $local->lt($start)) {
+            return $start;
+        }
+
+        return $this->nextWorkStart($local)->setTime($openHour, $openMinute);
+    }
+
+    public function whatsappClosedNotice(): string
+    {
+        $hours = $this->whatsappHours();
+        $overnight = $hours['close'] < $hours['open'] ? ' الدوام يعبر منتصف الليل.' : '';
+
+        return "نعمل من {$hours['open']} حتى {$hours['close']} بتوقيت دمشق، من السبت إلى الخميس.{$overnight} الجمعة عطلة. أرسل رسالتك خلال الدوام وسنرد عليك.";
     }
 
     public function isWorkDay(CarbonInterface $day): bool
@@ -137,5 +199,26 @@ class WorkCalendar
         }
 
         return $days;
+    }
+
+    private function clock(string $key, string $fallback): string
+    {
+        return $this->clockValue((string) OpsSetting::getValue($key, $fallback), $fallback);
+    }
+
+    private function clockValue(string $value, string $fallback): string
+    {
+        return preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $value) === 1 ? $value : $fallback;
+    }
+
+    /**
+     * @return array{0: int, 1: int}
+     */
+    private function windowMinutes(): array
+    {
+        $hours = $this->whatsappHours();
+        $open = array_map('intval', explode(':', $hours['open']));
+        $close = array_map('intval', explode(':', $hours['close']));
+        return [($open[0] * 60) + $open[1], ($close[0] * 60) + $close[1]];
     }
 }

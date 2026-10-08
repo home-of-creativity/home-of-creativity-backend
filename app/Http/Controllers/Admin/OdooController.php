@@ -4,16 +4,15 @@ namespace App\Http\Controllers\Admin;
 
 use App\Actions\ImportOdooCrmClients;
 use App\Actions\ImportOdooCrmClientsFromExcel;
+use App\Actions\OpenRequestFromStaffInvoice;
 use App\Actions\PublishOdooPaper;
 use App\Actions\SyncOdooEmployees;
 use App\Actions\SyncOdooPartners;
-use App\Enums\RequestStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\ImportOdooCrmClientsExcelRequest;
 use App\Http\Requests\StoreOdooInvoiceRequest;
 use App\Http\Requests\StoreOdooQuotationRequest;
 use App\Models\Client;
-use App\Models\ServiceRequest;
 use App\Services\OdooClient;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -143,6 +142,21 @@ class OdooController extends Controller
         ]);
     }
 
+    public function products(OdooClient $odoo): JsonResponse
+    {
+        if (! $odoo->configured()) {
+            return response()->json(['message' => 'Odoo is not configured.'], 422);
+        }
+
+        try {
+            return response()->json(['data' => $odoo->listSaleProducts(), 'message' => 'ok']);
+        } catch (\Throwable $exception) {
+            Log::warning('Odoo products failed.', ['error' => $exception->getMessage()]);
+
+            return response()->json(['message' => 'تعذر قراءة منتجات أودو.'], 502);
+        }
+    }
+
     public function quotations(Request $request, OdooClient $odoo): JsonResponse
     {
         if (! $odoo->configured()) {
@@ -195,19 +209,14 @@ class OdooController extends Controller
         }
 
         $action = (string) ($request->validated('action') ?: 'draft');
-        $serviceRequest = null;
         if ($action === 'send') {
-            $blocked = $this->paperTarget($client, $request->integer('request_id'), (string) $request->validated('deliver'), true);
+            $blocked = $this->paperChannel($client, (string) $request->validated('deliver'));
             if ($blocked instanceof JsonResponse) {
                 return $blocked;
             }
-            $serviceRequest = $blocked;
         }
 
         $reference = $request->validated('reference');
-        if ($serviceRequest !== null && ! filled($reference)) {
-            $reference = $serviceRequest->number;
-        }
 
         try {
             $created = $odoo->createStaffQuotation(
@@ -229,21 +238,18 @@ class OdooController extends Controller
         }
 
         $message = 'تم حفظ عرض السعر.';
-        if ($action === 'send' && $serviceRequest !== null) {
+        if ($action === 'send') {
             try {
                 $created = $publish->quotation(
                     $client,
-                    $serviceRequest,
                     $created,
-                    $request->validated('lines'),
                     (string) $request->validated('deliver'),
-                    $request->validated('notes'),
                     $request->validated('date_order'),
                     $request->validated('validity_date'),
                 );
                 $message = $publish->delivered
-                    ? 'تم إرسال عرض السعر وربطه بالطلب.'
-                    : 'رُبط عرض السعر بالطلب وتعذر إيصاله إلى البريد أو الرقم.';
+                    ? 'تم إرسال عرض السعر.'
+                    : 'أُرسل عرض السعر في أودو وتعذر إيصاله إلى البريد أو واتساب.';
             } catch (\Throwable $exception) {
                 Log::warning('Odoo quotation send failed.', ['error' => $exception->getMessage()]);
                 $message = 'أُنشئ عرض السعر في أودو وتعذر إرساله.';
@@ -256,7 +262,7 @@ class OdooController extends Controller
         ], 201);
     }
 
-    public function storeInvoice(StoreOdooInvoiceRequest $request, OdooClient $odoo, PublishOdooPaper $publish): JsonResponse
+    public function storeInvoice(StoreOdooInvoiceRequest $request, OdooClient $odoo, PublishOdooPaper $publish, OpenRequestFromStaffInvoice $openRequest): JsonResponse
     {
         if (! $odoo->configured()) {
             return response()->json(['message' => 'Odoo is not configured.'], 422);
@@ -271,15 +277,10 @@ class OdooController extends Controller
         $reference = $request->validated('reference');
         $quotationId = $request->integer('quotation_id');
         $action = (string) ($request->validated('action') ?: 'draft');
-        $serviceRequest = null;
         if ($action === 'post') {
-            $blocked = $this->paperTarget($client, $request->integer('request_id'), (string) $request->validated('deliver'), false);
+            $blocked = $this->paperChannel($client, (string) $request->validated('deliver'));
             if ($blocked instanceof JsonResponse) {
                 return $blocked;
-            }
-            $serviceRequest = $blocked;
-            if (! filled($reference)) {
-                $reference = $serviceRequest->number;
             }
         }
 
@@ -314,23 +315,28 @@ class OdooController extends Controller
         }
 
         $message = 'تم حفظ الفاتورة كمسودة.';
-        if ($action === 'post' && $serviceRequest !== null) {
+        if ($action === 'post') {
+            $opened = $openRequest->handle($client, $created, $lines, is_string($reference) ? $reference : null);
             try {
                 $created = $publish->invoice(
                     $client,
-                    $serviceRequest,
+                    $opened,
                     $created,
                     (string) $request->validated('deliver'),
                     true,
                     $request->validated('invoice_date'),
                     $request->validated('due_date'),
                 );
+                $opened->refresh();
+                $clickup = $opened->clickupTasks()->where('task_type', 'sales')->exists()
+                    ? ' ومهمة المبيعات في ClickUp.'
+                    : '.';
                 $message = $publish->delivered
-                    ? 'تم ترحيل الفاتورة وإرسالها وربطها بالطلب.'
-                    : 'رُحّلت الفاتورة ورُبطت بالطلب وتعذر إيصالها إلى البريد أو الرقم.';
+                    ? 'تم ترحيل الفاتورة وفتح الطلب '.$opened->number.$clickup
+                    : 'رُحّلت الفاتورة وفُتح الطلب '.$opened->number.' وتعذر إيصالها إلى البريد أو واتساب.';
             } catch (\Throwable $exception) {
                 Log::warning('Odoo invoice post failed.', ['error' => $exception->getMessage()]);
-                $message = 'أُنشئت الفاتورة في أودو وتعذر ترحيلها أو إرسالها.';
+                $message = 'أُنشئت الفاتورة وفُتح الطلب '.$opened->number.' وتعذر ترحيلها أو إرسالها.';
             }
         }
 
@@ -340,26 +346,24 @@ class OdooController extends Controller
         ], 201);
     }
 
-    private function paperTarget(Client $client, int $requestId, string $channel, bool $quotationGate): ServiceRequest|JsonResponse
+    private function paperChannel(Client $client, string $channel): ?JsonResponse
     {
-        if ($channel === 'email' && ! filled($client->email)) {
+        $channels = match ($channel) {
+            'both' => ['email', 'whatsapp'],
+            'phone', 'whatsapp' => ['whatsapp'],
+            'email' => ['email'],
+            default => [],
+        };
+        if ($channels === []) {
+            return response()->json(['message' => 'اختر البريد أو واتساب.'], 422);
+        }
+        if (in_array('email', $channels, true) && ! filled($client->email)) {
             return response()->json(['message' => 'العميل بلا بريد إلكتروني.'], 422);
         }
-        if ($channel === 'phone' && ! filled($client->phone)) {
-            return response()->json(['message' => 'العميل بلا رقم.'], 422);
+        if (in_array('whatsapp', $channels, true) && ! filled($client->phone)) {
+            return response()->json(['message' => 'العميل بلا رقم واتساب.'], 422);
         }
 
-        $serviceRequest = ServiceRequest::query()
-            ->whereKey($requestId)
-            ->where('client_id', $client->id)
-            ->first();
-        if ($serviceRequest === null) {
-            return response()->json(['message' => 'الطلب لا يخص هذا العميل.'], 422);
-        }
-        if ($quotationGate && ! in_array($serviceRequest->status, [RequestStatus::Submitted, RequestStatus::QuotationRejected], true)) {
-            return response()->json(['message' => 'يمكن إرسال عرض السعر والطلب مقدّم أو مرفوض فقط.'], 422);
-        }
-
-        return $serviceRequest;
+        return null;
     }
 }

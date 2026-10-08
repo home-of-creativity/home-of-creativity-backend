@@ -8,6 +8,7 @@ use App\Enums\RequestStatus;
 use App\Enums\SocialPostStatus;
 use App\Jobs\ClassifyWithGeminiJob;
 use App\Mail\ClientDocumentMail;
+use App\Models\ClickUpTask;
 use App\Models\Client;
 use App\Models\DriveDelivery;
 use App\Models\Employee;
@@ -992,14 +993,9 @@ class AdminDashboardTest extends TestCase
             'email' => 'client@example.com',
             'odoo_partner_id' => '44',
         ]);
-        $serviceRequest = ServiceRequest::factory()->create([
-            'client_id' => $client->id,
-            'status' => RequestStatus::Submitted,
-        ]);
 
         $this->postJson('/api/admin/odoo/quotations', [
             'client_id' => $client->id,
-            'request_id' => $serviceRequest->id,
             'action' => 'send',
             'deliver' => 'email',
             'lines' => [
@@ -1008,16 +1004,96 @@ class AdminDashboardTest extends TestCase
         ])
             ->assertCreated()
             ->assertJsonPath('data.state', 'sent')
-            ->assertJsonPath('message', 'تم إرسال عرض السعر وربطه بالطلب.');
+            ->assertJsonPath('message', 'تم إرسال عرض السعر.');
 
-        $serviceRequest->refresh();
-        $this->assertSame(RequestStatus::QuotationSent, $serviceRequest->status);
-        $this->assertSame('880', (string) $serviceRequest->odoo_quotation_id);
+        $this->assertSame(0, ServiceRequest::query()->count());
         Mail::assertSent(ClientDocumentMail::class, function (ClientDocumentMail $mail): bool {
             return $mail->mailer === 'reports'
                 && $mail->hasTo('client@example.com')
                 && $mail->hasFrom('reports@hoc.agency');
         });
+    }
+
+    public function test_admin_invoice_opens_a_request_and_a_clickup_sales_task(): void
+    {
+        Mail::fake();
+        Http::preventStrayRequests();
+        config([
+            'mail.mailers.reports.username' => 'reports@hoc.agency',
+            'mail.mailers.reports.password' => 'secret',
+            'services.odoo.enabled' => true,
+            'services.odoo.url' => 'https://odoo.test',
+            'services.odoo.db' => 'hoc',
+            'services.odoo.username' => 'admin',
+            'services.odoo.api_key' => 'secret-key',
+            'services.odoo.use_json2' => false,
+            'services.clickup.token' => 'clickup-token',
+            'services.clickup.list_id' => 'list-sales',
+            'services.clickup.lists.sales' => 'list-sales',
+        ]);
+        Http::fake([
+            'https://odoo.test/jsonrpc' => function (Request $request) {
+                $params = $request->data()['params'] ?? [];
+                if (($params['service'] ?? '') === 'common') {
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => 2], 200);
+                }
+
+                $args = $params['args'] ?? [];
+                if (($args[3] ?? null) === 'account.move' && ($args[4] ?? null) === 'create') {
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => 990], 200);
+                }
+                if (($args[3] ?? null) === 'account.move' && ($args[4] ?? null) === 'search_read') {
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => [[
+                        'id' => 990,
+                        'name' => 'INV/2026/0090',
+                        'partner_id' => [44, 'Damastech'],
+                        'amount_total' => 150,
+                        'amount_residual' => 150,
+                        'currency_id' => [1, 'USD'],
+                        'state' => 'posted',
+                        'payment_state' => 'not_paid',
+                        'invoice_origin' => false,
+                        'ref' => false,
+                        'invoice_date' => '2026-10-08',
+                    ]]], 200);
+                }
+
+                return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => []], 200);
+            },
+            'https://api.clickup.com/*' => Http::response(['id' => 'cu-1'], 200),
+        ]);
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+        $client = Client::factory()->create([
+            'company_name' => 'Damastech',
+            'email' => 'client@example.com',
+            'odoo_partner_id' => '44',
+        ]);
+
+        $this->postJson('/api/admin/odoo/invoices', [
+            'client_id' => $client->id,
+            'action' => 'post',
+            'deliver' => 'email',
+            'lines' => [
+                ['title' => 'تصميم', 'amount' => 150, 'units' => 1],
+            ],
+        ])->assertCreated();
+
+        $opened = ServiceRequest::query()->first();
+        $this->assertNotNull($opened);
+        $this->assertSame($client->id, $opened->client_id);
+        $this->assertSame(RequestStatus::Submitted, $opened->status);
+        $this->assertSame('990', (string) $opened->odoo_invoice_id);
+        $this->assertSame('تصميم', $opened->title);
+        $this->assertTrue(
+            ClickUpTask::query()->where('request_id', $opened->id)->where('clickup_task_id', 'cu-1')->exists()
+        );
+
+        $this->getJson('/api/admin/requests')
+            ->assertOk()
+            ->assertJsonFragment(['number' => $opened->number]);
     }
 
     public function test_admin_creates_an_odoo_invoice_linked_to_a_quotation(): void
@@ -1049,11 +1125,8 @@ class AdminDashboardTest extends TestCase
                         'state' => 'sale',
                     ]]], 200);
                 }
-                if (($args[3] ?? null) === 'sale.advance.payment.inv' && ($args[4] ?? null) === 'create') {
-                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => 77], 200);
-                }
-                if (($args[3] ?? null) === 'sale.advance.payment.inv' && ($args[4] ?? null) === 'create_invoices') {
-                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => true], 200);
+                if (($args[3] ?? null) === 'account.move' && ($args[4] ?? null) === 'create') {
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => 990], 200);
                 }
                 if (($args[3] ?? null) === 'account.move' && ($args[4] ?? null) === 'search_read') {
                     return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => [[

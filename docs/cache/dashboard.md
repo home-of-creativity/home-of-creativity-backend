@@ -1,8 +1,14 @@
 # Staff dashboard (Vite SPA)
 
-Last updated: 8 October 2026 (The clients page lists each client once. The same phone does not appear as another row.)
+Last updated: 8 October 2026 (Channels page edits WhatsApp bot hours, from and until. Default 21:00–09:00, and the range may cross midnight.)
 
-Previous: 8 October 2026 (Quotation and invoice create forms show the Odoo status bar, a request search, and send by email or phone.)
+Previous: 8 October 2026 (Quotation and invoice forms list Odoo products between send and the line table. Each card has Add, then a quantity counter. Email and WhatsApp can both be checked. The quotation status bar has no sales-order step.)
+
+Previous: 8 October 2026 (Quotation and invoice forms no longer ask for a request. Confirming an invoice opens a new request with a ClickUp sales task, and that request appears under Requests.)
+
+Previous: 8 October 2026 (The clients page lists each client once. The same phone does not appear as another row.)
+
+Previous: 8 October 2026 (Quotation and invoice create forms show the Odoo status bar and send by email or phone.)
 
 Previous: 8 October 2026 (Bot channels: a linked WhatsApp number can be changed, and days off are a month calendar.)
 

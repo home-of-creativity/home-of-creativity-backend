@@ -1,10 +1,16 @@
 # Laravel API
 
-Last updated: 8 October 2026 (Quotation, invoice, and client emails use the `reports` SMTP mailer: `REPORT_MAIL_USERNAME` defaults to reports@hoc.agency, with `REPORT_MAIL_PASSWORD`. The website form still uses the `contact` mailer and `CONTACT_MAIL_USERNAME`.)
+Last updated: 8 October 2026 (`GET`/`PUT /admin/ops-settings/work-calendar` stores `whatsapp_open` and `whatsapp_close`. Default 21:00–09:00 Asia/Damascus, and a close earlier than the open crosses midnight. The night starts on a Saturday–Thursday work day and continues until the morning close. Inbound WhatsApp outside that window gets one closed-hours reply and does not continue the chat. Staff document sends are not gated.)
+
+Previous: 8 October 2026 (`GET /admin/odoo/products` lists Odoo products with `sale_ok`. Quotation and invoice `deliver` is `email`, `whatsapp`, or `both`. WhatsApp uses the linked WhatsApp Web session. An invoice copied from a quotation does not confirm that quotation into a sales order.)
+
+Previous: 8 October 2026 (`POST /admin/odoo/quotations` and `POST /admin/odoo/invoices` do not take a request. Posting an invoice opens a new submitted request, stores `odoo_invoice_id` on it, and creates the ClickUp sales task. The request is listed by `GET /admin/requests`.)
+
+Previous: 8 October 2026 (Quotation, invoice, and client emails use the `reports` SMTP mailer: `REPORT_MAIL_USERNAME` defaults to reports@hoc.agency, with `REPORT_MAIL_PASSWORD`. The website form still uses the `contact` mailer and `CONTACT_MAIL_USERNAME`.)
 
 Previous: 8 October 2026 (Client import matches an existing row by email or by phone digits, including spaced numbers. `odoo_lead_id` and `odoo_partner_id` are unique. A second Odoo partner with the same phone updates that row and does not replace its partner id.)
 
-Previous: 8 October 2026 (`POST /admin/odoo/quotations` with `action=send` and `POST /admin/odoo/invoices` with `action=post` require a client request and `deliver=email|phone`. Quotation send marks the Odoo order sent and moves the request to quotation sent. Invoice post posts the move and stores `odoo_invoice_id` on the request.)
+Previous: 8 October 2026 (`POST /admin/odoo/quotations` with `action=send` and `POST /admin/odoo/invoices` with `action=post` deliver by `email` or `phone`. Quotation send does not open a request. Invoice post opens one.)
 
 Previous: 8 October 2026 (`POST /admin/reports/to-pdf` installs Google Sans into the LibreOffice profile and renames IBM Plex Sans Arabic to Google Sans. `w:sz` is not changed, so the point size stays.)
 

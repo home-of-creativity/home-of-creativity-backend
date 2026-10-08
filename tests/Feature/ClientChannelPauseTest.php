@@ -8,6 +8,7 @@ use App\Services\TelegramNotifier;
 use App\Support\ClientChannelGate;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -32,11 +33,18 @@ class ClientChannelPauseTest extends TestCase
             'services.whatsapp.graph_base' => 'https://graph.facebook.com/v21.0',
         ]);
 
+        Carbon::setTestNow(Carbon::parse('2026-10-10 22:00:00', 'Asia/Damascus'));
         Http::preventStrayRequests();
         Http::fake([
             'graph.facebook.com/*' => Http::response(['messages' => [['id' => 'wamid.out']]], 200),
             'api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 1]], 200),
         ]);
+    }
+
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+        parent::tearDown();
     }
 
     public function test_ops_settings_default_to_both_channels_on(): void

@@ -11,6 +11,7 @@ use App\Support\WorkCalendar;
 use App\Support\WorkLines;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 
 class WorkScheduleController extends Controller
 {
@@ -20,6 +21,8 @@ class WorkScheduleController extends Controller
             'data' => [
                 'hours_per_day' => $calendar->hoursPerDay(),
                 'holidays' => $calendar->holidays(),
+                'whatsapp_open' => $calendar->whatsappHours()['open'],
+                'whatsapp_close' => $calendar->whatsappHours()['close'],
                 'work_days' => ['saturday', 'sunday', 'monday', 'tuesday', 'wednesday', 'thursday'],
                 'weekend' => 'friday',
             ],
@@ -32,10 +35,20 @@ class WorkScheduleController extends Controller
             'hours_per_day' => ['required', 'integer', 'min:1', 'max:16'],
             'holidays' => ['array'],
             'holidays.*' => ['date_format:Y-m-d'],
+            'whatsapp_open' => ['nullable', 'date_format:H:i'],
+            'whatsapp_close' => ['nullable', 'date_format:H:i'],
         ]);
 
         $calendar->saveHoursPerDay((int) $validated['hours_per_day']);
         $calendar->saveHolidays($validated['holidays'] ?? []);
+        if (filled($validated['whatsapp_open'] ?? null) && filled($validated['whatsapp_close'] ?? null)) {
+            if ((string) $validated['whatsapp_close'] === (string) $validated['whatsapp_open']) {
+                throw ValidationException::withMessages([
+                    'whatsapp_close' => 'WhatsApp opening and closing times must differ.',
+                ]);
+            }
+            $calendar->saveWhatsAppHours((string) $validated['whatsapp_open'], (string) $validated['whatsapp_close']);
+        }
 
         return $this->showCalendar($calendar);
     }

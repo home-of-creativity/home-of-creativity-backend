@@ -2,18 +2,33 @@
 
 namespace App\Actions;
 
-use App\Contracts\WhatsAppMessenger;
 use App\Mail\ClientDocumentMail;
 use App\Models\Client;
+use App\Services\WhatsAppWebClient;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Throwable;
 
 class DeliverClientDocument
 {
-    public function __construct(private WhatsAppMessenger $whatsapp) {}
+    public function __construct(private WhatsAppWebClient $whatsapp) {}
 
     public function send(Client $client, string $channel, string $text, ?string $absolutePath = null, ?string $filename = null): bool
+    {
+        $channels = match ($channel) {
+            'both' => ['email', 'whatsapp'],
+            'phone', 'whatsapp' => ['whatsapp'],
+            default => ['email'],
+        };
+        $delivered = true;
+        foreach ($channels as $one) {
+            $delivered = $this->sendOne($client, $one, $text, $absolutePath, $filename) && $delivered;
+        }
+
+        return $delivered;
+    }
+
+    private function sendOne(Client $client, string $channel, string $text, ?string $absolutePath, ?string $filename): bool
     {
         try {
             if ($channel === 'email') {

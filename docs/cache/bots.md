@@ -1,5 +1,7 @@
 # Telegram bots
 
+WhatsApp client bot answers only during the hours saved on the channels page (default 21:00–09:00 Asia/Damascus, crossing midnight, Saturday–Thursday nights, Friday off). Outside that window it sends one closed-hours notice and does not continue the chat.
+
 Path: `backend/bot/`  
 Python 3, `python-telegram-bot==21.6`, httpx, dotenv. Shared runner: `telegram_http.py` (polling default, webhook if `TELEGRAM_WEBHOOK_URL`). Every bot registers an error handler there: Telegram `NetworkError` / `TimedOut` (Bad Gateway on `getUpdates`) is ignored; any other error is sent to Sentry.
 
