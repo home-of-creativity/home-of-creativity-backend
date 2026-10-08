@@ -5,6 +5,7 @@ import harfbuzzWasm from "@docx-editor.dev/core/harfbuzz.wasm?url";
 import "@docx-editor.dev/core/styles/editor.css";
 import type { Locale } from "../../i18n";
 import { editorArabic } from "./editorArabic";
+import { TableLayoutChrome } from "./TableLayoutChrome";
 import { addBlankPage, addCover, addTextBox, type TextBoxShape } from "./pageObjects";
 import { addBodyBackground, bodyDrawings, layoutNewDrawing } from "./pictureLayout";
 import { reportFontConfiguration, type ExtraFont } from "./fonts";
@@ -122,7 +123,18 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
     const host = root.current;
     setPrintLight(true);
     try {
-      await new Promise((resolve) => setTimeout(resolve, 120));
+      await document.fonts.ready;
+      const started = performance.now();
+      while (
+        (host.querySelector(".docx-page") == null || host.querySelector(".table-layout-chrome") != null)
+        && performance.now() - started < 2500
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      });
+      await new Promise((resolve) => setTimeout(resolve, 180));
       return await pagesToPdf(host, editor.current?.snapshot().zoom ?? 1, onProgress);
     } finally {
       setPrintLight(false);
@@ -457,6 +469,7 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
         renderTitleBarLeft={titleBarStart}
         renderTitleBarRight={titleBarEnd}
       />
+      {printLight ? null : <TableLayoutChrome editor={editor} host={root} locale={locale} />}
     </div>
   );
 });

@@ -19,8 +19,9 @@ class StoreClientReportRequest extends FormRequest
     }
 
     /**
-     * The report is a Word file edited in the dashboard. `document` is the .docx that publishing
-     * uploads to Drive. `pdf` is optional and is not uploaded. `body` is a plain-text extract.
+     * The report is a Word file edited in the dashboard. `document` is the .docx and `pdf` is the
+     * matching PDF. Publishing uploads both into the client's current Drive folder. `body` is a
+     * plain-text extract.
      *
      * @return array<string, mixed>
      */

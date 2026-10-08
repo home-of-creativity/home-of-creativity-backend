@@ -1222,9 +1222,14 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
-  driveFolders(parent?: string, pageToken?: string) {
+  driveFolders(parent?: string, pageToken?: string, q?: string) {
     return request<{ data: DriveFolder[]; meta: { parent_id: string | null; next_page_token: string | null }; message?: string }>(
-      `/admin/drive/folders${queryString({ parent: parent || undefined, page_token: pageToken || undefined })}`,
+      `/admin/drive/folders${queryString({ parent: parent || undefined, page_token: pageToken || undefined, q: q || undefined })}`,
+    );
+  },
+  driveFolder(id: string) {
+    return request<{ data: DriveFolder[]; meta: { parent_id: string | null; next_page_token: string | null }; message?: string }>(
+      `/admin/drive/folders${queryString({ folder: id })}`,
     );
   },
   driveStorageAccount() {

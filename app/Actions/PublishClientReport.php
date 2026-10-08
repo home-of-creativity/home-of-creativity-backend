@@ -7,8 +7,8 @@ use App\Services\GoogleDriveClient;
 use Illuminate\Support\Facades\Storage;
 
 /**
- * Upload a report to the client's Drive folder: the Word file and any attachments not uploaded
- * yet. Republishing replaces the same Word file instead of adding a copy.
+ * Upload a report into the client's current Drive folder: the same Word file and the same PDF.
+ * A later publish updates those two files and moves them when the folder changes.
  */
 class PublishClientReport
 {
@@ -16,13 +16,13 @@ class PublishClientReport
 
     public function handle(ClientReport $report): ClientReport
     {
-        $report->loadMissing(['client', 'attachments']);
+        $report->load(['client', 'attachments']);
         $client = $report->client;
         abort_unless($client && filled($client->google_drive_folder_id), 422, 'Assign a Drive folder to this client first.');
         abort_unless($this->readable($report->document_path), 422, 'Open and save this report in the editor before publishing.');
+        abort_unless($this->readable($report->pdf_path), 422, 'The PDF was not included. Publish again from the editor.');
 
-        $folderId = $this->drive->ensureFolderPath((string) $client->google_drive_folder_id, [$report->title]);
-        abort_if($folderId === null, 422, $this->drive->lastError() ?? 'Could not open the report folder.');
+        $folderId = (string) $client->google_drive_folder_id;
 
         $document = $this->put(
             $folderId,
@@ -34,6 +34,18 @@ class PublishClientReport
         $report->forceFill([
             'drive_document_id' => $document['id'],
             'drive_document_url' => $document['url'],
+        ])->save();
+
+        $pdf = $this->put(
+            $folderId,
+            (string) $report->drive_file_id,
+            $report->title.'.pdf',
+            (string) Storage::disk('local')->get((string) $report->pdf_path),
+            'application/pdf',
+        );
+        $report->forceFill([
+            'drive_file_id' => $pdf['id'],
+            'drive_url' => $pdf['url'],
             'published_at' => now(),
         ])->save();
 

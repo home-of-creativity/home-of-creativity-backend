@@ -105,11 +105,31 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
   const [removeIds, setRemoveIds] = useState<number[]>([]);
   const [panel, setPanel] = useState<PanelTab | null>(() => (window.matchMedia("(min-width: 1180px)").matches ? "gemini" : null));
   const [folderOpen, setFolderOpen] = useState(false);
+  const [folderName, setFolderName] = useState<string | null>(null);
   const [extraFonts, setExtraFonts] = useState<StoredReportFont[]>([]);
   const [savedTemplates, setSavedTemplates] = useState<ReportTemplateFile[]>([]);
   const [templateSaveOpen, setTemplateSaveOpen] = useState(false);
   const [templateName, setTemplateName] = useState("");
   const ownerId = report?.client_id ?? clientId;
+
+  useEffect(() => {
+    const id = client?.google_drive_folder_id;
+    if (!id) {
+      setFolderName(null);
+      return;
+    }
+    let cancelled = false;
+    api.driveFolder(id)
+      .then((res) => {
+        if (!cancelled) setFolderName(res.data[0]?.name ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setFolderName(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client?.google_drive_folder_id]);
   const BackIcon = locale === "ar" ? ArrowRight : ArrowLeft;
 
   // Autosave runs from timers and from the leave-page flush, so it reads the newest values here.
@@ -190,6 +210,15 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
       form.set("body", snapshot.text.slice(0, 190000));
       form.set("document", new File([docx as BlobPart], "report.docx", { type: DOCX_MIME }));
       if (mode === "publish") {
+        if (!handle) {
+          toast.error(tr(copy.loading));
+          return false;
+        }
+        setBusy("rendering");
+        const pdf = await handle.pdf((done, total) => {
+          if (mounted.current) setProgress({ done, total });
+        });
+        form.set("pdf", new File([pdf as BlobPart], "report.pdf", { type: "application/pdf" }));
         form.set("publish", "1");
         setBusy("publishing");
       }
@@ -754,7 +783,7 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
                   <dl className="meta-list">
                     <div><dt>{t(copy.company)}</dt><dd>{client?.company_name || client?.name || "—"}</dd></div>
                     <div><dt>{t(copy.reportLastEdited)}</dt><dd>{report?.updated_at ? new Date(report.updated_at).toLocaleString(locale === "ar" ? "ar-SA-u-nu-latn" : "en-GB", { dateStyle: "medium", timeStyle: "short" }) : "—"}</dd></div>
-                    <div><dt>{t(copy.driveFolder)}</dt><dd>{client?.google_drive_folder_id ? t(copy.driveFolderExisting) : "—"}</dd></div>
+                    <div><dt>{t(copy.driveFolder)}</dt><dd>{client?.google_drive_folder_url ? <a href={client.google_drive_folder_url} target="_blank" rel="noreferrer">{folderName || t(copy.driveOpenFolder)}</a> : "—"}</dd></div>
                   </dl>
                   <div className="stack-actions">
                     <button type="button" className="btn btn-sm" onClick={() => void downloadWord()}><Download size={15} aria-hidden="true" />{t(copy.reportDownloadDocx)}</button>

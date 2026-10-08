@@ -114,6 +114,34 @@ function loadImage(url: string): Promise<HTMLImageElement> {
  * Draw one page to a JPEG. html-to-image's own JPEG path loads the page as a data URL and,
  * when that image fails, rejects with a DOM event rather than an Error.
  */
+function svgMarkup(svg: string): string {
+  const comma = svg.indexOf(",");
+  if (comma < 0) throw new Error("pdf-capture");
+  const header = svg.slice(0, comma);
+  const payload = svg.slice(comma + 1);
+  let decoded: string;
+  try {
+    if (/;base64/i.test(header)) {
+      const binary = atob(payload);
+      const bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+      decoded = new TextDecoder().decode(bytes);
+    } else {
+      decoded = decodeURIComponent(payload);
+    }
+  } catch {
+    throw new Error("pdf-capture");
+  }
+  // Computed styles can contain form feeds and other controls. They are illegal in SVG XML,
+  // so the page image fails to load until those characters are removed.
+  return resolveColors(decoded).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g, "");
+}
+
+function skipChrome(node: HTMLElement): boolean {
+  const cls = typeof node.className === "string" ? node.className : "";
+  return !/\b(?:docx-selection|docx-caret|docx-comment|table-select-handle|table-layout)/.test(cls);
+}
+
 async function pageJpeg(page: HTMLElement, width: number, height: number, pixelRatio: number, fontEmbedCSS: string): Promise<string> {
   let svg: string;
   try {
@@ -123,22 +151,21 @@ async function pageJpeg(page: HTMLElement, width: number, height: number, pixelR
       fontEmbedCSS,
       cacheBust: false,
       includeStyleProperties: styleProperties(),
+      filter: skipChrome,
       onImageErrorHandler: () => undefined,
     });
   } catch (reason) {
     throw captureError(reason);
   }
-  const comma = svg.indexOf(",");
-  // Computed styles can contain form feeds and other controls. They are illegal in SVG XML,
-  // so the page image fails to load until those characters are removed.
-  const markup = resolveColors(decodeURIComponent(svg.slice(comma + 1)))
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g, "");
+  const markup = svgMarkup(svg);
   const url = URL.createObjectURL(new Blob([markup], { type: "image/svg+xml;charset=utf-8" }));
   try {
     const image = await loadImage(url);
+    const longest = Math.max(width, height);
+    const ratio = longest * pixelRatio > 4096 ? 4096 / longest : pixelRatio;
     const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(width * pixelRatio));
-    canvas.height = Math.max(1, Math.round(height * pixelRatio));
+    canvas.width = Math.max(1, Math.round(width * ratio));
+    canvas.height = Math.max(1, Math.round(height * ratio));
     const context = canvas.getContext("2d");
     if (!context) throw new Error("pdf-capture");
     context.fillStyle = "#ffffff";
@@ -150,6 +177,17 @@ async function pageJpeg(page: HTMLElement, width: number, height: number, pixelR
   } finally {
     URL.revokeObjectURL(url);
   }
+}
+
+function reveal(page: HTMLElement) {
+  const scroller = scrollParent(page);
+  if (!scroller) {
+    page.scrollIntoView({ block: "center", inline: "nearest" });
+    return;
+  }
+  const pageBox = page.getBoundingClientRect();
+  const box = scroller.getBoundingClientRect();
+  scroller.scrollTop += pageBox.top - box.top - (box.height - pageBox.height) / 2;
 }
 
 function scrollParent(element: HTMLElement): HTMLElement | null {
@@ -189,7 +227,7 @@ export async function pagesToPdf(root: HTMLElement, zoom: number, onProgress?: (
   // Pages are painted at the editor's zoom; divide it out so the PDF gets the real paper size.
   const scale = zoom > 0 ? zoom : 1;
   const count = root.querySelectorAll(".docx-page").length;
-  if (count === 0) throw new Error("no pages");
+  if (count === 0) throw new Error("pdf-capture");
   // The editor may rebuild page elements while painting (theme switch, lazy paint), so look each
   // page up again by its index right before drawing it.
   const pageAt = (index: number) =>
@@ -198,29 +236,44 @@ export async function pagesToPdf(root: HTMLElement, zoom: number, onProgress?: (
   const scroller = first ? scrollParent(first) : null;
   const scrollTop = scroller?.scrollTop ?? 0;
   const pdf = await PDFDocument.create();
-  let fontEmbedCSS: string | null = null;
 
   try {
     for (let index = 0; index < count; index += 1) {
-      pageAt(index)?.scrollIntoView({ block: "nearest" });
-      const current = pageAt(index);
-      if (!current) continue;
-      await painted(current);
-      const page = pageAt(index);
-      if (!page) continue;
-      fontEmbedCSS ??= await embeddedFontCss(page);
+      let page: HTMLElement | null = null;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        page = pageAt(index);
+        if (page) reveal(page);
+        if (page) await painted(page);
+        page = pageAt(index);
+        if (page && page.offsetWidth >= 2 && page.offsetHeight >= 2) break;
+      }
+      if (!page || page.offsetWidth < 2 || page.offsetHeight < 2) throw new Error("pdf-capture");
+      const fontEmbedCSS = await embeddedFontCss(page);
       const width = page.offsetWidth;
       const height = page.offsetHeight;
       // Each page sits absolutely positioned down the stack, and html-to-image keeps that offset
       // in its copy (an override on the copy is not applied), so move the page to the origin
       // just for the capture.
-      const top = page.style.top;
+      const placed = { top: page.style.top, left: page.style.left, transform: page.style.transform };
       page.style.top = "0px";
+      page.style.left = "0px";
+      page.style.transform = "none";
       let image: string;
       try {
-        image = await pageJpeg(page, width, height, 2 / scale, fontEmbedCSS);
+        try {
+          image = await pageJpeg(page, width, height, 2 / scale, fontEmbedCSS);
+        } catch (first) {
+          await painted(page);
+          try {
+            image = await pageJpeg(page, width, height, 2 / scale, fontEmbedCSS);
+          } catch {
+            throw first;
+          }
+        }
       } finally {
-        page.style.top = top;
+        page.style.top = placed.top;
+        page.style.left = placed.left;
+        page.style.transform = placed.transform;
       }
       const embedded = await pdf.embedJpg(image);
       const sheetWidth = (width / scale) * PX_TO_PT;

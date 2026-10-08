@@ -116,6 +116,118 @@ class GoogleDriveClient
     }
 
     /**
+     * Folders whose name contains the term, across every drive this account can see.
+     *
+     * @return array{folders: list<array{id: string, name: string}>, next_page_token: ?string}|null
+     */
+    public function searchFolders(string $term, ?string $pageToken = null): ?array
+    {
+        $this->lastError = null;
+        if ($error = $this->configurationError()) {
+            return $this->fail($error);
+        }
+
+        $token = $this->auth->accessToken();
+        if ($token === null) {
+            return $this->fail('Google service account could not get an access token. Check the private key.');
+        }
+
+        $escaped = $this->driveQuery($term);
+        if ($escaped === '') {
+            return $this->fail('Google Drive search is empty.');
+        }
+
+        $query = "mimeType = 'application/vnd.google-apps.folder' and trashed = false and name contains '{$escaped}'";
+
+        try {
+            $response = Http::withToken($token)
+                ->timeout(20)
+                ->acceptJson()
+                ->get(self::API.'/files', array_filter([
+                    'q' => $query,
+                    'fields' => 'nextPageToken,files(id,name)',
+                    'pageSize' => 50,
+                    'pageToken' => $pageToken ?: null,
+                    'supportsAllDrives' => 'true',
+                    'includeItemsFromAllDrives' => 'true',
+                    'corpora' => 'allDrives',
+                ], fn (mixed $value): bool => $value !== null && $value !== ''));
+
+            if (! $response->successful()) {
+                return $this->fail($this->googleErrorMessage($response, 'Google Drive could not search folders.'));
+            }
+
+            $folders = [];
+            foreach ($response->json('files') ?? [] as $file) {
+                if (! is_array($file) || ! filled($file['id'] ?? null)) {
+                    continue;
+                }
+                $folders[] = [
+                    'id' => (string) $file['id'],
+                    'name' => (string) ($file['name'] ?? ''),
+                ];
+            }
+
+            $next = $response->json('nextPageToken');
+            usort($folders, fn (array $a, array $b): int => strcasecmp($a['name'], $b['name']));
+
+            return [
+                'folders' => $folders,
+                'next_page_token' => filled($next) ? (string) $next : null,
+            ];
+        } catch (Throwable $exception) {
+            return $this->fail('Google Drive searchFolders failed: '.$exception->getMessage());
+        }
+    }
+
+    /**
+     * One folder by id, so the picker can show the name of the folder already assigned.
+     *
+     * @return array{id: string, name: string}|null
+     */
+    public function folder(string $id): ?array
+    {
+        $this->lastError = null;
+        if ($error = $this->configurationError()) {
+            return $this->fail($error);
+        }
+
+        $id = trim($id);
+        if ($id === '') {
+            return $this->fail('Google Drive folder id is empty.');
+        }
+
+        $token = $this->auth->accessToken();
+        if ($token === null) {
+            return $this->fail('Google service account could not get an access token. Check the private key.');
+        }
+
+        try {
+            $response = Http::withToken($token)
+                ->timeout(20)
+                ->acceptJson()
+                ->get(self::API.'/files/'.rawurlencode($id), [
+                    'fields' => 'id,name,mimeType,trashed',
+                    'supportsAllDrives' => 'true',
+                ]);
+
+            if (! $response->successful() || $response->json('trashed') === true) {
+                return $this->fail($this->googleErrorMessage($response, 'Google Drive could not open that folder.'));
+            }
+            if ($response->json('mimeType') !== 'application/vnd.google-apps.folder') {
+                return $this->fail('That Drive item is not a folder.');
+            }
+
+            return [
+                'id' => (string) $response->json('id'),
+                'name' => (string) ($response->json('name') ?? ''),
+            ];
+        } catch (Throwable $exception) {
+            return $this->fail('Google Drive folder failed: '.$exception->getMessage());
+        }
+    }
+
+    /**
      * Shared drives the account can open, as folder entries (a shared drive's id is also the parent
      * id of its top-level folders). A failure here leaves the regular folder list usable.
      *
@@ -1067,8 +1179,8 @@ class GoogleDriveClient
     }
 
     /**
-     * Replace the contents of a file this app uploaded earlier, keeping its id and link.
-     * Falls back to a fresh upload in the folder when the old file is gone.
+     * Replace the contents of a file this app uploaded earlier, keep its id, rename it, and move
+     * it into the requested folder. Falls back to a fresh upload when the old file is gone.
      *
      * @return array{id: string, url: string}|null
      */
@@ -1108,10 +1220,79 @@ class GoogleDriveClient
         }
 
         $link = $updated->json('webViewLink');
+        $fallback = is_string($link) && $link !== '' ? $link : 'https://drive.google.com/file/d/'.$fileId.'/view';
+        $placed = $this->placeInFolder($token, $fileId, $folderId, $name, $fallback);
+        if ($placed !== null) {
+            return $placed;
+        }
+        if ($this->lastError !== null) {
+            return null;
+        }
+
+        return $this->uploadFile($folderId, $name, $contents, $mime);
+    }
+
+    /**
+     * Rename a file and leave it in only the requested folder. Null with no last error means the
+     * file is gone, so the caller uploads a new one.
+     *
+     * @return array{id: string, url: string}|null
+     */
+    private function placeInFolder(string $token, string $fileId, string $folderId, string $name, string $fallbackUrl): ?array
+    {
+        $meta = Http::withToken($token)
+            ->timeout(20)
+            ->acceptJson()
+            ->get(self::API.'/files/'.rawurlencode($fileId), [
+                'fields' => 'id,parents,trashed,webViewLink',
+                'supportsAllDrives' => 'true',
+            ]);
+
+        if ($meta->status() === 404 || $meta->json('trashed') === true) {
+            return null;
+        }
+        if (! $meta->successful()) {
+            return $this->fail($this->googleErrorMessage($meta, 'Google Drive could not read the file to move it.'));
+        }
+
+        $parents = $meta->json('parents');
+        $parents = is_array($parents)
+            ? array_values(array_map(fn (mixed $id): string => (string) $id, $parents))
+            : [];
+        $remove = array_values(array_filter($parents, fn (string $id): bool => $id !== $folderId));
+        $add = in_array($folderId, $parents, true) ? [] : [$folderId];
+
+        $params = [
+            'supportsAllDrives' => 'true',
+            'fields' => 'id,webViewLink',
+        ];
+        if ($add !== []) {
+            $params['addParents'] = implode(',', $add);
+        }
+        if ($remove !== []) {
+            $params['removeParents'] = implode(',', $remove);
+        }
+
+        $renamed = Http::withToken($token)
+            ->timeout(20)
+            ->acceptJson()
+            ->asJson()
+            ->patch(self::API.'/files/'.rawurlencode($fileId).'?'.http_build_query($params), [
+                'name' => $this->safeName($name),
+            ]);
+
+        if ($renamed->status() === 404 || $renamed->json('trashed') === true) {
+            return null;
+        }
+        if (! $renamed->successful()) {
+            return $this->fail($this->googleErrorMessage($renamed, 'Google Drive could not move the file into the selected folder.'));
+        }
+
+        $link = $renamed->json('webViewLink');
 
         return [
             'id' => $fileId,
-            'url' => is_string($link) && $link !== '' ? $link : 'https://drive.google.com/file/d/'.$fileId.'/view',
+            'url' => is_string($link) && $link !== '' ? $link : ($meta->json('webViewLink') ?: $fallbackUrl),
         ];
     }
 
@@ -1150,5 +1331,16 @@ class GoogleDriveClient
         $trimmed = trim($name);
 
         return $trimmed !== '' ? mb_substr($trimmed, 0, 180) : 'untitled';
+    }
+
+    /** A Drive query literal: quotes and backslashes escaped, length capped. */
+    private function driveQuery(string $value): string
+    {
+        $trimmed = trim($value);
+        if ($trimmed === '') {
+            return '';
+        }
+
+        return str_replace(['\\', "'"], ['\\\\', "\\'"], mb_substr($trimmed, 0, 80));
     }
 }
