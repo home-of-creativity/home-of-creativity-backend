@@ -1,6 +1,8 @@
 # Staff dashboard (Vite SPA)
 
-Last updated: 8 October 2026 (Publishing a report updates the same Word file and the same PDF in the client's current Drive folder. The folder picker searches Drive, accepts a pasted link, and assigns a folder as soon as it is created.)
+Last updated: 8 October 2026 (PDF download and publish never reject: a page that cannot be painted is written from its text, and a total failure still returns a one-page PDF.)
+
+Previous: 8 October 2026 (Publishing a report updates the same Word file and the same PDF in the client's current Drive folder. The folder picker searches Drive, accepts a pasted link, and assigns a folder as soon as it is created.)
 
 Previous: 8 October 2026 (Report editor: a corner handle selects the whole table and opens تخطيط الجدول / Table Layout beside Review.)
 

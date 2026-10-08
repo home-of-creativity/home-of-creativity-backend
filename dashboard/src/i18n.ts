@@ -959,7 +959,7 @@ export const copy = {
   reportChangedAfterPublish: { ar: "تعديلات بعد النشر", en: "Edited since publishing" },
   reportPublishedToast: { ar: "نُشر التقرير في مجلد العميل على Drive.", en: "The report is in the client's Drive folder." },
   reportDriveFailed: { ar: "حُفظ التقرير، لكن الرفع إلى Drive فشل: {message}", en: "The report is saved, but the Drive upload failed: {message}" },
-  reportCaptureFailed: { ar: "تعذر تجهيز ملف PDF للنشر. أعد المحاولة.", en: "Could not prepare the PDF for publishing. Try again." },
+  reportCaptureFailed: { ar: "تعذر تجهيز ملف PDF. أعد المحاولة.", en: "Could not prepare the PDF. Try again." },
   reportDownloadDocx: { ar: "تنزيل Word", en: "Download Word" },
   reportDownloadPdf: { ar: "تنزيل PDF", en: "Download PDF" },
   reportOpenDriveDocx: { ar: "Word على Drive", en: "Word on Drive" },

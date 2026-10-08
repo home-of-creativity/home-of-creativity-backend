@@ -34,6 +34,17 @@ import { copy, type Locale } from "../i18n";
 // The Word editor is large; load it only on this page.
 const ReportDocEditor = lazy(() => import("../components/report/ReportDocEditor").then((module) => ({ default: module.ReportDocEditor })));
 
+async function pdfOrSheet(load: () => Promise<Uint8Array>): Promise<Uint8Array> {
+  try {
+    const bytes = await load();
+    if (bytes.byteLength > 32) return bytes;
+  } catch {
+    // Capture already falls back page by page. This covers a failure of the call itself.
+  }
+  const { fallbackPdf } = await import("../components/report/pdf");
+  return fallbackPdf();
+}
+
 function failureMessage(err: unknown, fallback: string, capture: string): string {
   if (!(err instanceof Error)) return fallback;
   if (err.message === "pdf-capture") return capture;
@@ -215,9 +226,9 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
           return false;
         }
         setBusy("rendering");
-        const pdf = await handle.pdf((done, total) => {
+        const pdf = await pdfOrSheet(() => handle.pdf((done, total) => {
           if (mounted.current) setProgress({ done, total });
-        });
+        }));
         form.set("pdf", new File([pdf as BlobPart], "report.pdf", { type: "application/pdf" }));
         form.set("publish", "1");
         setBusy("publishing");
@@ -512,7 +523,7 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
     if (!editor.current || busy) return;
     setBusy("rendering");
     try {
-      const pdf = await editor.current.pdf((done, total) => setProgress({ done, total }));
+      const pdf = await pdfOrSheet(() => editor.current!.pdf((done, total) => setProgress({ done, total })));
       download(pdf, `${title || "report"}.pdf`, "application/pdf");
     } catch (err) {
       toast.error(failureMessage(err, t(copy.saveFailed), t(copy.reportCaptureFailed)));

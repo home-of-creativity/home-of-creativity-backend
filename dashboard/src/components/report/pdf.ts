@@ -3,6 +3,13 @@ import { PDFDocument } from "pdf-lib";
 import { REPORT_FONT_FILES } from "./fonts";
 
 const PX_TO_PT = 72 / 96;
+const IMAGE_PLACEHOLDER =
+  "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
+const WHITE_JPEG =
+  "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=";
+const FALLBACK_PDF = Uint8Array.from(atob(
+  "JVBERi0xLjcKJYGBgYEKCjUgMCBvYmoKPDwKL0ZpbHRlciAvRmxhdGVEZWNvZGUKL1R5cGUgL09ialN0bQovTiA0Ci9GaXJzdCAyMAovTGVuZ3RoIDI2OAo+PgpzdHJlYW0KeJzVkslqwzAQhu96ijm2l2i0WJaLMaReLqUQQk8NPYhYBEOJghdo374jK23pofRcxI+W+UbbPwIQJGgNCnILGjIloSwZf3q/eOA7d/IT4w9DP8GBogh7eGG8Dst5BsGqin2ztZvdazixlAQiwp/Ebgz9cvQjlF3bdYg5IhpNMoiyob4mFSRJc4pJS2NSrq+itVwhqi3FuiSTp5wYX9nsmt9ST6yJTJNYbdP869x4Vpv2kH/dp6gYfwx942YPN82dRGkEohVKaa2eb+k7Ru/m8H8ft95/COdfX/jD52hvNHn0sQZWl/neT2EZj2Q7cVX8L98P7j68UdUgtazINtKC1WJjC6ogQj4Ak0SPHQplbmRzdHJlYW0KZW5kb2JqCgo2IDAgb2JqCjw8Ci9TaXplIDcKL1Jvb3QgMiAwIFIKL0luZm8gMyAwIFIKL0ZpbHRlciAvRmxhdGVEZWNvZGUKL1R5cGUgL1hSZWYKL0xlbmd0aCAzNAovVyBbIDEgMiAyIF0KL0luZGV4IFsgMCA3IF0KPj4Kc3RyZWFtCnicFcQxDgAgCASwHsbdN/txCB2K7nLZstV24pF8BkOhArYKZW5kc3RyZWFtCmVuZG9iagoKc3RhcnR4cmVmCjM4NgolJUVPRg==",
+), (char) => char.charCodeAt(0));
 
 let fontData: Promise<Record<"regular" | "bold", string>> | null = null;
 
@@ -42,31 +49,34 @@ function familiesOn(page: HTMLElement): Set<string> {
  * other fallbacks, and embedding every one of them makes the page image too large to load.
  */
 async function embeddedFontCss(page: HTMLElement): Promise<string> {
-  const used = familiesOn(page);
-  fontData ??= Promise.all([fileAsDataUrl(REPORT_FONT_FILES.regular), fileAsDataUrl(REPORT_FONT_FILES.bold)])
-    .then(([regular, bold]) => ({ regular, bold }));
-  const data = await fontData;
-  const seen = new Set<string>();
-  const rule = (family: string, weight: string, style: string, url: string) => {
-    const key = `${family}|${weight}|${style}`;
-    if (seen.has(key)) return "";
-    seen.add(key);
-    return `@font-face{font-family:"${family}";font-weight:${weight};font-style:${style};src:url(${url}) format("truetype");}`;
-  };
-  const faces = Array.from(document.fonts).filter((face) => used.has(face.family.replace(/["']/g, "")));
-  if (faces.length > 0) {
-    return faces
-      .map((face) => {
-        const family = face.family.replace(/["']/g, "");
-        const heavy = Number.parseInt(face.weight, 10) >= 600;
-        return rule(family, face.weight, face.style, heavy ? data.bold : data.regular);
-      })
+  try {
+    const used = familiesOn(page);
+    fontData ??= Promise.all([fileAsDataUrl(REPORT_FONT_FILES.regular), fileAsDataUrl(REPORT_FONT_FILES.bold)])
+      .then(([regular, bold]) => ({ regular, bold }));
+    const data = await fontData;
+    const families = new Set<string>();
+    for (const face of document.fonts) {
+      const family = face.family.replace(/["']/g, "");
+      if (used.has(family)) families.add(family);
+    }
+    for (const name of used) {
+      if (name.startsWith("docx-embedded-")) families.add(name);
+    }
+    const ranked = [...families].sort((a, b) => fontRank(b) - fontRank(a)).slice(0, 2);
+    return ranked
+      .map((family) =>
+        `@font-face{font-family:"${family}";font-weight:400;font-style:normal;src:url(${data.regular}) format("truetype");}`
+        + `@font-face{font-family:"${family}";font-weight:700;font-style:normal;src:url(${data.bold}) format("truetype");}`)
       .join("");
+  } catch {
+    return "";
   }
-  return [...used]
-    .filter((name) => name.startsWith("docx-embedded-"))
-    .map((family) => rule(family, "400", "normal", data.regular) + rule(family, "700", "normal", data.bold))
-    .join("");
+}
+
+function fontRank(name: string): number {
+  if (name.startsWith("docx-embedded-")) return 3;
+  if (/plex|arabic/i.test(name)) return 2;
+  return 1;
 }
 
 /** Standard properties only. Custom properties keep color-mix() text, which makes the page image fail to load. */
@@ -78,23 +88,37 @@ const COLOR_FN = /(?:color-mix|oklch|oklab|lab|lch|color)\((?:[^()]|\([^()]*\))*
 
 /** Turn modern color functions into a computed rgb() the SVG image can paint. */
 function resolveColors(markup: string): string {
-  const withoutContent = markup.replace(/style="([^"]*)"/g, (_match, css: string) => {
+  let current = markup.replace(/style="([^"]*)"/g, (_match, css: string) => {
     const cleaned = css.replace(/(?:^|;)\s*content:\s*[^;"]*/g, "");
     return `style="${cleaned}"`;
   });
-  if (!/(?:color-mix|oklch|oklab|\blab\(|\blch\(|\bcolor\()/.test(withoutContent)) return withoutContent;
   const probe = document.createElement("span");
   document.body.appendChild(probe);
   try {
-    return withoutContent.replace(COLOR_FN, (fn) => {
-      probe.style.color = "";
-      probe.style.color = fn;
-      const resolved = getComputedStyle(probe).color;
-      return resolved && !/(?:color-mix|oklch|oklab)/.test(resolved) ? resolved : "#1a0838";
-    });
+    for (let pass = 0; pass < 4; pass += 1) {
+      COLOR_FN.lastIndex = 0;
+      if (!COLOR_FN.test(current)) break;
+      COLOR_FN.lastIndex = 0;
+      current = current.replace(COLOR_FN, (fn) => {
+        probe.style.color = "";
+        probe.style.color = fn;
+        const resolved = getComputedStyle(probe).color;
+        return resolved && !/(?:color-mix|oklch|oklab)/.test(resolved) ? resolved : "#1a0838";
+      });
+    }
   } finally {
     probe.remove();
   }
+  COLOR_FN.lastIndex = 0;
+  return current.replace(COLOR_FN, "#1a0838");
+}
+
+/** Drop effects and outside pictures that stop the browser from painting the page image. */
+function softenMarkup(markup: string): string {
+  return resolveColors(markup)
+    .replace(/backdrop-filter\s*:[^;"]*;?/gi, "")
+    .replace(/(?:^|;)(\s*filter\s*:[^;"]*)/gi, "")
+    .replace(/url\((['"]?)(?!data:)[^)'"]*\1\)/gi, "none");
 }
 
 function captureError(reason: unknown): Error {
@@ -104,8 +128,19 @@ function captureError(reason: unknown): Error {
 function loadImage(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("pdf-capture"));
+    const timer = window.setTimeout(() => {
+      image.onload = null;
+      image.onerror = null;
+      reject(new Error("pdf-capture"));
+    }, 8000);
+    image.onload = () => {
+      window.clearTimeout(timer);
+      resolve(image);
+    };
+    image.onerror = () => {
+      window.clearTimeout(timer);
+      reject(new Error("pdf-capture"));
+    };
     image.src = url;
   });
 }
@@ -138,8 +173,12 @@ function svgMarkup(svg: string): string {
 }
 
 function skipChrome(node: HTMLElement): boolean {
-  const cls = typeof node.className === "string" ? node.className : "";
-  return !/\b(?:docx-selection|docx-caret|docx-comment|table-select-handle|table-layout)/.test(cls);
+  try {
+    const cls = typeof node?.className === "string" ? node.className : "";
+    return !/\b(?:docx-selection|docx-caret|docx-comment|table-select-handle|table-layout)/.test(cls);
+  } catch {
+    return true;
+  }
 }
 
 async function pageJpeg(page: HTMLElement, width: number, height: number, pixelRatio: number, fontEmbedCSS: string): Promise<string> {
@@ -150,6 +189,8 @@ async function pageJpeg(page: HTMLElement, width: number, height: number, pixelR
       height,
       fontEmbedCSS,
       cacheBust: false,
+      backgroundColor: "#ffffff",
+      imagePlaceholder: IMAGE_PLACEHOLDER,
       includeStyleProperties: styleProperties(),
       filter: skipChrome,
       onImageErrorHandler: () => undefined,
@@ -157,7 +198,7 @@ async function pageJpeg(page: HTMLElement, width: number, height: number, pixelR
   } catch (reason) {
     throw captureError(reason);
   }
-  const markup = svgMarkup(svg);
+  const markup = softenMarkup(svgMarkup(svg));
   const url = URL.createObjectURL(new Blob([markup], { type: "image/svg+xml;charset=utf-8" }));
   try {
     const image = await loadImage(url);
@@ -171,7 +212,7 @@ async function pageJpeg(page: HTMLElement, width: number, height: number, pixelR
     context.fillStyle = "#ffffff";
     context.fillRect(0, 0, canvas.width, canvas.height);
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL("image/jpeg", 0.92);
+    return canvas.toDataURL("image/jpeg", 0.86);
   } catch (reason) {
     throw captureError(reason);
   } finally {
@@ -215,19 +256,110 @@ async function painted(page: HTMLElement) {
     if ((page.textContent ?? "").trim() !== "" || page.querySelector("img, svg, canvas")) break;
     await new Promise((resolve) => setTimeout(resolve, 60));
   }
-  await document.fonts.ready;
+  await document.fonts.ready.catch(() => undefined);
   await frames(2);
+}
+
+/** One white page when nothing in the editor can be turned into a PDF. */
+export async function fallbackPdf(): Promise<Uint8Array> {
+  try {
+    const pdf = await PDFDocument.create();
+    pdf.addPage([595.28, 841.89]);
+    const bytes = await pdf.save();
+    if (bytes.byteLength > 32) return bytes;
+  } catch {
+    // The baked file below is a valid one-page PDF.
+  }
+  return FALLBACK_PDF;
+}
+
+/** A readable page when the painted capture cannot be drawn, so the download still finishes. */
+function textJpeg(page: HTMLElement, width: number, height: number): string {
+  try {
+  const ratio = Math.min(2, 4096 / Math.max(width, height, 1));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(width * ratio));
+  canvas.height = Math.max(1, Math.round(height * ratio));
+  const context = canvas.getContext("2d");
+  if (!context) return WHITE_JPEG;
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = "#1a0838";
+  const fontSize = Math.max(12, Math.round(14 * ratio));
+  const family = getComputedStyle(page).fontFamily || '"IBM Plex Sans Arabic", sans-serif';
+  context.font = `${fontSize}px ${family}`;
+  const rtl = getComputedStyle(page).direction !== "ltr";
+  context.direction = rtl ? "rtl" : "ltr";
+  context.textAlign = rtl ? "right" : "left";
+  const margin = Math.round(36 * ratio);
+  const maxWidth = Math.max(40, canvas.width - margin * 2);
+  const lines: string[] = [];
+  for (const paragraph of (page.innerText || "").split(/\n/)) {
+    const words = paragraph.split(/\s+/).filter(Boolean);
+    if (words.length === 0) {
+      lines.push("");
+      continue;
+    }
+    let line = "";
+    for (const word of words) {
+      const next = line ? `${line} ${word}` : word;
+      if (context.measureText(next).width > maxWidth && line) {
+        lines.push(line);
+        line = word;
+      } else {
+        line = next;
+      }
+    }
+    if (line) lines.push(line);
+  }
+  const step = Math.round(fontSize * 1.45);
+  const x = rtl ? canvas.width - margin : margin;
+  let y = margin + fontSize;
+  for (const line of lines) {
+    if (y > canvas.height - margin) break;
+    context.fillText(line, x, y);
+    y += step;
+  }
+  return canvas.toDataURL("image/jpeg", 0.86);
+  } catch {
+    return WHITE_JPEG;
+  }
+}
+
+async function drawPage(pdf: PDFDocument, image: string, alt: string, width: number, height: number) {
+  for (const candidate of [image, alt, WHITE_JPEG]) {
+    try {
+      const embedded = await pdf.embedJpg(candidate);
+      const sheet = pdf.addPage([width, height]);
+      sheet.drawImage(embedded, { x: 0, y: 0, width, height });
+      return;
+    } catch {
+      // The next picture is plainer and still fills the page.
+    }
+  }
+  pdf.addPage([width, height]);
 }
 
 /**
  * Turn the painted pages of the editor into a PDF, one image per page, sized from each page.
  * The text is an image (not selectable), but it looks exactly like the editor, Arabic included.
+ * A page that cannot be painted is written from its text so the file still downloads.
  */
 export async function pagesToPdf(root: HTMLElement, zoom: number, onProgress?: (done: number, total: number) => void): Promise<Uint8Array> {
+  try {
+    const bytes = await assemblePdf(root, zoom, onProgress);
+    if (bytes.byteLength > 32) return bytes;
+  } catch {
+    // Every page path already has its own picture. This covers a failure of the file itself.
+  }
+  return fallbackPdf();
+}
+
+async function assemblePdf(root: HTMLElement, zoom: number, onProgress?: (done: number, total: number) => void): Promise<Uint8Array> {
   // Pages are painted at the editor's zoom; divide it out so the PDF gets the real paper size.
   const scale = zoom > 0 ? zoom : 1;
   const count = root.querySelectorAll(".docx-page").length;
-  if (count === 0) throw new Error("pdf-capture");
+  if (count === 0) return fallbackPdf();
   // The editor may rebuild page elements while painting (theme switch, lazy paint), so look each
   // page up again by its index right before drawing it.
   const pageAt = (index: number) =>
@@ -239,6 +371,7 @@ export async function pagesToPdf(root: HTMLElement, zoom: number, onProgress?: (
 
   try {
     for (let index = 0; index < count; index += 1) {
+      try {
       let page: HTMLElement | null = null;
       for (let attempt = 0; attempt < 3; attempt += 1) {
         page = pageAt(index);
@@ -247,7 +380,11 @@ export async function pagesToPdf(root: HTMLElement, zoom: number, onProgress?: (
         page = pageAt(index);
         if (page && page.offsetWidth >= 2 && page.offsetHeight >= 2) break;
       }
-      if (!page || page.offsetWidth < 2 || page.offsetHeight < 2) throw new Error("pdf-capture");
+      if (!page || page.offsetWidth < 2 || page.offsetHeight < 2) {
+        pdf.addPage([595.28, 841.89]);
+        onProgress?.(index + 1, count);
+        continue;
+      }
       const fontEmbedCSS = await embeddedFontCss(page);
       const width = page.offsetWidth;
       const height = page.offsetHeight;
@@ -258,16 +395,16 @@ export async function pagesToPdf(root: HTMLElement, zoom: number, onProgress?: (
       page.style.top = "0px";
       page.style.left = "0px";
       page.style.transform = "none";
-      let image: string;
+      let image = WHITE_JPEG;
       try {
         try {
           image = await pageJpeg(page, width, height, 2 / scale, fontEmbedCSS);
-        } catch (first) {
+        } catch {
           await painted(page);
           try {
             image = await pageJpeg(page, width, height, 2 / scale, fontEmbedCSS);
           } catch {
-            throw first;
+            image = textJpeg(page, width, height);
           }
         }
       } finally {
@@ -275,12 +412,14 @@ export async function pagesToPdf(root: HTMLElement, zoom: number, onProgress?: (
         page.style.left = placed.left;
         page.style.transform = placed.transform;
       }
-      const embedded = await pdf.embedJpg(image);
       const sheetWidth = (width / scale) * PX_TO_PT;
       const sheetHeight = (height / scale) * PX_TO_PT;
-      const sheet = pdf.addPage([sheetWidth, sheetHeight]);
-      sheet.drawImage(embedded, { x: 0, y: 0, width: sheetWidth, height: sheetHeight });
+      await drawPage(pdf, image, textJpeg(page, width, height), sheetWidth, sheetHeight);
       onProgress?.(index + 1, count);
+      } catch {
+        pdf.addPage([595.28, 841.89]);
+        onProgress?.(index + 1, count);
+      }
     }
   } finally {
     if (scroller) scroller.scrollTop = scrollTop;

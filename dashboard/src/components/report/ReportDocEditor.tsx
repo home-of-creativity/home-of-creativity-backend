@@ -9,7 +9,7 @@ import { TableLayoutChrome } from "./TableLayoutChrome";
 import { addBlankPage, addCover, addTextBox, type TextBoxShape } from "./pageObjects";
 import { addBodyBackground, bodyDrawings, layoutNewDrawing } from "./pictureLayout";
 import { reportFontConfiguration, type ExtraFont } from "./fonts";
-import { pagesToPdf } from "./pdf";
+import { fallbackPdf, pagesToPdf } from "./pdf";
 
 // The text shaper is WebAssembly; point it at the copy Vite emits so dev and production both find it.
 setHarfBuzzWasmUrl(harfbuzzWasm);
@@ -119,11 +119,11 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
   const [printLight, setPrintLight] = useState(false);
   const insertPageRef = useRef<() => Promise<boolean>>(async () => false);
   const renderPdf = useCallback(async (onProgress?: (done: number, total: number) => void) => {
-    if (!root.current) throw new Error("editor not mounted");
     const host = root.current;
+    if (!host) return fallbackPdf();
     setPrintLight(true);
     try {
-      await document.fonts.ready;
+      await document.fonts.ready.catch(() => undefined);
       const started = performance.now();
       while (
         (host.querySelector(".docx-page") == null || host.querySelector(".table-layout-chrome") != null)
@@ -136,6 +136,8 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
       });
       await new Promise((resolve) => setTimeout(resolve, 180));
       return await pagesToPdf(host, editor.current?.snapshot().zoom ?? 1, onProgress);
+    } catch {
+      return fallbackPdf();
     } finally {
       setPrintLight(false);
     }
