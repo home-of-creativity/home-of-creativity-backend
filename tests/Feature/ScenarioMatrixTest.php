@@ -143,7 +143,7 @@ class ScenarioMatrixTest extends TestCase
                 'text' => 'مرحبا',
             ])
             ->assertOk();
-        $this->assertStringContainsString('واقف', $this->sentText());
+        $this->assertStringContainsString(ClientChannelGate::WHATSAPP_PAUSED_MESSAGE, $this->sentText());
         $this->assertSame(0, $client->requests()->count());
     }
 
