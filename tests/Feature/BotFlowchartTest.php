@@ -68,7 +68,7 @@ class BotFlowchartTest extends TestCase
             'company_name' => 'شركة نون',
         ])->assertOk()
             ->assertJsonPath('data.profile_complete', true)
-            ->assertJsonPath('data.company_name', 'شركة نون')
+            ->assertJsonPath('data.company_name', 'نون')
             ->assertJsonPath('data.missing_fields.0', 'email');
 
         $this->clientBot()->postJson('/api/bot/telegram/profile', [
@@ -103,11 +103,11 @@ class BotFlowchartTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.profile_complete', true)
             ->assertJsonPath('data.phone', '+963911111111')
-            ->assertJsonPath('data.company_name', 'شركة نون')
+            ->assertJsonPath('data.company_name', 'نون')
             ->assertJsonPath('data.company_activity', 'مطعم');
 
         $client = Client::query()->where('telegram_user_id', 'tg-stairs')->firstOrFail();
-        $this->assertSame('شركة نون', $client->company_name);
+        $this->assertSame('نون', $client->company_name);
         $this->assertNull($client->email);
         $this->assertNotNull($client->email_skipped_at);
         $this->assertTrue($client->profileFinished());
@@ -567,7 +567,7 @@ class BotFlowchartTest extends TestCase
             ->assertJsonPath('data.id', $client->id)
             ->assertJsonPath('data.profile_complete', true)
             ->assertJsonPath('data.phone', '+963900000001')
-            ->assertJsonPath('data.company_name', 'شركة restore');
+            ->assertJsonPath('data.company_name', 'restore');
 
         $this->assertNull($client->fresh()->deleted_at);
         $this->assertSame(1, Client::query()->withTrashed()->where('telegram_user_id', 'tg-restore')->count());

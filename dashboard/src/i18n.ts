@@ -732,6 +732,11 @@ export const copy = {
   voucherOpen: { ar: "فتح", en: "Open" },
   navChannels: { ar: "قنوات البوت", en: "Bot channels" },
   navPhotography: { ar: "التصوير", en: "Photography" },
+  navComplaints: { ar: "الشكاوى", en: "Complaints" },
+  complaintsLede: {
+    ar: "شكاوى العملاء من البوت: عنوان، وصف، صورة، وتسجيل صوتي.",
+    en: "Client complaints from the bot: a title, a description, a photo, and a voice note.",
+  },
   photographyLede: {
     ar: "طلبات التصوير، المواعيد بانتظار العميل، ومواعيدك المثبتة. الجلسة تُخصم بعد الاتفاق فقط.",
     en: "Shoot requests, times waiting on the client, and your agreed shoots. A session is charged only after agreement.",

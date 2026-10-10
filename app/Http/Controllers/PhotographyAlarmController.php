@@ -8,6 +8,7 @@ use Illuminate\Contracts\View\View;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\URL;
 
 class PhotographyAlarmController extends Controller
 {
@@ -20,12 +21,14 @@ class PhotographyAlarmController extends Controller
         }
 
         $intent = $alarm->intent($start);
-        abort_if($intent === null, 404);
+        $expires = (int) $request->query('expires', $start->copy()->addDay()->getTimestamp());
 
         return view('photography-alarm', [
             'intent' => $intent,
-            'when' => $alarm->moment($start)?->format('Y-m-d H:i'),
-            'usesTimer' => str_contains($intent, 'SET_TIMER'),
+            'when' => ($alarm->moment($start) ?? $start)->timezone('Asia/Damascus')->format('Y-m-d H:i'),
+            'usesTimer' => is_string($intent) && str_contains($intent, 'SET_TIMER'),
+            'google' => $alarm->googleCalendarUrl($start),
+            'ics' => URL::temporarySignedRoute('photography.alarm.ics', Carbon::createFromTimestamp($expires), ['booking' => $booking->id]),
         ]);
     }
 

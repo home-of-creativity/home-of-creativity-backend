@@ -60,7 +60,7 @@ class WorkPlanPaymentStageTest extends TestCase
             ->postJson("/api/bot/telegram/requests/{$serviceRequest->number}/receipt", [
                 'telegram_user_id' => 'tg-plan-1',
                 'file_name' => 'receipt.jpg',
-                'file_base64' => base64_encode('fake-image'),
+                'file_base64' => base64_encode("\xFF\xD8\xFF\xD9"),
                 'mime_type' => 'image/jpeg',
             ])->assertOk();
 

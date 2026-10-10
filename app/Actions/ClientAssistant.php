@@ -10,6 +10,7 @@ use App\Services\GeminiService;
 use App\Services\SiteGuide;
 use App\Support\BillingPeriod;
 use App\Support\ClientChannelGate;
+use App\Support\ClientReplyGuard;
 use App\Support\ResolveServiceRequest;
 use App\Support\WorkCalendar;
 use App\Support\WorkLines;
@@ -30,6 +31,7 @@ class ClientAssistant
         private BookPhotographySlot $photography,
         private PhotographySessions $sessions,
         private WorkCalendar $calendar,
+        private ClientReplyGuard $replies,
     ) {}
 
     /**
@@ -61,6 +63,12 @@ class ClientAssistant
                 'answer' => '',
                 'reason' => 'The assistant could not read this message because Gemini did not answer.',
             ];
+        }
+
+        if ($decision['answer'] !== '' && ! $this->replies->allows($client, $decision['answer'])) {
+            $decision['action'] = 'escalate';
+            $decision['answer'] = '';
+            $decision['reason'] = 'The reply was blocked because it included data outside this client.';
         }
 
         if ($decision['action'] === 'escalate') {

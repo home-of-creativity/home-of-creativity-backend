@@ -1,6 +1,10 @@
 # Laravel API
 
-Last updated: 10 October 2026 (Photography refusals are plain text. Time lists page with `photo_more`. A company-phone reply posts `from_me` and pauses that chat for two hours. `NotifyClientChannels` prefers the last chat in `hoc:client-reply`. `ops:photography-expire` also nudges Media once after a confirmed shoot ends.)
+Last updated: 10 October 2026 (Client complaints: `complaints` stores a title, description, optional image, and optional audio. `GET /admin/complaints` and `PATCH /admin/complaints/{id}` need `ops.complaints`. Files stream from `GET /admin/complaints/{id}/image|audio`. The bot conversation is `HandleClientComplaint`, shared by WhatsApp and `POST /bot/telegram/complaint`.)
+
+Previous: 10 October 2026 (Caddy sends `/photography-alarm*` to Laravel. The signed page offers a Google Calendar link and an `.ics` file. Android still opens the alarm intent.)
+
+Previous: 10 October 2026 (Photography refusals are plain text. Time lists page with `photo_more`. A company-phone reply posts `from_me` and pauses that chat for two hours. `NotifyClientChannels` prefers the last chat in `hoc:client-reply`. `ops:photography-expire` also nudges Media once after a confirmed shoot ends.)
 
 Previous: 10 October 2026 (`POST /api/bot/telegram/photography` runs the same photography conversation as WhatsApp for the Telegram client and sends the reply on that chat. `handled: false` leaves the sentence to the assistant.)
 

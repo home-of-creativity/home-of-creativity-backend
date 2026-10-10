@@ -21,8 +21,10 @@ use App\Support\PaymentPlanResolver;
 use App\Support\PhotographyActor;
 use App\Support\ChatLanguage;
 use App\Support\ClientChannelGate;
+use App\Support\ClientUploadGuard;
 use App\Support\ClientProfileValue;
 use App\Support\PricingCatalog;
+use App\Support\ResolveCompanyName;
 use App\Support\ResolveServiceRequest;
 use App\Support\StatusLabel;
 use App\Support\WorkCalendar;
@@ -30,6 +32,7 @@ use App\Support\WorkLines;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use RuntimeException;
@@ -58,6 +61,9 @@ class HandleWhatsAppInbound
 
     /** @var list<string> */
     private const NAV_PHOTO = ['حجز تصوير', 'موعد تصوير', 'menu:photo', 'Photo booking'];
+
+    /** @var list<string> */
+    private const NAV_COMPLAINT = ['شكوى', '📣 شكوى', 'menu:complaint', 'Complaint'];
 
     /** @var list<string> */
     private const PHOTO_STEPS = ['photo_sub', 'photo_day', 'photo_time', 'photo_which'];
@@ -166,6 +172,20 @@ class HandleWhatsAppInbound
             return;
         }
 
+        if (RateLimiter::tooManyAttempts('hoc:wa-flood:'.$phone, 30)) {
+            $this->whatsApp->markRead($wamid);
+            if (Cache::add('hoc:wa-flood-notice:'.$phone, 1, now()->addMinute())) {
+                try {
+                    $this->whatsApp->sendText($phone, 'وصلت رسائل كتير دفعة وحدة. استنى دقيقة وابعث من جديد.');
+                } catch (Throwable) {
+                    // The pause still holds if the notice cannot be sent.
+                }
+            }
+
+            return;
+        }
+        RateLimiter::hit('hoc:wa-flood:'.$phone, 60);
+
         if (! ClientChannelGate::whatsappEnabled()) {
             $this->whatsApp->markRead($wamid);
             $this->replyPausedOnce($phone);
@@ -211,6 +231,21 @@ class HandleWhatsAppInbound
             }
             $media = $this->messageMedia($message);
             $voice = $this->voiceNote($message);
+            $complaints = app(HandleClientComplaint::class);
+            if ($voice !== null && $complaints->active($phone)) {
+                $this->rememberLanguage(null, $phone, $session, $client);
+                $complaints->turn($client, $chatId, $phone, $this->replyLang, null, null, $voice, false);
+
+                return;
+            }
+            if ($media !== null && $complaints->active($phone)) {
+                $this->rememberLanguage(null, $phone, $session, $client);
+                $mime = strtolower((string) ($media['mime_type'] ?? ''));
+                $video = str_starts_with($mime, 'video/');
+                $complaints->turn($client, $chatId, $phone, $this->replyLang, null, $video ? null : $media, null, $video);
+
+                return;
+            }
             if ($voice !== null) {
                 $spoken = app(GeminiService::class)->transcribeClientAudio($voice['mime_type'], $voice['file_base64']);
                 if ($spoken === '') {
@@ -225,6 +260,16 @@ class HandleWhatsAppInbound
                 $text = $spoken;
             }
             $this->rememberLanguage($callback === null ? $text : null, $phone, $session, $client);
+
+            if ($callback === null && ($complaints->active($phone) || $complaints->wants(is_string($text) ? $text : null))) {
+                if (! $complaints->active($phone)) {
+                    $this->resetCompose($session);
+                    $this->putSession($phone, $session);
+                }
+                if ($complaints->turn($client, $chatId, $phone, $this->replyLang, is_string($text) ? $text : null, null, null, false)) {
+                    return;
+                }
+            }
 
             if ($callback !== null) {
                 $this->handleCallback($client, $chatId, $phone, $session, $callback);
@@ -523,10 +568,17 @@ class HandleWhatsAppInbound
 
             return;
         }
-        if ($field === 'company_name' && ClientProfileValue::usableCompanyName($value, $chatId) === null) {
-            $this->safeSend($chatId, $this->tx('اكتب اسم الشركة أو المحل.', 'Send the real company name.'));
+        if ($field === 'company_name') {
+            $stored = app(ResolveCompanyName::class)->resolve($value, $chatId);
+            if ($stored === null) {
+                $this->safeSend($chatId, $this->tx(
+                    'اسم الشركة مو واضح. ابعت الاسم لحاله، مثل: النور للتجارة.',
+                    'The company name is not clear. Send the name on its own.',
+                ));
 
-            return;
+                return;
+            }
+            $value = $stored;
         }
 
         $column = $field;
@@ -549,6 +601,14 @@ class HandleWhatsAppInbound
      */
     private function handleCallback(Client $client, string $chatId, string $phone, array $session, string $data): void
     {
+        if ($this->isNav($data, self::NAV_COMPLAINT) || $data === 'menu:complaint') {
+            $this->resetCompose($session);
+            $this->putSession($phone, $session);
+            app(HandleClientComplaint::class)->start($client, $chatId, $phone, $this->replyLang);
+
+            return;
+        }
+        app(HandleClientComplaint::class)->clear($phone);
         if ($data === 'menu:home') {
             if (filled($session['quote_ref'] ?? null)) {
                 $this->showQuoteDecision($chatId, $phone, $session);
@@ -1897,21 +1957,15 @@ class HandleWhatsAppInbound
             abort_unless($request->acceptsReceiptUpload(), 422, 'Receipt upload is only allowed while awaiting payment.');
             $binary = base64_decode($media['file_base64'], true);
             abort_if($binary === false, 422, 'Invalid file payload.');
-            $mime = $media['mime_type'];
-            $allowed = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
-            abort_unless(in_array($mime, $allowed, true), 422, 'Unsupported file type.');
-            $extension = match ($mime) {
-                'image/jpeg' => 'jpg',
-                'image/png' => 'png',
-                'image/webp' => 'webp',
-                default => 'pdf',
-            };
+            $uploads = app(ClientUploadGuard::class);
+            $mime = $uploads->assertReceipt($binary, $media['mime_type']);
+            $extension = $uploads->extension($mime);
             $path = "receipts/{$request->number}-".now()->format('YmdHis').".{$extension}";
             Storage::disk('local')->put($path, $binary);
             $receiptFile = RequestFile::query()->create([
                 'request_id' => $request->id,
                 'kind' => 'payment_receipt',
-                'original_name' => $media['file_name'],
+                'original_name' => basename(str_replace('\\', '/', $media['file_name'])),
                 'path' => $path,
             ]);
             $request->forceFill([
@@ -3227,6 +3281,7 @@ class HandleWhatsAppInbound
             [['text' => $this->tx('تجديد الاشتراك', 'Renew subscription'), 'callback_data' => 'menu:renew']],
             [['text' => $this->tx('بياناتي', 'My details'), 'callback_data' => 'menu:profile']],
             [['text' => $this->tx('استفسار', 'Inquiry'), 'callback_data' => 'menu:ask']],
+            [['text' => $this->tx('شكوى', 'Complaint'), 'callback_data' => 'menu:complaint']],
             [['text' => $this->tx('الدعم', 'Support'), 'callback_data' => 'menu:help']],
         ]);
     }
@@ -3316,13 +3371,13 @@ class HandleWhatsAppInbound
         $stored = match ($field) {
             'name' => ClientProfileValue::usableName($value),
             'phone' => ClientProfileValue::usablePhone($value),
-            default => ClientProfileValue::usableCompanyName($value, $chatId),
+            default => app(ResolveCompanyName::class)->resolve($value, $chatId),
         };
         if ($stored === null) {
             $hint = match ($field) {
                 'name' => $this->tx('اكتب اسمك، مو رقم ولا خيار من القائمة.', 'Send your full name, not a number or a menu button.'),
                 'phone' => $this->tx('الرقم مو واضح، ابعت رقم الموبايل.', 'Send a valid phone number.'),
-                default => $this->tx('اكتب اسم الشركة أو المحل.', 'Send the real company name.'),
+                default => $this->tx('اسم الشركة مو واضح. ابعت الاسم لحاله، مثل: النور للتجارة.', 'The company name is not clear. Send the name on its own.'),
             };
             $this->safeSend($chatId, $hint);
 

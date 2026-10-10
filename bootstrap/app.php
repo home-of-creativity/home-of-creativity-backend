@@ -5,6 +5,7 @@ use App\Http\Middleware\EnsureAdmin;
 use App\Http\Middleware\EnsureClientTelegramEnabled;
 use App\Http\Middleware\EnsureCrudAbility;
 use App\Http\Middleware\StripPoweredByHeader;
+use App\Http\Middleware\ThrottleBotSender;
 use App\Http\Middleware\VerifySentryWebhook;
 use App\Http\Middleware\VerifySharedSecret;
 use App\Http\Middleware\VerifyWhatsAppSignature;
@@ -27,6 +28,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'sentry.webhook' => VerifySentryWebhook::class,
             'whatsapp.signature' => VerifyWhatsAppSignature::class,
             'telegram.client' => EnsureClientTelegramEnabled::class,
+            'bot.sender' => ThrottleBotSender::class,
             'admin' => EnsureAdmin::class,
             'ability' => EnsureAbility::class,
             'crud' => EnsureCrudAbility::class,

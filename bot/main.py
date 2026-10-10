@@ -11,6 +11,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton,
 from telegram.error import BadRequest, NetworkError, TimedOut
 from telegram.ext import (
     Application,
+    ApplicationHandlerStop,
     BasePersistence,
     CallbackQueryHandler,
     CommandHandler,
@@ -46,10 +47,11 @@ BOT_SECRET = os.environ.get("TELEGRAM_BOT_SECRET", "")
 BTN_NEW = "🆕 طلب جديد"
 BTN_MY = "📋 طلباتي"
 BTN_PHOTO = "📷 حجز تصوير"
+BTN_COMPLAINT = "📣 شكوى"
 BTN_SUPPORT = "💬 دعم"
 SUPPORT_PHONE = "0947823488"
 BTN_SUBMIT = "✅ تم الإرسال"
-NAV_BUTTONS = {BTN_NEW, BTN_MY, BTN_PHOTO, BTN_SUPPORT}
+NAV_BUTTONS = {BTN_NEW, BTN_MY, BTN_PHOTO, BTN_COMPLAINT, BTN_SUPPORT}
 MAX_ATTACHMENTS = 5
 PERIOD_LABELS = {
     "monthly": "شهري",
@@ -258,7 +260,7 @@ def welcome_text(user, *, missing: list[str]) -> str:
 
 def main_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-        [[KeyboardButton(BTN_NEW), KeyboardButton(BTN_MY)], [KeyboardButton(BTN_PHOTO), KeyboardButton(BTN_SUPPORT)]],
+        [[KeyboardButton(BTN_NEW), KeyboardButton(BTN_MY)], [KeyboardButton(BTN_PHOTO), KeyboardButton(BTN_COMPLAINT)], [KeyboardButton(BTN_SUPPORT)]],
         resize_keyboard=True,
     )
 
@@ -727,6 +729,11 @@ async def maybe_route_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         outcome = await photography_chat(update.effective_user.id, text=text)
         if outcome != "handled" and update.message:
             await update.message.reply_text(outcome if outcome != "pass" else "تعذر فتح حجز التصوير. أعد المحاولة.", reply_markup=main_keyboard())
+        return ConversationHandler.END
+    if text == BTN_COMPLAINT:
+        outcome = await complaint_chat(update.effective_user.id, text=text)
+        if outcome != "handled" and update.message:
+            await update.message.reply_text(outcome if outcome != "pass" else "تعذر فتح الشكوى. أعد المحاولة.", reply_markup=main_keyboard())
         return ConversationHandler.END
     return await support_start(update, context)
 
@@ -1686,6 +1693,88 @@ async def photography_chat(user_id: int, *, text: str | None = None, callback: s
     return "pass"
 
 
+def looks_like_complaint(text: str | None) -> bool:
+    if not text:
+        return False
+    return any(word in text for word in ("شكوى", "شكاوى", "اشتكي", "أشتكي")) or "complaint" in text.casefold()
+
+
+async def complaint_chat(
+    user_id: int,
+    *,
+    text: str | None = None,
+    image: dict | None = None,
+    audio: dict | None = None,
+    video: bool = False,
+) -> str:
+    """Ask Laravel to run the complaint conversation. It sends the Telegram reply itself."""
+    payload: dict = {
+        "telegram_user_id": str(user_id),
+        "text": text,
+        "video": video,
+    }
+    if image:
+        payload["image_base64"] = image["data"]
+        payload["image_mime"] = image["mime"]
+    if audio:
+        payload["audio_base64"] = audio["data"]
+        payload["audio_mime"] = audio["mime"]
+    try:
+        async with httpx.AsyncClient(timeout=25) as client:
+            response = await client.post(
+                f"{API_URL}/bot/telegram/complaint",
+                headers=api_headers(),
+                json=payload,
+            )
+    except Exception:
+        if looks_like_complaint(text):
+            return "تعذر فتح الشكوى. أعد المحاولة."
+        return "pass"
+    if response.status_code >= 400:
+        if looks_like_complaint(text):
+            return "تعذر فتح الشكوى. أعد المحاولة."
+        return "pass"
+    try:
+        handled = bool(response.json().get("handled"))
+    except Exception:
+        handled = False
+    if handled:
+        return "handled"
+    return "pass"
+
+
+async def complaint_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.message
+    user = update.effective_user
+    if message is None or user is None:
+        return
+    document = message.document
+    video = bool(message.video or message.video_note) or (
+        document is not None and str(document.mime_type or "").startswith("video/")
+    )
+    image = None
+    audio = None
+    if not video and message.photo:
+        image = {"data": await _telegram_b64(message.photo[-1]), "mime": "image/jpeg"}
+    elif not video and message.voice:
+        audio = {"data": await _telegram_b64(message.voice), "mime": message.voice.mime_type or "audio/ogg"}
+    elif not video and message.audio:
+        audio = {"data": await _telegram_b64(message.audio), "mime": message.audio.mime_type or "audio/mpeg"}
+    elif not video and document is not None and str(document.mime_type or "").startswith("image/"):
+        image = {"data": await _telegram_b64(document), "mime": document.mime_type or "image/jpeg"}
+    elif not video:
+        return
+    outcome = await complaint_chat(user.id, image=image, audio=audio, video=video)
+    if outcome == "handled":
+        raise ApplicationHandlerStop
+
+
+async def _telegram_b64(file_obj) -> str:
+    telegram_file = await file_obj.get_file()
+    content = await telegram_file.download_as_bytearray()
+    return base64.b64encode(bytes(content)).decode("ascii")
+
+
 async def photography_decision(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if query is None or query.data is None or query.from_user is None:
@@ -2003,8 +2092,19 @@ async def route_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         return ConversationHandler.END
     if text == BTN_SUPPORT:
         return await support_start(update, context)
+    if text == BTN_COMPLAINT:
+        outcome = await complaint_chat(update.effective_user.id, text=text)
+        if outcome != "handled" and update.message:
+            await update.message.reply_text(outcome if outcome != "pass" else "تعذر فتح الشكوى. أعد المحاولة.", reply_markup=main_keyboard())
+        return ConversationHandler.END
     user = update.effective_user
     if user is not None:
+        outcome = await complaint_chat(user.id, text=text)
+        if outcome == "handled":
+            return ConversationHandler.END
+        if outcome != "pass" and update.message:
+            await update.message.reply_text(outcome, reply_markup=main_keyboard())
+            return ConversationHandler.END
         outcome = await photography_chat(user.id, text=text)
         if outcome == "handled":
             return ConversationHandler.END
@@ -2157,6 +2257,9 @@ def main() -> None:
             name="client_compose",
             persistent=True,
         )
+    )
+    application.add_handler(
+        MessageHandler(filters.PHOTO | filters.Document.ALL | filters.VOICE | filters.AUDIO | filters.VIDEO | filters.VIDEO_NOTE, complaint_media)
     )
     application.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, upload_receipt), group=1)
     application.add_handler(

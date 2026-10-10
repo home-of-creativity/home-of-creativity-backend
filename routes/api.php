@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Admin\ArticleController as AdminArticleController;
 use App\Http\Controllers\Admin\ClientChannelController as AdminClientChannelController;
+use App\Http\Controllers\Admin\ComplaintController as AdminComplaintController;
 use App\Http\Controllers\Admin\ClientController as AdminClientController;
 use App\Http\Controllers\Admin\ClientReportController as AdminClientReportController;
 use App\Http\Controllers\Admin\ContactChannelController as AdminContactChannelController;
@@ -245,6 +246,12 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::put('ops-settings/social-profile', [AdminServiceRequestController::class, 'updateSocialProfile']);
     });
 
+    Route::middleware('ability:ops.complaints')->group(function () {
+        Route::get('complaints', [AdminComplaintController::class, 'index']);
+        Route::patch('complaints/{complaint}', [AdminComplaintController::class, 'update']);
+        Route::get('complaints/{complaint}/{kind}', [AdminComplaintController::class, 'file'])->whereIn('kind', ['image', 'audio']);
+    });
+
     Route::middleware('ability:ops.photography')->group(function () {
         Route::get('photography', [AdminPhotographyController::class, 'index']);
         Route::get('photography/slots', [AdminPhotographyController::class, 'slots']);
@@ -386,7 +393,7 @@ Route::post('integrations/sentry', SentryWebhookController::class)
 Route::post('integrations/github', GithubWebhookController::class)
     ->middleware('throttle:60,1');
 
-Route::prefix('bot/telegram')->middleware(['shared.secret:services.telegram.bot_secret', 'telegram.client'])->group(function () {
+Route::prefix('bot/telegram')->middleware(['shared.secret:services.telegram.bot_secret', 'telegram.client', 'bot.sender'])->group(function () {
     Route::post('link', [TelegramBotController::class, 'link']);
     Route::get('me', [TelegramBotController::class, 'me']);
     Route::post('profile', [TelegramBotController::class, 'updateProfile']);
@@ -406,6 +413,7 @@ Route::prefix('bot/telegram')->middleware(['shared.secret:services.telegram.bot_
     Route::post('requests/{service_request}/approve-file', [TelegramBotController::class, 'approveFile']);
     Route::post('requests/{service_request}/renew', [TelegramBotController::class, 'renew']);
     Route::post('photography', [TelegramBotController::class, 'photographyChat']);
+    Route::post('complaint', [TelegramBotController::class, 'complaintChat']);
     Route::get('requests/{service_request}/photography-slots', [TelegramBotController::class, 'photographySlots']);
     Route::post('requests/{service_request}/photography-bookings', [TelegramBotController::class, 'bookPhotography']);
     Route::post('requests/{service_request}/photography-decision', [TelegramBotController::class, 'decidePhotography']);

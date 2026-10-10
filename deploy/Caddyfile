@@ -29,6 +29,18 @@
 		file_server
 	}
 
+	# Signed phone-reminder page. APP_URL is hoc.agency, so the link must reach Laravel.
+	handle /photography-alarm* {
+		root * /var/www/hoc/public
+		encode zstd gzip
+		php_fastcgi hoc-api:9000 {
+			dial_timeout 10s
+			read_timeout 10m
+			write_timeout 10m
+		}
+		file_server
+	}
+
 	handle /up {
 		root * /var/www/hoc/public
 		php_fastcgi hoc-api:9000

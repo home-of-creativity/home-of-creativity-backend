@@ -13,10 +13,24 @@ class VerifySharedSecret
         $expected = (string) config($configKey);
         $provided = (string) $request->header('X-Webhook-Secret', $request->header('X-N8N-Secret', ''));
 
-        if ($expected === '' || ! hash_equals($expected, $provided)) {
+        if ($expected === '' || $this->isPlaceholder($expected) || ! hash_equals($expected, $provided)) {
             abort(401, 'Invalid webhook secret.');
         }
 
         return $next($request);
+    }
+
+    private function isPlaceholder(string $secret): bool
+    {
+        if (! app()->environment('production')) {
+            return false;
+        }
+
+        return strlen($secret) < 24 || in_array($secret, [
+            'change-me',
+            'change-me-bot',
+            'secret',
+            'password',
+        ], true);
     }
 }

@@ -88,7 +88,7 @@ class WhatsAppClientBotTest extends TestCase
 
         $client = Client::query()->where('telegram_user_id', 'wa:963911111111')->firstOrFail();
         $this->assertTrue($client->profileComplete());
-        $this->assertSame('شركة نون', $client->company_name);
+        $this->assertSame('نون', $client->company_name);
         $this->assertTrue($client->isWhatsApp());
     }
 

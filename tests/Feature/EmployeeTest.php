@@ -432,7 +432,7 @@ class EmployeeTest extends TestCase
             ->postJson("/api/bot/telegram/requests/{$serviceRequest->number}/receipt", [
                 'telegram_user_id' => 'tg-client-9',
                 'file_name' => 'receipt.jpg',
-                'file_base64' => base64_encode('fake-image'),
+                'file_base64' => base64_encode("\xFF\xD8\xFF\xD9"),
                 'mime_type' => 'image/jpeg',
             ])->assertOk()
             ->assertJsonPath('data.stored', true);

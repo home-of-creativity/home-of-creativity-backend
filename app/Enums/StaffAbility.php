@@ -19,6 +19,7 @@ enum StaffAbility: string
     case OpsDrive = 'ops.drive';
     case OpsPhotography = 'ops.photography';
     case OpsPhotographyAll = 'ops.photography_all';
+    case OpsComplaints = 'ops.complaints';
     case SiteProjects = 'site.projects';
     case SiteCategories = 'site.categories';
     case SiteReels = 'site.reels';
@@ -90,6 +91,7 @@ enum StaffAbility: string
             self::OpsDrive => ['ar' => 'حساب تخزين Drive', 'en' => 'Drive storage account'],
             self::OpsPhotography => ['ar' => 'التصوير: الطابور ومواعيدي', 'en' => 'Photography: queue and my shoots'],
             self::OpsPhotographyAll => ['ar' => 'التصوير: كل المواعيد والإلغاء وضبط الجلسات', 'en' => 'Photography: all bookings, cancel, session counts'],
+            self::OpsComplaints => ['ar' => 'الشكاوى', 'en' => 'Complaints'],
             self::SiteProjects => ['ar' => 'المشاريع', 'en' => 'Projects'],
             self::SiteCategories => ['ar' => 'التصنيفات', 'en' => 'Categories'],
             self::SiteReels => ['ar' => 'الريلز', 'en' => 'Reels'],

@@ -8,6 +8,7 @@ use App\Actions\ClientAssistant;
 use App\Actions\CompleteRequest;
 use App\Actions\CreateCatalogRequest;
 use App\Actions\DeclineRenewal;
+use App\Actions\HandleClientComplaint;
 use App\Actions\HandleWhatsAppInbound;
 use App\Actions\NotifyEmployees;
 use App\Actions\NotifyPaymentStage;
@@ -37,7 +38,10 @@ use App\Services\ClickUpStatusMapper;
 use App\Services\OdooLeadLog;
 use App\Services\RequestStatusTransitionService;
 use App\Support\ChatLanguage;
+use Illuminate\Support\Facades\Cache;
 use App\Support\ClientProfileValue;
+use App\Support\ResolveCompanyName;
+use App\Support\ClientUploadGuard;
 use App\Support\PricingCatalog;
 use App\Support\ResolveServiceRequest;
 use App\Support\ShamCashQr;
@@ -141,8 +145,8 @@ class TelegramBotController extends Controller
         }
 
         if (array_key_exists('company_name', $validated)) {
-            $values['company_name'] = ClientProfileValue::usableCompanyName(trim((string) $validated['company_name']), $client->telegram_user_id)
-                ?? throw ValidationException::withMessages(['company_name' => 'أرسل اسم الشركة الحقيقي.']);
+            $values['company_name'] = app(ResolveCompanyName::class)->resolve(trim((string) $validated['company_name']), $client->telegram_user_id)
+                ?? throw ValidationException::withMessages(['company_name' => 'اسم الشركة مو واضح. أرسل الاسم وحده، مثل: النور للتجارة.']);
         }
 
         if (array_key_exists('email', $validated)) {
@@ -308,23 +312,10 @@ class TelegramBotController extends Controller
             throw ValidationException::withMessages(['file_base64' => 'Invalid file payload.']);
         }
 
-        if (strlen($binary) > 5 * 1024 * 1024) {
-            throw ValidationException::withMessages(['file_base64' => 'File exceeds 5MB limit.']);
-        }
-
-        $mime = $validated['mime_type'] ?? 'application/octet-stream';
-        $allowed = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
-        if (! in_array($mime, $allowed, true)) {
-            throw ValidationException::withMessages(['mime_type' => 'Unsupported file type.']);
-        }
-
-        $extension = match ($mime) {
-            'image/jpeg' => 'jpg',
-            'image/png' => 'png',
-            'image/webp' => 'webp',
-            'application/pdf' => 'pdf',
-            default => 'bin',
-        };
+        $uploads = app(ClientUploadGuard::class);
+        $mime = $uploads->assertReceipt($binary, (string) ($validated['mime_type'] ?? ''));
+        $extension = $uploads->extension($mime);
+        $original = basename(str_replace('\\', '/', $validated['file_name']));
 
         $path = "receipts/{$serviceRequest->number}-".now()->format('YmdHis').".{$extension}";
         Storage::disk('local')->put($path, $binary);
@@ -332,7 +323,7 @@ class TelegramBotController extends Controller
         $receiptFile = RequestFile::query()->create([
             'request_id' => $serviceRequest->id,
             'kind' => 'payment_receipt',
-            'original_name' => $validated['file_name'],
+            'original_name' => $original,
             'path' => $path,
         ]);
 
@@ -696,6 +687,42 @@ class TelegramBotController extends Controller
             (string) $client->telegram_user_id,
             $validated['text'] ?? null,
             $validated['callback'] ?? null,
+        );
+
+        return response()->json(['handled' => $handled]);
+    }
+
+    public function complaintChat(Request $request, HandleClientComplaint $complaints): JsonResponse
+    {
+        $validated = $request->validate([
+            'telegram_user_id' => ['required', 'string', 'max:40'],
+            'text' => ['nullable', 'string', 'max:2000'],
+            'image_base64' => ['nullable', 'string'],
+            'image_mime' => ['nullable', 'string', 'max:80'],
+            'audio_base64' => ['nullable', 'string'],
+            'audio_mime' => ['nullable', 'string', 'max:80'],
+            'video' => ['sometimes', 'boolean'],
+        ]);
+        $client = $this->resolveTelegramClient->handle($validated['telegram_user_id']);
+        $chatId = (string) $client->telegram_user_id;
+        Cache::put('hoc:client-reply:'.$client->id, $chatId, now()->addDays(30));
+        $image = filled($validated['image_base64'] ?? null) ? [
+            'file_base64' => (string) $validated['image_base64'],
+            'mime_type' => (string) ($validated['image_mime'] ?? 'image/jpeg'),
+        ] : null;
+        $audio = filled($validated['audio_base64'] ?? null) ? [
+            'file_base64' => (string) $validated['audio_base64'],
+            'mime_type' => (string) ($validated['audio_mime'] ?? 'audio/ogg'),
+        ] : null;
+        $handled = $complaints->turn(
+            $client,
+            $chatId,
+            'tg:'.$client->id,
+            'ar',
+            $validated['text'] ?? null,
+            $image,
+            $audio,
+            $request->boolean('video'),
         );
 
         return response()->json(['handled' => $handled]);

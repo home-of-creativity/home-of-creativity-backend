@@ -173,6 +173,15 @@ export function IconChannels(props: IconProps) {
   );
 }
 
+export function IconComplaint(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M5 6.2h9.2A2.3 2.3 0 0 1 16.5 8.5v4.4a2.3 2.3 0 0 1-2.3 2.3H8.2L5 17.6V6.2Z" />
+      <path d="M8 10.2h5.2M8 12.6h3.2" />
+    </svg>
+  );
+}
+
 export function IconCamera(props: IconProps) {
   return (
     <svg {...base} {...props}>

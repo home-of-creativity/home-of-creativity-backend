@@ -33,6 +33,7 @@ export type StaffModule =
   | "ops.channels"
   | "ops.photography"
   | "ops.photography_all"
+  | "ops.complaints"
   | "ops.report_gemini"
   | "ops.report_templates"
   | "ops.report_media"
@@ -1054,6 +1055,19 @@ export type PhotographyBookingRow = {
 
 export type PhotographySlot = { starts_at: string; label: string };
 
+export type ComplaintRow = {
+  id: number;
+  title: string;
+  description: string;
+  status: "open" | "reviewed" | string;
+  has_image: boolean;
+  has_audio: boolean;
+  client_name: string | null;
+  company_name: string | null;
+  phone: string | null;
+  created_at: string | null;
+};
+
 export type PhotographyBoard = {
   queue: PhotographyBookingRow[];
   waiting_client: PhotographyBookingRow[];
@@ -1297,6 +1311,23 @@ export const api = {
   },
   unlinkWhatsappAdmin() {
     return request<Envelope<WhatsAppWebStatus>>("/admin/ops-settings/whatsapp-admin/logout", { method: "POST" });
+  },
+  complaints() {
+    return request<Envelope<ComplaintRow[]>>("/admin/complaints");
+  },
+  updateComplaint(id: number, status: "open" | "reviewed") {
+    return request<Envelope<{ id: number; status: string }>>(`/admin/complaints/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    });
+  },
+  async complaintFile(id: number, kind: "image" | "audio") {
+    const headers = new Headers({ Accept: "application/octet-stream" });
+    const token = getToken();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    const response = await fetch(`${API_URL}/admin/complaints/${id}/${kind}`, { headers });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.blob();
   },
   photographyBoard() {
     return request<Envelope<PhotographyBoard>>("/admin/photography");

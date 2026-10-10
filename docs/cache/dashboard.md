@@ -1,6 +1,8 @@
 # Staff dashboard (Vite SPA)
 
-Last updated: 10 October 2026 (Photography is a dashboard page at /photography, gated by ops.photography. It lists the photographer queue, client replies, agreed shoots, unbooked paid work, and a session-count editor for ops.photography_all. Package forms now save photography_sessions.)
+Last updated: 10 October 2026 (Complaints is a dashboard page at /complaints, gated by ops.complaints. It lists client complaints and can open the photo, play the voice note, and mark a row reviewed.)
+
+Previous: 10 October 2026 (Photography is a dashboard page at /photography, gated by ops.photography. It lists the photographer queue, client replies, agreed shoots, unbooked paid work, and a session-count editor for ops.photography_all. Package forms now save photography_sessions.)
 
 Previous: 10 October 2026 (Bot channels shows a second WhatsApp Web QR for the admin phone, separate from the client bot session.)
 
