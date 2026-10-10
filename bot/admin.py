@@ -790,7 +790,10 @@ async def on_expense_category(update: Update, context: ContextTypes.DEFAULT_TYPE
     index = int(query.data.split(":", 1)[1])
     categories = context.user_data.get("expense_categories") or ["رواتب", "إعلانات", "برامج", "مكتب", "تنقل", "أخرى"]
     context.user_data["expense_category"] = categories[index] if 0 <= index < len(categories) else "أخرى"
-    await query.message.reply_text("ملاحظة المصروف (أو اكتب -):")
+    await query.message.reply_text(
+        "إذا بدك ملاحظة اكتبها.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("تخطي", callback_data="eskip")]]),
+    )
     return WAITING_EXPENSE_NOTE
 
 
@@ -801,8 +804,22 @@ async def capture_expense_note(update: Update, context: ContextTypes.DEFAULT_TYP
     if context.user_data.get("expense_category") is None:
         return WAITING_EXPENSE_NOTE
     note = update.message.text.strip()
-    if note == "-":
+    if note in {"-", "تخطي", "تخطى"}:
         note = ""
+    return await show_expense_summary(update.message, context, note)
+
+
+async def skip_expense_note(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if query is None or query.message is None:
+        return ConversationHandler.END
+    await query.answer()
+    if context.user_data.get("expense_category") is None:
+        return WAITING_EXPENSE_NOTE
+    return await show_expense_summary(query.message, context, "")
+
+
+async def show_expense_summary(message, context: ContextTypes.DEFAULT_TYPE, note: str) -> int:
     context.user_data["expense_note"] = note
     summary = (
         f"المبلغ: {context.user_data.get('expense_amount')} USD\n"
@@ -813,7 +830,7 @@ async def capture_expense_note(update: Update, context: ContextTypes.DEFAULT_TYP
         [InlineKeyboardButton("سجّل", callback_data="esave:yes")],
         [InlineKeyboardButton("إلغاء", callback_data="esave:no")],
     ]
-    await update.message.reply_text(escape(summary), reply_markup=InlineKeyboardMarkup(rows))
+    await message.reply_text(escape(summary), reply_markup=InlineKeyboardMarkup(rows))
     return WAITING_EXPENSE_CONFIRM
 
 
@@ -953,6 +970,7 @@ def main() -> None:
                 WAITING_EXPENSE_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, capture_expense_amount)],
                 WAITING_EXPENSE_NOTE: [
                     CallbackQueryHandler(on_expense_category, pattern=r"^ecat:"),
+                    CallbackQueryHandler(skip_expense_note, pattern=r"^eskip$"),
                     MessageHandler(filters.TEXT & ~filters.COMMAND, capture_expense_note),
                 ],
                 WAITING_EXPENSE_CONFIRM: [CallbackQueryHandler(on_expense_confirm, pattern=r"^esave:")],

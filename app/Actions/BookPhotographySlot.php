@@ -29,31 +29,58 @@ class BookPhotographySlot
     /**
      * @return list<array{starts_at: string, label: string}>
      */
+    /**
+     * @return list<array{date: string, label: string}>
+     */
+    public function bookableDays(int $count = 8): array
+    {
+        $days = [];
+        $cursor = now('Asia/Damascus')->addDays(self::LEAD_DAYS)->startOfDay();
+        for ($i = 0; count($days) < $count && $i < 40; $i++) {
+            if ($this->calendar->isWorkDay($cursor) && $this->timesOn($cursor) !== []) {
+                $days[] = [
+                    'date' => $cursor->toDateString(),
+                    'label' => $this->dayLabel($cursor),
+                ];
+            }
+            $cursor->addDay();
+        }
+
+        return $days;
+    }
+
+    /**
+     * @return list<array{starts_at: string, label: string}>
+     */
+    public function timesOn(Carbon $day): array
+    {
+        [$openMinute, $closeMinute] = $this->calendar->teamWindowMinutes();
+        $local = $day->copy()->timezone('Asia/Damascus')->startOfDay();
+        $start = $local->copy()->addMinutes($openMinute);
+        $end = $local->copy()->addMinutes($closeMinute);
+        $slots = [];
+        for ($cursor = $start->copy(); $cursor->copy()->addHours(self::SHOOT_HOURS)->lte($end); $cursor->addHour()) {
+            if ($this->confirmedConflict($cursor) !== null) {
+                continue;
+            }
+            $slots[] = [
+                'starts_at' => $cursor->toIso8601String(),
+                'label' => $this->friendlyTime($cursor),
+            ];
+        }
+
+        return $slots;
+    }
+
+    /**
+     * @return list<array{starts_at: string, label: string}>
+     */
     public function freeSlots(): array
     {
         $slots = [];
-        $earliest = now('Asia/Damascus')->addDays(self::LEAD_DAYS)->startOfDay();
-        $cursorDay = $earliest->copy();
-        $found = 0;
-        for ($i = 0; $found < 10 && $i < 24; $i++) {
-            if (! $this->calendar->isWorkDay($cursorDay)) {
-                $cursorDay->addDay();
-
-                continue;
-            }
-            $found++;
-            $local = $cursorDay->copy();
-            $cursorDay->addDay();
-            $start = $local->copy()->setTime(WorkCalendar::DAY_START_HOUR, 0);
-            $dayEnd = $start->copy()->addHours($this->calendar->hoursPerDay());
-            for ($cursor = $start->copy(); $cursor->copy()->addHours(self::SHOOT_HOURS)->lte($dayEnd); $cursor->addHour()) {
-                if ($this->confirmedConflict($cursor) !== null) {
-                    continue;
-                }
-                $slots[] = [
-                    'starts_at' => $cursor->toIso8601String(),
-                    'label' => $cursor->format('Y-m-d H:i'),
-                ];
+        foreach ($this->bookableDays() as $day) {
+            foreach ($this->timesOn(Carbon::parse($day['date'], 'Asia/Damascus')) as $slot) {
+                $slots[] = $slot;
             }
         }
 
@@ -98,7 +125,7 @@ class BookPhotographySlot
             return $this->offerText($booking->proposed_starts_at);
         }
 
-        return 'وصل طلب الموعد. يوافق موظف التصوير، وإذا اقترب من موعد آخر يُعرض عليك وقت يبعد 5 ساعات.';
+        return 'وصلنا طلب الموعد، ومنرد عليك لتأكيده.';
     }
 
     public function decide(ServiceRequest $request, bool $accept): PhotographyBooking
@@ -303,7 +330,28 @@ class BookPhotographySlot
 
     private function offerText(Carbon $proposed): string
     {
-        return 'لا يمكن الحجز بهذا الوقت. هل يناسبك '.$this->hourLabel($proposed).'؟';
+        return 'هاد الوقت محجوز. بيناسبك '.$this->friendlyTime($proposed).'؟';
+    }
+
+    private function dayLabel(Carbon $day): string
+    {
+        $names = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+
+        return $names[$day->dayOfWeek].' '.$day->format('j/n');
+    }
+
+    private function friendlyTime(Carbon $time): string
+    {
+        $local = $this->clock($time);
+        $hour = (int) $local->format('G');
+        $clock = $local->format((int) $local->format('i') === 0 ? 'g' : 'g:i');
+        $part = match (true) {
+            $hour < 12 => 'الصبح',
+            $hour < 17 => 'بعد الضهر',
+            default => 'المسا',
+        };
+
+        return "الساعة {$clock} {$part}";
     }
 
     private function hourLabel(Carbon $time): string
@@ -320,11 +368,18 @@ class BookPhotographySlot
     {
         $anchor = $this->clock($anchor);
         $offer = $anchor->copy()->addHours(self::GAP_HOURS);
-        if ($this->calendar->isWorkDay($offer) && $offer->toDateString() === $anchor->toDateString()) {
+        [$openMinute, $closeMinute] = $this->calendar->teamWindowMinutes();
+        $offerMinute = ($offer->hour * 60) + $offer->minute;
+        if ($this->calendar->isWorkDay($offer)
+            && $offer->toDateString() === $anchor->toDateString()
+            && $offerMinute >= $openMinute
+            && $offerMinute + (self::SHOOT_HOURS * 60) <= $closeMinute) {
             return $offer;
         }
 
-        return $this->calendar->nextWorkStart($anchor);
+        $next = $this->calendar->nextWorkStart($anchor);
+
+        return $next->setTime(intdiv($openMinute, 60), $openMinute % 60);
     }
 
     private function guardStart(string $startsAt): Carbon
@@ -333,11 +388,16 @@ class BookPhotographySlot
         $earliest = now('Asia/Damascus')->addDays(self::LEAD_DAYS)->startOfDay();
         if ($start->lt($earliest)) {
             throw ValidationException::withMessages([
-                'starts_at' => 'أقرب حجز للتصوير بعد أسبوع من اليوم.',
+                'starts_at' => 'أقرب موعد للتصوير بعد أسبوع.',
             ]);
         }
         if (! $this->calendar->isWorkDay($start)) {
-            throw ValidationException::withMessages(['starts_at' => 'هذا اليوم ليس يوم دوام.']);
+            throw ValidationException::withMessages(['starts_at' => 'هاد اليوم مو متاح، اختار يوم تاني.']);
+        }
+        [$openMinute, $closeMinute] = $this->calendar->teamWindowMinutes();
+        $minute = ($start->hour * 60) + $start->minute;
+        if ($minute < $openMinute || $minute + (self::SHOOT_HOURS * 60) > $closeMinute) {
+            throw ValidationException::withMessages(['starts_at' => 'هاد الوقت مو مناسب للتصوير.']);
         }
 
         return $start;

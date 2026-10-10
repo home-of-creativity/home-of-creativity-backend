@@ -1291,6 +1291,7 @@ class OdooClient
         }
 
         if ($lines !== null && $lines !== []) {
+            $lines = $this->withProductDetails($lines);
             $orderValues['order_line'] = array_map(
                 fn (array $line): array => [0, 0, $this->staffSaleLine($line)],
                 $lines,
@@ -1924,6 +1925,79 @@ class OdooClient
      * @param  array{title?: string, amount?: float|int|string|null, units?: float|int|string|null, notes?: string|null, discount?: float|int|string|null, display_type?: string|null}  $line
      * @return array<string, mixed>
      */
+    /**
+     * @param  list<array<string, mixed>>  $lines
+     * @return list<array<string, mixed>>
+     */
+    private function withProductDetails(array $lines): array
+    {
+        $ids = [];
+        foreach ($lines as $line) {
+            $id = (int) ($line['product_id'] ?? 0);
+            if ($id > 0 && ! filled($line['notes'] ?? null)) {
+                $ids[] = $id;
+            }
+        }
+        $details = $this->productSaleDetails($ids);
+        if ($details === []) {
+            return $lines;
+        }
+
+        foreach ($lines as $index => $line) {
+            $id = (int) ($line['product_id'] ?? 0);
+            if ($id > 0 && ! filled($line['notes'] ?? null) && filled($details[$id] ?? null)) {
+                $lines[$index]['notes'] = $details[$id];
+            }
+        }
+
+        return $lines;
+    }
+
+    /**
+     * @param  list<int>  $ids
+     * @return array<int, string>
+     */
+    private function productSaleDetails(array $ids): array
+    {
+        $ids = array_values(array_unique(array_filter($ids, fn (int $id): bool => $id > 0)));
+        if ($ids === [] || ! $this->configured()) {
+            return [];
+        }
+
+        try {
+            $rows = $this->searchRead('product.product', [
+                ['id', 'in', $ids],
+            ], ['id', 'description_sale'], count($ids), 0, 'id asc');
+        } catch (Throwable) {
+            return [];
+        }
+
+        $details = [];
+        foreach ($rows as $row) {
+            if (! is_array($row) || ! isset($row['id'])) {
+                continue;
+            }
+            $text = $this->plainProductText($row['description_sale'] ?? null);
+            if ($text !== '') {
+                $details[(int) $row['id']] = $text;
+            }
+        }
+
+        return $details;
+    }
+
+    private function plainProductText(mixed $value): string
+    {
+        if (! is_string($value)) {
+            return '';
+        }
+        $text = html_entity_decode(strip_tags($value), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $text = preg_replace("/[ \t]*\n[ \t]*/", "\n", $text) ?? $text;
+        $text = preg_replace("/\n{3,}/", "\n\n", $text) ?? $text;
+
+        return trim($text);
+    }
+
     private function staffSaleLine(array $line): array
     {
         $type = $line['display_type'] ?? null;

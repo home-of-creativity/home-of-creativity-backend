@@ -15,6 +15,8 @@ export function ClientChannelsPage({ locale, t }: { locale: Locale; t: (c: { ar:
   const [hours, setHours] = useState("8");
   const [openAt, setOpenAt] = useState("21:00");
   const [closeAt, setCloseAt] = useState("09:00");
+  const [teamOpen, setTeamOpen] = useState("09:00");
+  const [teamClose, setTeamClose] = useState("21:00");
   const [holidays, setHolidays] = useState<string[]>([]);
   const [unlinking, setUnlinking] = useState(false);
 
@@ -36,6 +38,8 @@ export function ClientChannelsPage({ locale, t }: { locale: Locale; t: (c: { ar:
         setHours(String(res.data.hours_per_day));
         setOpenAt(res.data.whatsapp_open || "21:00");
         setCloseAt(res.data.whatsapp_close || "09:00");
+        setTeamOpen(res.data.team_open || "09:00");
+        setTeamClose(res.data.team_close || "21:00");
         setHolidays(res.data.holidays);
       })
       .catch(() => undefined);
@@ -76,10 +80,14 @@ export function ClientChannelsPage({ locale, t }: { locale: Locale; t: (c: { ar:
         holidays,
         whatsapp_open: openAt,
         whatsapp_close: closeAt,
+        team_open: teamOpen,
+        team_close: teamClose,
       });
       setHours(String(res.data.hours_per_day));
       setOpenAt(res.data.whatsapp_open);
       setCloseAt(res.data.whatsapp_close);
+      setTeamOpen(res.data.team_open);
+      setTeamClose(res.data.team_close);
       setHolidays(res.data.holidays);
       toast.success(t(copy.channelsSaved));
     } catch (err) {
@@ -187,8 +195,20 @@ export function ClientChannelsPage({ locale, t }: { locale: Locale; t: (c: { ar:
           <input className="field" value={hours} onChange={(event) => setHours(event.target.value)} inputMode="numeric" />
         </label>
         <fieldset className="holiday-calendar">
+          <legend>{t(copy.channelsTeamHours)}</legend>
+          <div className="odoo-deliver">
+            <label>
+              {t(copy.channelsWhatsappOpen)}
+              <input className="field" type="time" value={teamOpen} onChange={(event) => setTeamOpen(event.target.value)} />
+            </label>
+            <label>
+              {t(copy.channelsWhatsappClose)}
+              <input className="field" type="time" value={teamClose} onChange={(event) => setTeamClose(event.target.value)} />
+            </label>
+          </div>
+        </fieldset>
+        <fieldset className="holiday-calendar">
           <legend>{t(copy.channelsWhatsappHours)}</legend>
-          <p className="muted">{t(copy.channelsWhatsappHoursHint)}</p>
           <div className="odoo-deliver">
             <label>
               {t(copy.channelsWhatsappOpen)}
@@ -202,7 +222,6 @@ export function ClientChannelsPage({ locale, t }: { locale: Locale; t: (c: { ar:
         </fieldset>
         <fieldset className="holiday-calendar">
           <legend>{t(copy.channelsHolidays)}</legend>
-          <p className="muted">{t(copy.channelsHolidayHint)}</p>
           <HolidayMonth locale={locale} dates={holidays} onToggle={toggleHoliday} t={t} />
         </fieldset>
         <button className="btn btn-teal" type="submit">

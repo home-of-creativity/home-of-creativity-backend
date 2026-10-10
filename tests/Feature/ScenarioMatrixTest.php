@@ -143,7 +143,7 @@ class ScenarioMatrixTest extends TestCase
                 'text' => 'مرحبا',
             ])
             ->assertOk();
-        $this->assertStringContainsString('متوقف', $this->sentText());
+        $this->assertStringContainsString('واقف', $this->sentText());
         $this->assertSame(0, $client->requests()->count());
     }
 

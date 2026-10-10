@@ -23,6 +23,8 @@ class WorkScheduleController extends Controller
                 'holidays' => $calendar->holidays(),
                 'whatsapp_open' => $calendar->whatsappHours()['open'],
                 'whatsapp_close' => $calendar->whatsappHours()['close'],
+                'team_open' => $calendar->teamHours()['open'],
+                'team_close' => $calendar->teamHours()['close'],
                 'work_days' => ['saturday', 'sunday', 'monday', 'tuesday', 'wednesday', 'thursday'],
                 'weekend' => 'friday',
             ],
@@ -37,6 +39,8 @@ class WorkScheduleController extends Controller
             'holidays.*' => ['date_format:Y-m-d'],
             'whatsapp_open' => ['nullable', 'date_format:H:i'],
             'whatsapp_close' => ['nullable', 'date_format:H:i'],
+            'team_open' => ['nullable', 'date_format:H:i'],
+            'team_close' => ['nullable', 'date_format:H:i'],
         ]);
 
         $calendar->saveHoursPerDay((int) $validated['hours_per_day']);
@@ -48,6 +52,14 @@ class WorkScheduleController extends Controller
                 ]);
             }
             $calendar->saveWhatsAppHours((string) $validated['whatsapp_open'], (string) $validated['whatsapp_close']);
+        }
+        if (filled($validated['team_open'] ?? null) && filled($validated['team_close'] ?? null)) {
+            if ((string) $validated['team_close'] <= (string) $validated['team_open']) {
+                throw ValidationException::withMessages([
+                    'team_close' => 'Team closing time must be after opening time.',
+                ]);
+            }
+            $calendar->saveTeamHours((string) $validated['team_open'], (string) $validated['team_close']);
         }
 
         return $this->showCalendar($calendar);

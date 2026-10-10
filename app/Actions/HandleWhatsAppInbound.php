@@ -54,6 +54,12 @@ class HandleWhatsAppInbound
     /** @var list<string> */
     private const NAV_PROFILE = ['بياناتي', 'menu:profile', 'My details', 'my details'];
 
+    /** @var list<string> */
+    private const NAV_PHOTO = ['حجز تصوير', 'موعد تصوير', 'menu:photo', 'Photo booking'];
+
+    /** @var list<string> */
+    private const NAV_RENEW = ['تجديد الاشتراك', 'menu:renew', 'Renew subscription'];
+
     private string $replyLang = 'ar';
 
     public function __construct(
@@ -171,7 +177,7 @@ class HandleWhatsAppInbound
             if ($voice !== null) {
                 $spoken = app(GeminiService::class)->transcribeClientAudio($voice['mime_type'], $voice['file_base64']);
                 if ($spoken === '') {
-                    $this->safeSend($chatId, $this->tx('ما قدرت أفهم التسجيل. أعده أو اكتبه.', 'I could not understand the recording. Send it again or type it.'));
+                    $this->safeSend($chatId, $this->tx('ما قدرت أفهم التسجيل. عيده أو اكتبه.', 'I could not understand the recording. Send it again or type it.'));
 
                     return;
                 }
@@ -215,13 +221,23 @@ class HandleWhatsAppInbound
             if ($this->isNav($text, self::NAV_HELP)) {
                 $this->resetCompose($session);
                 $this->putSession($phone, $session);
-                $this->sendMenu($chatId, $this->tx('رقم الدعم: ', 'Support: ').self::SUPPORT_PHONE);
+                $this->sendMenu($chatId, $this->tx('احكي معنا عالرقم: ', 'Call us: ').self::SUPPORT_PHONE);
 
                 return;
             }
             if ($this->isNav($text, self::NAV_ASK)) {
                 $this->resetCompose($session);
                 $this->beginAsk($chatId, $phone, $session);
+
+                return;
+            }
+            if ($this->isNav($text, self::NAV_PHOTO)) {
+                $this->offerPhotography($client, $chatId, $phone, $session);
+
+                return;
+            }
+            if ($this->isNav($text, self::NAV_RENEW)) {
+                $this->startRenewal($client, $chatId);
 
                 return;
             }
@@ -282,7 +298,12 @@ class HandleWhatsAppInbound
 
                 return;
             }
-            if ($step === 'photo_pick' && preg_match('/^[1-9]$/u', trim((string) $text)) === 1) {
+            if ($step === 'photo_day' && preg_match('/^(?:10|[1-9])$/u', trim((string) $text)) === 1) {
+                $this->pickPhotoDay($client, $chatId, $phone, $session, (int) $text);
+
+                return;
+            }
+            if (in_array($step, ['photo_pick', 'photo_time'], true) && preg_match('/^(?:10|[1-9])$/u', trim((string) $text)) === 1) {
                 $this->bookPhotoSlot($client, $chatId, $phone, $session, (int) $text);
 
                 return;
@@ -303,7 +324,7 @@ class HandleWhatsAppInbound
                 return;
             }
             if ($step === 'receipt') {
-                $this->safeSend($chatId, $this->tx('بانتظار وصل الدفع. أرسل صورة التحويل أو ملف PDF.', 'Waiting for the payment receipt. Send a photo of the transfer or a PDF.'));
+                $this->safeSend($chatId, $this->tx('ابعت صورة وصل الدفع أو ملف PDF.', 'Waiting for the payment receipt. Send a photo of the transfer or a PDF.'));
 
                 return;
             }
@@ -334,7 +355,7 @@ class HandleWhatsAppInbound
                 'phone' => $phone,
                 'error' => $exception->getMessage(),
             ]);
-            $this->safeSend($chatId, $this->tx('تعذر تنفيذ الطلب. حاول مرة أخرى أو اضغط الدعم.', 'That could not be completed. Try again or choose Support.'));
+            $this->safeSend($chatId, $this->tx('صار في مشكلة صغيرة. جرب مرة تانية أو احكي مع الدعم.', 'That could not be completed. Try again or choose Support.'));
         }
     }
 
@@ -349,7 +370,7 @@ class HandleWhatsAppInbound
             $this->replyLang = ($session['lang'] ?? 'ar') === 'en' ? 'en' : 'ar';
             $this->whatsApp->sendText($phone, $this->tx(
                 ClientChannelGate::WHATSAPP_PAUSED_MESSAGE,
-                'The WhatsApp bot is paused. You can use Telegram, or try again later.',
+                'WhatsApp is quiet for a bit. Try again later.',
             ));
         } catch (Throwable $exception) {
             Log::info('WhatsApp pause notice skipped.', [
@@ -369,10 +390,9 @@ class HandleWhatsAppInbound
         try {
             $session = $this->session($phone);
             $this->replyLang = ($session['lang'] ?? 'ar') === 'en' ? 'en' : 'ar';
-            $hours = $calendar->whatsappHours();
             $this->whatsApp->sendText($phone, $this->tx(
                 $calendar->whatsappClosedNotice(),
-                "We work {$hours['open']} to {$hours['close']} Damascus time, Saturday to Thursday. Friday is off. Send your message during working hours.",
+                "We're not here on WhatsApp right now. Message us later and we'll get back to you.",
             ));
         } catch (Throwable $exception) {
             Log::info('WhatsApp closed-hours notice skipped.', [
@@ -409,8 +429,8 @@ class HandleWhatsAppInbound
                 $this->sendMenu(
                     $chatId,
                     $this->tx(
-                        'أهلاً '.$client->name." في Home of Creativity.\nهذا بوت العملاء: تطلب الخدمة، تستلم عرض السعر، وتتابع حالة طلبك من هنا.\nاختر برقم الخيار: طلب جديد، طلباتي، استفسار، أو الدعم.",
-                        'Hello '.$client->name." at Home of Creativity.\nThis is the client bot: request a service, receive the quotation, and follow your order from here.\nReply with the option number: New request, My requests, Inquiry, or Support.",
+                        'أهلين '.$client->name."، كيف فيني ساعدك؟\nفيك تطلب خدمة، تشوف طلباتك، تحجز تصوير، أو تجدد اشتراكك.",
+                        'Hello '.$client->name.".\nYou can request a service, check your orders, book a shoot, or renew a subscription.",
                     ),
                 );
             }
@@ -424,19 +444,19 @@ class HandleWhatsAppInbound
 
         $intro = $greet
             ? $this->tx(
-                'أهلاً '.($client->name ?: '')." في Home of Creativity.\nهذا بوت العملاء: تطلب الخدمة، تستلم عرض السعر، وتتابع حالة طلبك من هنا.\n\nقبل أول طلب نحتاج رقم هاتفك واسم الشركة.\n",
-                'Hello '.($client->name ?: '')." at Home of Creativity.\nThis is the client bot: request a service, receive the quotation, and follow your order from here.\n\nBefore the first request we need your phone and company name.\n",
+                'أهلين '.($client->name ?: '')."، نورت.\nقبل ما نبلش بدنا اسمك وشركتك، عشان نجهزلك الطلب صح.\n",
+                'Hello '.($client->name ?: '').".\nBefore the first request we need your name and company.\n",
             )
             : '';
 
         $prompt = match ($field) {
-            'name' => $this->tx('ما اسمك الكامل؟', 'What is your full name?'),
+            'name' => $this->tx('شو اسمك؟', 'What is your full name?'),
             'phone' => $this->tx(
-                "نطلب رقم الهاتف لنتواصل معك عند صدور العرض أو أي استفسار عن الطلب.\nما رقم هاتفك؟",
+                "عطينا رقمك لحتى نرجعلك لما يجهز العرض.\nشو رقمك؟",
                 "We ask for a phone number so we can reach you when the quotation is ready.\nWhat is your phone number?",
             ),
             default => $this->tx(
-                "نطلب اسم الشركة لنصدر العرض والفاتورة باسم جهتك ونحفظ الطلب في ملفك.\nما اسم الشركة؟",
+                "شو اسم الشركة أو المحل؟ منحط العرض والفاتورة عاسمه.\n",
                 "We ask for the company name so the quotation and invoice use it.\nWhat is the company name?",
             ),
         };
@@ -460,17 +480,17 @@ class HandleWhatsAppInbound
         }
 
         if ($field === 'name' && ClientProfileValue::usableName($value) === null) {
-            $this->safeSend($chatId, $this->tx('أرسل اسمك الكامل، وليس رقماً أو زر قائمة.', 'Send your full name, not a number or a menu button.'));
+            $this->safeSend($chatId, $this->tx('اكتب اسمك، مو رقم ولا خيار من القائمة.', 'Send your full name, not a number or a menu button.'));
 
             return;
         }
         if ($field === 'phone' && ClientProfileValue::usablePhone($value) === null) {
-            $this->safeSend($chatId, $this->tx('أرسل رقم هاتف صالح.', 'Send a valid phone number.'));
+            $this->safeSend($chatId, $this->tx('الرقم مو واضح، ابعت رقم الموبايل.', 'Send a valid phone number.'));
 
             return;
         }
         if ($field === 'company_name' && ClientProfileValue::usableCompanyName($value, $chatId) === null) {
-            $this->safeSend($chatId, $this->tx('أرسل اسم الشركة الحقيقي.', 'Send the real company name.'));
+            $this->safeSend($chatId, $this->tx('اكتب اسم الشركة أو المحل.', 'Send the real company name.'));
 
             return;
         }
@@ -487,7 +507,7 @@ class HandleWhatsAppInbound
             return;
         }
 
-        $this->sendMenu($chatId, $this->tx('تم حفظ بياناتك. اختر برقم الخيار.', 'Your details are saved. Reply with the option number.'));
+        $this->sendMenu($chatId, $this->tx('تمام، سجلنا بياناتك. شو بدك نساوي؟', 'Your details are saved. Reply with the option number.'));
     }
 
     /**
@@ -505,8 +525,8 @@ class HandleWhatsAppInbound
             unset($session['profile_field']);
             $this->putSession($phone, $session);
             $this->sendMenu($chatId, $this->tx(
-                'اختر برقم الخيار: طلب جديد، طلباتي، بياناتي، استفسار، أو الدعم.',
-                'Reply with the option number: New request, My requests, My details, Inquiry, or Support.',
+                'شو بدك نساوي؟ فيك تطلب، تشوف طلباتك، تحجز تصوير، أو تجدد اشتراكك.',
+                'What do you need? You can request, check your orders, book a shoot, or renew.',
             ));
 
             return;
@@ -527,9 +547,9 @@ class HandleWhatsAppInbound
             $session['profile_field'] = $field;
             $this->putSession($phone, $session);
             $prompt = match ($field) {
-                'name' => $this->tx('ما الاسم الكامل الجديد؟', 'What is the new full name?'),
-                'phone' => $this->tx('ما رقم الهاتف الجديد؟', 'What is the new phone number?'),
-                default => $this->tx('ما اسم الشركة الجديد؟', 'What is the new company name?'),
+                'name' => $this->tx('شو الاسم الجديد؟', 'What is the new full name?'),
+                'phone' => $this->tx('شو الرقم الجديد؟', 'What is the new phone number?'),
+                default => $this->tx('شو اسم الشركة الجديد؟', 'What is the new company name?'),
             };
             $this->safeSend($chatId, $prompt);
 
@@ -558,12 +578,32 @@ class HandleWhatsAppInbound
             return;
         }
         if ($this->isNav($data, self::NAV_HELP) || $data === 'menu:help') {
-            $this->sendMenu($chatId, $this->tx('رقم الدعم: ', 'Support: ').self::SUPPORT_PHONE);
+            $this->sendMenu($chatId, $this->tx('احكي معنا عالرقم: ', 'Call us: ').self::SUPPORT_PHONE);
 
             return;
         }
         if ($this->isNav($data, self::NAV_ASK) || $data === 'menu:ask') {
             $this->beginAsk($chatId, $phone, $session);
+
+            return;
+        }
+        if ($this->isNav($data, self::NAV_PHOTO) || $data === 'menu:photo') {
+            $this->offerPhotography($client, $chatId, $phone, $session);
+
+            return;
+        }
+        if ($this->isNav($data, self::NAV_RENEW) || $data === 'menu:renew') {
+            $this->startRenewal($client, $chatId);
+
+            return;
+        }
+        if (str_starts_with($data, 'photo_day:')) {
+            $this->pickPhotoDay($client, $chatId, $phone, $session, (int) substr($data, 10) + 1);
+
+            return;
+        }
+        if (str_starts_with($data, 'photo_time:')) {
+            $this->bookPhotoSlot($client, $chatId, $phone, $session, (int) substr($data, 11) + 1);
 
             return;
         }
@@ -615,7 +655,7 @@ class HandleWhatsAppInbound
             $session['attachments'] = [];
             $session['description'] = '';
             $this->putSession($phone, $session);
-            $this->telegram->sendInlineKeyboard($chatId, $this->tx('ما عنوان الطلب؟', 'What is the request title?'), [[
+            $this->telegram->sendInlineKeyboard($chatId, $this->tx('شو عنوان الطلب؟', 'What is the request title?'), [[
                 ['text' => $this->tx('السابق', 'Back'), 'callback_data' => 'back'],
             ]]);
 
@@ -679,7 +719,7 @@ class HandleWhatsAppInbound
             $this->runOwned($client, $ref, function (ServiceRequest $request) use ($chatId): void {
                 $this->approveQuotation->handle($request);
                 $this->safeSend($chatId, $this->tx(
-                    "تم تسجيل موافقتك.\nحوّل المبلغ عبر شام كاش، ثم أرسل صورة الوصل أو PDF هنا.",
+                    "تمام، سجلنا موافقتك.\nحوّل المبلغ عبر شام كاش، وبعدين ابعت صورة الوصل أو PDF هون.",
                     "Your approval is recorded.\nTransfer the amount with Sham Cash, then send the receipt photo or PDF here.",
                 ));
             });
@@ -710,7 +750,7 @@ class HandleWhatsAppInbound
             $ref = explode(':', $data, 2)[1] ?? '';
             $this->runOwned($client, $ref, function (ServiceRequest $request) use ($chatId, $reason): void {
                 $this->rejectQuotation->handle($request, $reason);
-                $this->sendMenu($chatId, $this->tx('تم رفض العرض. يمكن للفريق إرسال عرض جديد.', 'The quotation was rejected. The team can send a new one.'));
+                $this->sendMenu($chatId, $this->tx('تمام، رفضنا العرض. إذا بدك منرجعلك بعرض جديد.', 'The quotation was rejected. The team can send a new one.'));
             });
             $session['step'] = 'idle';
             unset($session['quote_ref'], $session['reject_ref']);
@@ -722,7 +762,7 @@ class HandleWhatsAppInbound
             $session['step'] = 'reject_reason';
             $session['reject_ref'] = explode(':', $data, 2)[1] ?? '';
             $this->putSession($phone, $session);
-            $this->safeSend($chatId, $this->tx('اكتب سبب الرفض.', 'Write the reason for rejecting it.'));
+            $this->safeSend($chatId, $this->tx('إذا بدك سبب اكتبه، أو ابعت «تخطي».', 'Write a reason if you want, or send “skip”.'));
 
             return;
         }
@@ -742,7 +782,7 @@ class HandleWhatsAppInbound
             $session['revision_ref'] = $requestRef;
             $session['revision_delivery_id'] = $deliveryId;
             $this->putSession($phone, $session);
-            $this->safeSend($chatId, $this->tx('ما هي التعديلات المطلوبة', 'What changes do you need?'));
+            $this->safeSend($chatId, $this->tx('إذا بدك تحكي شو التعديل اكتبه، أو ابعت «تخطي».', 'Write the change if you want, or send “skip”.'));
 
             return;
         }
@@ -750,7 +790,7 @@ class HandleWhatsAppInbound
             $this->runOwned($client, substr($data, 9), function (ServiceRequest $request) use ($chatId): void {
                 abort_unless($request->status === RequestStatus::ReadyForReview, 422, 'Only ready-for-review requests can be completed.');
                 $this->completeRequest->handle($request, 'client');
-                $this->sendMenu($chatId, $this->tx('تم اعتماد التسليم. شكراً لك.', 'The delivery is accepted. Thank you.'));
+                $this->sendMenu($chatId, $this->tx('تمام، اعتمدنا التسليم. يعطيك العافية.', 'The delivery is accepted. Thank you.'));
             });
 
             return;
@@ -759,14 +799,14 @@ class HandleWhatsAppInbound
             $session['step'] = 'receipt';
             $session['receipt_ref'] = substr($data, 13);
             $this->putSession($phone, $session);
-            $this->safeSend($chatId, $this->tx('أرسل وصل الدفع كصورة أو PDF.', 'Send the payment receipt as a photo or PDF.'));
+            $this->safeSend($chatId, $this->tx('ابعت وصل الدفع صورة أو PDF.', 'Send the payment receipt as a photo or PDF.'));
 
             return;
         }
         if (str_starts_with($data, 'renew:')) {
             $this->runOwned($client, substr($data, 6), function (ServiceRequest $request) use ($chatId): void {
                 $this->renewSubscription->handle($request);
-                $this->safeSend($chatId, $this->tx('تجديد الاشتراك. أُرسل ملف الفاتورة بالمبلغ المتفق عليه.', 'Subscription renewal. The invoice file was sent with the agreed amount.'));
+                $this->safeSend($chatId, $this->tx('منبعتلك فاتورة التجديد بالمبلغ المتفق عليه.', 'The renewal invoice is on its way, with the agreed amount.'));
             });
 
             return;
@@ -774,7 +814,7 @@ class HandleWhatsAppInbound
         if (str_starts_with($data, 'norenew:')) {
             $this->runOwned($client, substr($data, 8), function (ServiceRequest $request) use ($chatId): void {
                 $this->declineRenewal->handle($request);
-                $this->sendMenu($chatId, $this->tx('تم تسجيل أنك لن تجدّد الآن.', 'Recorded: you will not renew now.'));
+                $this->sendMenu($chatId, $this->tx('تمام، ما رح نجدد هلق.', 'Recorded: you will not renew now.'));
             });
 
             return;
@@ -787,7 +827,7 @@ class HandleWhatsAppInbound
                     EmployeeProfession::Sales,
                     "✅ أكد الزبون اهتمامه بالطلب\n#{$displayNumber} — {$request->title}\n{$request->client?->name}",
                 );
-                $this->safeSend($chatId, $this->tx('تم إبلاغ الفريق باهتمامك.', 'The team was told you are interested.'));
+                $this->safeSend($chatId, $this->tx('تمام، خبرنا الفريق إنك مهتم.', 'The team was told you are interested.'));
             });
 
             return;
@@ -806,7 +846,7 @@ class HandleWhatsAppInbound
                     EmployeeProfession::Sales,
                     "❌ ألغى الزبون الطلب\n#{$displayNumber} — {$fresh->title}\n{$fresh->client?->name}",
                 );
-                $this->sendMenu($chatId, $this->tx('تم إلغاء الطلب.', 'The request was cancelled.'));
+                $this->sendMenu($chatId, $this->tx('تمام، لغينا الطلب.', 'The request was cancelled.'));
             });
         }
     }
@@ -864,7 +904,7 @@ class HandleWhatsAppInbound
             $rows[] = [['text' => $this->tx('طلب يدوي', 'Manual request'), 'callback_data' => 'cman']];
             $this->telegram->sendInlineKeyboard(
                 $chatId,
-                $this->tx('اختر مدة الاشتراك لـ ', 'Choose the subscription length for ').((string) ($first['name'] ?? '')).':',
+                $this->tx('قديش مدة الاشتراك لـ ', 'Choose the subscription length for ').((string) ($first['name'] ?? '')).':',
                 $rows,
             );
 
@@ -903,12 +943,12 @@ class HandleWhatsAppInbound
         $rows[] = [['text' => $this->tx('السابق', 'Back'), 'callback_data' => 'back']];
         $rows[] = [['text' => $this->tx('طلب يدوي', 'Manual request'), 'callback_data' => 'cman']];
 
-        $title = $this->tx('اختر الفئة:', 'Choose a category:');
+        $title = $this->tx('اختار القسم:', 'Choose a category:');
         if ($categoryId) {
-            $title = $this->tx('اختر الفئة الفرعية أو الباقة:', 'Choose a subcategory or a package:');
+            $title = $this->tx('اختار النوع أو الباقة:', 'Choose a subcategory or a package:');
         }
         if ($subcategoryId) {
-            $title = $this->tx('اختر الباقة:', 'Choose a package:');
+            $title = $this->tx('اختار الباقة:', 'Choose a package:');
         }
 
         $this->telegram->sendInlineKeyboard($chatId, $title, $rows);
@@ -952,7 +992,7 @@ class HandleWhatsAppInbound
 
         $this->resetCompose($session);
         $this->putSession($phone, $session);
-        $this->sendMenu($chatId, $this->tx('تم الرجوع للقائمة الرئيسية.', 'Back to the main menu.'));
+        $this->sendMenu($chatId, $this->tx('رجعنالك عالقائمة.', 'Back to the main menu.'));
     }
 
     /**
@@ -962,7 +1002,7 @@ class HandleWhatsAppInbound
     {
         abort_unless($client->profileComplete(), 422, 'Complete your name, phone, and company first.');
         $this->safeSend($chatId, $this->tx(
-            "جاري إنشاء طلبك وانتظار عرض السعر…\nيرجى الانتظار لحظات، لا تغلق المحادثة.",
+            "عم نجهز طلبك والعرض.\nاستنى شوي وما تسكر المحادثة.",
             "Creating your request and waiting for the quotation…\nPlease wait a moment and keep this chat open.",
         ));
 
@@ -983,7 +1023,7 @@ class HandleWhatsAppInbound
         $session['step'] = 'idle';
         $this->putSession($phone, $session);
         $this->sendMenu($chatId, $this->tx(
-            "تم إنشاء الطلب #{$number}.\nالحالة: {$label}.\nإذا لم يصلك عرض السعر خلال لحظات، افتح طلباتي.",
+            "فتحنا الطلب #{$number}.\nالحالة: {$label}.\nإذا ما وصلك العرض بهاللحظة، افتح طلباتي.",
             "Request #{$number} was created.\nStatus: {$label}.\nIf the quotation does not arrive in a moment, open My requests.",
         ));
     }
@@ -997,14 +1037,14 @@ class HandleWhatsAppInbound
             ->reject(fn (ServiceRequest $item) => $item->hiddenFromClient());
 
         if ($items->isEmpty()) {
-            $this->sendMenu($chatId, $this->tx('لا توجد طلبات بعد.', 'There are no requests yet.'));
+            $this->sendMenu($chatId, $this->tx('لسا ما في طلبات.', 'There are no requests yet.'));
 
             return;
         }
 
         $pageSize = 9;
         $shown = $items->slice($offset, $pageSize);
-        $lines = [$this->tx('أرسل رقم الطلب لفتحه أو تعديله:', 'Reply with the request number to open or edit it:')];
+        $lines = [$this->tx('ابعت رقم الطلب لحتى نفتحه:', 'Reply with the request number to open or edit it:')];
         $rows = [];
         foreach ($shown as $item) {
             $label = StatusLabel::request($item->status->value, $this->replyLang);
@@ -1037,7 +1077,7 @@ class HandleWhatsAppInbound
             $session['step'] = 'idle';
             unset($session['hours_numbers']);
             $this->putSession($phone, $session);
-            $this->sendMenu($chatId, $this->tx('لا توجد طلبات بعد.', 'There are no requests yet.'));
+            $this->sendMenu($chatId, $this->tx('لسا ما في طلبات.', 'There are no requests yet.'));
 
             return;
         }
@@ -1092,7 +1132,7 @@ class HandleWhatsAppInbound
             return;
         }
 
-        $this->safeSend($chatId, $this->tx('أرسل رقم الطلب من القائمة.', 'Reply with the request number from the list.'));
+        $this->safeSend($chatId, $this->tx('ابعت رقم الطلب من القائمة.', 'Reply with the request number from the list.'));
     }
 
     /**
@@ -1105,7 +1145,7 @@ class HandleWhatsAppInbound
         unset($session['hours_numbers']);
         $this->putSession($phone, $session);
         if ($item === null || $item->hiddenFromClient()) {
-            $this->sendMenu($chatId, $this->tx('لا يوجد طلب بهذا الرقم.', 'There is no request with that number.'));
+            $this->sendMenu($chatId, $this->tx('ما لقيت طلب بهاد الرقم.', 'There is no request with that number.'));
 
             return;
         }
@@ -1180,7 +1220,7 @@ class HandleWhatsAppInbound
     {
         $item = $client->requests()->where('number', $number)->first();
         if ($item === null || $item->hiddenFromClient()) {
-            $this->sendMenu($chatId, $this->tx('لا يوجد طلب بهذا الرقم.', 'There is no request with that number.'));
+            $this->sendMenu($chatId, $this->tx('ما لقيت طلب بهاد الرقم.', 'There is no request with that number.'));
 
             return;
         }
@@ -1219,7 +1259,7 @@ class HandleWhatsAppInbound
             $rows[] = [['text' => $this->tx('اعتماد التسليم', 'Accept delivery'), 'callback_data' => 'complete:'.$ref]];
         }
         if ($item->receipt_reupload_required || $item->acceptsReceiptUpload()) {
-            $lines[] = $this->tx('أرسل وصل الدفع كصورة أو PDF', 'Send the payment receipt as a photo or PDF');
+            $lines[] = $this->tx('ابعت وصل الدفع صورة أو PDF', 'Send the payment receipt as a photo or PDF');
             $rows[] = [['text' => $this->tx('رفع وصل الدفع', 'Upload receipt'), 'callback_data' => 'receipt_hint:'.$ref]];
         }
         if ($item->canRenew()) {
@@ -1265,7 +1305,7 @@ class HandleWhatsAppInbound
     {
         $item = $client->requests()->where('number', $number)->first();
         if ($item === null || ! $item->status->allowsClientEdit()) {
-            $this->sendMenu($chatId, $this->tx('هذا الطلب لم يعد قابلاً لتعديل البيانات.', 'This request can no longer be edited.'));
+            $this->sendMenu($chatId, $this->tx('ما عاد فينا نعدل بيانات هاد الطلب.', 'This request can no longer be edited.'));
 
             return;
         }
@@ -1285,14 +1325,14 @@ class HandleWhatsAppInbound
     {
         $title = trim($text);
         if ($title === '' || mb_strlen($title) > 255) {
-            $this->safeSend($chatId, $this->tx('أرسل عنواناً واضحاً، حتى 255 حرفاً.', 'Send a clear title, up to 255 characters.'));
+            $this->safeSend($chatId, $this->tx('اكتب عنوان أوضح، وبسطر واحد.', 'Send a clear title, up to 255 characters.'));
 
             return;
         }
         $session['edit_title'] = $title;
         $session['step'] = 'edit_body';
         $this->putSession($phone, $session);
-        $this->safeSend($chatId, $this->tx('أرسل الوصف الجديد في جملة واضحة.', 'Send the new description in one clear sentence.'));
+        $this->safeSend($chatId, $this->tx('اكتب الوصف الجديد بجملة واضحة.', 'Send the new description in one clear sentence.'));
     }
 
     /**
@@ -1302,7 +1342,7 @@ class HandleWhatsAppInbound
     {
         $description = trim($text);
         if (mb_strlen($description) < 15) {
-            $this->safeSend($chatId, $this->tx('أرسل جملة أوضح تصف التعديل.', 'Send one clearer sentence describing the change.'));
+            $this->safeSend($chatId, $this->tx('اكتب جملة أوضح عن التعديل.', 'Send one clearer sentence describing the change.'));
 
             return;
         }
@@ -1311,7 +1351,7 @@ class HandleWhatsAppInbound
             $session['step'] = 'idle';
             unset($session['edit_number'], $session['edit_title']);
             $this->putSession($phone, $session);
-            $this->sendMenu($chatId, $this->tx('هذا الطلب لم يعد قابلاً لتعديل البيانات.', 'This request can no longer be edited.'));
+            $this->sendMenu($chatId, $this->tx('ما عاد فينا نعدل بيانات هاد الطلب.', 'This request can no longer be edited.'));
 
             return;
         }
@@ -1463,7 +1503,7 @@ class HandleWhatsAppInbound
             return true;
         }
         if ($intent === 'help') {
-            $this->sendMenu($chatId, $this->tx('رقم الدعم: ', 'Support: ').self::SUPPORT_PHONE);
+            $this->sendMenu($chatId, $this->tx('احكي معنا عالرقم: ', 'Call us: ').self::SUPPORT_PHONE);
 
             return true;
         }
@@ -1524,7 +1564,7 @@ class HandleWhatsAppInbound
     {
         $value = trim((string) $text);
         if ($value === '') {
-            $this->safeSend($chatId, $this->tx('ما عنوان الطلب؟', 'What is the request title?'));
+            $this->safeSend($chatId, $this->tx('شو عنوان الطلب؟', 'What is the request title?'));
 
             return;
         }
@@ -1536,7 +1576,7 @@ class HandleWhatsAppInbound
         $this->telegram->sendInlineKeyboard(
             $chatId,
             $this->tx(
-                "صف المطلوب.\nيمكنك إرسال نصاً أو صوراً أو ملفات (JPG, PNG, PDF).\nعند الانتهاء أرسل «تم الإرسال».",
+                "احكيلنا شو بدك.\nفيك تبعت نص أو صور أو ملفات (JPG, PNG, PDF).\nلما تخلص اكتب «تم الإرسال».",
                 "Describe what you need.\nYou can send text, photos, or files (JPG, PNG, PDF).\nWhen you finish, send “done”.",
             ),
             [[['text' => $this->tx('السابق', 'Back'), 'callback_data' => 'back']]],
@@ -1568,7 +1608,7 @@ class HandleWhatsAppInbound
             $this->putSession($phone, $session);
             $count = count($attachments);
             $this->safeSend($chatId, $this->tx(
-                'تم حفظ المرفق ('.$count.'/5). أرسل وصفاً أو اضغط تم الإرسال.',
+                'وصل المرفق ('.$count.'/5). اكتب الوصف أو ابعت «تم الإرسال».',
                 'Attachment saved ('.$count.'/5). Send a description or reply “done”.',
             ));
 
@@ -1579,7 +1619,7 @@ class HandleWhatsAppInbound
             $session['description'] = $trimmed;
             $this->putSession($phone, $session);
             $this->safeSend($chatId, $this->tx(
-                'تم حفظ الوصف. أرسل مرفقات إن وجدت، ثم أرسل «تم الإرسال».',
+                'سجلنا الوصف. إذا في ملفات ابعتها، وبعدين اكتب «تم الإرسال».',
                 'Description saved. Send attachments if you have any, then reply “done”.',
             ));
         }
@@ -1614,7 +1654,7 @@ class HandleWhatsAppInbound
         $fresh = $serviceRequest->fresh() ?? $serviceRequest;
         $manualLabel = $this->statusText($fresh->status);
         $this->sendMenu($chatId, $this->tx(
-            "تم إنشاء الطلب #{$fresh->number}.\nالحالة: {$manualLabel}.",
+            "فتحنا الطلب #{$fresh->number}.\nالحالة: {$manualLabel}.",
             "Request #{$fresh->number} was created.\nStatus: {$manualLabel}.",
         ));
     }
@@ -1626,13 +1666,16 @@ class HandleWhatsAppInbound
     {
         $reason = trim((string) $text);
         if ($reason === '') {
-            $this->safeSend($chatId, $this->tx('اكتب سبب الرفض.', 'Write the reason for rejecting it.'));
+            $this->safeSend($chatId, $this->tx('إذا بدك سبب اكتبه، أو ابعت «تخطي».', 'Write a reason if you want, or send “skip”.'));
 
             return;
         }
+        if ($this->feedbackSkipped($reason)) {
+            $reason = '';
+        }
         $this->runOwned($client, (string) ($session['reject_ref'] ?? ''), function (ServiceRequest $request) use ($chatId, $reason): void {
             $this->rejectQuotation->handle($request, $reason);
-            $this->sendMenu($chatId, $this->tx('تم رفض العرض.', 'The quotation was rejected.'));
+            $this->sendMenu($chatId, $this->tx('تمام، رفضنا العرض.', 'The quotation was rejected.'));
         });
         $session['step'] = 'idle';
         unset($session['reject_ref']);
@@ -1646,9 +1689,12 @@ class HandleWhatsAppInbound
     {
         $reason = trim((string) $text);
         if ($reason === '') {
-            $this->safeSend($chatId, $this->tx('ما هي التعديلات المطلوبة', 'What changes do you need?'));
+            $this->safeSend($chatId, $this->tx('إذا بدك تحكي شو التعديل اكتبه، أو ابعت «تخطي».', 'Write the change if you want, or send “skip”.'));
 
             return;
+        }
+        if ($this->feedbackSkipped($reason)) {
+            $reason = '';
         }
         $this->runOwned($client, (string) ($session['revision_ref'] ?? ''), function (ServiceRequest $request) use ($session, $chatId, $reason): void {
             $delivery = null;
@@ -1659,7 +1705,7 @@ class HandleWhatsAppInbound
                     ->first();
             }
             $this->requestRevision->handle($request, $reason, $delivery);
-            $this->sendMenu($chatId, $this->tx('تم إرسال طلب التعديل للفريق.', 'The revision request was sent to the team.'));
+            $this->sendMenu($chatId, $this->tx('وصلنا التعديل، ومنشتغل عليه.', 'The revision request was sent to the team.'));
         });
         $session['step'] = 'idle';
         unset($session['revision_ref'], $session['revision_delivery_id']);
@@ -1705,7 +1751,7 @@ class HandleWhatsAppInbound
                 "📎 رفع الزبون وصل دفع\n#{$displayNumber} — {$request->title}\n{$request->client?->name}",
             );
             $this->provisionSalesClickUpTask->appendReceipt($request, $receiptFile);
-            $this->sendMenu($chatId, $this->tx('تم استلام وصل الدفع. سيراجعه الفريق.', 'The payment receipt was received. The team will review it.'));
+            $this->sendMenu($chatId, $this->tx('وصلنا وصل الدفع، ومنراجعه.', 'The payment receipt was received. The team will review it.'));
         });
         $session['step'] = 'idle';
         unset($session['receipt_ref']);
@@ -1726,7 +1772,7 @@ class HandleWhatsAppInbound
                 ->where('request_id', $request->id)
                 ->firstOrFail();
             $this->approveDriveDelivery->handle($request, $delivery);
-            $this->safeSend($chatId, $this->tx('تم تسجيل موافقتك على الملف.', 'Your approval of the file is recorded.'));
+            $this->safeSend($chatId, $this->tx('تمام، وافقت عالملف.', 'Your approval of the file is recorded.'));
         });
     }
 
@@ -1907,7 +1953,7 @@ class HandleWhatsAppInbound
             ->values();
         if ($items->isEmpty()) {
             $this->sendMenu($chatId, $this->tx(
-                'التجديد يفتح خلال آخر 8 أيام من الاشتراك.',
+                'التجديد بيصير بآخر 8 أيام من الاشتراك.',
                 'Renewal opens during the last 8 days of the subscription.',
             ));
 
@@ -1916,8 +1962,8 @@ class HandleWhatsAppInbound
         if ($items->count() === 1) {
             $this->renewSubscription->handle($items->first());
             $this->safeSend($chatId, $this->tx(
-                'تجديد الاشتراك. أُرسل ملف الفاتورة بالمبلغ المتفق عليه.',
-                'Subscription renewal. The invoice file was sent with the agreed amount.',
+                'منبعتلك فاتورة التجديد بالمبلغ المتفق عليه.',
+                'The renewal invoice is on its way, with the agreed amount.',
             ));
 
             return;
@@ -1926,7 +1972,7 @@ class HandleWhatsAppInbound
         foreach ($items as $item) {
             $rows[] = [['text' => '#'.$item->number, 'callback_data' => 'renew:'.$item->number]];
         }
-        $this->telegram->sendInlineKeyboard($chatId, $this->tx('أي اشتراك تجدّد؟', 'Which subscription should be renewed?'), $rows);
+        $this->telegram->sendInlineKeyboard($chatId, $this->tx('أي اشتراك بدك تجدده؟', 'Which subscription should be renewed?'), $rows);
     }
 
     private function declineRenewalFromChat(Client $client, string $chatId): void
@@ -1935,13 +1981,13 @@ class HandleWhatsAppInbound
             ->filter(fn (ServiceRequest $item): bool => $item->canRenew() && ! $item->hiddenFromClient())
             ->values();
         if ($items->isEmpty()) {
-            $this->sendMenu($chatId, $this->tx('لا يوجد اشتراك بانتظار التجديد.', 'No subscription is waiting for renewal.'));
+            $this->sendMenu($chatId, $this->tx('ما في اشتراك جاهز للتجديد هلق.', 'No subscription is waiting for renewal.'));
 
             return;
         }
         if ($items->count() === 1) {
             $this->declineRenewal->handle($items->first());
-            $this->sendMenu($chatId, $this->tx('تم تسجيل أنك لن تجدّد الآن.', 'Recorded: you will not renew now.'));
+            $this->sendMenu($chatId, $this->tx('تمام، ما رح نجدد هلق.', 'Recorded: you will not renew now.'));
 
             return;
         }
@@ -1949,7 +1995,7 @@ class HandleWhatsAppInbound
         foreach ($items as $item) {
             $rows[] = [['text' => '#'.$item->number, 'callback_data' => 'norenew:'.$item->number]];
         }
-        $this->telegram->sendInlineKeyboard($chatId, $this->tx('أي اشتراك لن تجدّده؟', 'Which subscription will you not renew?'), $rows);
+        $this->telegram->sendInlineKeyboard($chatId, $this->tx('أي اشتراك ما بدك تجدده؟', 'Which subscription will you not renew?'), $rows);
     }
 
     /**
@@ -1960,8 +2006,8 @@ class HandleWhatsAppInbound
         $request = $this->photographyRequest($client);
         if ($request === null) {
             $this->sendMenu($chatId, $this->tx(
-                'موعد التصوير متاح ضمن باقة الاشتراك التي تشمل التصوير.',
-                'A photography time is available on a subscription package that includes photography.',
+                'حجز التصوير للباقات يلي فيها تصوير واشتراكها شغال.',
+                'Photography booking is for an active package that includes photography.',
             ));
 
             return;
@@ -1973,33 +2019,66 @@ class HandleWhatsAppInbound
         $left = $this->shootAllowance($request) - $used;
         if ($left < 1) {
             $this->sendMenu($chatId, $this->tx(
-                'خلصت مواعيد التصوير ضمن باقتك.',
+                'خلصت مواعيد التصوير بباقتك.',
                 'The photography times in your package are used.',
             ));
 
             return;
         }
-        $slots = array_slice(app(BookPhotographySlot::class)->freeSlots(), 0, 6);
-        if ($slots === []) {
-            $this->sendMenu($chatId, $this->tx('لا يوجد وقت تصوير متاح الآن.', 'No photography time is free right now.'));
+        $days = app(BookPhotographySlot::class)->bookableDays();
+        if ($days === []) {
+            $this->sendMenu($chatId, $this->tx('ما في يوم فاضي للتصوير هالفترة.', 'No photography day is free right now.'));
 
             return;
         }
         $name = $request->pricingPackage?->name_ar ?: $request->title;
+        $word = $left === 1 ? 'موعد' : 'مواعيد';
         $lines = [$this->tx(
-            "باقة {$name}: متبقي {$left} ".($left === 1 ? 'موعد' : 'مواعيد').".\nاختر رقماً:",
-            "Package {$name}: {$left} photography ".($left === 1 ? 'time' : 'times')." left.\nReply with a number:",
+            "باقة {$name}: باقيلك {$left} {$word}.\nاختار اليوم:",
+            "Package {$name}: {$left} photography ".($left === 1 ? 'time' : 'times')." left.\nPick a day:",
         )];
+        $rows = [];
+        foreach ($days as $index => $day) {
+            $lines[] = ($index + 1).'. '.$day['label'];
+            $rows[] = [['text' => $day['label'], 'callback_data' => 'photo_day:'.$index]];
+        }
+        $session['step'] = 'photo_day';
+        $session['photo_request'] = $request->number;
+        $session['photo_days'] = array_column($days, 'date');
+        unset($session['photo_slots']);
+        $this->putSession($phone, $session);
+        $this->telegram->sendInlineKeyboard($chatId, implode("\n", $lines), $rows);
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function pickPhotoDay(Client $client, string $chatId, string $phone, array &$session, int $choice): void
+    {
+        $days = is_array($session['photo_days'] ?? null) ? array_values($session['photo_days']) : [];
+        $date = $days[$choice - 1] ?? null;
+        if (! is_string($date)) {
+            $this->offerPhotography($client, $chatId, $phone, $session);
+
+            return;
+        }
+        $slots = app(BookPhotographySlot::class)->timesOn(\Illuminate\Support\Carbon::parse($date, 'Asia/Damascus'));
+        if ($slots === []) {
+            $this->safeSend($chatId, $this->tx('هاد اليوم مليان، اختار يوم تاني.', 'That day is full. Pick another day.'));
+            $this->offerPhotography($client, $chatId, $phone, $session);
+
+            return;
+        }
+        $lines = [$this->tx('اختار الوقت:', 'Pick a time:')];
         $rows = [];
         foreach ($slots as $index => $slot) {
             $lines[] = ($index + 1).'. '.$slot['label'];
-            $rows[] = [['text' => (string) ($index + 1), 'callback_data' => 'ph:'.$index]];
+            $rows[] = [['text' => $slot['label'], 'callback_data' => 'photo_time:'.$index]];
         }
-        $session['step'] = 'photo_pick';
-        $session['photo_request'] = $request->number;
+        $session['step'] = 'photo_time';
         $session['photo_slots'] = array_column($slots, 'starts_at');
         $this->putSession($phone, $session);
-        $this->telegram->sendInlineKeyboard($chatId, implode("\n", $lines), $rows);
+        $this->telegram->sendInlineKeyboard($chatId, implode("\n", $lines), array_slice($rows, 0, 10));
     }
 
     /**
@@ -2021,7 +2100,7 @@ class HandleWhatsAppInbound
             $booking = app(BookPhotographySlot::class)->hold($request, $startsAt);
             $reply = app(BookPhotographySlot::class)->clientMessage($booking);
         } catch (ValidationException $exception) {
-            $reply = collect($exception->errors())->flatten()->first() ?: $this->tx('تعذر حجز هذا الوقت.', 'That time could not be booked.');
+            $reply = collect($exception->errors())->flatten()->first() ?: $this->tx('ما قدرنا نحجز هاد الوقت.', 'That time could not be booked.');
         }
         $session['step'] = 'idle';
         unset($session['photo_request'], $session['photo_slots']);
@@ -2091,13 +2170,15 @@ class HandleWhatsAppInbound
 
     private function sendMenu(string $chatId, string $text): void
     {
-        $this->telegram->sendInlineKeyboard($chatId, $text, [[
-            ['text' => $this->tx('طلب جديد', 'New request'), 'callback_data' => 'menu:new'],
-            ['text' => $this->tx('طلباتي', 'My requests'), 'callback_data' => 'menu:mine'],
-            ['text' => $this->tx('بياناتي', 'My details'), 'callback_data' => 'menu:profile'],
-            ['text' => $this->tx('استفسار', 'Inquiry'), 'callback_data' => 'menu:ask'],
-            ['text' => $this->tx('الدعم', 'Support'), 'callback_data' => 'menu:help'],
-        ]]);
+        $this->telegram->sendInlineKeyboard($chatId, $text, [
+            [['text' => $this->tx('طلب جديد', 'New request'), 'callback_data' => 'menu:new']],
+            [['text' => $this->tx('طلباتي', 'My requests'), 'callback_data' => 'menu:mine']],
+            [['text' => $this->tx('حجز تصوير', 'Photo booking'), 'callback_data' => 'menu:photo']],
+            [['text' => $this->tx('تجديد الاشتراك', 'Renew subscription'), 'callback_data' => 'menu:renew']],
+            [['text' => $this->tx('بياناتي', 'My details'), 'callback_data' => 'menu:profile']],
+            [['text' => $this->tx('استفسار', 'Inquiry'), 'callback_data' => 'menu:ask']],
+            [['text' => $this->tx('الدعم', 'Support'), 'callback_data' => 'menu:help']],
+        ]);
     }
 
     /**
@@ -2157,7 +2238,7 @@ class HandleWhatsAppInbound
         $this->telegram->sendInlineKeyboard(
             $chatId,
             $this->tx(
-                "بياناتك:\nالاسم: {$client->name}\nالهاتف: {$client->phone}\nالشركة: {$client->company_name}\nاختر الحقل الذي تريد تعديله.",
+                "بياناتك:\nالاسم: {$client->name}\nالهاتف: {$client->phone}\nالشركة: {$client->company_name}\nأي حقل بدك تعدله؟",
                 "Your details:\nName: {$client->name}\nPhone: {$client->phone}\nCompany: {$client->company_name}\nChoose the field to change.",
             ),
             [
@@ -2177,7 +2258,7 @@ class HandleWhatsAppInbound
         $field = (string) ($session['profile_field'] ?? '');
         $value = trim((string) $text);
         if ($value === '' || ClientProfileValue::isKeyboardLabel($value) || ! in_array($field, ['name', 'phone', 'company_name'], true)) {
-            $this->safeSend($chatId, $this->tx('أرسل القيمة الجديدة كتابة.', 'Type the new value.'));
+            $this->safeSend($chatId, $this->tx('اكتب القيمة الجديدة.', 'Type the new value.'));
 
             return;
         }
@@ -2189,9 +2270,9 @@ class HandleWhatsAppInbound
         };
         if ($stored === null) {
             $hint = match ($field) {
-                'name' => $this->tx('أرسل اسمك الكامل، وليس رقماً أو زر قائمة.', 'Send your full name, not a number or a menu button.'),
-                'phone' => $this->tx('أرسل رقم هاتف صالح.', 'Send a valid phone number.'),
-                default => $this->tx('أرسل اسم الشركة الحقيقي.', 'Send the real company name.'),
+                'name' => $this->tx('اكتب اسمك، مو رقم ولا خيار من القائمة.', 'Send your full name, not a number or a menu button.'),
+                'phone' => $this->tx('الرقم مو واضح، ابعت رقم الموبايل.', 'Send a valid phone number.'),
+                default => $this->tx('اكتب اسم الشركة أو المحل.', 'Send the real company name.'),
             };
             $this->safeSend($chatId, $hint);
 
@@ -2201,7 +2282,7 @@ class HandleWhatsAppInbound
         $client->forceFill([$field => $stored])->save();
         $fresh = $client->fresh() ?? $client;
         $this->pushCompletedClientToOdoo($fresh);
-        $this->safeSend($chatId, $this->tx('تم تحديث بياناتك.', 'Your details were updated.'));
+        $this->safeSend($chatId, $this->tx('تمام، حدّثنا بياناتك.', 'Your details were updated.'));
         if (filled($session['quote_ref'] ?? null)) {
             $this->safeSend($chatId, $this->tx(
                 "بياناتك:\nالاسم: {$fresh->name}\nالهاتف: {$fresh->phone}\nالشركة: {$fresh->company_name}",
@@ -2280,7 +2361,7 @@ class HandleWhatsAppInbound
     {
         $ref = (string) ($session['quote_ref'] ?? '');
         if ($ref === '') {
-            $this->sendMenu($chatId, $this->tx('لا يوجد عرض بانتظار قرارك. افتح طلباتي.', 'No quotation is waiting for a decision. Open My requests.'));
+            $this->sendMenu($chatId, $this->tx('ما في عرض ناطر قرارك. افتح طلباتي.', 'No quotation is waiting for a decision. Open My requests.'));
 
             return;
         }
@@ -2590,6 +2671,13 @@ class HandleWhatsAppInbound
         if ($client->locale !== $detected) {
             $client->forceFill(['locale' => $detected])->save();
         }
+    }
+
+    private function feedbackSkipped(string $text): bool
+    {
+        $value = mb_strtolower(trim($text));
+
+        return in_array($value, ['تخطي', 'تخطى', 'skip', '-', 'لا', 'بدون'], true);
     }
 
     private function tx(string $arabic, string $english): string

@@ -1,6 +1,6 @@
 # Laravel API
 
-Last updated: 8 October 2026 (`GET`/`PUT /admin/ops-settings/work-calendar` stores `whatsapp_open` and `whatsapp_close`. Default 21:00–09:00 Asia/Damascus, and a close earlier than the open crosses midnight. The night starts on a Saturday–Thursday work day and continues until the morning close. Inbound WhatsApp outside that window gets one closed-hours reply and does not continue the chat. Staff document sends are not gated.)
+Last updated: 10 October 2026 (Quotation email uses the `reports` mailer. `REPORT_MAIL_PASSWORD` must be single-quoted in `.env` when it contains `#` or `$`, or it is not loaded and the message stays in the log. A product line copies Odoo `description_sale` under the product name in the quotation PDF.)
 
 Previous: 8 October 2026 (`GET /admin/odoo/products` lists Odoo products with `sale_ok`. Quotation and invoice `deliver` is `email`, `whatsapp`, or `both`. WhatsApp uses the linked WhatsApp Web session. An invoice copied from a quotation does not confirm that quotation into a sales order.)
 

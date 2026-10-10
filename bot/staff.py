@@ -259,7 +259,10 @@ async def capture_quote_amount(update: Update, context: ContextTypes.DEFAULT_TYP
         return WAITING_QUOTE_AMOUNT
 
     context.user_data["quote_amount"] = amount
-    await update.message.reply_text("ملاحظات العرض (اختياري). اكتب «-» للتخطي.")
+    await update.message.reply_text(
+        "إذا بدك ملاحظة اكتبها.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("تخطي", callback_data="qskip")]]),
+    )
     return WAITING_QUOTE_NOTES
 
 
@@ -291,11 +294,24 @@ async def capture_quote_notes(update: Update, context: ContextTypes.DEFAULT_TYPE
         return ConversationHandler.END
 
     notes = update.message.text.strip()
-    if notes == "-":
+    if notes in {"-", "تخطي", "تخطى"}:
         notes = ""
 
+    return await send_quote_preview(update.message, context, notes, user.id)
+
+
+async def skip_quote_notes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    user = update.effective_user
+    if query is None or query.message is None or user is None:
+        return ConversationHandler.END
+    await query.answer()
+    return await send_quote_preview(query.message, context, "", user.id)
+
+
+async def send_quote_preview(message, context: ContextTypes.DEFAULT_TYPE, notes: str, user_id: int) -> int:
     payload = {
-        "telegram_user_id": str(user.id),
+        "telegram_user_id": str(user_id),
         "request_number": context.user_data.get("quote_request"),
         "amount": context.user_data.get("quote_amount"),
         "notes": notes or None,
@@ -308,9 +324,9 @@ async def capture_quote_notes(update: Update, context: ContextTypes.DEFAULT_TYPE
             json=payload,
         )
     if response.status_code >= 400:
-        await update.message.reply_text(
+        await message.reply_text(
             f"تعذر تجهيز المعاينة: {escape(staff_api_error(response))}",
-            reply_markup=staff_keyboard(await lookup_employee(user.id)),
+            reply_markup=staff_keyboard(await lookup_employee(user_id)),
         )
         return ConversationHandler.END
 
@@ -321,9 +337,9 @@ async def capture_quote_notes(update: Update, context: ContextTypes.DEFAULT_TYPE
     if encoded:
         buffer = BytesIO(base64.b64decode(encoded))
         buffer.name = str(data.get("file_name") or "quotation.pdf")
-        await update.message.reply_document(document=buffer, caption=card[:1024], reply_markup=quote_confirm_markup(token))
+        await message.reply_document(document=buffer, caption=card[:1024], reply_markup=quote_confirm_markup(token))
     else:
-        await update.message.reply_text(card, reply_markup=quote_confirm_markup(token))
+        await message.reply_text(card, reply_markup=quote_confirm_markup(token))
     return WAITING_QUOTE_CONFIRM
 
 
@@ -1062,7 +1078,10 @@ def main() -> None:
             states={
                 WAITING_QUOTE_PICK: [CallbackQueryHandler(on_select_quote_request, pattern=r"^qsel:")],
                 WAITING_QUOTE_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, capture_quote_amount)],
-                WAITING_QUOTE_NOTES: [MessageHandler(filters.TEXT & ~filters.COMMAND, capture_quote_notes)],
+                WAITING_QUOTE_NOTES: [
+                    CallbackQueryHandler(skip_quote_notes, pattern=r"^qskip$"),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, capture_quote_notes),
+                ],
                 WAITING_QUOTE_CONFIRM: [
                     CallbackQueryHandler(on_quote_confirm, pattern=r"^qsend:"),
                     CallbackQueryHandler(on_quote_edit, pattern=r"^qedit:"),

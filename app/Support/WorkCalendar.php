@@ -16,6 +16,10 @@ class WorkCalendar
 
     public const WHATSAPP_CLOSE_KEY = 'whatsapp_bot_close';
 
+    public const TEAM_OPEN_KEY = 'team_work_open';
+
+    public const TEAM_CLOSE_KEY = 'team_work_close';
+
     public const DAY_START_HOUR = 9;
 
     /** @return list<int> */
@@ -34,11 +38,9 @@ class WorkCalendar
     public function holidaySummary(): string
     {
         $dates = $this->holidays();
-        $list = $dates === []
-            ? 'لا توجد عطل إضافية محفوظة.'
-            : 'العطل المحفوظة: '.implode('، ', $dates).'.';
+        $list = $dates === [] ? '' : implode('، ', $dates);
 
-        return "الجمعة عطلة.\nالتصوير لا يُحجز قبل مرور أسبوع. موعدان في اليوم نفسه يفصل بينهما 5 ساعات، والموظف يقترح وقتاً حتى يوافق العميل.\n{$list}";
+        return $list;
     }
 
     /** @return list<string> */
@@ -118,12 +120,45 @@ class WorkCalendar
         return $this->nextWorkStart($local)->setTime($openHour, $openMinute);
     }
 
+    /**
+     * @return array{open: string, close: string}
+     */
+    public function teamHours(): array
+    {
+        return [
+            'open' => $this->clock(self::TEAM_OPEN_KEY, '09:00'),
+            'close' => $this->clock(self::TEAM_CLOSE_KEY, '21:00'),
+        ];
+    }
+
+    public function saveTeamHours(string $open, string $close): void
+    {
+        OpsSetting::setValue(self::TEAM_OPEN_KEY, $this->clockValue($open, '09:00'));
+        OpsSetting::setValue(self::TEAM_CLOSE_KEY, $this->clockValue($close, '21:00'));
+    }
+
+    /**
+     * Daytime window for the team. An overnight pair falls back to 09:00–21:00.
+     *
+     * @return array{0: int, 1: int}
+     */
+    public function teamWindowMinutes(): array
+    {
+        $hours = $this->teamHours();
+        $open = array_map('intval', explode(':', $hours['open']));
+        $close = array_map('intval', explode(':', $hours['close']));
+        $openMinute = ($open[0] * 60) + $open[1];
+        $closeMinute = ($close[0] * 60) + $close[1];
+        if ($closeMinute <= $openMinute) {
+            return [9 * 60, 21 * 60];
+        }
+
+        return [$openMinute, $closeMinute];
+    }
+
     public function whatsappClosedNotice(): string
     {
-        $hours = $this->whatsappHours();
-        $overnight = $hours['close'] < $hours['open'] ? ' الدوام يعبر منتصف الليل.' : '';
-
-        return "نعمل من {$hours['open']} حتى {$hours['close']} بتوقيت دمشق، من السبت إلى الخميس.{$overnight} الجمعة عطلة. أرسل رسالتك خلال الدوام وسنرد عليك.";
+        return 'هلا مو موجودين عالواتساب، ابعتلنا بعدين ومنرد عليك.';
     }
 
     public function isWorkDay(CarbonInterface $day): bool

@@ -77,8 +77,9 @@ class WhatsAppWebBotTest extends TestCase
 
         $this->assertNull(Client::query()->where('telegram_user_id', 'wa:963922222222')->first());
         Http::assertSent(fn (Request $request): bool => $request->url() === 'http://wa-web.test/send'
-            && str_contains((string) data_get($request->data(), 'text'), '21:00')
-            && str_contains((string) data_get($request->data(), 'text'), '09:00'));
+            && str_contains((string) data_get($request->data(), 'text'), 'بعدين')
+            && ! str_contains((string) data_get($request->data(), 'text'), '21:00')
+            && ! str_contains((string) data_get($request->data(), 'text'), 'فريق'));
     }
 
     public function test_whatsapp_night_shift_continues_until_morning_and_friday_night_stays_closed(): void
@@ -531,7 +532,7 @@ class WhatsAppWebBotTest extends TestCase
             ->assertOk();
 
         Http::assertSent(fn (Request $request): bool => $request->url() === 'http://wa-web.test/send'
-            && str_contains((string) data_get($request->data(), 'text'), 'لا توجد طلبات'));
+            && str_contains((string) data_get($request->data(), 'text'), 'لسا ما في طلبات'));
     }
 
     public function test_the_chat_follows_the_language_of_the_latest_message(): void
@@ -685,7 +686,7 @@ class WhatsAppWebBotTest extends TestCase
             ->assertOk();
 
         Http::assertSent(fn (Request $request): bool => $request->url() === 'http://wa-web.test/send'
-            && str_contains((string) data_get($request->data(), 'text'), 'لا توجد طلبات'));
+            && str_contains((string) data_get($request->data(), 'text'), 'لسا ما في طلبات'));
     }
 
     public function test_a_subscriber_can_book_photography_from_the_package_allowance(): void
@@ -741,7 +742,8 @@ class WhatsAppWebBotTest extends TestCase
             ->assertOk();
 
         Http::assertSent(fn (Request $request): bool => $request->url() === 'http://wa-web.test/send'
-            && str_contains((string) data_get($request->data(), 'text'), 'متبقي 2')
+            && str_contains((string) data_get($request->data(), 'text'), 'باقيلك 2')
+            && str_contains((string) data_get($request->data(), 'text'), 'اختار اليوم')
             && ! str_contains((string) data_get($request->data(), 'text'), 'غير متاح'));
     }
 
