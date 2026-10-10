@@ -23,11 +23,19 @@ class ClickUpClient
 
         foreach ($briefs as $brief) {
             $listId = $this->listIdForDepartment((string) $brief['department']);
+            $name = $requestNumber.' · '.$brief['department'];
+            if (filled($brief['label'] ?? null)) {
+                $name .= ' · '.$brief['label'];
+            }
             $payload = [
-                'name' => $requestNumber.' · '.$brief['department'],
+                'name' => $name,
                 'description' => $brief['brief'],
                 'tags' => ['hoc', $brief['department']],
             ];
+            $hours = isset($brief['hours']) ? (int) $brief['hours'] : 0;
+            if ($hours >= 1) {
+                $payload['time_estimate'] = $hours * 3_600_000;
+            }
             if (filled($brief['clickup_user_id'] ?? null)) {
                 $assignee = (string) $brief['clickup_user_id'];
                 $payload['assignees'] = [ctype_digit($assignee) ? (int) $assignee : $assignee];

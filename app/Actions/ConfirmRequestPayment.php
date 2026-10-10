@@ -304,6 +304,9 @@ class ConfirmRequestPayment
             'renewal_declined' => false,
         ])->save();
         $this->leadLog->paymentReceived($request, $receivedAmount, $method);
+        if (! $alreadyApplied) {
+            app(PhotographySessions::class)->startNewPeriod($request->fresh() ?? $request);
+        }
 
         if ($request->status === RequestStatus::Completed) {
             $request = $this->transitions->transition($request, RequestStatus::InProgress, 'admin', 'Renewal paid.');

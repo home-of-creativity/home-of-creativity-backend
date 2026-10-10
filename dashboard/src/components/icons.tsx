@@ -173,6 +173,15 @@ export function IconChannels(props: IconProps) {
   );
 }
 
+export function IconCamera(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M8 7.2 9.2 5h5.6L16 7.2h2.2A1.8 1.8 0 0 1 20 9v8.2a1.8 1.8 0 0 1-1.8 1.8H5.8A1.8 1.8 0 0 1 4 17.2V9a1.8 1.8 0 0 1 1.8-1.8H8Z" />
+      <circle cx="12" cy="12.4" r="2.6" />
+    </svg>
+  );
+}
+
 export function IconVoucher(props: IconProps) {
   return (
     <svg {...base} {...props}>

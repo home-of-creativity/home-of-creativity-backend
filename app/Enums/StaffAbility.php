@@ -17,6 +17,8 @@ enum StaffAbility: string
     case OpsReportTemplates = 'ops.report_templates';
     case OpsReportMedia = 'ops.report_media';
     case OpsDrive = 'ops.drive';
+    case OpsPhotography = 'ops.photography';
+    case OpsPhotographyAll = 'ops.photography_all';
     case SiteProjects = 'site.projects';
     case SiteCategories = 'site.categories';
     case SiteReels = 'site.reels';
@@ -86,6 +88,8 @@ enum StaffAbility: string
             self::OpsReportTemplates => ['ar' => 'قوالب التقارير', 'en' => 'Report templates'],
             self::OpsReportMedia => ['ar' => 'صور التقارير ومربع النص', 'en' => 'Report pictures and text box'],
             self::OpsDrive => ['ar' => 'حساب تخزين Drive', 'en' => 'Drive storage account'],
+            self::OpsPhotography => ['ar' => 'التصوير: الطابور ومواعيدي', 'en' => 'Photography: queue and my shoots'],
+            self::OpsPhotographyAll => ['ar' => 'التصوير: كل المواعيد والإلغاء وضبط الجلسات', 'en' => 'Photography: all bookings, cancel, session counts'],
             self::SiteProjects => ['ar' => 'المشاريع', 'en' => 'Projects'],
             self::SiteCategories => ['ar' => 'التصنيفات', 'en' => 'Categories'],
             self::SiteReels => ['ar' => 'الريلز', 'en' => 'Reels'],

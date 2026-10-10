@@ -239,7 +239,7 @@ class AdminBotController extends Controller
     {
         $this->assertAdmin($request);
 
-        return response()->json(['data' => $desk->finance(), 'message' => 'ok']);
+        return response()->json(['data' => $desk->finance(['per_page' => 10]), 'message' => 'ok']);
     }
 
     public function storeExpense(Request $request, AdminBotDesk $desk): JsonResponse

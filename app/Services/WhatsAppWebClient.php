@@ -37,6 +37,31 @@ class WhatsAppWebClient implements WhatsAppMessenger
     /**
      * @return array{connected: bool, qr: string|null, phone: string|null, reachable: bool}
      */
+    public function adminStatus(): array
+    {
+        return $this->sessionStatus('/admin/status');
+    }
+
+    /**
+     * @return array{connected: bool, qr: string|null, phone: string|null, reachable: bool}
+     */
+    public function unlinkAdmin(): array
+    {
+        if (! $this->configured()) {
+            throw new RuntimeException('WhatsApp Web bridge is not configured.');
+        }
+
+        $response = $this->http()->post($this->baseUrl().'/admin/logout');
+        if (! $response->successful()) {
+            throw new RuntimeException($this->failureMessage($response));
+        }
+
+        return $this->adminStatus();
+    }
+
+    /**
+     * @return array{connected: bool, qr: string|null, phone: string|null, reachable: bool}
+     */
     public function status(): array
     {
         if (! $this->configured()) {
@@ -55,6 +80,38 @@ class WhatsAppWebClient implements WhatsAppMessenger
             return ['connected' => false, 'qr' => null, 'phone' => null, 'reachable' => false];
         }
 
+        return $this->sessionFromResponse($response);
+    }
+
+    /**
+     * @return array{connected: bool, qr: string|null, phone: string|null, reachable: bool}
+     */
+    private function sessionStatus(string $path): array
+    {
+        if (! $this->configured()) {
+            return ['connected' => false, 'qr' => null, 'phone' => null, 'reachable' => false];
+        }
+
+        try {
+            $response = $this->http()->get($this->baseUrl().$path);
+        } catch (\Throwable $exception) {
+            Log::info('WhatsApp Web bridge is not reachable.', ['error' => $exception->getMessage()]);
+
+            return ['connected' => false, 'qr' => null, 'phone' => null, 'reachable' => false];
+        }
+
+        if (! $response->successful()) {
+            return ['connected' => false, 'qr' => null, 'phone' => null, 'reachable' => false];
+        }
+
+        return $this->sessionFromResponse($response);
+    }
+
+    /**
+     * @return array{connected: bool, qr: string|null, phone: string|null, reachable: bool}
+     */
+    private function sessionFromResponse(Response $response): array
+    {
         $qr = $response->json('qr');
         $phone = preg_replace('/\D+/', '', (string) $response->json('phone')) ?? '';
 

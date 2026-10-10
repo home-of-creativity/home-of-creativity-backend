@@ -31,6 +31,8 @@ export type StaffModule =
   | "ops.finance"
   | "ops.vouchers"
   | "ops.channels"
+  | "ops.photography"
+  | "ops.photography_all"
   | "ops.report_gemini"
   | "ops.report_templates"
   | "ops.report_media"
@@ -83,29 +85,59 @@ export type OpsSettings = {
   whatsapp_transport?: "web" | "cloud";
 };
 
+export type FinanceInvoiceState = "paid" | "partial" | "open" | "overdue" | "draft" | "cancelled";
+
 export type FinanceInvoice = {
   id: number;
+  source: "odoo" | "local";
   name?: string | null;
   amount: number;
   collected: number;
-  state: "paid" | "open" | "partial" | "cancelled" | string;
+  residual: number;
+  currency?: string | null;
+  state: FinanceInvoiceState | string;
   payment_state?: string | null;
+  odoo_state?: string | null;
   partner_name?: string | null;
+  request_id?: number | null;
   request_number: string | null;
   title: string | null;
   issued_at: string | null;
+  due_at?: string | null;
   odoo_url?: string | null;
+};
+
+export type FinanceFilters = {
+  q?: string;
+  invoice_state?: string;
+  client?: string;
+  currency?: string;
+  from?: string;
+  to?: string;
+  amount_min?: string;
+  amount_max?: string;
+  category?: string;
+  sort?: string;
+  dir?: string;
+  page?: number;
+  per_page?: number;
 };
 
 export type FinanceSummary = {
   revenue_paid: number;
   revenue_open: number;
+  revenue_overdue?: number;
+  invoiced?: number;
   expenses: number;
   net: number;
   invoices: FinanceInvoice[];
+  state_counts?: Partial<Record<FinanceInvoiceState, number>>;
+  meta?: PageMeta;
   clients?: string[];
+  currencies?: string[];
   expense_rows: { id: number; amount: number; category: string; note: string | null; spent_at: string | null }[];
   categories: string[];
+  sync?: { configured: boolean; synced_at: string | null; error: string | null };
 };
 
 export type VoucherKind = "delivery" | "receipt" | "payment" | "journal" | "settlement";
@@ -732,6 +764,7 @@ export type PricingPackage = {
   prices: PricingPackagePrices | null;
   features: Array<{ en: string; ar: string }>;
   work_lines?: Array<{ department: string; hours: number }>;
+  photography_sessions?: number;
   reach: PricingPackageReach | null;
   featured: boolean;
   badge_en: string | null;
@@ -964,6 +997,87 @@ async function submitForm<T>(
   });
 }
 
+export type PhotographyRequestRow = {
+  id: number;
+  number: string;
+  title: string | null;
+  status: string;
+  package: string | null;
+  client_name: string | null;
+  company_name: string | null;
+  sessions: number;
+  used: number;
+  holds: number;
+  remaining: number;
+  blocker: string | null;
+};
+
+export type PhotographyCan = {
+  accept: boolean;
+  decline: boolean;
+  propose: boolean;
+  reschedule: boolean;
+  reschedule_direct: boolean;
+  cancel: boolean;
+  done: boolean;
+  noshow: boolean;
+  refund: boolean;
+  resend: boolean;
+  retry_calendar: boolean;
+  retry_clickup: boolean;
+};
+
+export type PhotographyBookingRow = {
+  id: number;
+  status: string;
+  request: PhotographyRequestRow | null;
+  client: { id: number; name: string | null; company_name: string | null; phone: string | null } | null;
+  session_label: string | null;
+  starts_at: string | null;
+  ends_at: string | null;
+  proposed_starts_at: string | null;
+  when: string | null;
+  proposed_when: string | null;
+  employee: { id: number; name: string } | null;
+  waiting_since: string | null;
+  expires_at: string | null;
+  late: boolean;
+  charged: boolean;
+  refunded_at: string | null;
+  lead_override: boolean;
+  client_notified_at: string | null;
+  client_notify_failed: boolean;
+  calendar_missing: boolean;
+  clickup_stale: boolean;
+  can: PhotographyCan;
+};
+
+export type PhotographySlot = { starts_at: string; label: string };
+
+export type PhotographyBoard = {
+  queue: PhotographyBookingRow[];
+  waiting_client: PhotographyBookingRow[];
+  mine: PhotographyBookingRow[];
+  all: PhotographyBookingRow[];
+  unbooked: PhotographyRequestRow[];
+  needs_count: PhotographyRequestRow[];
+  me: { employee_id: number | null; is_photographer: boolean; can_all: boolean };
+  settings: { lead_days: number; shoot_hours: number; gap_hours: number; reply_hours: number };
+};
+
+export type PhotographyAction =
+  | "accept"
+  | "decline"
+  | "propose"
+  | "reschedule"
+  | "cancel"
+  | "done"
+  | "noshow"
+  | "refund"
+  | "resend"
+  | "retry_calendar"
+  | "retry_clickup";
+
 export const api = {
   login(email: string, password: string) {
     return request<Envelope<{ token: string; user: User }>>("/auth/login", {
@@ -1046,22 +1160,13 @@ export const api = {
       body: JSON.stringify({ decision, reason: reason || undefined }),
     });
   },
-  finance(filters: {
-    from?: string;
-    to?: string;
-    client?: string;
-    invoice_state?: string;
-    category?: string;
-    q?: string;
-  } = {}) {
-    return request<Envelope<FinanceSummary>>(`/admin/finance${queryString({
-      from: filters.from,
-      to: filters.to,
-      client: filters.client,
-      invoice_state: filters.invoice_state,
-      category: filters.category,
-      q: filters.q,
-    })}`);
+  finance(filters: FinanceFilters = {}) {
+    return request<Envelope<FinanceSummary>>(`/admin/finance${queryString({ ...filters })}`);
+  },
+  syncFinance() {
+    return request<Envelope<{ synced: boolean; changed: number; removed: number }>>("/admin/finance/sync", {
+      method: "POST",
+    });
   },
   addExpense(payload: { amount: number; category: string; note?: string }) {
     return request<Envelope<FinanceSummary>>("/admin/finance/expenses", {
@@ -1186,6 +1291,34 @@ export const api = {
   },
   unlinkWhatsappWeb() {
     return request<Envelope<WhatsAppWebStatus>>("/admin/ops-settings/whatsapp-web/logout", { method: "POST" });
+  },
+  whatsappAdminStatus() {
+    return request<Envelope<WhatsAppWebStatus>>("/admin/ops-settings/whatsapp-admin");
+  },
+  unlinkWhatsappAdmin() {
+    return request<Envelope<WhatsAppWebStatus>>("/admin/ops-settings/whatsapp-admin/logout", { method: "POST" });
+  },
+  photographyBoard() {
+    return request<Envelope<PhotographyBoard>>("/admin/photography");
+  },
+  photographySlots(date: string, booking?: number) {
+    return request<Envelope<PhotographySlot[]>>(`/admin/photography/slots${queryString({ date, booking })}`);
+  },
+  bookPhotography(payload: { request_id: number; starts_at: string; confirm?: boolean; override_lead?: boolean }) {
+    return request<Envelope<PhotographyBookingRow>>("/admin/photography/bookings", { method: "POST", body: JSON.stringify(payload) });
+  },
+  setPhotographySessions(requestId: number, sessions: number) {
+    return request<Envelope<PhotographyRequestRow>>(`/admin/photography/requests/${requestId}/sessions`, {
+      method: "PUT",
+      body: JSON.stringify({ sessions }),
+    });
+  },
+  photographyAction(id: number, action: PhotographyAction, payload?: { starts_at?: string; direct?: boolean; override_lead?: boolean }) {
+    const path = action === "retry_calendar" ? "retry-calendar" : action === "retry_clickup" ? "retry-clickup" : action;
+    return request<Envelope<PhotographyBookingRow>>(`/admin/photography/${id}/${path}`, {
+      method: "POST",
+      body: JSON.stringify(payload ?? {}),
+    });
   },
   async receiptBlob(requestId: number, fileId: number) {
     const headers = new Headers({ Accept: "application/octet-stream" });

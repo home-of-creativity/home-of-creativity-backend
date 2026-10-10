@@ -55,6 +55,8 @@ class ServiceRequestResource extends JsonResource
             'quotation_amount' => $this->quotation_amount,
             'quotation_notes' => $this->quotation_notes,
             'pricing_package_id' => $this->pricing_package_id,
+            'photography_sessions' => $this->photography_sessions,
+            'photography_sessions_used' => (int) $this->photography_sessions_used,
             'billing_period' => $this->billing_period,
             'payment_plan' => $this->payment_plan,
             'requires_full_payment' => (bool) $this->requires_full_payment,

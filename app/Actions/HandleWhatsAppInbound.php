@@ -14,11 +14,11 @@ use App\Models\RequestFile;
 use App\Models\ServiceRequest;
 use App\Services\GeminiService;
 use App\Services\RequestStatusTransitionService;
-use App\Services\SiteGuide;
 use App\Services\TelegramNotifier;
 use App\Contracts\WhatsAppMessenger;
 use App\Support\BillingPeriod;
 use App\Support\PaymentPlanResolver;
+use App\Support\PhotographyActor;
 use App\Support\ChatLanguage;
 use App\Support\ClientChannelGate;
 use App\Support\ClientProfileValue;
@@ -27,6 +27,7 @@ use App\Support\ResolveServiceRequest;
 use App\Support\StatusLabel;
 use App\Support\WorkCalendar;
 use App\Support\WorkLines;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -56,6 +57,12 @@ class HandleWhatsAppInbound
 
     /** @var list<string> */
     private const NAV_PHOTO = ['حجز تصوير', 'موعد تصوير', 'menu:photo', 'Photo booking'];
+
+    /** @var list<string> */
+    private const PHOTO_STEPS = ['photo_sub', 'photo_day', 'photo_time', 'photo_which'];
+
+    /** @var list<string> */
+    private const PHOTO_INTENTS = ['photo', 'photo_balance', 'photo_move', 'photo_keep'];
 
     /** @var list<string> */
     private const NAV_RENEW = ['تجديد الاشتراك', 'menu:renew', 'Renew subscription'];
@@ -232,7 +239,7 @@ class HandleWhatsAppInbound
                 return;
             }
             if ($this->isNav($text, self::NAV_PHOTO)) {
-                $this->offerPhotography($client, $chatId, $phone, $session);
+                $this->startPhotography($client, $chatId, $phone, $session);
 
                 return;
             }
@@ -279,7 +286,7 @@ class HandleWhatsAppInbound
                 return;
             }
             if ($step === 'ask') {
-                $this->answerAsk($chatId, $phone, $session, (string) $text);
+                $this->answerAsk($client, $chatId, $phone, $session, (string) $text);
 
                 return;
             }
@@ -298,14 +305,7 @@ class HandleWhatsAppInbound
 
                 return;
             }
-            if ($step === 'photo_day' && preg_match('/^(?:10|[1-9])$/u', trim((string) $text)) === 1) {
-                $this->pickPhotoDay($client, $chatId, $phone, $session, (int) $text);
-
-                return;
-            }
-            if (in_array($step, ['photo_pick', 'photo_time'], true) && preg_match('/^(?:10|[1-9])$/u', trim((string) $text)) === 1) {
-                $this->bookPhotoSlot($client, $chatId, $phone, $session, (int) $text);
-
+            if ($media === null && $this->photographyTurn($client, $chatId, $phone, $session, (string) $text)) {
                 return;
             }
             if (in_array($step, ['quote', 'suggest', 'receipt', 'ask'], true) || $step === 'idle' || $step === '') {
@@ -329,7 +329,7 @@ class HandleWhatsAppInbound
                 return;
             }
             if ($step === 'ask') {
-                $this->answerAsk($chatId, $phone, $session, (string) $text);
+                $this->answerAsk($client, $chatId, $phone, $session, (string) $text);
 
                 return;
             }
@@ -348,7 +348,7 @@ class HandleWhatsAppInbound
             }
 
             if ($asking) {
-                $this->answerAsk($chatId, $phone, $session, (string) $text);
+                $this->answerAsk($client, $chatId, $phone, $session, (string) $text);
             }
         } catch (Throwable $exception) {
             Log::error('WhatsApp conversation failed.', [
@@ -588,7 +588,7 @@ class HandleWhatsAppInbound
             return;
         }
         if ($this->isNav($data, self::NAV_PHOTO) || $data === 'menu:photo') {
-            $this->offerPhotography($client, $chatId, $phone, $session);
+            $this->startPhotography($client, $chatId, $phone, $session);
 
             return;
         }
@@ -597,19 +597,7 @@ class HandleWhatsAppInbound
 
             return;
         }
-        if (str_starts_with($data, 'photo_sub:')) {
-            $this->confirmPhotographySubscription($client, $chatId, $phone, $session, (int) substr($data, 10));
-
-            return;
-        }
-        if (str_starts_with($data, 'photo_day:')) {
-            $this->pickPhotoDay($client, $chatId, $phone, $session, (int) substr($data, 10) + 1);
-
-            return;
-        }
-        if (str_starts_with($data, 'photo_time:')) {
-            $this->bookPhotoSlot($client, $chatId, $phone, $session, (int) substr($data, 11) + 1);
-
+        if ($this->photographyCallback($client, $chatId, $phone, $session, $data)) {
             return;
         }
         if (str_starts_with($data, 'open:')) {
@@ -629,21 +617,6 @@ class HandleWhatsAppInbound
         }
         if (str_starts_with($data, 'edit:')) {
             $this->beginEdit($client, $chatId, $phone, $session, substr($data, 5));
-
-            return;
-        }
-        if (str_starts_with($data, 'ph:')) {
-            $this->bookPhotoSlot($client, $chatId, $phone, $session, (int) substr($data, 3) + 1);
-
-            return;
-        }
-        if (str_starts_with($data, 'photoyes:') || str_starts_with($data, 'photonno:')) {
-            $number = explode(':', $data, 2)[1] ?? '';
-            $accept = str_starts_with($data, 'photoyes:');
-            $this->runOwned($client, $number, function (ServiceRequest $request) use ($chatId, $accept): void {
-                $booking = app(BookPhotographySlot::class)->decide($request, $accept);
-                $this->safeSend($chatId, app(BookPhotographySlot::class)->clientMessage($booking));
-            });
 
             return;
         }
@@ -1420,12 +1393,19 @@ class HandleWhatsAppInbound
                 return true;
             }
         }
-        if ($intent === null && mb_strlen($text) >= 8) {
-            $classified = app(GeminiService::class)->classifyClientIntent($text, $step === '' ? 'idle' : $step);
-            $intent = $classified === 'none' ? null : $classified;
-        }
+        $decision = null;
         if ($intent === null) {
-            return false;
+            if ($this->isGreeting($text)) {
+                return false;
+            }
+            $decision = $this->askAssistant($client, $phone, $session, $text);
+            if ($decision === null) {
+                return false;
+            }
+            if ($this->runAssistantReply($client, $chatId, $phone, $session, $decision)) {
+                return true;
+            }
+            $intent = $decision['action'];
         }
 
         if ($intent === 'new' && ($step === 'quote' || $this->openQuotation($client) !== null)) {
@@ -1465,7 +1445,16 @@ class HandleWhatsAppInbound
 
             return true;
         }
+        if (in_array($intent, ['approve', 'reject'], true) && $this->answerOfferText($client, $chatId, $phone, $session, $intent === 'approve', $text)) {
+            return true;
+        }
         if ($intent === 'hours') {
+            $named = $this->ownedRequest($client, (string) ($decision['ref'] ?? ''));
+            if ($named instanceof ServiceRequest) {
+                $this->showTaskHours($client, $chatId, $phone, $session, (string) $named->number);
+
+                return true;
+            }
             $this->askRequestHours($client, $chatId, $phone, $session);
 
             return true;
@@ -1480,8 +1469,8 @@ class HandleWhatsAppInbound
 
             return true;
         }
-        if ($intent === 'photo') {
-            $this->offerPhotography($client, $chatId, $phone, $session);
+        if (in_array($intent, self::PHOTO_INTENTS, true)) {
+            $this->runPhotoIntent($client, $chatId, $phone, $session, $intent, $text, (string) ($decision['ref'] ?? ''));
 
             return true;
         }
@@ -1512,8 +1501,8 @@ class HandleWhatsAppInbound
 
             return true;
         }
-        if ($intent === 'ask') {
-            $this->answerAsk($chatId, $phone, $session, $text);
+        if ($decision !== null && $decision['answer'] !== '') {
+            $this->sendMenu($chatId, $decision['answer']);
 
             return true;
         }
@@ -1521,11 +1510,145 @@ class HandleWhatsAppInbound
         return false;
     }
 
+    /**
+     * Gemini reads this client's records and decides. Null only when Gemini did not
+     * answer while the client is on a step that already tells them what to send.
+     *
+     * @param  array<string, mixed>  $session
+     * @return array{action: string, ref: string, answer: string, reason: string}|null
+     */
+    private function askAssistant(Client $client, string $phone, array &$session, string $text): ?array
+    {
+        $step = (string) ($session['step'] ?? 'idle');
+        $history = is_array($session['ask_history'] ?? null) ? $session['ask_history'] : [];
+        $decision = app(ClientAssistant::class)->decide(
+            $client,
+            $text,
+            $history,
+            $this->replyLang,
+            in_array($step, ['quote', 'suggest', 'receipt'], true) ? $step : 'idle',
+            'whatsapp',
+        );
+        $unread = $decision['action'] === 'escalate' && str_contains($decision['reason'], 'Gemini did not answer');
+        if ($unread && in_array($step, ['quote', 'suggest', 'receipt'], true)) {
+            return null;
+        }
+
+        $history[] = ['role' => 'user', 'text' => mb_substr($text, 0, 500)];
+        if ($decision['answer'] !== '') {
+            $history[] = ['role' => 'assistant', 'text' => mb_substr($decision['answer'], 0, 500)];
+        }
+        $session['ask_history'] = array_slice($history, -10);
+        if ($step === 'ask') {
+            $session['step'] = 'idle';
+        }
+        $this->putSession($phone, $session);
+
+        return $decision;
+    }
+
+    /**
+     * Replies that need no bot operation. False hands the action back to the router.
+     *
+     * @param  array<string, mixed>  $session
+     * @param  array{action: string, ref: string, answer: string, reason: string}  $decision
+     */
+    private function runAssistantReply(Client $client, string $chatId, string $phone, array $session, array $decision): bool
+    {
+        $action = $decision['action'];
+        $step = (string) ($session['step'] ?? 'idle');
+        if (in_array($action, ['answer', 'greet', 'escalate'], true)) {
+            if ($step === 'quote') {
+                $this->safeSend($chatId, $decision['answer']);
+                $this->showQuoteDecision($chatId, $phone, $session);
+
+                return true;
+            }
+            if ($step === 'receipt' || $step === 'suggest') {
+                $this->safeSend($chatId, $decision['answer']);
+
+                return true;
+            }
+            $this->sendMenu($chatId, $decision['answer']);
+
+            return true;
+        }
+        if ($action === 'open_request') {
+            $item = $this->ownedRequest($client, $decision['ref']);
+            if ($item instanceof ServiceRequest) {
+                $this->showRequest($client, $chatId, (string) $item->number);
+            } else {
+                $this->listRequests($client, $chatId);
+            }
+
+            return true;
+        }
+        if ($action === 'receipt') {
+            $item = $this->ownedRequest($client, $decision['ref']);
+            if (! $item instanceof ServiceRequest || $item->status !== RequestStatus::AwaitingPayment) {
+                $item = $this->pendingReceiptRequest($client);
+            }
+            if (! $item instanceof ServiceRequest) {
+                $this->sendMenu($chatId, $decision['answer'] !== '' ? $decision['answer'] : $this->tx(
+                    'ما في طلب ناطر وصل دفع هلق.',
+                    'No request is waiting for a payment receipt right now.',
+                ));
+
+                return true;
+            }
+            $session['step'] = 'receipt';
+            $session['receipt_ref'] = ResolveServiceRequest::displayNumber($item);
+            $this->putSession($phone, $session);
+            $this->safeSend($chatId, $this->tx(
+                'ابعت صورة وصل الدفع أو ملف PDF للطلب #'.ResolveServiceRequest::displayNumber($item).'.',
+                'Send the payment receipt photo or PDF for request #'.ResolveServiceRequest::displayNumber($item).'.',
+            ));
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /** A request of this client named as #45, 45, or REQ-2026-000045. */
+    private function ownedRequest(Client $client, string $ref): ?ServiceRequest
+    {
+        $ref = trim(ltrim(trim($ref), '#'));
+        if ($ref === '') {
+            return null;
+        }
+        $query = $client->requests();
+        if (str_starts_with(strtoupper($ref), 'REQ-')) {
+            $query->where('number', strtoupper($ref));
+        } elseif (ctype_digit($ref)) {
+            $query->where('number', 'like', '%-'.sprintf('%06d', (int) $ref));
+        } else {
+            return null;
+        }
+        $item = $query->latest('id')->first();
+
+        return $item instanceof ServiceRequest && ! $item->hiddenFromClient() ? $item : null;
+    }
+
+    private function isGreeting(string $text): bool
+    {
+        $text = trim((string) preg_replace('/[^\p{L}\p{N}\s]+/u', ' ', $text));
+        if ($text === '' || mb_strlen($text) > 40) {
+            return false;
+        }
+
+        return preg_match('/^(?:(?:ال)?سلام(?:\s*عليكم)?(?:\s*ورحمة\s*الله)?(?:\s*وبركاته)?|مرحبا|مرحباً|مرحبتين|اهلين|أهلين|اهلا|أهلا|هلا|هاي|صباح\s*(?:الخير|النور)|مسا(?:ء)?\s*(?:الخير|النور)|hi|hello|hey|good\s*(?:morning|evening))(?:\s+\S+)?$/iu', $text) === 1;
+    }
+
     private function operationIntent(string $text): ?string
     {
         $text = trim($text);
         if ($text === '') {
             return null;
+        }
+        $photo = $this->photoRuleIntent($text, false);
+        if ($photo !== null) {
+            return $photo;
         }
         if ($this->asksForRequestHours($text)) {
             return 'hours';
@@ -1537,10 +1660,6 @@ class HandleWhatsAppInbound
         if (preg_match('/تجديد|أجدد|اجدد|جدد\s*ال?اشتراك/u', $text) === 1
             || preg_match('/\brenew\b/i', $text) === 1) {
             return 'renew';
-        }
-        if (preg_match('/موعد\s*تصوير|حجز\s*تصوير|بدي\s*أصو|أبي\s*أصو|ابغى\s*أصو/u', $text) === 1
-            || preg_match('/\b(photography|photo shoot|book a shoot)\b/i', $text) === 1) {
-            return 'photo';
         }
         if (preg_match('/طلباتي|وين طلب|شو صار بطلب/u', $text) === 1
             || preg_match('/\b(my orders|my requests|order status)\b/i', $text) === 1) {
@@ -2004,31 +2123,254 @@ class HandleWhatsAppInbound
     }
 
     /**
+     * The Telegram client bot posts the sentence or the button here. The reply is sent
+     * on the client's Telegram chat. A sentence that is not about photography returns
+     * false so the assistant can answer it.
+     */
+    public function telegramPhotography(Client $client, string $chatId, ?string $text, ?string $callback): bool
+    {
+        $this->replyLang = $client->locale === 'en' ? 'en' : 'ar';
+        $key = 'tg:'.$client->id;
+        $session = $this->session($key);
+        $callback = trim((string) $callback);
+        if ($callback !== '') {
+            return $this->photographyCallback($client, $chatId, $key, $session, $callback);
+        }
+
+        return $this->photographyTurn($client, $chatId, $key, $session, trim((string) $text));
+    }
+
+    /**
+     * Photography in the chat. Inside its steps a number is the option of the list on
+     * screen and any other sentence repeats that list. Outside them the written rules
+     * open booking, the balance, a move, or the answer to an offered time.
+     *
+     * @param  array<string, mixed>  $session
+     */
+    private function photographyTurn(Client $client, string $chatId, string $phone, array &$session, string $text): bool
+    {
+        $step = (string) ($session['step'] ?? 'idle');
+        $value = $this->photoDigits(trim($text));
+        if ($value === '') {
+            return false;
+        }
+        $hasBookings = app(BookPhotographySlot::class)->clientBookings($client)->isNotEmpty();
+        $intent = $this->photoRuleIntent($value, $hasBookings);
+        if (in_array($step, self::PHOTO_STEPS, true)) {
+            if (preg_match('/^\d{1,2}$/', $value) === 1) {
+                $this->photoChoice($client, $chatId, $phone, $session, (int) $value);
+            } elseif ($intent !== null) {
+                $this->runPhotoIntent($client, $chatId, $phone, $session, $intent, $value);
+            } else {
+                $this->repeatPhotoQuestion($client, $chatId, $phone, $session);
+            }
+
+            return true;
+        }
+        if ($intent !== null) {
+            $this->runPhotoIntent($client, $chatId, $phone, $session, $intent, $value);
+
+            return true;
+        }
+        if (in_array($step, ['idle', ''], true) && $hasBookings) {
+            $word = $this->offerWord($value);
+            if ($word !== null) {
+                return $this->answerOfferText($client, $chatId, $phone, $session, $word === 'yes', $value);
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Written rules first: booking, the balance, a move, or keeping the agreed time.
+     * A move or keep without the word «تصوير» counts only when the client has a booking.
+     */
+    private function photoRuleIntent(string $text, bool $hasBookings): ?string
+    {
+        $shoot = preg_match('/تصوير|جلس[ةه]|جلسات/u', $text) === 1
+            || preg_match('/\b(?:shoot|session|photo)/i', $text) === 1;
+        if (preg_match('/خل(?:ّ)?ي(?:ه|ها)?\s*(?:ال)?(?:موعد|جلس[ةه])?\s*(?:مثل|متل|زي|كيف|كما)\s*(?:ما\s*)?(?:هو|هي)|ما\s*بدي\s*(?:غير|أغير|اغير)\s*(?:ال)?موعد/u', $text) === 1
+            || preg_match('/\bkeep (?:the|my) (?:time|shoot|appointment|session)\b/i', $text) === 1) {
+            return ($shoot || $hasBookings) ? 'photo_keep' : null;
+        }
+        if (preg_match('/كم\s*جلس|(?:ضل|ضلّ|بقي|باقي|متبقي|تبقى)\s*(?:لي|إلي|الي|عندي)?\s*(?:كم\s*)?جلس|رصيد\s*(?:ال)?(?:تصوير|جلسات)|جلسات\s*(?:ال)?تصوير\s*(?:ال)?(?:باقية|متبقية)/u', $text) === 1
+            || preg_match('/\b(?:how many (?:shoots|sessions)|sessions? left|shoots? left|photo(?:graphy)? balance)\b/i', $text) === 1) {
+            return 'photo_balance';
+        }
+        if (preg_match('/(?:غير|غيّر|أغير|اغير|بغير|بدل|بدّل|أبدل|ابدل|أجل|أجّل|اجل|اجّل|تأجيل|تاجيل|انقل|أنقل|نقل|تعديل|عدل|عدّل|أعدل|اعدل|قدّم|قدم)\s*(?:لي\s*)?(?:ال)?(?:موعد|جلس[ةه])/u', $text) === 1
+            || preg_match('/\b(?:reschedule|postpone|move|change)\b.*\b(?:shoot|session|appointment)/i', $text) === 1) {
+            return ($shoot || $hasBookings) ? 'photo_move' : null;
+        }
+        if (preg_match('/موعد\s*(?:ال)?تصوير|حجز\s*(?:ال)?تصوير|احجز\s*(?:لي\s*)?(?:ال)?(?:تصوير|جلس[ةه])|جلس[ةه]\s*تصوير|بدي\s*[أا]صو|أبي\s*أصو|ابغى\s*أصو/u', $text) === 1
+            || preg_match('/\b(?:photography|photo shoot|book a shoot|book a session)\b/i', $text) === 1) {
+            return 'photo';
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function runPhotoIntent(Client $client, string $chatId, string $phone, array &$session, string $intent, string $text, string $ref = ''): void
+    {
+        match ($intent) {
+            'photo_balance' => $this->photoBalance($client, $chatId, $phone, $session),
+            'photo_move' => $this->startPhotoMove($client, $chatId, $phone, $session, $text),
+            'photo_keep' => $this->keepFromText($client, $chatId, $phone, $session, $text),
+            default => $this->startPhotography($client, $chatId, $phone, $session, $text, $ref),
+        };
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function photographyCallback(Client $client, string $chatId, string $phone, array &$session, string $data): bool
+    {
+        if (str_starts_with($data, 'photo_sub:')) {
+            $request = $client->requests()->whereKey((int) substr($data, 10))->first();
+            if ($request instanceof ServiceRequest) {
+                $this->openPhotoRequest($client, $chatId, $phone, $session, $request);
+            } else {
+                $this->offerPhotography($client, $chatId, $phone, $session);
+            }
+
+            return true;
+        }
+        if (str_starts_with($data, 'photo_day:')) {
+            $this->pickPhotoDay($client, $chatId, $phone, $session, (int) substr($data, 10) + 1);
+
+            return true;
+        }
+        if (str_starts_with($data, 'photo_time:') || str_starts_with($data, 'ph:')) {
+            $this->pickPhotoTime($client, $chatId, $phone, $session, (int) substr($data, strpos($data, ':') + 1) + 1);
+
+            return true;
+        }
+        if (str_starts_with($data, 'photo_bk:')) {
+            $booking = $this->ownedBooking($client, (int) substr($data, 9));
+            if (! $booking instanceof PhotographyBooking) {
+                $this->repeatPhotoQuestion($client, $chatId, $phone, $session);
+
+                return true;
+            }
+            if (($session['photo_purpose'] ?? 'move') === 'keep') {
+                $this->resetPhoto($session);
+                $this->putSession($phone, $session);
+                $this->keepBooking($chatId, $booking);
+
+                return true;
+            }
+            $this->openMoveBooking($client, $chatId, $phone, $session, $booking);
+
+            return true;
+        }
+        if (str_starts_with($data, 'photokeep:')) {
+            $booking = $this->ownedBooking($client, (int) substr($data, 10));
+            $this->resetPhoto($session);
+            $this->putSession($phone, $session);
+            if ($booking instanceof PhotographyBooking) {
+                $this->keepBooking($chatId, $booking);
+            } else {
+                $this->sendMenu($chatId, $this->tx('ما في طلب تعديل مفتوح على هالموعد.', 'No move is open on that booking.'));
+            }
+
+            return true;
+        }
+        if (str_starts_with($data, 'photoyes:') || str_starts_with($data, 'photonno:')) {
+            $yes = str_starts_with($data, 'photoyes:');
+            $ref = (string) (explode(':', $data, 2)[1] ?? '');
+            $booking = ctype_digit($ref) ? $this->ownedBooking($client, (int) $ref) : null;
+            if (! $booking instanceof PhotographyBooking && ! ctype_digit($ref)) {
+                // Older buttons carried the request number.
+                $request = $this->ownedRequest($client, $ref);
+                $booking = $request instanceof ServiceRequest
+                    ? $request->photographyBookings()->where('status', PhotographyBooking::NEEDS_CLIENT)->latest('id')->first()
+                    : null;
+            }
+            $this->resetPhoto($session);
+            $this->putSession($phone, $session);
+            if (! $booking instanceof PhotographyBooking) {
+                $this->sendMenu($chatId, $this->tx('ما في وقت تصوير ناطر جوابك هلق.', 'No shoot time is waiting for your answer.'));
+
+                return true;
+            }
+            if ($booking->status === PhotographyBooking::RESCHEDULING) {
+                if ($yes) {
+                    $this->safeSend($chatId, $this->tx('التعديل عند المصور، والوقت القديم باقي لحين رده.', 'The move is with the photographer. Your current time stays until they answer.'));
+                } else {
+                    $this->keepBooking($chatId, $booking);
+                }
+
+                return true;
+            }
+            $this->answerOffer($chatId, $booking, $yes);
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * «بدي موعد تصوير», the menu button, or a sentence that names a request.
+     *
+     * @param  array<string, mixed>  $session
+     */
+    private function startPhotography(Client $client, string $chatId, string $phone, array &$session, string $text = '', string $ref = ''): void
+    {
+        $named = $this->photoRequestFromText($client, $text);
+        if (! $named instanceof ServiceRequest && $ref !== '') {
+            $named = $this->ownedRequest($client, $ref);
+        }
+        if ($named instanceof ServiceRequest) {
+            $this->openPhotoRequest($client, $chatId, $phone, $session, $named);
+
+            return;
+        }
+        $this->offerPhotography($client, $chatId, $phone, $session);
+    }
+
+    /**
+     * One eligible request opens its days at once. Several are listed with their
+     * balance; the client picks one. None gives one reason, then the menu.
+     *
      * @param  array<string, mixed>  $session
      */
     private function offerPhotography(Client $client, string $chatId, string $phone, array &$session): void
     {
-        $requests = $this->photographyRequests($client);
-        if ($requests->isEmpty()) {
-            $this->sendMenu($chatId, $this->tx(
-                'حجز التصوير للباقات يلي فيها تصوير واشتراكها شغال.',
-                'Photography booking is for an active package that includes photography.',
-            ));
+        $sessions = app(PhotographySessions::class);
+        $book = app(BookPhotographySlot::class);
+        $candidates = $sessions->forClient($client);
+        $eligible = $candidates->filter(fn (ServiceRequest $request): bool => $sessions->eligible($request))->values();
+        if ($eligible->isEmpty()) {
+            $this->resetPhoto($session);
+            $this->putSession($phone, $session);
+            $blocked = $candidates->first(fn (ServiceRequest $request): bool => $sessions->blocker($request) === 'held')
+                ?? $candidates->first();
+            $this->sendMenu($chatId, $blocked instanceof ServiceRequest
+                ? $this->photoBlockerText($blocked, (string) $sessions->blocker($blocked))
+                : $this->noPhotographyReason($client));
 
             return;
         }
+        if ($eligible->count() === 1) {
+            $this->openPhotoRequest($client, $chatId, $phone, $session, $eligible->first());
+
+            return;
+        }
+        $lines = [$this->tx('على أي طلب بدك تحجز التصوير؟', 'Which request should the shoot use?')];
         $rows = [];
-        $lines = [$this->tx('أي اشتراك بدك تحجز عليه التصوير؟', 'Which subscription should the shoot use?')];
         $ids = [];
-        foreach ($requests as $index => $request) {
-            $name = $request->pricingPackage?->name_ar ?: $request->title;
-            $lines[] = ($index + 1).'. '.$name.' #'.$request->number;
-            $rows[] = [['text' => $name, 'callback_data' => 'photo_sub:'.$request->id]];
+        foreach ($eligible->take(10)->values() as $index => $request) {
+            $lines[] = ($index + 1).'. '.$book->ref($request).' — '.$this->photoBalanceText($request);
+            $rows[] = [['text' => mb_substr('#'.$request->number, 0, 24), 'callback_data' => 'photo_sub:'.$request->id]];
             $ids[] = $request->id;
         }
+        $this->resetPhoto($session);
         $session['step'] = 'photo_sub';
         $session['photo_subs'] = $ids;
-        unset($session['photo_request'], $session['photo_days'], $session['photo_slots']);
         $this->putSession($phone, $session);
         $this->telegram->sendInlineKeyboard($chatId, implode("\n", $lines), $rows);
     }
@@ -2036,51 +2378,47 @@ class HandleWhatsAppInbound
     /**
      * @param  array<string, mixed>  $session
      */
-    private function confirmPhotographySubscription(Client $client, string $chatId, string $phone, array &$session, int $requestId): void
+    private function openPhotoRequest(Client $client, string $chatId, string $phone, array &$session, ServiceRequest $request): void
     {
-        $request = $this->photographyRequests($client)->first(fn (ServiceRequest $item): bool => $item->id === $requestId);
-        if (! $request instanceof ServiceRequest) {
-            $this->sendMenu($chatId, $this->tx(
-                'هاد الاشتراك مو شغال، أو ما فيه تصوير.',
-                'That subscription is not active, or it has no photography.',
-            ));
+        $sessions = app(PhotographySessions::class);
+        $book = app(BookPhotographySlot::class);
+        $blocker = $sessions->blocker($request);
+        if ($blocker !== null) {
+            $this->resetPhoto($session);
+            $this->putSession($phone, $session);
+            $this->sendMenu($chatId, $this->photoBlockerText($request, $blocker));
 
             return;
         }
-        $used = PhotographyBooking::query()
-            ->where('request_id', $request->id)
-            ->whereIn('status', ['pending_staff', 'needs_client', 'confirmed'])
-            ->count();
-        $left = $this->shootAllowance($request) - $used;
-        if ($left < 1) {
-            $this->sendMenu($chatId, $this->tx(
-                'خلصت مواعيد التصوير بباقتك.',
-                'The photography times in your package are used.',
-            ));
-
-            return;
-        }
-        $days = app(BookPhotographySlot::class)->bookableDays();
+        $days = $book->bookableDays();
         if ($days === []) {
+            $this->resetPhoto($session);
+            $this->putSession($phone, $session);
             $this->sendMenu($chatId, $this->tx('ما في يوم فاضي للتصوير هالفترة.', 'No photography day is free right now.'));
 
             return;
         }
-        $name = $request->pricingPackage?->name_ar ?: $request->title;
-        $word = $left === 1 ? 'موعد' : 'مواعيد';
-        $lines = [$this->tx(
-            "باقة {$name}: باقيلك {$left} {$word}.\nاختار اليوم:",
-            "Package {$name}: {$left} photography ".($left === 1 ? 'time' : 'times')." left.\nPick a day:",
-        )];
+        $this->resetPhoto($session);
+        $session['photo_mode'] = 'book';
+        $session['photo_request'] = $request->number;
+        $this->showPhotoDays($chatId, $phone, $session, $days, $book->ref($request).'، '.$this->photoBalanceText($request).".\n".$this->tx('اختار اليوم:', 'Pick a day:'));
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     * @param  list<array{date: string, label: string}>  $days
+     */
+    private function showPhotoDays(string $chatId, string $phone, array &$session, array $days, string $intro): void
+    {
+        $lines = [$intro];
         $rows = [];
         foreach ($days as $index => $day) {
             $lines[] = ($index + 1).'. '.$day['label'];
             $rows[] = [['text' => $day['label'], 'callback_data' => 'photo_day:'.$index]];
         }
         $session['step'] = 'photo_day';
-        $session['photo_request'] = $request->number;
         $session['photo_days'] = array_column($days, 'date');
-        unset($session['photo_slots']);
+        unset($session['photo_slots'], $session['photo_date']);
         $this->putSession($phone, $session);
         $this->telegram->sendInlineKeyboard($chatId, implode("\n", $lines), $rows);
     }
@@ -2093,18 +2431,41 @@ class HandleWhatsAppInbound
         $days = is_array($session['photo_days'] ?? null) ? array_values($session['photo_days']) : [];
         $date = $days[$choice - 1] ?? null;
         if (! is_string($date)) {
-            $this->offerPhotography($client, $chatId, $phone, $session);
+            $this->repeatPhotoQuestion($client, $chatId, $phone, $session);
 
             return;
         }
-        $slots = app(BookPhotographySlot::class)->timesOn(\Illuminate\Support\Carbon::parse($date, 'Asia/Damascus'));
+        $slots = $this->photoSlotsOn($session, $date);
         if ($slots === []) {
             $this->safeSend($chatId, $this->tx('هاد اليوم مليان، اختار يوم تاني.', 'That day is full. Pick another day.'));
-            $this->offerPhotography($client, $chatId, $phone, $session);
+            $this->repeatPhotoQuestion($client, $chatId, $phone, $session);
 
             return;
         }
-        $lines = [$this->tx('اختار الوقت:', 'Pick a time:')];
+        $session['photo_date'] = $date;
+        $this->showPhotoTimes($chatId, $phone, $session, $date, $slots);
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     * @return list<array{starts_at: string, label: string}>
+     */
+    private function photoSlotsOn(array $session, string $date): array
+    {
+        $ignore = ($session['photo_mode'] ?? '') === 'move' ? (int) ($session['photo_booking'] ?? 0) : null;
+
+        return app(BookPhotographySlot::class)->timesOn(Carbon::parse($date, 'Asia/Damascus'), $ignore ?: null);
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     * @param  list<array{starts_at: string, label: string}>  $slots
+     */
+    private function showPhotoTimes(string $chatId, string $phone, array &$session, string $date, array $slots): void
+    {
+        $slots = array_slice($slots, 0, 10);
+        $label = app(BookPhotographySlot::class)->dayLabel(Carbon::parse($date, 'Asia/Damascus'));
+        $lines = [$this->tx("اختار الوقت يوم {$label}:", "Pick a time on {$label}:")];
         $rows = [];
         foreach ($slots as $index => $slot) {
             $lines[] = ($index + 1).'. '.$slot['label'];
@@ -2113,77 +2474,570 @@ class HandleWhatsAppInbound
         $session['step'] = 'photo_time';
         $session['photo_slots'] = array_column($slots, 'starts_at');
         $this->putSession($phone, $session);
-        $this->telegram->sendInlineKeyboard($chatId, implode("\n", $lines), array_slice($rows, 0, 10));
+        $this->telegram->sendInlineKeyboard($chatId, implode("\n", $lines), $rows);
     }
 
     /**
+     * Saves the pick: a new hold, or the same booking moved. The booking sends the
+     * reply. Nothing is charged here.
+     *
      * @param  array<string, mixed>  $session
      */
-    private function bookPhotoSlot(Client $client, string $chatId, string $phone, array &$session, int $choice): void
+    private function pickPhotoTime(Client $client, string $chatId, string $phone, array &$session, int $choice): void
     {
         $slots = is_array($session['photo_slots'] ?? null) ? array_values($session['photo_slots']) : [];
         $startsAt = $slots[$choice - 1] ?? null;
-        $request = $client->requests()->where('number', (string) ($session['photo_request'] ?? ''))->first();
-        if (! is_string($startsAt) || ! $request instanceof ServiceRequest) {
-            $session['step'] = 'idle';
+        if (! is_string($startsAt)) {
+            $this->repeatPhotoQuestion($client, $chatId, $phone, $session);
+
+            return;
+        }
+        $book = app(BookPhotographySlot::class);
+        if (($session['photo_mode'] ?? '') === 'move') {
+            $booking = $this->ownedBooking($client, (int) ($session['photo_booking'] ?? 0));
+            $this->resetPhoto($session);
             $this->putSession($phone, $session);
+            if (! $booking instanceof PhotographyBooking) {
+                $this->sendMenu($chatId, $this->tx('ما لقينا هالموعد.', 'That booking was not found.'));
+
+                return;
+            }
+            try {
+                $book->reschedule($booking, $startsAt, PhotographyActor::client());
+            } catch (ValidationException $exception) {
+                $this->safeSend($chatId, $this->photoError($exception));
+                $this->openMoveBooking($client, $chatId, $phone, $session, $booking);
+            }
+
+            return;
+        }
+
+        $request = $this->ownedRequest($client, (string) ($session['photo_request'] ?? ''));
+        $this->resetPhoto($session);
+        $this->putSession($phone, $session);
+        if (! $request instanceof ServiceRequest) {
             $this->offerPhotography($client, $chatId, $phone, $session);
 
             return;
         }
         try {
-            $booking = app(BookPhotographySlot::class)->hold($request, $startsAt);
-            $reply = app(BookPhotographySlot::class)->clientMessage($booking);
+            $book->hold($request, $startsAt, PhotographyActor::client());
         } catch (ValidationException $exception) {
-            $reply = collect($exception->errors())->flatten()->first() ?: $this->tx('ما قدرنا نحجز هاد الوقت.', 'That time could not be booked.');
+            $this->safeSend($chatId, $this->photoError($exception));
+            $this->openPhotoRequest($client, $chatId, $phone, $session, $request);
         }
-        $session['step'] = 'idle';
-        unset($session['photo_request'], $session['photo_slots']);
-        $this->putSession($phone, $session);
-        $this->safeSend($chatId, (string) $reply);
     }
 
     /**
-     * @return \Illuminate\Support\Collection<int, ServiceRequest>
+     * A sentence outside the options asks the same question again, never the main menu.
+     *
+     * @param  array<string, mixed>  $session
      */
-    private function photographyRequests(Client $client): \Illuminate\Support\Collection
+    private function repeatPhotoQuestion(Client $client, string $chatId, string $phone, array &$session): void
     {
-        return $client->requests()
-            ->with('pricingPackage')
-            ->where('allows_renewal', true)
-            ->where(function ($query): void {
-                $query->where('subscription_ends_at', '>', now())
-                    ->orWhereIn('status', [
-                        RequestStatus::PaymentConfirmed->value,
-                        RequestStatus::InProgress->value,
-                        RequestStatus::ReadyForReview->value,
-                        RequestStatus::RevisionRequested->value,
-                    ]);
-            })
-            ->latest('id')
-            ->get()
-            ->filter(function (ServiceRequest $item): bool {
-                return ! $item->hiddenFromClient()
-                    && ! $item->renewalDeclined()
-                    && $this->shootAllowance($item) > 0;
-            })
-            ->values();
-    }
+        $step = (string) ($session['step'] ?? '');
+        $move = ($session['photo_mode'] ?? '') === 'move';
+        if ($step === 'photo_time' && is_string($session['photo_date'] ?? null)) {
+            $slots = $this->photoSlotsOn($session, $session['photo_date']);
+            if ($slots !== []) {
+                $this->showPhotoTimes($chatId, $phone, $session, $session['photo_date'], $slots);
 
-    private function shootAllowance(ServiceRequest $request): int
-    {
-        $hours = 0;
-        foreach (WorkLines::fromRequest($request) as $line) {
-            if ($line['department'] === 'photography') {
-                $hours += $line['hours'];
+                return;
             }
         }
-        if ($hours >= 1) {
-            return max(1, intdiv($hours, BookPhotographySlot::SHOOT_HOURS));
-        }
-        $features = json_encode($request->pricingPackage?->features ?? '', JSON_UNESCAPED_UNICODE) ?: '';
+        if (in_array($step, ['photo_day', 'photo_time'], true)) {
+            if ($move) {
+                $booking = $this->ownedBooking($client, (int) ($session['photo_booking'] ?? 0));
+                if ($booking instanceof PhotographyBooking) {
+                    $this->openMoveBooking($client, $chatId, $phone, $session, $booking);
 
-        return str_contains($features, 'تصوير') ? 1 : 0;
+                    return;
+                }
+            }
+            $request = $this->ownedRequest($client, (string) ($session['photo_request'] ?? ''));
+            if ($request instanceof ServiceRequest) {
+                $this->openPhotoRequest($client, $chatId, $phone, $session, $request);
+
+                return;
+            }
+        }
+        if ($step === 'photo_which') {
+            if (($session['photo_purpose'] ?? '') === 'keep') {
+                $this->keepFromText($client, $chatId, $phone, $session, '');
+            } else {
+                $this->startPhotoMove($client, $chatId, $phone, $session, '');
+            }
+
+            return;
+        }
+        $this->offerPhotography($client, $chatId, $phone, $session);
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function photoChoice(Client $client, string $chatId, string $phone, array &$session, int $choice): void
+    {
+        $step = (string) ($session['step'] ?? '');
+        if ($step === 'photo_day') {
+            $this->pickPhotoDay($client, $chatId, $phone, $session, $choice);
+
+            return;
+        }
+        if ($step === 'photo_time') {
+            $this->pickPhotoTime($client, $chatId, $phone, $session, $choice);
+
+            return;
+        }
+        if ($step === 'photo_which') {
+            $ids = is_array($session['photo_pick_ids'] ?? null) ? array_values($session['photo_pick_ids']) : [];
+            $booking = isset($ids[$choice - 1]) ? $this->ownedBooking($client, (int) $ids[$choice - 1]) : null;
+            if (! $booking instanceof PhotographyBooking) {
+                $this->repeatPhotoQuestion($client, $chatId, $phone, $session);
+
+                return;
+            }
+            if (($session['photo_purpose'] ?? 'move') === 'keep') {
+                $this->resetPhoto($session);
+                $this->putSession($phone, $session);
+                $this->keepBooking($chatId, $booking);
+
+                return;
+            }
+            $this->openMoveBooking($client, $chatId, $phone, $session, $booking);
+
+            return;
+        }
+        $ids = is_array($session['photo_subs'] ?? null) ? array_values($session['photo_subs']) : [];
+        $request = isset($ids[$choice - 1]) ? $client->requests()->whereKey((int) $ids[$choice - 1])->first() : null;
+        if (! $request instanceof ServiceRequest) {
+            $this->repeatPhotoQuestion($client, $chatId, $phone, $session);
+
+            return;
+        }
+        $this->openPhotoRequest($client, $chatId, $phone, $session, $request);
+    }
+
+    /**
+     * «بدي أغير موعد التصوير». One open booking opens directly and names its day; a
+     * day or booking number in the sentence picks that row; otherwise a numbered list.
+     *
+     * @param  array<string, mixed>  $session
+     */
+    private function startPhotoMove(Client $client, string $chatId, string $phone, array &$session, string $text): void
+    {
+        $book = app(BookPhotographySlot::class);
+        $rows = $book->clientBookings($client);
+        if ($rows->isEmpty()) {
+            $this->resetPhoto($session);
+            $this->putSession($phone, $session);
+            $this->sendMenu($chatId, $this->tx(
+                'ما عندك موعد تصوير مفتوح نعدله. لتحجز موعد جديد ابعت «موعد تصوير».',
+                'You have no open shoot to move. Send “photo booking” to book one.',
+            ));
+
+            return;
+        }
+        $named = $this->bookingFromText($rows, $text);
+        if ($named instanceof PhotographyBooking) {
+            $this->openMoveBooking($client, $chatId, $phone, $session, $named);
+
+            return;
+        }
+        if ($rows->count() === 1) {
+            $this->openMoveBooking($client, $chatId, $phone, $session, $rows->first());
+
+            return;
+        }
+        $this->askWhichBooking($chatId, $phone, $session, $rows, 'move', $this->tx('أي موعد بدك تعدل؟', 'Which booking do you want to move?'));
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     * @param  \Illuminate\Support\Collection<int, PhotographyBooking>  $rows
+     */
+    private function askWhichBooking(string $chatId, string $phone, array &$session, \Illuminate\Support\Collection $rows, string $purpose, string $question): void
+    {
+        $book = app(BookPhotographySlot::class);
+        $lines = [$question];
+        $buttons = [];
+        $ids = [];
+        foreach ($rows->take(10)->values() as $index => $row) {
+            $time = $row->status === PhotographyBooking::NEEDS_CLIENT ? $row->proposed_starts_at : $row->starts_at;
+            $lines[] = ($index + 1).'. '.$this->tx('موعد', 'Booking').' #'.$row->id.' — '.$book->when($time).' — '.$book->statusLabel($row, $row->request?->client);
+            $buttons[] = [['text' => mb_substr('#'.$row->id.' '.($time ? $book->dayLabel($time) : ''), 0, 24), 'callback_data' => 'photo_bk:'.$row->id]];
+            $ids[] = $row->id;
+        }
+        $this->resetPhoto($session);
+        $session['step'] = 'photo_which';
+        $session['photo_pick_ids'] = $ids;
+        $session['photo_purpose'] = $purpose;
+        $this->putSession($phone, $session);
+        $this->telegram->sendInlineKeyboard($chatId, implode("\n", $lines), $buttons);
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function openMoveBooking(Client $client, string $chatId, string $phone, array &$session, PhotographyBooking $booking): void
+    {
+        $book = app(BookPhotographySlot::class);
+        $agreed = in_array($booking->status, [PhotographyBooking::CONFIRMED, PhotographyBooking::RESCHEDULING], true);
+        $day = Carbon::parse($booking->starts_at->format('Y-m-d'), 'Asia/Damascus')->startOfDay();
+        if ($agreed && now('Asia/Damascus')->gte($day)) {
+            $this->resetPhoto($session);
+            $this->putSession($phone, $session);
+            $this->sendMenu($chatId, $this->tx('بلّش يوم الموعد، الجلسة بتبقى بيومها.', 'The shoot day has started, so the session stays on its day.'));
+
+            return;
+        }
+        $days = $book->bookableDays(8, $booking->id);
+        if ($days === []) {
+            $this->resetPhoto($session);
+            $this->putSession($phone, $session);
+            $this->sendMenu($chatId, $this->tx('ما في يوم فاضي للتصوير هالفترة.', 'No photography day is free right now.'));
+
+            return;
+        }
+        $current = $booking->status === PhotographyBooking::NEEDS_CLIENT ? $booking->proposed_starts_at : $booking->starts_at;
+        $this->resetPhoto($session);
+        $session['photo_mode'] = 'move';
+        $session['photo_booking'] = $booking->id;
+        $this->showPhotoDays($chatId, $phone, $session, $days, $this->tx(
+            'موعد #'.$booking->id.' ('.$book->ref($booking->request).') حالياً '.$book->when($current).' — '.$book->statusLabel($booking).".\nاختار اليوم الجديد:",
+            'Booking #'.$booking->id.' ('.$book->ref($booking->request).') is now '.$book->when($current).".\nPick the new day:",
+        ));
+    }
+
+    /**
+     * «بيناسبني» or «لا» typed without a button. It answers an offered time only when
+     * one row asks; with an offer and a move both open the client picks the row.
+     *
+     * @param  array<string, mixed>  $session
+     */
+    private function answerOfferText(Client $client, string $chatId, string $phone, array &$session, bool $yes, string $text = ''): bool
+    {
+        $rows = app(BookPhotographySlot::class)->clientBookings($client);
+        $offers = $rows->where('status', PhotographyBooking::NEEDS_CLIENT)->values();
+        $moves = $rows->where('status', PhotographyBooking::RESCHEDULING)->values();
+        if ($offers->isEmpty() && $moves->isEmpty()) {
+            return false;
+        }
+        $named = $this->bookingFromText($offers->concat($moves), $text);
+        if ($named instanceof PhotographyBooking) {
+            $offers = $named->status === PhotographyBooking::NEEDS_CLIENT ? collect([$named]) : collect();
+            $moves = $named->status === PhotographyBooking::RESCHEDULING ? collect([$named]) : collect();
+        }
+        if ($offers->count() === 1 && $moves->isEmpty()) {
+            $this->answerOffer($chatId, $offers->first(), $yes);
+
+            return true;
+        }
+        if ($offers->isEmpty()) {
+            if ($yes) {
+                $this->safeSend($chatId, $this->tx('التعديل عند المصور، والوقت القديم باقي لحين رده.', 'The move is with the photographer. Your current time stays until they answer.'));
+
+                return true;
+            }
+            if ($moves->count() === 1) {
+                $this->keepBooking($chatId, $moves->first());
+
+                return true;
+            }
+        }
+        $this->askWhichAnswer($chatId, $offers->concat($moves));
+
+        return true;
+    }
+
+    /**
+     * Each open question with its own buttons, so a typed word is never applied to
+     * the wrong booking.
+     *
+     * @param  \Illuminate\Support\Collection<int, PhotographyBooking>  $rows
+     */
+    private function askWhichAnswer(string $chatId, \Illuminate\Support\Collection $rows): void
+    {
+        $book = app(BookPhotographySlot::class);
+        $lines = [$this->tx('أي موعد تقصد؟', 'Which booking do you mean?')];
+        $buttons = [];
+        foreach ($rows->take(4) as $row) {
+            if ($row->status === PhotographyBooking::NEEDS_CLIENT) {
+                $lines[] = $this->tx(
+                    'موعد #'.$row->id.': بيناسبك '.$book->when($row->proposed_starts_at).'؟',
+                    'Booking #'.$row->id.': does '.$book->when($row->proposed_starts_at).' work?',
+                );
+                $buttons[] = [['text' => '#'.$row->id.' '.$this->tx('يناسبني', 'Works'), 'callback_data' => 'photoyes:'.$row->id]];
+                $buttons[] = [['text' => '#'.$row->id.' '.$this->tx('لا يناسبني', 'Does not work'), 'callback_data' => 'photonno:'.$row->id]];
+
+                continue;
+            }
+            $lines[] = $this->tx(
+                'موعد #'.$row->id.': طلب تعديله إلى '.$book->when($row->proposed_starts_at).' عند المصور. الوقت الحالي '.$book->when($row->starts_at).'.',
+                'Booking #'.$row->id.': the move to '.$book->when($row->proposed_starts_at).' is with the photographer.',
+            );
+            $buttons[] = [['text' => '#'.$row->id.' '.$this->tx('خلّي الموعد', 'Keep time'), 'callback_data' => 'photokeep:'.$row->id]];
+        }
+        $this->telegram->sendInlineKeyboard($chatId, implode("\n", $lines), $buttons);
+    }
+
+    private function answerOffer(string $chatId, PhotographyBooking $booking, bool $yes): void
+    {
+        try {
+            $updated = app(BookPhotographySlot::class)->clientAnswer($booking, $yes);
+        } catch (ValidationException) {
+            $this->sendMenu($chatId, $this->tx('ما في وقت تصوير ناطر جوابك هلق.', 'No shoot time is waiting for your answer.'));
+
+            return;
+        }
+        if (! $yes && $updated->status === PhotographyBooking::PENDING_STAFF) {
+            $this->safeSend($chatId, $this->tx('تمام، رح نبعتلك وقت تاني.', 'Okay, we will send you another time.'));
+        }
+    }
+
+    private function keepBooking(string $chatId, PhotographyBooking $booking): void
+    {
+        try {
+            app(BookPhotographySlot::class)->keepOriginal($booking, PhotographyActor::client());
+        } catch (ValidationException $exception) {
+            $this->safeSend($chatId, $this->photoError($exception));
+        }
+    }
+
+    /**
+     * «خلّي الموعد مثل ما هو» drops a move that waits for the photographer.
+     *
+     * @param  array<string, mixed>  $session
+     */
+    private function keepFromText(Client $client, string $chatId, string $phone, array &$session, string $text): void
+    {
+        $moves = app(BookPhotographySlot::class)->clientBookings($client)
+            ->where('status', PhotographyBooking::RESCHEDULING)
+            ->values();
+        if ($moves->isEmpty()) {
+            $this->resetPhoto($session);
+            $this->putSession($phone, $session);
+            $this->sendMenu($chatId, $this->tx('ما في طلب تعديل مفتوح، ومواعيدك على حالها.', 'No move is open. Your bookings stay as they are.'));
+
+            return;
+        }
+        $named = $this->bookingFromText($moves, $text) ?? ($moves->count() === 1 ? $moves->first() : null);
+        if ($named instanceof PhotographyBooking) {
+            $this->resetPhoto($session);
+            $this->putSession($phone, $session);
+            $this->keepBooking($chatId, $named);
+
+            return;
+        }
+        $this->askWhichBooking($chatId, $phone, $session, $moves, 'keep', $this->tx('أي موعد بدك تخليه بوقته؟', 'Which booking should keep its time?'));
+    }
+
+    /**
+     * «كم جلسة ضل إلي»: each request with its package, number, and what is left of the
+     * cap. No prices and no hours of other departments.
+     *
+     * @param  array<string, mixed>  $session
+     */
+    private function photoBalance(Client $client, string $chatId, string $phone, array &$session): void
+    {
+        $sessions = app(PhotographySessions::class);
+        $book = app(BookPhotographySlot::class);
+        $this->resetPhoto($session);
+        $this->putSession($phone, $session);
+        $requests = $sessions->forClient($client);
+        if ($requests->isEmpty()) {
+            $this->sendMenu($chatId, $this->noPhotographyReason($client));
+
+            return;
+        }
+        $lines = [$this->tx('رصيد جلسات التصوير:', 'Photography sessions:')];
+        foreach ($requests as $request) {
+            $line = '• '.$book->ref($request).': '.$this->photoBalanceText($request);
+            $hold = $sessions->blockingHold($request);
+            if ($hold instanceof PhotographyBooking) {
+                $time = $hold->status === PhotographyBooking::NEEDS_CLIENT ? $hold->proposed_starts_at : $hold->starts_at;
+                $line .= $this->tx('، وموعد بانتظار الرد '.$book->when($time), ', and one booking waiting for an answer on '.$book->when($time));
+            }
+            $lines[] = $line;
+        }
+        $this->sendMenu($chatId, implode("\n", $lines));
+    }
+
+    private function photoBalanceText(ServiceRequest $request): string
+    {
+        if ($this->replyLang === 'en') {
+            $sessions = app(PhotographySessions::class);
+
+            return $sessions->remaining($request).' of '.(int) $sessions->cap($request).' sessions left';
+        }
+
+        return app(BookPhotographySlot::class)->balanceLine($request);
+    }
+
+    private function photoBlockerText(ServiceRequest $request, string $blocker): string
+    {
+        $book = app(BookPhotographySlot::class);
+        $ref = $book->ref($request);
+        if ($blocker === 'held') {
+            $hold = app(PhotographySessions::class)->blockingHold($request);
+            $time = $hold?->status === PhotographyBooking::NEEDS_CLIENT ? $hold->proposed_starts_at : $hold?->starts_at;
+
+            return $this->tx(
+                "رصيد التصوير بالطلب {$ref} محجوز لموعد بانتظار الرد ".$book->when($time).'.',
+                "The photography balance of {$ref} is held by a booking waiting for an answer on ".$book->when($time).'.',
+            );
+        }
+
+        return match ($blocker) {
+            'unpaid' => $this->tx("الطلب {$ref} مو مدفوع لهلق. حجز التصوير بيفتح بعد تأكيد الدفع.", "Request {$ref} is not paid yet. Booking opens after the payment is confirmed."),
+            'no_count' => $this->tx("عدد جلسات التصوير بالطلب {$ref} لسا ما انضبط. الفريق رح يضبطه ومنرجعلك.", "The photography sessions of {$ref} are not set yet. The team will set them and get back to you."),
+            'no_sessions' => $this->tx("الطلب {$ref} ما فيه جلسات تصوير.", "Request {$ref} has no photography sessions."),
+            default => $this->tx("خلصت جلسات التصوير بالطلب {$ref} بهالفترة.", "The photography sessions of {$ref} are used for this period."),
+        };
+    }
+
+    private function noPhotographyReason(Client $client): string
+    {
+        $sessions = app(PhotographySessions::class);
+        $requests = $client->requests()->with('pricingPackage')->latest('id')->get()
+            ->reject(fn (ServiceRequest $request): bool => $request->hiddenFromClient());
+        $paidWithoutCount = $requests->first(fn (ServiceRequest $request): bool => $sessions->isPaidOpen($request) && $request->photography_sessions === null);
+        if ($paidWithoutCount instanceof ServiceRequest) {
+            return $this->photoBlockerText($paidWithoutCount, 'no_count');
+        }
+        $unpaid = $requests->first(fn (ServiceRequest $request): bool => ! $sessions->isPaidOpen($request)
+            && in_array($request->status, [RequestStatus::QuotationSent, RequestStatus::AwaitingPayment], true)
+            && (int) $request->photography_sessions > 0);
+        if ($unpaid instanceof ServiceRequest) {
+            return $this->photoBlockerText($unpaid, 'unpaid');
+        }
+
+        return $this->tx(
+            'حجز التصوير للطلبات المدفوعة يلي فيها جلسات تصوير.',
+            'Photography booking is for a paid request that includes photography sessions.',
+        );
+    }
+
+    /** «طلب 7», «#7», or «REQ-2026-000007». The reason comes later if it cannot book. */
+    private function photoRequestFromText(Client $client, string $text): ?ServiceRequest
+    {
+        if ($text === '') {
+            return null;
+        }
+        if (preg_match('/REQ-\d{4}-\d+/iu', $text, $match) === 1) {
+            return $this->ownedRequest($client, strtoupper($match[0]));
+        }
+        if (preg_match('/(?:طلب|الطلب|رقم|request|order)\s*(?:رقم\s*)?#?\s*(\d{1,6})/iu', $text, $match) === 1
+            || preg_match('/#\s*(\d{1,6})/u', $text, $match) === 1) {
+            return $this->ownedRequest($client, $match[1]);
+        }
+
+        return null;
+    }
+
+    /**
+     * A booking named in the sentence by its number («موعد 12», «#12»), its weekday,
+     * or its date (20/10). Null when nothing matches exactly one row.
+     *
+     * @param  \Illuminate\Support\Collection<int, PhotographyBooking>  $rows
+     */
+    private function bookingFromText(\Illuminate\Support\Collection $rows, string $text): ?PhotographyBooking
+    {
+        $text = trim($text);
+        if ($text === '' || $rows->isEmpty()) {
+            return null;
+        }
+        if (preg_match('/(?:موعد|الموعد|booking)\s*(?:رقم\s*)?#?\s*(\d{1,7})|#\s*(\d{1,7})/iu', $text, $match) === 1) {
+            $id = (int) (($match[1] ?? '') !== '' ? $match[1] : ($match[2] ?? 0));
+            $row = $rows->firstWhere('id', $id);
+            if ($row instanceof PhotographyBooking) {
+                return $row;
+            }
+        }
+        $days = [
+            'الأحد' => 0, 'الاحد' => 0, 'الاثنين' => 1, 'الإثنين' => 1, 'التنين' => 1, 'الثلاثاء' => 2, 'التلات' => 2,
+            'الأربعاء' => 3, 'الاربعاء' => 3, 'الخميس' => 4, 'السبت' => 6,
+            'sunday' => 0, 'monday' => 1, 'tuesday' => 2, 'wednesday' => 3, 'thursday' => 4, 'saturday' => 6,
+        ];
+        $times = fn (PhotographyBooking $row): array => array_values(array_filter([$row->starts_at, $row->proposed_starts_at]));
+        foreach ($days as $word => $dow) {
+            if (mb_stripos($text, $word) === false) {
+                continue;
+            }
+            $hits = $rows->filter(fn (PhotographyBooking $row): bool => collect($times($row))->contains(fn ($time): bool => Carbon::parse($time->format('Y-m-d'), 'Asia/Damascus')->dayOfWeek === $dow));
+            if ($hits->count() === 1) {
+                return $hits->first();
+            }
+        }
+        if (preg_match('/(\d{1,2})\s*[\/\-]\s*(\d{1,2})/u', $text, $match) === 1) {
+            $hits = $rows->filter(fn (PhotographyBooking $row): bool => collect($times($row))->contains(
+                fn ($time): bool => (int) $time->format('j') === (int) $match[1] && (int) $time->format('n') === (int) $match[2],
+            ));
+            if ($hits->count() === 1) {
+                return $hits->first();
+            }
+        }
+
+        return null;
+    }
+
+    private function ownedBooking(Client $client, int $id): ?PhotographyBooking
+    {
+        if ($id < 1) {
+            return null;
+        }
+
+        return PhotographyBooking::query()
+            ->with('request.client', 'request.pricingPackage')
+            ->whereKey($id)
+            ->whereHas('request', fn ($query) => $query->where('client_id', $client->id))
+            ->first();
+    }
+
+    private function offerWord(string $value): ?string
+    {
+        $end = '(?=$|[\s.!،,؟?])';
+        if (preg_match('/^(?:2|لا|لأ|no|nope)'.$end.'|(?:ما|لا|مو)\s*(?:بي|ي)?ناسب|not\s+work|doesn.?t\s+work/iu', $value) === 1) {
+            return 'no';
+        }
+        if (preg_match('/^(?:1|نعم|اي|ايه|إيه|أكيد|اكيد|تمام|ماشي|موافق|اوكي|أوكي|ok|okay|yes|sure|works)'.$end.'|^(?:بي|ي)?ناسبني|^مناسب/iu', $value) === 1) {
+            return 'yes';
+        }
+
+        return null;
+    }
+
+    private function photoError(ValidationException $exception): string
+    {
+        $message = (string) collect($exception->errors())->flatten()->first();
+
+        return $message !== '' ? $message : $this->tx('ما انحفظ، أعد الاختيار.', 'That was not saved. Pick again.');
+    }
+
+    private function photoDigits(string $value): string
+    {
+        return strtr($value, ['٠' => '0', '١' => '1', '٢' => '2', '٣' => '3', '٤' => '4', '٥' => '5', '٦' => '6', '٧' => '7', '٨' => '8', '٩' => '9']);
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function resetPhoto(array &$session): void
+    {
+        if (str_starts_with((string) ($session['step'] ?? ''), 'photo')) {
+            $session['step'] = 'idle';
+        }
+        unset(
+            $session['photo_subs'],
+            $session['photo_request'],
+            $session['photo_days'],
+            $session['photo_slots'],
+            $session['photo_date'],
+            $session['photo_mode'],
+            $session['photo_booking'],
+            $session['photo_pick_ids'],
+            $session['photo_purpose'],
+        );
     }
 
     /**
@@ -2342,15 +3196,15 @@ class HandleWhatsAppInbound
         $session['step'] = 'ask';
         $this->putSession($phone, $session);
         $this->safeSend($chatId, $this->tx(
-            "اكتب سؤالك عن الخدمات، أو عن الباقة الأنسب لنشاطك.\nالجواب من طريقة عمل الشركة والباقات المنشورة، ومن دون أي معلومة خاصة.",
-            "Write your question about the services, or about the package that fits your business.\nThe answer uses how the company works and the published packages, with no private information.",
+            "اكتب سؤالك: عن طلباتك، الدفع، التصوير، التجديد، أو عن الخدمات والباقة الأنسب لنشاطك.",
+            "Write your question: about your requests, payment, photography, renewal, or the services and the package that fits your business.",
         ));
     }
 
     /**
      * @param  array<string, mixed>  $session
      */
-    private function answerAsk(string $chatId, string $phone, array &$session, string $text): void
+    private function answerAsk(Client $client, string $chatId, string $phone, array &$session, string $text): void
     {
         $question = trim($text);
         if ($question === '' || ClientProfileValue::isKeyboardLabel($question)) {
@@ -2359,38 +3213,11 @@ class HandleWhatsAppInbound
             return;
         }
 
-        $history = is_array($session['ask_history'] ?? null) ? $session['ask_history'] : [];
-        $answer = $this->boundedAnswer($question, $history);
-        $history[] = ['role' => 'user', 'text' => mb_substr($question, 0, 400)];
-        $history[] = ['role' => 'assistant', 'text' => mb_substr($answer, 0, 400)];
-        $session['ask_history'] = array_slice($history, -6);
         $session['step'] = 'idle';
         $this->putSession($phone, $session);
-        $this->sendMenu($chatId, $answer);
-    }
-
-    /**
-     * @param  list<array{role: string, text: string}>  $history
-     */
-    private function boundedAnswer(string $question, array $history): string
-    {
-        try {
-            $answer = app(GeminiService::class)->answerSiteQuestion(
-                $question,
-                $this->replyLang,
-                app(SiteGuide::class)->brief(),
-                $history,
-            );
-        } catch (Throwable $exception) {
-            Log::warning('WhatsApp inquiry failed.', ['error' => $exception->getMessage()]);
-
-            return $this->tx(
-                "ما لقيت هذا التفصيل في المعلومات المنشورة.\nتقدر تسأل رقم الدعم: ".self::SUPPORT_PHONE,
-                "That detail is not in the published information.\nYou can ask support: ".self::SUPPORT_PHONE,
-            );
+        if (! $this->routeSentence($client, $chatId, $phone, $session, $question)) {
+            $this->sendMenu($chatId, $this->tx('أهلين، كيف فيني ساعدك؟', 'Hello, how can we help?'));
         }
-
-        return mb_substr($answer, 0, 1200);
     }
 
     /**

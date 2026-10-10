@@ -15,9 +15,11 @@ class NotifyClientChannels
     ) {}
 
     /**
+     * True when the chat or the email accepted the message.
+     *
      * @param  list<array{text: string, callback_data: string}>|null  $inlineButtons
      */
-    public function send(ServiceRequest $request, string $text, ?array $inlineButtons = null): void
+    public function send(ServiceRequest $request, string $text, ?array $inlineButtons = null): bool
     {
         $request->loadMissing('client');
         $chatId = $request->client?->telegram_user_id;
@@ -30,7 +32,7 @@ class NotifyClientChannels
                     $this->telegram->send($chatId, $text);
                 }
 
-                return;
+                return true;
             }
 
             $email = $request->client?->email;
@@ -43,6 +45,8 @@ class NotifyClientChannels
                         $message->from($from, 'Home of Creativity');
                     }
                 });
+
+                return true;
             }
         } catch (Throwable $exception) {
             Log::warning('Client channel notify failed.', [
@@ -50,5 +54,7 @@ class NotifyClientChannels
                 'error' => $exception->getMessage(),
             ]);
         }
+
+        return false;
     }
 }

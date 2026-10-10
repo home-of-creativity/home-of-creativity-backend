@@ -45,10 +45,11 @@ API_URL = _origin if _origin.endswith("/api") else f"{_origin}/api"
 BOT_SECRET = os.environ.get("TELEGRAM_BOT_SECRET", "")
 BTN_NEW = "🆕 طلب جديد"
 BTN_MY = "📋 طلباتي"
+BTN_PHOTO = "📷 حجز تصوير"
 BTN_SUPPORT = "💬 دعم"
 SUPPORT_PHONE = "0947823488"
 BTN_SUBMIT = "✅ تم الإرسال"
-NAV_BUTTONS = {BTN_NEW, BTN_MY, BTN_SUPPORT}
+NAV_BUTTONS = {BTN_NEW, BTN_MY, BTN_PHOTO, BTN_SUPPORT}
 MAX_ATTACHMENTS = 5
 PERIOD_LABELS = {
     "monthly": "شهري",
@@ -257,7 +258,7 @@ def welcome_text(user, *, missing: list[str]) -> str:
 
 def main_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-        [[KeyboardButton(BTN_NEW), KeyboardButton(BTN_MY)], [KeyboardButton(BTN_SUPPORT)]],
+        [[KeyboardButton(BTN_NEW), KeyboardButton(BTN_MY)], [KeyboardButton(BTN_PHOTO), KeyboardButton(BTN_SUPPORT)]],
         resize_keyboard=True,
     )
 
@@ -721,6 +722,11 @@ async def maybe_route_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return await new_request(update, context)
     if text == BTN_MY:
         await list_requests(update, context)
+        return ConversationHandler.END
+    if text == BTN_PHOTO:
+        outcome = await photography_chat(update.effective_user.id, text=text)
+        if outcome != "handled" and update.message:
+            await update.message.reply_text(outcome if outcome != "pass" else "تعذر فتح حجز التصوير. أعد المحاولة.", reply_markup=main_keyboard())
         return ConversationHandler.END
     return await support_start(update, context)
 
@@ -1634,17 +1640,51 @@ async def client_request_action(update: Update, context: ContextTypes.DEFAULT_TY
             return
 
 
+async def photography_chat(user_id: int, *, text: str | None = None, callback: str | None = None) -> str:
+    """Ask Laravel to run the photography conversation. It sends the Telegram reply itself."""
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            response = await client.post(
+                f"{API_URL}/bot/telegram/photography",
+                headers=api_headers(),
+                json={
+                    "telegram_user_id": str(user_id),
+                    "text": text,
+                    "callback": callback,
+                },
+            )
+    except Exception:
+        return "pass" if callback is None else "تعذر فتح حجز التصوير. أعد المحاولة."
+    if response.status_code == 503:
+        message = ""
+        try:
+            message = str(response.json().get("message") or "")
+        except Exception:
+            message = ""
+        return message or "بوت تيليجرام متوقف مؤقتاً."
+    if response.status_code >= 400:
+        return "pass" if callback is None else "تعذر فتح حجز التصوير. أعد المحاولة."
+    try:
+        handled = bool(response.json().get("handled"))
+    except Exception:
+        handled = False
+    if handled:
+        return "handled"
+    return "pass"
+
+
 async def photography_decision(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    if query is None or query.data is None:
+    if query is None or query.data is None or query.from_user is None:
         return
     try:
         await query.answer()
     except Exception:
         pass
-    if query.message:
+    outcome = await photography_chat(query.from_user.id, callback=query.data)
+    if outcome != "handled" and query.message:
         await query.message.reply_text(
-            f"حجز التصوير غير متاح من المحادثة. رقم الدعم: {SUPPORT_PHONE}",
+            outcome if outcome != "pass" else "ما في وقت تصوير ناطر جوابك هلق.",
             reply_markup=main_keyboard(),
         )
 
@@ -1950,6 +1990,57 @@ async def route_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         return ConversationHandler.END
     if text == BTN_SUPPORT:
         return await support_start(update, context)
+    user = update.effective_user
+    if user is not None:
+        outcome = await photography_chat(user.id, text=text)
+        if outcome == "handled":
+            return ConversationHandler.END
+        if outcome != "pass":
+            await update.message.reply_text(outcome, reply_markup=main_keyboard())
+            return ConversationHandler.END
+    return await ask_assistant(update, context, text)
+
+
+async def ask_assistant(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> int:
+    """Free text goes to the Laravel assistant: it answers from the client's own records,
+    names one bot action, or emails the developer when it cannot help."""
+    message = update.message
+    user = update.effective_user
+    if message is None or user is None or not text:
+        return ConversationHandler.END
+    history = list(context.user_data.get("assistant_history") or [])[-10:]
+    try:
+        async with httpx.AsyncClient(timeout=40) as client:
+            response = await client.post(
+                f"{API_URL}/bot/telegram/assistant",
+                headers=api_headers(),
+                json={"telegram_user_id": str(user.id), "message": text[:2000], "history": history},
+            )
+        response.raise_for_status()
+        data = response.json().get("data") or {}
+    except Exception:
+        await message.reply_text(f"ما قدرنا نقرأ رسالتك هلق. جرب كمان شوي أو احكي معنا عالرقم {SUPPORT_PHONE}.", reply_markup=main_keyboard())
+        return ConversationHandler.END
+
+    action = str(data.get("action") or "answer")
+    answer = str(data.get("answer") or "").strip()
+    history.append({"role": "user", "text": text[:500]})
+    if answer:
+        history.append({"role": "assistant", "text": answer[:500]})
+    context.user_data["assistant_history"] = history[-10:]
+
+    if action == "new":
+        if answer:
+            await message.reply_text(answer)
+        return await new_request(update, context)
+    if action in {"requests", "open_request", "hours", "approve", "reject", "receipt", "edit"}:
+        if answer:
+            await message.reply_text(answer)
+        await list_requests(update, context)
+        return ConversationHandler.END
+    if action == "help":
+        return await support_start(update, context)
+    await message.reply_text(answer or "أهلين، كيف فيني ساعدك؟", reply_markup=main_keyboard())
     return ConversationHandler.END
 
 
@@ -2017,7 +2108,7 @@ def main() -> None:
     application.add_handler(
         CallbackQueryHandler(
             photography_decision,
-            pattern=r"^photo(yes|nno):",
+            pattern=r"^(photo_sub|photo_day|photo_time|ph|photo_bk|photokeep|photoyes|photonno):",
         ),
         group=-1,
     )

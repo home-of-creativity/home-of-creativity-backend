@@ -27,6 +27,7 @@ use App\Models\Employee;
 use App\Models\ServiceRequest;
 use App\Services\RequestStatusTransitionService;
 use App\Services\TelegramNotifier;
+use App\Support\PhotographyActor;
 use App\Support\ResolveServiceRequest;
 use App\Support\StatusLabel;
 use Illuminate\Http\JsonResponse;
@@ -551,15 +552,40 @@ class StaffBotController extends Controller
         return new ServiceRequestResource($confirmWorkPlan->handle($serviceRequest));
     }
 
+    /**
+     * The same accept as the dashboard tab: a waiting request is agreed, a waiting
+     * move is applied, and a second tap reports who already answered.
+     */
     public function approvePhotography(
         Request $request,
         PhotographyBooking $booking,
         BookPhotographySlot $bookPhotographySlot,
     ): JsonResponse {
-        $this->approvedEmployee($request);
-        $updated = $bookPhotographySlot->approveSameTime($booking);
+        $employee = $this->approvedEmployee($request);
+        $outcome = $bookPhotographySlot->accept($booking, PhotographyActor::employee($employee));
 
-        return response()->json(['data' => ['status' => $updated->status], 'message' => 'ok']);
+        return $this->photographyReply($bookPhotographySlot, $outcome['booking'], $outcome['result'], match ($outcome['result']) {
+            'confirmed' => 'تم تثبيت موعد التصوير وأُبلغ العميل.',
+            'moved' => 'تم نقل الموعد إلى الوقت الجديد وأُبلغ العميل.',
+            'offered' => 'هذا الوقت قريب من موعد مثبت. عُرض على العميل وقت بعد 5 ساعات.',
+            'closed' => 'الطلب لم يعد مدفوعاً أو مفتوحاً، فأُغلق الموعد بلا خصم.',
+            default => 'تم الرد على هذا الموعد مسبقاً.',
+        });
+    }
+
+    public function declinePhotography(
+        Request $request,
+        PhotographyBooking $booking,
+        BookPhotographySlot $bookPhotographySlot,
+    ): JsonResponse {
+        $employee = $this->approvedEmployee($request);
+        $outcome = $bookPhotographySlot->decline($booking, PhotographyActor::employee($employee));
+
+        return $this->photographyReply($bookPhotographySlot, $outcome['booking'], $outcome['result'], match ($outcome['result']) {
+            'declined' => 'رُفض الموعد وتحررت الخانة. أُبلغ العميل.',
+            'kept' => 'رُفض التعديل وبقي الموعد بوقته القديم. أُبلغ العميل.',
+            default => 'تم الرد على هذا الموعد مسبقاً.',
+        });
     }
 
     public function proposePhotography(
@@ -567,14 +593,35 @@ class StaffBotController extends Controller
         PhotographyBooking $booking,
         BookPhotographySlot $bookPhotographySlot,
     ): JsonResponse {
-        $this->approvedEmployee($request);
+        $employee = $this->approvedEmployee($request);
         $validated = $request->validate([
             'telegram_user_id' => ['required', 'string'],
-            'starts_at' => ['required', 'date'],
+            'starts_at' => ['required', 'string', 'max:40'],
         ]);
-        $updated = $bookPhotographySlot->propose($booking, $validated['starts_at']);
+        $updated = $bookPhotographySlot->propose($booking, $validated['starts_at'], PhotographyActor::employee($employee));
+        $sent = ! $updated->client_notify_failed && $updated->client_notified_at !== null;
 
-        return response()->json(['data' => ['status' => $updated->status], 'message' => 'ok']);
+        return $this->photographyReply($bookPhotographySlot, $updated, 'offered', $sent
+            ? 'أُرسل الوقت المقترح للعميل.'
+            : 'الوقت محفوظ بانتظار العميل، لكن رسالة واتساب لم تصل. أعد الإرسال من تاب التصوير.');
+    }
+
+    private function photographyReply(BookPhotographySlot $book, PhotographyBooking $booking, string $result, string $message): JsonResponse
+    {
+        $booking = $booking->fresh() ?? $booking;
+
+        return response()->json([
+            'data' => [
+                'id' => $booking->id,
+                'status' => $booking->status,
+                'result' => $result,
+                'starts_at' => $booking->starts_at?->format('Y-m-d H:i'),
+                'proposed_starts_at' => $booking->proposed_starts_at?->format('Y-m-d H:i'),
+                'client_notified' => ! $booking->client_notify_failed && $booking->client_notified_at !== null,
+                'when' => $book->when($booking->proposed_starts_at ?? $booking->starts_at),
+            ],
+            'message' => $message,
+        ]);
     }
 
     /**

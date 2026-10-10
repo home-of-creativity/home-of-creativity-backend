@@ -41,6 +41,7 @@ export function PricingPackageForm({ locale, t }: { locale: Locale; t: (c: { ar:
           features_en: z.string(),
           features_ar: z.string(),
           work_lines_text: z.string(),
+          photography_sessions: z.string(),
           has_reach: z.boolean(),
           ad_budget_usd: z.string().trim(),
           ad_credit_usd: z.string().trim(),
@@ -95,6 +96,7 @@ export function PricingPackageForm({ locale, t }: { locale: Locale; t: (c: { ar:
       features_en: "",
       features_ar: "",
       work_lines_text: "",
+      photography_sessions: "0",
       has_reach: false,
       ad_budget_usd: "",
       ad_credit_usd: "",
@@ -168,6 +170,7 @@ export function PricingPackageForm({ locale, t }: { locale: Locale; t: (c: { ar:
           features_en: featuresToText(item.features, "en"),
           features_ar: featuresToText(item.features, "ar"),
           work_lines_text: (item.work_lines ?? []).map((line) => `${line.department} ${line.hours}`).join("\n"),
+          photography_sessions: String(item.photography_sessions ?? 0),
           has_reach: Boolean(item.reach),
           ad_budget_usd: item.reach?.adBudgetUsd != null ? String(item.reach.adBudgetUsd) : "",
           ad_credit_usd: item.reach?.adCreditUsd != null ? String(item.reach.adCreditUsd) : "",
@@ -212,6 +215,7 @@ export function PricingPackageForm({ locale, t }: { locale: Locale; t: (c: { ar:
     features_en: string;
     features_ar: string;
     work_lines_text: string;
+    photography_sessions: string;
     has_reach: boolean;
     ad_budget_usd: string;
     ad_credit_usd: string;
@@ -237,6 +241,7 @@ export function PricingPackageForm({ locale, t }: { locale: Locale; t: (c: { ar:
       subtitle_en: values.subtitle_en.trim(),
       subtitle_ar: values.subtitle_ar.trim(),
       features: textToFeatures(values.features_en, values.features_ar),
+      photography_sessions: Math.max(0, Math.min(100, Number(values.photography_sessions) || 0)),
       work_lines: values.work_lines_text
         .split(/\n/)
         .map((row) => row.trim().match(/^(design|content|programming|photography)\s+(\d+)$/i))
@@ -391,6 +396,10 @@ export function PricingPackageForm({ locale, t }: { locale: Locale; t: (c: { ar:
         <label className="field-label">
           أسطر العمل (قسم وساعات، مثل design 16)
           <textarea className="field" rows={4} {...register("work_lines_text")} />
+        </label>
+        <label className="field-label">
+          جلسات التصوير (عدد، لا ساعات)
+          <input className="field" type="number" min={0} max={100} {...register("photography_sessions")} />
         </label>
       </FormSection>
 

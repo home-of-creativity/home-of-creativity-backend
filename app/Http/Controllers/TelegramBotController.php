@@ -4,9 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Actions\ApproveDriveDelivery;
 use App\Actions\ApproveQuotation;
+use App\Actions\ClientAssistant;
 use App\Actions\CompleteRequest;
 use App\Actions\CreateCatalogRequest;
 use App\Actions\DeclineRenewal;
+use App\Actions\HandleWhatsAppInbound;
 use App\Actions\NotifyEmployees;
 use App\Actions\NotifyPaymentStage;
 use App\Actions\ProvisionSalesClickUpTask;
@@ -34,6 +36,7 @@ use App\Models\SupportMessage;
 use App\Services\ClickUpStatusMapper;
 use App\Services\OdooLeadLog;
 use App\Services\RequestStatusTransitionService;
+use App\Support\ChatLanguage;
 use App\Support\ClientProfileValue;
 use App\Support\PricingCatalog;
 use App\Support\ResolveServiceRequest;
@@ -482,6 +485,52 @@ class TelegramBotController extends Controller
         ]);
     }
 
+    /**
+     * Free text the Telegram client bot did not route. The assistant answers from
+     * this client's records, names one bot action, or emails the developer.
+     */
+    public function assistant(Request $request, ClientAssistant $assistant): JsonResponse
+    {
+        $validated = $request->validate([
+            'telegram_user_id' => ['required', 'string'],
+            'message' => ['required', 'string', 'max:2000'],
+            'history' => ['nullable', 'array', 'max:10'],
+            'history.*.role' => ['required', 'string', 'in:user,assistant'],
+            'history.*.text' => ['required', 'string', 'max:500'],
+        ]);
+
+        $client = $this->resolveTelegramClient->handle($validated['telegram_user_id']);
+        $locale = ChatLanguage::detect($validated['message']) ?? ($client->locale === 'en' ? 'en' : 'ar');
+        $decision = $assistant->decide(
+            $client,
+            $validated['message'],
+            array_values($validated['history'] ?? []),
+            $locale,
+            'idle',
+            'telegram',
+        );
+
+        $number = null;
+        $ref = trim(ltrim($decision['ref'], '#'));
+        if ($ref !== '') {
+            try {
+                $named = app(ResolveServiceRequest::class)->byReference($ref);
+                $number = $named->client_id === $client->id ? $named->number : null;
+            } catch (\Throwable) {
+                $number = null;
+            }
+        }
+
+        return response()->json([
+            'data' => [
+                'action' => $decision['action'],
+                'answer' => $decision['answer'],
+                'request_number' => $number,
+            ],
+            'message' => 'ok',
+        ]);
+    }
+
     public function support(Request $request, NotifyEmployees $notifyEmployees): JsonResponse
     {
         $validated = $request->validate([
@@ -632,6 +681,24 @@ class TelegramBotController extends Controller
             writeExisting: filled($fresh->odoo_lead_id),
             classifyIndustry: false,
         );
+    }
+
+    public function photographyChat(Request $request, HandleWhatsAppInbound $inbound): JsonResponse
+    {
+        $validated = $request->validate([
+            'telegram_user_id' => ['required', 'string', 'max:40'],
+            'text' => ['nullable', 'string', 'max:500'],
+            'callback' => ['nullable', 'string', 'max:80'],
+        ]);
+        $client = $this->resolveTelegramClient->handle($validated['telegram_user_id']);
+        $handled = $inbound->telegramPhotography(
+            $client,
+            (string) $client->telegram_user_id,
+            $validated['text'] ?? null,
+            $validated['callback'] ?? null,
+        );
+
+        return response()->json(['handled' => $handled]);
     }
 
     public function photographySlots(Request $request, ServiceRequest $serviceRequest): JsonResponse

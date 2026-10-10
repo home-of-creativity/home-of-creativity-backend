@@ -370,7 +370,7 @@ class WorkScenarioCoverageTest extends TestCase
     {
         Carbon::setTestNow(Carbon::parse('2026-10-07 08:00:00', 'Asia/Damascus'));
         $book = app(BookPhotographySlot::class);
-        $request = ServiceRequest::factory()->create();
+        $request = ServiceRequest::factory()->photography()->create();
 
         try {
             $book->hold($request, Carbon::parse('2026-10-08 09:00:00', 'Asia/Damascus')->toIso8601String());
@@ -389,6 +389,7 @@ class WorkScenarioCoverageTest extends TestCase
         Http::fake();
         Carbon::setTestNow(Carbon::parse('2026-09-26 08:00:00', 'Asia/Damascus'));
         $this->mock(\App\Services\GoogleCalendarClient::class, function ($mock): void {
+            $mock->shouldReceive('configured')->andReturn(true);
             $mock->shouldReceive('createShoot')->once()->andReturn('evt-one');
             $mock->shouldReceive('deleteEvent')->twice();
         });
@@ -396,7 +397,7 @@ class WorkScenarioCoverageTest extends TestCase
         $start = Carbon::parse('2026-10-04 09:00:00', 'Asia/Damascus')->toIso8601String();
         $bookings = [];
         foreach ([1, 2, 3] as $ignored) {
-            $bookings[] = $book->hold(ServiceRequest::factory()->create(), $start);
+            $bookings[] = $book->hold(ServiceRequest::factory()->photography()->create(), $start);
         }
 
         $first = $book->approveSameTime($bookings[0]);

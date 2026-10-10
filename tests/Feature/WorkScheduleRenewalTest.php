@@ -171,8 +171,8 @@ class WorkScheduleRenewalTest extends TestCase
 
     public function test_photography_same_day_requests_wait_for_one_staff_choice(): void
     {
-        $request = ServiceRequest::factory()->create();
-        $other = ServiceRequest::factory()->create();
+        $request = ServiceRequest::factory()->photography()->create();
+        $other = ServiceRequest::factory()->photography()->create();
         $book = app(BookPhotographySlot::class);
         $start = Carbon::parse('2026-10-03 09:00:00', 'Asia/Damascus');
 
@@ -183,7 +183,7 @@ class WorkScheduleRenewalTest extends TestCase
         $clash = $book->hold($other, $start->toIso8601String());
         $this->assertSame('pending_staff', $clash->status);
 
-        $third = ServiceRequest::factory()->create();
+        $third = ServiceRequest::factory()->photography()->create();
         $near = $book->hold($third, $start->copy()->addHours(2)->toIso8601String());
         $this->assertSame('pending_staff', $near->status);
 

@@ -26,6 +26,7 @@ class PricingPackageResource extends JsonResource
             'prices' => $this->prices,
             'features' => $this->features ?? [],
             'work_lines' => $this->work_lines ?? [],
+            'photography_sessions' => (int) ($this->photography_sessions ?? 0),
             'reach' => $this->reach,
             'featured' => $this->featured,
             'badge_en' => $this->badge_en,

@@ -13,16 +13,35 @@ class FinanceController extends Controller
 {
     public function index(Request $request, AdminBotDesk $desk): JsonResponse
     {
+        $filters = $request->validate([
+            'q' => ['nullable', 'string', 'max:120'],
+            'invoice_state' => ['nullable', Rule::in(['paid', 'partial', 'open', 'overdue', 'draft', 'cancelled'])],
+            'client' => ['nullable', 'string', 'max:160'],
+            'currency' => ['nullable', 'string', 'max:12'],
+            'from' => ['nullable', 'date_format:Y-m-d'],
+            'to' => ['nullable', 'date_format:Y-m-d'],
+            'amount_min' => ['nullable', 'numeric', 'min:0'],
+            'amount_max' => ['nullable', 'numeric', 'min:0'],
+            'category' => ['nullable', 'string', 'max:40'],
+            'sort' => ['nullable', Rule::in(['date', 'amount', 'residual', 'due', 'client'])],
+            'dir' => ['nullable', Rule::in(['asc', 'desc'])],
+            'page' => ['nullable', 'integer', 'min:1'],
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:200'],
+        ]);
+
         return response()->json([
-            'data' => $desk->finance([
-                'from' => $request->query('from'),
-                'to' => $request->query('to'),
-                'client' => $request->query('client'),
-                'invoice_state' => $request->query('invoice_state'),
-                'category' => $request->query('category'),
-                'q' => $request->query('q'),
-            ]),
+            'data' => $desk->finance($filters),
             'message' => 'ok',
+        ]);
+    }
+
+    public function sync(AdminBotDesk $desk): JsonResponse
+    {
+        $result = $desk->syncOdooInvoices();
+
+        return response()->json([
+            'data' => $result,
+            'message' => $result['synced'] ? 'تمت المزامنة مع أودو.' : 'تعذّرت المزامنة مع أودو الآن.',
         ]);
     }
 

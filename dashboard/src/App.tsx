@@ -10,6 +10,7 @@ import { Moon, Search, Sun } from "lucide-react";
 import { BrandLockup } from "./components/BrandLockup";
 import { CommandPalette, type CommandItem } from "./components/CommandPalette";
 import { ClientChannelsPage } from "./pages/ClientChannels";
+import { PhotographyPage } from "./pages/Photography";
 import { ClientForm } from "./pages/ClientForm";
 import { Clients } from "./pages/Clients";
 import { ClientReports } from "./pages/ClientReports";
@@ -60,6 +61,7 @@ import {
   IconLegal,
   IconLogout,
   IconArticles,
+  IconCamera,
   IconChannels,
   IconOverview,
   IconPricing,
@@ -136,6 +138,7 @@ function Shell({
     { id: "finance", label: t(copy.navFinance), to: "/finance", icon: <IconPricing aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
     { id: "vouchers", label: t(copy.navVouchers), to: "/vouchers", icon: <IconVoucher aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
     { id: "channels", label: t(copy.navChannels), to: "/channels", icon: <IconChannels aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
+    { id: "photography", label: t(copy.navPhotography), to: "/photography", icon: <IconCamera aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
     { id: "add-employee", label: t(copy.addEmployee), to: "/employees/new", icon: <IconEmployees aria-hidden width={18} height={18} />, group: t(copy.commandGroupActions) },
     { id: "add-client", label: t(copy.addClient), to: "/clients/new", icon: <IconClients aria-hidden width={18} height={18} />, group: t(copy.commandGroupActions) },
     { id: "add-reel", label: t(copy.addReel), to: "/reels/new", icon: <IconReels aria-hidden width={18} height={18} />, group: t(copy.commandGroupActions) },
@@ -251,6 +254,12 @@ function Shell({
           <NavLink to="/channels">
             <IconChannels aria-hidden />
             <span>{t(copy.navChannels)}</span>
+          </NavLink>
+          ) : null}
+          {canAbility(user, "ops.photography") ? (
+          <NavLink to="/photography">
+            <IconCamera aria-hidden />
+            <span>{t(copy.navPhotography)}</span>
           </NavLink>
           ) : null}
           <p className="nav-group-label">{t(copy.navSite)}</p>
@@ -502,6 +511,7 @@ export function App() {
           <Route path="/vouchers/new" element={<VoucherStudio locale={locale} t={t} />} />
           <Route path="/vouchers/:id" element={<VoucherStudio locale={locale} t={t} />} />
           <Route path="/channels" element={<ClientChannelsPage locale={locale} t={t} />} />
+          <Route path="/photography" element={<PhotographyPage locale={locale} t={t} />} />
           <Route path="/client-logos" element={<Navigate to="/clients?tab=logos" replace />} />
           <Route path="/projects" element={<PortfolioProjects locale={locale} t={t} />} />
           <Route path="/projects/new" element={<PortfolioProjectForm locale={locale} t={t} />} />
@@ -573,6 +583,7 @@ const commandAbility: Record<string, StaffAbility | "social" | "owner"> = {
   finance: "ops.finance",
   vouchers: "ops.vouchers",
   channels: "ops.channels",
+  photography: "ops.photography",
   "add-employee": "ops.employees",
   "add-client": "ops.clients",
   "add-reel": "site.reels",
@@ -612,6 +623,7 @@ function pathAllowed(user: User | null, pathname: string) {
     return canAbility(user, "ops.vouchers.view");
   }
   if (pathname.startsWith("/channels")) return canAbility(user, "ops.channels");
+  if (pathname.startsWith("/photography")) return canAbility(user, "ops.photography");
   if (pathname.startsWith("/projects")) return canAbility(user, `site.projects.${verb}`);
   if (pathname.startsWith("/reels")) return canAbility(user, `site.reels.${verb}`);
   if (pathname.startsWith("/articles")) return canAbility(user, `site.articles.${verb}`);
@@ -628,6 +640,6 @@ function pathAllowed(user: User | null, pathname: string) {
 }
 
 function homeFor(user: User) {
-  const candidates = ["/", "/requests", "/employees", "/clients", "/reports", "/social", "/payments", "/finance", "/vouchers", "/channels", "/projects", "/reels", "/articles", "/categories", "/pricing", "/contact", "/profile-pdf", "/privacy", "/permissions"];
+  const candidates = ["/", "/requests", "/employees", "/clients", "/reports", "/social", "/payments", "/finance", "/vouchers", "/channels", "/photography", "/projects", "/reels", "/articles", "/categories", "/pricing", "/contact", "/profile-pdf", "/privacy", "/permissions"];
   return candidates.find((path) => pathAllowed(user, path)) ?? "/";
 }

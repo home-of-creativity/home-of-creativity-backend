@@ -15,6 +15,7 @@ use App\Http\Controllers\Admin\LegalPageController as AdminLegalPageController;
 use App\Http\Controllers\Admin\LiveController;
 use App\Http\Controllers\Admin\OdooController as AdminOdooController;
 use App\Http\Controllers\Admin\OverviewController;
+use App\Http\Controllers\Admin\PhotographyController as AdminPhotographyController;
 use App\Http\Controllers\Admin\PortfolioCategoryController as AdminPortfolioCategoryController;
 use App\Http\Controllers\Admin\PortfolioProjectController as AdminPortfolioProjectController;
 use App\Http\Controllers\Admin\PricingCategoryController as AdminPricingCategoryController;
@@ -218,6 +219,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
     Route::middleware('ability:ops.finance')->group(function () {
         Route::get('finance', [AdminFinanceController::class, 'index']);
         Route::post('finance/expenses', [AdminFinanceController::class, 'storeExpense']);
+        Route::post('finance/sync', [AdminFinanceController::class, 'sync']);
     });
 
     Route::middleware('crud:ops.vouchers')->group(function () {
@@ -243,10 +245,32 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::put('ops-settings/social-profile', [AdminServiceRequestController::class, 'updateSocialProfile']);
     });
 
+    Route::middleware('ability:ops.photography')->group(function () {
+        Route::get('photography', [AdminPhotographyController::class, 'index']);
+        Route::get('photography/slots', [AdminPhotographyController::class, 'slots']);
+        Route::get('photography/requests', [AdminPhotographyController::class, 'requests']);
+        Route::post('photography/bookings', [AdminPhotographyController::class, 'store']);
+        Route::put('photography/requests/{service_request}/sessions', [AdminPhotographyController::class, 'sessions']);
+        Route::get('photography/{booking}', [AdminPhotographyController::class, 'show'])->whereNumber('booking');
+        Route::post('photography/{booking}/accept', [AdminPhotographyController::class, 'accept'])->whereNumber('booking');
+        Route::post('photography/{booking}/decline', [AdminPhotographyController::class, 'decline'])->whereNumber('booking');
+        Route::post('photography/{booking}/propose', [AdminPhotographyController::class, 'propose'])->whereNumber('booking');
+        Route::post('photography/{booking}/reschedule', [AdminPhotographyController::class, 'reschedule'])->whereNumber('booking');
+        Route::post('photography/{booking}/cancel', [AdminPhotographyController::class, 'cancel'])->whereNumber('booking');
+        Route::post('photography/{booking}/done', [AdminPhotographyController::class, 'done'])->whereNumber('booking');
+        Route::post('photography/{booking}/noshow', [AdminPhotographyController::class, 'noShow'])->whereNumber('booking');
+        Route::post('photography/{booking}/refund', [AdminPhotographyController::class, 'refund'])->whereNumber('booking');
+        Route::post('photography/{booking}/resend', [AdminPhotographyController::class, 'resend'])->whereNumber('booking');
+        Route::post('photography/{booking}/retry-calendar', [AdminPhotographyController::class, 'retryCalendar'])->whereNumber('booking');
+        Route::post('photography/{booking}/retry-clickup', [AdminPhotographyController::class, 'retryClickUp'])->whereNumber('booking');
+    });
+
     Route::middleware('ability:ops.channels')->group(function () {
         Route::put('ops-settings/client-channels', [AdminClientChannelController::class, 'update']);
         Route::get('ops-settings/whatsapp-web', [AdminClientChannelController::class, 'whatsappWeb']);
         Route::post('ops-settings/whatsapp-web/logout', [AdminClientChannelController::class, 'unlinkWhatsapp']);
+        Route::get('ops-settings/whatsapp-admin', [AdminClientChannelController::class, 'whatsappAdmin']);
+        Route::post('ops-settings/whatsapp-admin/logout', [AdminClientChannelController::class, 'unlinkWhatsappAdmin']);
         Route::get('ops-settings/work-calendar', [AdminWorkScheduleController::class, 'showCalendar']);
         Route::put('ops-settings/work-calendar', [AdminWorkScheduleController::class, 'updateCalendar']);
     });
@@ -381,12 +405,14 @@ Route::prefix('bot/telegram')->middleware(['shared.secret:services.telegram.bot_
     Route::post('requests/{service_request}/revision', [TelegramBotController::class, 'revision']);
     Route::post('requests/{service_request}/approve-file', [TelegramBotController::class, 'approveFile']);
     Route::post('requests/{service_request}/renew', [TelegramBotController::class, 'renew']);
+    Route::post('photography', [TelegramBotController::class, 'photographyChat']);
     Route::get('requests/{service_request}/photography-slots', [TelegramBotController::class, 'photographySlots']);
     Route::post('requests/{service_request}/photography-bookings', [TelegramBotController::class, 'bookPhotography']);
     Route::post('requests/{service_request}/photography-decision', [TelegramBotController::class, 'decidePhotography']);
     Route::post('requests/{service_request}/decline-renewal', [TelegramBotController::class, 'declineRenewal']);
     Route::get('support-brief', [TelegramBotController::class, 'supportBrief']);
     Route::post('support', [TelegramBotController::class, 'support']);
+    Route::post('assistant', [TelegramBotController::class, 'assistant'])->middleware('throttle:30,1');
 });
 
 Route::prefix('bot/telegram')->middleware('shared.secret:services.telegram.bot_secret')->group(function () {
@@ -423,6 +449,7 @@ Route::prefix('bot/staff')->middleware('shared.secret:services.telegram.staff_bo
     Route::post('confirm-payment', [StaffBotController::class, 'confirmPayment']);
     Route::post('confirm-plan', [StaffBotController::class, 'confirmPlan']);
     Route::post('photography-bookings/{booking}/approve', [StaffBotController::class, 'approvePhotography']);
+    Route::post('photography-bookings/{booking}/decline', [StaffBotController::class, 'declinePhotography']);
     Route::post('photography-bookings/{booking}/propose', [StaffBotController::class, 'proposePhotography']);
 });
 

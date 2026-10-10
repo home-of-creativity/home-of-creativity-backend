@@ -28,6 +28,10 @@ class SyncClickUpReview
             if (! filled($task->clickup_task_id) || in_array($task->status, ['complete', 'closed', 'done'], true)) {
                 continue;
             }
+            // A photography session task follows its own shoot, not the file delivery.
+            if (str_contains((string) $task->integration_key, ':photo:')) {
+                continue;
+            }
             if ($localStatus === 'complete' && $task->status !== 'review') {
                 continue;
             }

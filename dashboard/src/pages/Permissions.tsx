@@ -23,6 +23,8 @@ const abilityLabels: Record<StaffModule, { ar: string; en: string }> = {
   "ops.finance": { ar: "المالية", en: "Finance" },
   "ops.vouchers": { ar: "المسندات المالية", en: "Financial vouchers" },
   "ops.channels": { ar: "قنوات البوت", en: "Bot channels" },
+  "ops.photography": { ar: "التصوير: الطابور ومواعيدي", en: "Photography: queue and my shoots" },
+  "ops.photography_all": { ar: "التصوير: كل المواعيد والإلغاء وضبط الجلسات", en: "Photography: all bookings, cancel, session counts" },
   "ops.report_gemini": { ar: "مساعد التقارير", en: "Report assistant" },
   "ops.report_templates": { ar: "قوالب التقارير", en: "Report templates" },
   "ops.report_media": { ar: "صور التقارير ومربع النص", en: "Report pictures and text box" },

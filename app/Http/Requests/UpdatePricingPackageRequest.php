@@ -83,6 +83,7 @@ class UpdatePricingPackageRequest extends FormRequest
             'work_lines' => ['nullable', 'array'],
             'work_lines.*.department' => ['required_with:work_lines', 'in:design,content,programming,photography'],
             'work_lines.*.hours' => ['required_with:work_lines', 'integer', 'min:1', 'max:400'],
+            'photography_sessions' => ['sometimes', 'integer', 'min:0', 'max:100'],
         ];
     }
 }

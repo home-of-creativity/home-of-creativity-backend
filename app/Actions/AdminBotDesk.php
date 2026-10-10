@@ -5,6 +5,7 @@ namespace App\Actions;
 use App\Enums\RequestStatus;
 use App\Models\Client;
 use App\Models\Invoice;
+use App\Models\OdooInvoice;
 use App\Models\OpsExpense;
 use App\Models\ServiceRequest;
 use App\Services\OdooClient;
@@ -14,7 +15,12 @@ use Throwable;
 
 class AdminBotDesk
 {
-    public function __construct(private OdooClient $odoo) {}
+    private const INVOICE_BUCKETS = ['paid', 'partial', 'open', 'overdue', 'draft', 'cancelled'];
+
+    public function __construct(
+        private OdooClient $odoo,
+        private SyncOdooInvoices $syncOdooInvoices,
+    ) {}
 
     /**
      * @return array<string, mixed>
@@ -98,15 +104,22 @@ class AdminBotDesk
     }
 
     /**
-     * @param  array{from?: string|null, to?: string|null, client?: string|null, invoice_state?: string|null, category?: string|null, q?: string|null}  $filters
+     * Received money follows the Odoo invoice state copied by `odoo:sync-invoices`.
+     * A cancelled or draft invoice adds nothing. Filters: q, invoice_state (paid,
+     * partial, open, overdue, draft, cancelled), client, currency, from, to (invoice
+     * date), amount_min, amount_max, category (expenses), sort, dir, page, per_page.
+     *
+     * @param  array<string, mixed>  $filters
      * @return array<string, mixed>
      */
     public function finance(array $filters = []): array
     {
-        $invoiceRows = $this->financeInvoices();
+        $this->refreshOdooInvoices();
+
+        $all = $this->financeInvoices($filters);
         $expenseRows = OpsExpense::query()
             ->latest('id')
-            ->limit(200)
+            ->limit(500)
             ->get()
             ->map(fn (OpsExpense $expense): array => [
                 'id' => $expense->id,
@@ -117,50 +130,84 @@ class AdminBotDesk
             ])
             ->all();
 
-        $clients = array_values(array_unique(array_filter(array_map(
-            fn (array $row): string => trim((string) ($row['partner_name'] ?? '')),
-            $invoiceRows,
-        ))));
-        sort($clients);
-
-        $filteredInvoices = array_values(array_filter(
-            $invoiceRows,
-            fn (array $row): bool => $this->invoiceMatches($row, $filters),
-        ));
+        $stateCounts = array_fill_keys(self::INVOICE_BUCKETS, 0);
+        foreach ($all as $row) {
+            $stateCounts[$row['state']] = ($stateCounts[$row['state']] ?? 0) + 1;
+        }
+        $state = (string) ($filters['invoice_state'] ?? '');
+        $filteredInvoices = $state === ''
+            ? $all
+            : array_values(array_filter($all, fn (array $row): bool => $row['state'] === $state));
         $filteredExpenses = array_values(array_filter(
             $expenseRows,
             fn (array $row): bool => $this->expenseMatches($row, $filters),
         ));
 
-        $revenuePaid = round(array_sum(array_map(
-            fn (array $row): float => (float) $row['collected'],
-            $filteredInvoices,
-        )), 2);
-        if ($revenuePaid <= 0 && $invoiceRows === [] && $this->filtersAreEmpty($filters)) {
+        $mirrorHasRows = OdooInvoice::query()->exists();
+        $revenuePaid = round(array_sum(array_column($filteredInvoices, 'collected')), 2);
+        $hasInvoices = $all !== [] || $mirrorHasRows || Invoice::query()->where('kind', 'received')->exists();
+        if ($revenuePaid <= 0 && ! $hasInvoices && $this->filtersAreEmpty($filters)) {
             $revenuePaid = round((float) ServiceRequest::query()->sum('amount_paid'), 2);
         }
 
-        $openQuery = ServiceRequest::query()->whereNotIn('status', [RequestStatus::Cancelled]);
-        $client = trim((string) ($filters['client'] ?? ''));
-        if ($client !== '') {
-            $openQuery->whereHas('client', function ($query) use ($client): void {
-                $like = '%'.addcslashes($client, '%_\\').'%';
-                $query->where('name', 'like', $like)->orWhere('company_name', 'like', $like);
-            });
-        }
-        $revenueOpen = round((float) $openQuery->sum('amount_remaining'), 2);
+        $open = array_filter($filteredInvoices, fn (array $row): bool => in_array($row['state'], ['open', 'partial', 'overdue'], true));
+        $revenueOpen = $mirrorHasRows
+            ? round(array_sum(array_column($open, 'residual')), 2)
+            : $this->localOpenRevenue($filters);
+        $overdue = array_filter($filteredInvoices, fn (array $row): bool => $row['state'] === 'overdue');
         $expenses = round(array_sum(array_column($filteredExpenses, 'amount')), 2);
+
+        $sorted = $this->sortInvoices($filteredInvoices, (string) ($filters['sort'] ?? 'date'), (string) ($filters['dir'] ?? 'desc'));
+        $perPage = min(max((int) ($filters['per_page'] ?? 25), 1), 200);
+        $total = count($sorted);
+        $lastPage = max(1, (int) ceil($total / $perPage));
+        $page = min(max((int) ($filters['page'] ?? 1), 1), $lastPage);
+        $pageRows = array_slice($sorted, ($page - 1) * $perPage, $perPage);
+
+        $clients = $this->financeClients();
+        $currencies = OdooInvoice::query()->whereNotNull('currency')->distinct()->orderBy('currency')->pluck('currency')->all();
+        $status = SyncOdooInvoices::status();
 
         return [
             'revenue_paid' => $revenuePaid,
             'revenue_open' => $revenueOpen,
+            'revenue_overdue' => round(array_sum(array_column($overdue, 'residual')), 2),
+            'invoiced' => round(array_sum(array_map(
+                fn (array $row): float => in_array($row['state'], ['cancelled', 'draft'], true) ? 0.0 : (float) $row['amount'],
+                $filteredInvoices,
+            )), 2),
             'expenses' => $expenses,
             'net' => round($revenuePaid - $expenses, 2),
-            'invoices' => $filteredInvoices,
+            'invoices' => $pageRows,
+            'state_counts' => $stateCounts,
+            'meta' => [
+                'current_page' => $page,
+                'last_page' => $lastPage,
+                'per_page' => $perPage,
+                'total' => $total,
+                'from' => $total === 0 ? null : (($page - 1) * $perPage) + 1,
+                'to' => $total === 0 ? null : (($page - 1) * $perPage) + count($pageRows),
+            ],
             'clients' => $clients,
+            'currencies' => $currencies,
             'expense_rows' => $filteredExpenses,
             'categories' => OpsExpense::categories(),
+            'sync' => [
+                'configured' => $this->odoo->configured(),
+                'synced_at' => $status['synced_at'],
+                'error' => $status['error'],
+            ],
         ];
+    }
+
+    /**
+     * Pulls the Odoo invoices changed since the last sync now, instead of waiting for the scheduler.
+     *
+     * @return array{synced: bool, changed: int, removed: int}
+     */
+    public function syncOdooInvoices(): array
+    {
+        return $this->syncOdooInvoices->handle();
     }
 
     /**
@@ -253,146 +300,165 @@ class AdminBotDesk
         ];
     }
 
+    private function refreshOdooInvoices(): void
+    {
+        try {
+            $this->syncOdooInvoices->refreshIfStale(30);
+        } catch (Throwable) {
+            // The page still shows the last copied state; sync.error says why it is old.
+        }
+    }
+
     /**
-     * Received money follows the live invoice state. A cancelled Odoo invoice
-     * contributes nothing, even when it was paid before.
+     * Every invoice row that matches the filters except the state filter, so the
+     * state chips can show their counts. Odoo invoices come from `odoo_invoices`.
+     * A received payment that never reached Odoo is listed from the local table.
      *
+     * @param  array<string, mixed>  $filters
      * @return list<array<string, mixed>>
      */
-    private function financeInvoices(): array
+    private function financeInvoices(array $filters): array
     {
+        $query = OdooInvoice::query()->with('request:id,number,title');
+        $from = trim((string) ($filters['from'] ?? ''));
+        $to = trim((string) ($filters['to'] ?? ''));
+        if ($from !== '') {
+            $query->whereDate('invoice_date', '>=', $from);
+        }
+        if ($to !== '') {
+            $query->whereDate('invoice_date', '<=', $to);
+        }
+        $client = trim((string) ($filters['client'] ?? ''));
+        if ($client !== '') {
+            $query->where('partner_name', 'like', $this->like($client));
+        }
+        $currency = trim((string) ($filters['currency'] ?? ''));
+        if ($currency !== '') {
+            $query->where('currency', $currency);
+        }
+        if (is_numeric($filters['amount_min'] ?? null)) {
+            $query->where('amount_total', '>=', (float) $filters['amount_min']);
+        }
+        if (is_numeric($filters['amount_max'] ?? null)) {
+            $query->where('amount_total', '<=', (float) $filters['amount_max']);
+        }
+        $needle = trim((string) ($filters['q'] ?? ''));
+        if ($needle !== '') {
+            $like = $this->like($needle);
+            $query->where(function ($inner) use ($like): void {
+                $inner->where('name', 'like', $like)
+                    ->orWhere('partner_name', 'like', $like)
+                    ->orWhere('ref', 'like', $like)
+                    ->orWhere('invoice_origin', 'like', $like)
+                    ->orWhereHas('request', fn ($request) => $request->where('number', 'like', $like)->orWhere('title', 'like', $like));
+            });
+        }
+
+        $rows = $query->orderByDesc('invoice_date')->orderByDesc('odoo_id')->limit(5000)->get()
+            ->map(fn (OdooInvoice $invoice): array => $this->odooInvoiceRow($invoice))
+            ->all();
+
+        $mirrored = OdooInvoice::query()->pluck('odoo_id')->map(fn ($id): string => (string) $id)->flip()->all();
         $local = Invoice::query()
             ->with('request.client:id,name,company_name')
             ->where('kind', 'received')
             ->latest('id')
-            ->limit(200)
-            ->get();
+            ->limit(500)
+            ->get()
+            ->filter(fn (Invoice $invoice): bool => ! filled($invoice->odoo_invoice_id) || ! isset($mirrored[(string) $invoice->odoo_invoice_id]))
+            ->map(fn (Invoice $invoice): array => $this->localInvoiceRow($invoice))
+            ->filter(fn (array $row): bool => $this->localInvoiceMatches($row, $filters))
+            ->values()
+            ->all();
 
-        $live = $this->liveOdooInvoices();
-        $liveById = [];
-        foreach ($live as $row) {
-            $liveById[(string) $row['id']] = $row;
-        }
-
-        $cancelIds = [];
-        $paidIds = [];
-        foreach ($live as $row) {
-            $id = (string) $row['id'];
-            if (($row['state'] ?? '') === 'cancel') {
-                $cancelIds[] = $id;
-            } elseif (in_array((string) ($row['payment_state'] ?? ''), ['paid', 'in_payment'], true)) {
-                $paidIds[] = $id;
-            }
-        }
-        if ($cancelIds !== []) {
-            Invoice::query()->whereIn('odoo_invoice_id', $cancelIds)->update(['status' => 'cancelled']);
-        }
-        if ($paidIds !== []) {
-            Invoice::query()->whereIn('odoo_invoice_id', $paidIds)->where('status', '!=', 'cancelled')->update(['status' => 'paid']);
-        }
-
-        $rows = [];
-        $linked = [];
-        foreach ($local as $invoice) {
-            $odooId = filled($invoice->odoo_invoice_id) ? (string) $invoice->odoo_invoice_id : '';
-            $remote = $odooId !== '' ? ($liveById[$odooId] ?? null) : null;
-            if ($odooId !== '') {
-                $linked[$odooId] = true;
-            }
-            if ($remote !== null) {
-                $rows[] = $this->financeInvoiceRow($remote, $invoice);
-                continue;
-            }
-            if (in_array((string) $invoice->status, ['cancelled', 'void'], true)) {
-                $rows[] = $this->localInvoiceRow($invoice, 'cancelled', 0.0);
-                continue;
-            }
-            $rows[] = $this->localInvoiceRow($invoice, 'paid', (float) $invoice->amount);
-        }
-
-        foreach ($live as $row) {
-            if (isset($linked[(string) $row['id']])) {
-                continue;
-            }
-            $rows[] = $this->financeInvoiceRow($row, null);
-        }
-
-        return $rows;
+        return array_values(array_merge($rows, $local));
     }
 
     /**
-     * @return list<array<string, mixed>>
+     * Every partner name on an Odoo invoice or a local received payment, for the client filter.
+     *
+     * @return list<string>
      */
-    private function liveOdooInvoices(): array
+    private function financeClients(): array
     {
-        if (! $this->odoo->configured()) {
-            return [];
-        }
+        $names = OdooInvoice::query()->whereNotNull('partner_name')->distinct()->pluck('partner_name')->all();
+        Invoice::query()
+            ->with('request.client:id,name,company_name')
+            ->where('kind', 'received')
+            ->latest('id')
+            ->limit(500)
+            ->get()
+            ->each(function (Invoice $invoice) use (&$names): void {
+                $client = $invoice->request?->client;
+                if ($client !== null) {
+                    $names[] = (string) ($client->company_name ?: $client->name);
+                }
+            });
+        $names = array_values(array_unique(array_filter(array_map(fn ($name): string => trim((string) $name), $names))));
+        sort($names);
 
-        try {
-            return $this->odoo->listInvoices(200);
-        } catch (Throwable) {
-            return [];
-        }
+        return $names;
+    }
+
+    private function like(string $value): string
+    {
+        return '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $value).'%';
     }
 
     /**
-     * @param  array<string, mixed>  $remote
      * @return array<string, mixed>
      */
-    private function financeInvoiceRow(array $remote, ?Invoice $invoice): array
+    private function odooInvoiceRow(OdooInvoice $invoice): array
     {
-        $state = (string) ($remote['state'] ?? '');
-        $payment = (string) ($remote['payment_state'] ?? '');
-        $collected = 0.0;
-        if ($state !== 'cancel' && in_array($payment, ['paid', 'in_payment', 'partial'], true)) {
-            $collected = round(max((float) $remote['amount_total'] - (float) $remote['amount_residual'], 0), 2);
-        }
-        $bucket = match (true) {
-            $state === 'cancel' => 'cancelled',
-            in_array($payment, ['paid', 'in_payment'], true) => 'paid',
-            $payment === 'partial' => 'partial',
-            default => 'open',
-        };
-        $partner = (string) ($remote['partner_name'] ?? '');
-        if ($partner === '' && $invoice?->request?->client) {
-            $partner = (string) ($invoice->request->client->company_name ?: $invoice->request->client->name);
-        }
+        $bucket = $invoice->bucket();
 
         return [
-            'id' => $invoice?->id ?? (int) $remote['id'],
-            'name' => (string) ($remote['name'] ?? $invoice?->invoice_number ?? ''),
-            'amount' => (float) ($remote['amount_total'] ?? $invoice?->amount ?? 0),
-            'collected' => $collected,
+            'id' => (int) $invoice->odoo_id,
+            'source' => 'odoo',
+            'name' => (string) $invoice->name,
+            'amount' => (float) $invoice->amount_total,
+            'collected' => $invoice->collected(),
+            'residual' => in_array($bucket, ['cancelled', 'draft', 'paid'], true) ? 0.0 : round((float) $invoice->amount_residual, 2),
+            'currency' => $invoice->currency,
             'state' => $bucket,
-            'payment_state' => $payment,
-            'partner_name' => $partner !== '' ? $partner : null,
-            'request_number' => $invoice?->request?->number ?? ($remote['ref'] ?? $remote['invoice_origin'] ?? null),
-            'title' => $invoice?->request?->title,
-            'issued_at' => $remote['invoice_date'] ?? $invoice?->issued_at?->toDateString(),
-            'odoo_url' => $remote['odoo_url'] ?? null,
+            'payment_state' => $invoice->payment_state,
+            'odoo_state' => $invoice->state,
+            'partner_name' => $invoice->partner_name,
+            'request_id' => $invoice->request?->id,
+            'request_number' => $invoice->request?->number ?? ($invoice->ref ?: $invoice->invoice_origin),
+            'title' => $invoice->request?->title,
+            'issued_at' => $invoice->invoice_date?->toDateString(),
+            'due_at' => $invoice->invoice_date_due?->toDateString(),
+            'odoo_url' => $this->odoo->recordUrl('account.move', (int) $invoice->odoo_id),
         ];
     }
 
     /**
      * @return array<string, mixed>
      */
-    private function localInvoiceRow(Invoice $invoice, string $bucket, float $collected): array
+    private function localInvoiceRow(Invoice $invoice): array
     {
         $client = $invoice->request?->client;
         $partner = $client ? (string) ($client->company_name ?: $client->name) : '';
+        $cancelled = in_array((string) $invoice->status, ['cancelled', 'void'], true);
 
         return [
             'id' => $invoice->id,
+            'source' => 'local',
             'name' => (string) $invoice->invoice_number,
             'amount' => (float) $invoice->amount,
-            'collected' => round($collected, 2),
-            'state' => $bucket,
-            'payment_state' => $bucket === 'paid' ? 'paid' : ($bucket === 'cancelled' ? 'cancel' : 'not_paid'),
+            'collected' => $cancelled ? 0.0 : round((float) $invoice->amount, 2),
+            'residual' => 0.0,
+            'currency' => 'USD',
+            'state' => $cancelled ? 'cancelled' : 'paid',
+            'payment_state' => $cancelled ? 'cancel' : 'paid',
+            'odoo_state' => null,
             'partner_name' => $partner !== '' ? $partner : null,
+            'request_id' => $invoice->request?->id,
             'request_number' => $invoice->request?->number,
             'title' => $invoice->request?->title,
             'issued_at' => $invoice->issued_at?->toDateString(),
+            'due_at' => null,
             'odoo_url' => null,
         ];
     }
@@ -401,14 +467,20 @@ class AdminBotDesk
      * @param  array<string, mixed>  $row
      * @param  array<string, mixed>  $filters
      */
-    private function invoiceMatches(array $row, array $filters): bool
+    private function localInvoiceMatches(array $row, array $filters): bool
     {
-        $state = (string) ($filters['invoice_state'] ?? '');
-        if ($state !== '' && (string) $row['state'] !== $state) {
-            return false;
-        }
         $client = trim((string) ($filters['client'] ?? ''));
         if ($client !== '' && ! str_contains(mb_strtolower((string) ($row['partner_name'] ?? '')), mb_strtolower($client))) {
+            return false;
+        }
+        $currency = trim((string) ($filters['currency'] ?? ''));
+        if ($currency !== '' && $currency !== $row['currency']) {
+            return false;
+        }
+        if (is_numeric($filters['amount_min'] ?? null) && (float) $row['amount'] < (float) $filters['amount_min']) {
+            return false;
+        }
+        if (is_numeric($filters['amount_max'] ?? null) && (float) $row['amount'] > (float) $filters['amount_max']) {
             return false;
         }
         if (! $this->dateMatches((string) ($row['issued_at'] ?? ''), $filters)) {
@@ -427,6 +499,56 @@ class AdminBotDesk
         ])));
 
         return str_contains($haystack, $needle);
+    }
+
+    /**
+     * Before the first Odoo copy, the open amount is what the requests still owe.
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    private function localOpenRevenue(array $filters): float
+    {
+        $query = ServiceRequest::query()->whereNotIn('status', [RequestStatus::Cancelled]);
+        $client = trim((string) ($filters['client'] ?? ''));
+        if ($client !== '') {
+            $like = $this->like($client);
+            $query->whereHas('client', fn ($inner) => $inner->where('name', 'like', $like)->orWhere('company_name', 'like', $like));
+        }
+
+        return round((float) $query->sum('amount_remaining'), 2);
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $rows
+     * @return list<array<string, mixed>>
+     */
+    private function sortInvoices(array $rows, string $sort, string $dir): array
+    {
+        $key = match ($sort) {
+            'amount' => 'amount',
+            'residual' => 'residual',
+            'due' => 'due_at',
+            'client' => 'partner_name',
+            default => 'issued_at',
+        };
+        $sign = $dir === 'asc' ? 1 : -1;
+        usort($rows, function (array $a, array $b) use ($key, $sign): int {
+            $left = $a[$key] ?? null;
+            $right = $b[$key] ?? null;
+            if ($left === $right) {
+                return $sign * ((int) $a['id'] <=> (int) $b['id']);
+            }
+            if ($left === null) {
+                return 1;
+            }
+            if ($right === null) {
+                return -1;
+            }
+
+            return $sign * (is_numeric($left) && is_numeric($right) ? ((float) $left <=> (float) $right) : strcmp((string) $left, (string) $right));
+        });
+
+        return $rows;
     }
 
     /**
@@ -479,7 +601,7 @@ class AdminBotDesk
      */
     private function filtersAreEmpty(array $filters): bool
     {
-        foreach (['from', 'to', 'client', 'invoice_state', 'category', 'q'] as $key) {
+        foreach (['from', 'to', 'client', 'invoice_state', 'category', 'q', 'currency', 'amount_min', 'amount_max'] as $key) {
             if (trim((string) ($filters[$key] ?? '')) !== '') {
                 return false;
             }

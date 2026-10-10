@@ -975,13 +975,42 @@ async def on_photo_approve(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         if response.status_code >= 400:
             await api_staff_error(query, response)
             return
-        status = response.json().get("data", {}).get("status")
-    if status == "needs_client":
-        await query.answer("هذا الوقت محجوز. عُرض على العميل وقت يبعد 5 ساعات.", show_alert=True)
+        body = response.json()
+    await photo_outcome(query, employee, body)
+
+
+async def photo_outcome(query, employee, body: dict) -> None:
+    """One reply for accept and decline. A second tap shows that someone already answered."""
+    data = body.get("data", {}) or {}
+    message = str(body.get("message") or "تم.")
+    if data.get("result") == "already":
+        await query.answer(message, show_alert=True)
         return
-    await query.answer("تمت الموافقة على الموعد.")
+    await query.answer(message[:190])
     if query.message:
-        await query.message.reply_text("تم تثبيت موعد التصوير. أي موعد أقرب من 5 ساعات يُعرض على العميل بوقت أبعد.", reply_markup=staff_keyboard(employee))
+        await query.message.reply_text(message, reply_markup=staff_keyboard(employee))
+
+
+async def on_photo_decline(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if query is None or query.data is None or query.from_user is None:
+        return
+    employee = await ensure_approved(update)
+    if employee is None:
+        await query.answer("حسابك غير مفعّل.", show_alert=True)
+        return
+    booking_id = query.data.split(":", 1)[1]
+    async with httpx.AsyncClient(timeout=API_TIMEOUT) as client:
+        response = await client.post(
+            f"{API_URL}/bot/staff/photography-bookings/{booking_id}/decline",
+            headers=api_headers(),
+            json={"telegram_user_id": str(query.from_user.id)},
+        )
+        if response.status_code >= 400:
+            await api_staff_error(query, response)
+            return
+        body = response.json()
+    await photo_outcome(query, employee, body)
 
 
 async def on_photo_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -995,7 +1024,7 @@ async def on_photo_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     context.user_data["photo_booking_id"] = query.data.split(":", 1)[1]
     await query.answer()
     if query.message:
-        await query.message.reply_text("أرسل الوقت الذي يناسبك بصيغة 2026-10-05 16:00")
+        await query.message.reply_text("أرسل الوقت الذي يناسبك بصيغة 2026-10-05 16:00. الحضور 3 ساعات داخل دوام الفريق، وبين موعدين 5 ساعات.")
 
 
 async def route_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1012,11 +1041,16 @@ async def route_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 json={"telegram_user_id": str(update.effective_user.id), "starts_at": text},
             )
         if response.status_code >= 400:
-            detail = response.text or "تعذر إرسال الوقت."
-            await update.message.reply_text(detail[:300])
+            try:
+                detail = response.json().get("message") or response.text
+            except Exception:
+                detail = response.text or "تعذر حفظ الوقت."
+            await update.message.reply_text(str(detail)[:300])
             return
         employee = await lookup_employee(update.effective_user.id)
-        await update.message.reply_text("أُرسل الوقت المقترح للعميل.", reply_markup=staff_keyboard(employee))
+        # «أُرسل للعميل» only when WhatsApp accepted the message.
+        message = response.json().get("message") or "الوقت محفوظ بانتظار العميل."
+        await update.message.reply_text(message, reply_markup=staff_keyboard(employee))
         return
     if text == BTN_TASKS:
         await list_tasks(update, context)
@@ -1064,6 +1098,7 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(on_confirm_plan, pattern=r"^planok:"))
     application.add_handler(CallbackQueryHandler(on_photo_approve, pattern=r"^photook:"))
     application.add_handler(CallbackQueryHandler(on_photo_time, pattern=r"^phototime:"))
+    application.add_handler(CallbackQueryHandler(on_photo_decline, pattern=r"^photono:"))
     application.add_handler(CallbackQueryHandler(on_select_request, pattern=r"^rsel:"))
     application.add_handler(CallbackQueryHandler(on_send_template, pattern=r"^rtpl:"))
     application.add_handler(MessageHandler(filters.Regex(f"^{BTN_TASKS}$"), list_tasks))

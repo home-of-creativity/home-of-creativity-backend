@@ -19,6 +19,9 @@ Schedule::command('integration:process-outbox')->everyMinute()->withoutOverlappi
 // (not a rotating slice) so a stage/tag/contact edit made directly in Odoo
 // reaches the dashboard within about a minute even as the client list grows.
 Schedule::command('odoo:reconcile', ['--limit' => 500])->everyMinute()->withoutOverlapping();
+// Finance follows Odoo: invoices changed in Odoo every minute, a full walk hourly for deletions.
+Schedule::command('odoo:sync-invoices')->everyMinute()->withoutOverlapping();
+Schedule::command('odoo:sync-invoices', ['--full'])->hourly()->withoutOverlapping();
 Schedule::command('ops:process-reminders')->everyMinute()->timezone('Asia/Damascus')->withoutOverlapping();
 Schedule::command('ops:process-bot-sla')->everyMinute()->timezone('Asia/Damascus')->withoutOverlapping();
 Schedule::command('ops:poll-drive', ['--limit' => 200])->everyMinute()->timezone('Asia/Damascus')->withoutOverlapping();
@@ -26,6 +29,8 @@ Schedule::command('ops:renew-drive-watch')->hourly()->timezone('Asia/Damascus')-
 Schedule::command('ops:clickup-due-alerts')->hourly()->timezone('Asia/Damascus')->withoutOverlapping();
 Schedule::command('clickup:retry-tasks')->everyFiveMinutes()->withoutOverlapping();
 Schedule::command('ops:photography-day-before')->hourly()->timezone('Asia/Damascus')->withoutOverlapping();
+// Unanswered photography requests, offers, and moves close after 48 hours, even with Telegram down.
+Schedule::command('ops:photography-expire')->everyTenMinutes()->timezone('Asia/Damascus')->withoutOverlapping();
 Schedule::command('seo:submit-sitemap')->dailyAt('06:15')->timezone('Asia/Damascus')->withoutOverlapping();
 Schedule::command('ops:watch-health')->everyMinute()->withoutOverlapping();
 Schedule::command('ops:watch-signals')->everyFifteenMinutes()->withoutOverlapping();

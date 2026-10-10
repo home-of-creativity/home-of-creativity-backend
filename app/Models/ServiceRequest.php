@@ -71,6 +71,10 @@ class ServiceRequest extends Model
         'clickup_error',
         'clickup_attempts',
         'clickup_failed_at',
+        'photography_sessions',
+        'photography_sessions_used',
+        'photography_period_key',
+        'photography_next_period_key',
     ];
 
     protected function casts(): array
@@ -104,6 +108,8 @@ class ServiceRequest extends Model
             'odoo_won_at' => 'datetime',
             'clickup_attempts' => 'integer',
             'clickup_failed_at' => 'datetime',
+            'photography_sessions' => 'integer',
+            'photography_sessions_used' => 'integer',
         ];
     }
 
@@ -113,7 +119,20 @@ class ServiceRequest extends Model
             if (! filled($request->uuid)) {
                 $request->uuid = (string) Str::uuid();
             }
+            // The package count is copied once. A later package edit leaves this request alone.
+            if ($request->photography_sessions === null && $request->pricing_package_id !== null) {
+                $sessions = PricingPackage::query()->whereKey($request->pricing_package_id)->value('photography_sessions');
+                if ($sessions !== null) {
+                    $request->photography_sessions = (int) $sessions;
+                    $request->photography_period_key ??= 'initial';
+                }
+            }
         });
+    }
+
+    public function photographyBookings(): HasMany
+    {
+        return $this->hasMany(PhotographyBooking::class, 'request_id');
     }
 
     public function client(): BelongsTo
@@ -376,6 +395,9 @@ class ServiceRequest extends Model
                     continue;
                 }
                 $department = trim((string) ($operation['department'] ?? ''));
+                if ($department === 'photography') {
+                    continue;
+                }
                 if ($department !== '' && ! in_array($department, $departments, true)) {
                     $departments[] = $department;
                 }

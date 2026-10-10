@@ -31,6 +31,18 @@ class NotifyEmployees
         return $this->notifyProfession($profession, $text, 'staff-join');
     }
 
+    /**
+     * @param  list<array{text: string, callback_data: string}>|null  $inlineButtons
+     */
+    public function toEmployee(Employee $employee, string $text, ?array $inlineButtons = null): bool
+    {
+        if (! filled($employee->telegram_user_id) || ! $employee->isApproved()) {
+            return false;
+        }
+
+        return $this->deliver((string) $employee->telegram_user_id, $text, 'employee:'.$employee->id, $inlineButtons);
+    }
+
     public function handleAdmins(string $text): int
     {
         $ids = array_values(array_filter(array_map(

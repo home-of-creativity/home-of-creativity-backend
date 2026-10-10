@@ -11,6 +11,7 @@ const defaults: ClientChannels = { telegram_enabled: true, whatsapp_enabled: tru
 export function ClientChannelsPage({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
   const [channels, setChannels] = useState<ClientChannels>(defaults);
   const [link, setLink] = useState<WhatsAppWebStatus | null>(null);
+  const [adminLink, setAdminLink] = useState<WhatsAppWebStatus | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<"telegram" | "whatsapp" | null>(null);
   const [hours, setHours] = useState("8");
@@ -21,6 +22,7 @@ export function ClientChannelsPage({ locale, t }: { locale: Locale; t: (c: { ar:
   const [photoLead, setPhotoLead] = useState("7");
   const [holidays, setHolidays] = useState<string[]>([]);
   const [unlinking, setUnlinking] = useState(false);
+  const [unlinkingAdmin, setUnlinkingAdmin] = useState(false);
 
   useEffect(() => {
     api
@@ -67,8 +69,26 @@ export function ClientChannelsPage({ locale, t }: { locale: Locale; t: (c: { ar:
           }
         });
     };
+    const pullAdmin = () => {
+      api
+        .whatsappAdminStatus()
+        .then((res) => {
+          if (!stop) {
+            setAdminLink(res.data);
+          }
+        })
+        .catch(() => {
+          if (!stop) {
+            setAdminLink(null);
+          }
+        });
+    };
     pull();
-    const timer = window.setInterval(pull, 4000);
+    pullAdmin();
+    const timer = window.setInterval(() => {
+      pull();
+      pullAdmin();
+    }, 4000);
     return () => {
       stop = true;
       window.clearInterval(timer);
@@ -115,6 +135,20 @@ export function ClientChannelsPage({ locale, t }: { locale: Locale; t: (c: { ar:
       setError(err instanceof Error ? err.message : t(copy.saveFailed));
     } finally {
       setUnlinking(false);
+    }
+  }
+
+  async function changeAdminNumber() {
+    setUnlinkingAdmin(true);
+    setError("");
+    try {
+      const res = await api.unlinkWhatsappAdmin();
+      setAdminLink(res.data);
+      toast.success(t(copy.channelsSaved));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t(copy.saveFailed));
+    } finally {
+      setUnlinkingAdmin(false);
     }
   }
 
@@ -187,6 +221,36 @@ export function ClientChannelsPage({ locale, t }: { locale: Locale; t: (c: { ar:
               </div>
             ) : (
               <p className="muted">{t(copy.channelsWhatsappScan)}</p>
+            )}
+          </section>
+        ) : null}
+        {channels.whatsapp_transport === "web" ? (
+          <section className="card channels-link">
+            <p className="channels-link-kicker">{t(copy.channelsAdminWhatsapp)}</p>
+            {adminLink?.connected ? (
+              <div className="channels-link-row">
+                <div>
+                  {adminLink.phone ? <p className="channels-phone" dir="ltr">+{adminLink.phone}</p> : null}
+                  <p className="muted">{t(copy.channelsAdminWhatsappLinked)}</p>
+                </div>
+                <ConfirmAction
+                  label={t(copy.channelsWhatsappChange)}
+                  confirmLabel={t(copy.channelsWhatsappChangeConfirm)}
+                  yesLabel={t(copy.channelsWhatsappChange)}
+                  noLabel={t(copy.cancel)}
+                  disabled={unlinkingAdmin}
+                  onConfirm={() => void changeAdminNumber()}
+                />
+              </div>
+            ) : adminLink && !adminLink.reachable ? (
+              <p className="error">{t(copy.channelsWhatsappOffline)}</p>
+            ) : adminLink?.qr ? (
+              <div className="channels-link-scan">
+                <p>{t(copy.channelsAdminWhatsappScan)}</p>
+                <img className="wa-link-qr" alt="" src={adminLink.qr} />
+              </div>
+            ) : (
+              <p className="muted">{t(copy.channelsAdminWhatsappScan)}</p>
             )}
           </section>
         ) : null}

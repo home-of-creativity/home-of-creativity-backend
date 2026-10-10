@@ -164,7 +164,8 @@ class ScenarioMatrixTest extends TestCase
 
         $this->mock(\App\Services\GeminiService::class, function ($mock): void {
             $mock->shouldReceive('answerSiteQuestion')->andThrow(new \RuntimeException('gemini down'));
-            $mock->shouldReceive('classifyClientIntent')->andReturn('none');
+            $mock->shouldReceive('assistClient')->andReturnNull();
+            $mock->shouldReceive('recommendPackage')->andReturnNull();
         });
 
         $this->withHeaders(['X-Webhook-Secret' => 'web-secret'])

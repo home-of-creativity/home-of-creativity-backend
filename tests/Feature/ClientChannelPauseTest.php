@@ -200,6 +200,33 @@ class ClientChannelPauseTest extends TestCase
         });
     }
 
+    public function test_admin_can_link_a_separate_admin_whatsapp_phone(): void
+    {
+        config([
+            'services.whatsapp.web_url' => 'http://wa-bridge.test',
+            'services.whatsapp.web_secret' => 'bridge-secret',
+        ]);
+        Http::fake([
+            'http://wa-bridge.test/admin/status' => Http::response([
+                'connected' => false,
+                'qr' => 'data:image/png;base64,admin',
+                'phone' => null,
+            ], 200),
+            'http://wa-bridge.test/admin/logout' => Http::response(['ok' => true], 200),
+        ]);
+
+        $this->actingAdmin()
+            ->getJson('/api/admin/ops-settings/whatsapp-admin')
+            ->assertOk()
+            ->assertJsonPath('data.qr', 'data:image/png;base64,admin')
+            ->assertJsonPath('data.connected', false);
+
+        $this->actingAdmin()
+            ->postJson('/api/admin/ops-settings/whatsapp-admin/logout')
+            ->assertOk()
+            ->assertJsonPath('data.qr', 'data:image/png;base64,admin');
+    }
+
     private function actingAdmin()
     {
         $admin = User::factory()->create();

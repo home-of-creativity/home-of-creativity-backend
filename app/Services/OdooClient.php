@@ -73,7 +73,7 @@ class OdooClient
      */
     private function invoiceFields(): array
     {
-        return ['id', 'name', 'partner_id', 'amount_total', 'amount_residual', 'currency_id', 'state', 'payment_state', 'invoice_origin', 'ref', 'invoice_date'];
+        return ['id', 'name', 'partner_id', 'amount_total', 'amount_residual', 'currency_id', 'state', 'payment_state', 'invoice_origin', 'ref', 'invoice_date', 'invoice_date_due', 'write_date'];
     }
 
     /**
@@ -106,6 +106,7 @@ class OdooClient
         return [
             'id' => (int) $row['id'],
             'name' => (string) ($row['name'] ?? ''),
+            'partner_id' => $this->relationId($row['partner_id'] ?? null),
             'partner_name' => $this->relationName($row['partner_id'] ?? null),
             'amount_total' => (float) ($row['amount_total'] ?? 0),
             'amount_residual' => $this->invoiceResidual($row),
@@ -115,6 +116,8 @@ class OdooClient
             'invoice_origin' => $this->optionalString($row['invoice_origin'] ?? null),
             'ref' => $this->optionalString($row['ref'] ?? null),
             'invoice_date' => $this->optionalString($row['invoice_date'] ?? null),
+            'invoice_date_due' => $this->optionalString($row['invoice_date_due'] ?? null),
+            'write_date' => $this->optionalString($row['write_date'] ?? null),
             'odoo_url' => $this->recordUrl('account.move', (int) $row['id']),
         ];
     }
@@ -175,6 +178,40 @@ class OdooClient
         $rows = $this->searchRead('account.move', $domain, $this->invoiceFields(), $limit, $offset, 'invoice_date desc');
 
         return array_map(fn (array $row): array => $this->mapInvoice($row), $rows);
+    }
+
+    /**
+     * Customer invoices changed in Odoo after $since (UTC "Y-m-d H:i:s"), oldest change first.
+     * A null $since walks every customer invoice.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function invoicesChangedSince(?string $since, int $limit = 200, int $offset = 0): array
+    {
+        $domain = [['move_type', '=', 'out_invoice']];
+        if (filled($since)) {
+            $domain[] = ['write_date', '>', $since];
+        }
+
+        $rows = $this->searchRead('account.move', $domain, $this->invoiceFields(), $limit, $offset, 'write_date asc, id asc');
+
+        return array_map(fn (array $row): array => $this->mapInvoice($row), $rows);
+    }
+
+    /**
+     * @param  list<int>  $ids
+     * @return list<int>
+     */
+    public function existingInvoiceIds(array $ids): array
+    {
+        $ids = array_values(array_filter(array_map('intval', $ids), fn (int $id): bool => $id > 0));
+        if ($ids === []) {
+            return [];
+        }
+
+        $rows = $this->searchRead('account.move', [['id', 'in', $ids]], ['id'], count($ids));
+
+        return array_map(fn (array $row): int => (int) $row['id'], $rows);
     }
 
     /**

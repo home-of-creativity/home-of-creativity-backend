@@ -5,13 +5,17 @@ namespace Tests\Feature;
 use App\Enums\ClickUpTaskType;
 use App\Enums\RequestStatus;
 use App\Models\ClickUpTask;
+use App\Actions\BookPhotographySlot;
+use App\Actions\PhotographySessions;
 use App\Models\Client;
+use App\Models\PhotographyBooking;
 use App\Models\PricingCategory;
 use App\Models\PricingPackage;
 use App\Models\PricingSubcategory;
 use App\Models\Quotation;
 use App\Models\ServiceRequest;
 use App\Support\ClientChannelGate;
+use App\Support\PhotographyActor;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Carbon;
@@ -495,11 +499,11 @@ class WhatsAppWebBotTest extends TestCase
                 return Http::response(['id' => 'wa-web-1'], 200);
             }
             $prompt = (string) data_get($request->data(), 'contents.0.parts.0.text');
-            $intent = str_contains($prompt, 'شو صار بشغلي') ? 'requests' : 'approve';
+            $action = str_contains($prompt, 'شو صار بشغلي') ? 'requests' : 'approve';
 
             return Http::response([
                 'candidates' => [[
-                    'content' => ['parts' => [['text' => '{"intent":"'.$intent.'"}']]],
+                    'content' => ['parts' => [['text' => '{"action":"'.$action.'","ref":"","answer":"","reason":""}']]],
                 ]],
             ], 200);
         });
@@ -689,74 +693,35 @@ class WhatsAppWebBotTest extends TestCase
             && str_contains((string) data_get($request->data(), 'text'), 'لسا ما في طلبات'));
     }
 
-    public function test_a_subscriber_can_book_photography_from_the_package_allowance(): void
+    public function test_a_subscriber_books_photography_from_the_package_sessions(): void
     {
-        $category = PricingCategory::query()->create([
-            'slug' => 'strategic-photo',
-            'name_en' => 'Strategic',
-            'name_ar' => 'حلول',
-            'is_published' => true,
-            'allows_renewal' => true,
-        ]);
-        $subcategory = PricingSubcategory::query()->create([
-            'category_id' => $category->id,
-            'slug' => 'plans-photo',
-            'name_en' => 'Plans',
-            'name_ar' => 'باقات',
-            'is_published' => true,
-        ]);
-        $package = PricingPackage::query()->create([
-            'subcategory_id' => $subcategory->id,
-            'slug' => 'growth-photo',
-            'name_en' => 'Business Growth',
-            'name_ar' => 'Business Growth',
-            'subtitle_en' => 'Mid',
-            'subtitle_ar' => 'متوسطة',
-            'prices' => ['monthly' => 899],
-            'work_lines' => [['department' => 'photography', 'hours' => 6]],
-            'is_published' => true,
-        ]);
-        $client = Client::query()->create([
-            'name' => 'Nour',
-            'phone' => '+963933333332',
-            'company_name' => 'Nour Co',
-            'telegram_user_id' => 'wa:963933333332',
-            'locale' => 'ar',
-        ]);
-        ServiceRequest::factory()->create([
-            'client_id' => $client->id,
-            'pricing_package_id' => $package->id,
-            'billing_period' => 'monthly',
-            'allows_renewal' => true,
-            'status' => RequestStatus::InProgress,
-            'subscription_ends_at' => now()->addDays(20),
-            'title' => 'Business Growth',
-        ]);
+        $request = $this->photographyClient('963933333332', $this->photographyPackage(2));
+        $this->assertSame(2, $request->fresh()->photography_sessions);
 
-        $this->withHeaders(['X-Webhook-Secret' => 'web-secret'])
-            ->postJson('/api/bot/whatsapp/web', [
-                'phone' => '963933333332',
-                'message_id' => 'web-photo',
-                'text' => 'بدي موعد تصوير',
-            ])
-            ->assertOk();
+        $this->chat('963933333332', 'web-photo', 'بدي موعد تصوير');
 
-        Http::assertSent(fn (Request $request): bool => $request->url() === 'http://wa-web.test/send'
-            && str_contains((string) data_get($request->data(), 'text'), 'أي اشتراك'));
+        // One eligible request opens its days at once, with its balance and no department hours.
+        Http::assertSent(fn (Request $sent): bool => $sent->url() === 'http://wa-web.test/send'
+            && str_contains((string) data_get($sent->data(), 'text'), 'باقي جلستان من 2')
+            && str_contains((string) data_get($sent->data(), 'text'), '#'.$request->number)
+            && str_contains((string) data_get($sent->data(), 'text'), 'اختار اليوم')
+            && ! str_contains((string) data_get($sent->data(), 'text'), 'ساعة'));
 
-        $requestId = ServiceRequest::query()->where('client_id', $client->id)->value('id');
-        $this->withHeaders(['X-Webhook-Secret' => 'web-secret'])
-            ->postJson('/api/bot/whatsapp/web', [
-                'phone' => '963933333332',
-                'message_id' => 'web-photo-pick',
-                'button_id' => 'photo_sub:'.$requestId,
-            ])
-            ->assertOk();
+        // A sentence outside the options asks the same question again, not the main menu.
+        $this->chat('963933333332', 'web-photo-noise', 'شو الأخبار');
+        $this->assertSame(2, $this->sentCount('963933333332', 'اختار اليوم'));
 
-        Http::assertSent(fn (Request $request): bool => $request->url() === 'http://wa-web.test/send'
-            && str_contains((string) data_get($request->data(), 'text'), 'باقيلك 2')
-            && str_contains((string) data_get($request->data(), 'text'), 'اختار اليوم')
-            && ! str_contains((string) data_get($request->data(), 'text'), 'غير متاح'));
+        $this->chat('963933333332', 'web-photo-day', '2');
+        $this->assertSentTo('963933333332', 'اختار الوقت يوم الأحد 18/10');
+        $this->chat('963933333332', 'web-photo-time', '1');
+        $this->assertSentTo('963933333332', 'وصلنا طلب الموعد يوم الأحد 18/10 الساعة 9 الصبح');
+
+        $booking = PhotographyBooking::query()->where('request_id', $request->id)->firstOrFail();
+        $this->assertSame('pending_staff', $booking->status);
+        $this->assertSame(0, $request->fresh()->photography_sessions_used);
+
+        $this->chat('963933333332', 'web-photo-balance', 'كم جلسة ضل إلي');
+        $this->assertSentTo('963933333332', 'باقي جلسة وحدة من 2');
     }
 
     public function test_asking_to_renew_before_the_window_explains_when_it_opens(): void
@@ -787,5 +752,163 @@ class WhatsAppWebBotTest extends TestCase
 
         Http::assertSent(fn (Request $request): bool => $request->url() === 'http://wa-web.test/send'
             && str_contains((string) data_get($request->data(), 'text'), 'آخر 8 أيام'));
+    }
+
+    public function test_photography_booking_tells_the_client_every_staff_decision(): void
+    {
+        $package = $this->photographyPackage(2);
+        $first = $this->photographyClient('963944444441', $package);
+        $second = $this->photographyClient('963944444442', $package);
+
+        foreach (['963944444441', '963944444442'] as $phone) {
+            $this->chat($phone, "photo-{$phone}-0", 'بدي موعد تصوير');
+            $this->press($phone, "photo-{$phone}-1", 'photo_day:0');
+            $this->press($phone, "photo-{$phone}-2", 'photo_time:0');
+        }
+        $this->assertSentTo('963944444441', 'وصلنا طلب الموعد');
+
+        $book = app(BookPhotographySlot::class);
+        $firstBooking = PhotographyBooking::query()->where('request_id', $first->id)->firstOrFail();
+        $secondBooking = PhotographyBooking::query()->where('request_id', $second->id)->firstOrFail();
+        $this->assertSame('pending_staff', $secondBooking->status);
+
+        $book->accept($firstBooking, PhotographyActor::system());
+        $this->assertSame('confirmed', $firstBooking->fresh()->status);
+        $this->assertSentTo('963944444441', 'ثبتنالك موعد التصوير');
+        $this->assertSame(1, $first->fresh()->photography_sessions_used);
+        // A second accept stops without a second charge.
+        $this->assertSame('already', $book->accept($firstBooking->fresh(), PhotographyActor::system())['result']);
+        $this->assertSame(1, $first->fresh()->photography_sessions_used);
+
+        // The second client held the same start, so the later time reaches them with this booking's buttons.
+        $this->assertSame('needs_client', $secondBooking->fresh()->status);
+        $this->assertSentTo('963944444442', 'بيناسبك');
+        Http::assertSent(fn (Request $request): bool => $request->url() === 'http://wa-web.test/send'
+            && $request['to'] === '963944444442'
+            && collect($request['buttons'] ?? [])->contains(fn (array $button): bool => (string) $button['id'] === 'photoyes:'.$secondBooking->id));
+
+        $this->chat('963944444442', 'photo-typed-no', 'لا ما بيناسبني');
+        $this->assertSame('pending_staff', $secondBooking->fresh()->status);
+        $this->assertSentTo('963944444442', 'رح نبعتلك وقت تاني');
+
+        $book->propose($secondBooking->fresh(), '2026-10-19T12:00:00+03:00');
+        $this->chat('963944444442', 'photo-typed-yes', 'تمام بيناسبني');
+        $this->assertSame('confirmed', $secondBooking->fresh()->status);
+        $this->assertSame('12:00', $secondBooking->fresh()->starts_at?->format('H:i'));
+        $this->assertSentTo('963944444442', 'ثبتنالك موعد التصوير الاثنين 19/10');
+
+        $this->assertSame(1, app(PhotographySessions::class)->remaining($first->fresh()));
+    }
+
+    public function test_the_client_moves_an_agreed_shoot_and_the_old_time_stays_until_the_answer(): void
+    {
+        $request = $this->photographyClient('963955555551', $this->photographyPackage(2));
+        $book = app(BookPhotographySlot::class);
+        $booking = $book->book($request, '2026-10-18T10:00:00+03:00', PhotographyActor::system(), confirm: true);
+        $this->assertSame('confirmed', $booking->status);
+        $this->assertSame(1, $request->fresh()->photography_sessions_used);
+
+        $this->chat('963955555551', 'move-1', 'بدي أغير موعد التصوير');
+        $this->assertSentTo('963955555551', 'موعد #'.$booking->id);
+        $this->assertSentTo('963955555551', 'اختار اليوم الجديد');
+        $this->chat('963955555551', 'move-2', '3');
+        $this->chat('963955555551', 'move-3', '1');
+
+        $moving = $booking->fresh();
+        $this->assertSame('rescheduling', $moving->status);
+        $this->assertSame('2026-10-18 10:00', $moving->starts_at?->format('Y-m-d H:i'));
+        $this->assertSame('2026-10-19 09:00', $moving->proposed_starts_at?->format('Y-m-d H:i'));
+        $this->assertSentTo('963955555551', 'طلب تعديل موعد #'.$booking->id);
+        $this->assertSame(1, $request->fresh()->photography_sessions_used);
+
+        // «بيناسبني» does not apply a move; the answer belongs to the photographer.
+        $this->chat('963955555551', 'move-4', 'بيناسبني');
+        $this->assertSentTo('963955555551', 'التعديل عند المصور');
+        $this->assertSame('rescheduling', $booking->fresh()->status);
+
+        $this->chat('963955555551', 'move-5', 'خلّي الموعد مثل ما هو');
+        $this->assertSame('confirmed', $booking->fresh()->status);
+        $this->assertNull($booking->fresh()->proposed_starts_at);
+        $this->assertSentTo('963955555551', 'بقي بوقته');
+        $this->assertSame(1, $request->fresh()->photography_sessions_used);
+    }
+
+    private function chat(string $phone, string $id, string $text): void
+    {
+        $this->withHeaders(['X-Webhook-Secret' => 'web-secret'])
+            ->postJson('/api/bot/whatsapp/web', ['phone' => $phone, 'message_id' => $id, 'text' => $text])
+            ->assertOk();
+    }
+
+    private function press(string $phone, string $id, string $button): void
+    {
+        $this->withHeaders(['X-Webhook-Secret' => 'web-secret'])
+            ->postJson('/api/bot/whatsapp/web', ['phone' => $phone, 'message_id' => $id, 'button_id' => $button])
+            ->assertOk();
+    }
+
+    private function sentCount(string $phone, string $needle): int
+    {
+        return Http::recorded(fn (Request $request): bool => $request->url() === 'http://wa-web.test/send'
+            && $request['to'] === $phone
+            && str_contains((string) data_get($request->data(), 'text'), $needle))->count();
+    }
+
+    private function assertSentTo(string $phone, string $needle): void
+    {
+        Http::assertSent(fn (Request $request): bool => $request->url() === 'http://wa-web.test/send'
+            && $request['to'] === $phone
+            && str_contains((string) data_get($request->data(), 'text'), $needle));
+    }
+
+    private function photographyPackage(int $sessions): PricingPackage
+    {
+        $category = PricingCategory::query()->create([
+            'slug' => 'photo-cat-'.uniqid(),
+            'name_en' => 'Strategic',
+            'name_ar' => 'حلول',
+            'is_published' => true,
+            'allows_renewal' => true,
+        ]);
+        $subcategory = PricingSubcategory::query()->create([
+            'category_id' => $category->id,
+            'slug' => 'photo-sub-'.uniqid(),
+            'name_en' => 'Plans',
+            'name_ar' => 'باقات',
+            'is_published' => true,
+        ]);
+
+        return PricingPackage::query()->create([
+            'subcategory_id' => $subcategory->id,
+            'slug' => 'photo-pkg-'.uniqid(),
+            'name_en' => 'Growth',
+            'name_ar' => 'نمو',
+            'subtitle_en' => 'Mid',
+            'subtitle_ar' => 'متوسطة',
+            'prices' => ['monthly' => 899],
+            'work_lines' => [['department' => 'photography', 'hours' => 6], ['department' => 'design', 'hours' => 16]],
+            'photography_sessions' => $sessions,
+            'is_published' => true,
+        ]);
+    }
+
+    private function photographyClient(string $phone, PricingPackage $package): ServiceRequest
+    {
+        $client = Client::query()->create([
+            'name' => 'Client '.$phone,
+            'phone' => '+'.$phone,
+            'company_name' => 'Co '.$phone,
+            'telegram_user_id' => 'wa:'.$phone,
+            'locale' => 'ar',
+        ]);
+
+        return ServiceRequest::factory()->create([
+            'client_id' => $client->id,
+            'pricing_package_id' => $package->id,
+            'billing_period' => 'monthly',
+            'status' => RequestStatus::InProgress,
+            'paid_at' => now(),
+            'title' => 'Growth',
+        ]);
     }
 }

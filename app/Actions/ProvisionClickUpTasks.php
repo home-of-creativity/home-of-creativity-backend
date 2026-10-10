@@ -4,6 +4,8 @@ namespace App\Actions;
 
 use App\Enums\ClickUpTaskType;
 use App\Enums\EmployeeProfession;
+use App\Models\ClickUpTask;
+use App\Models\PhotographyBooking;
 use App\Models\ServiceRequest;
 use App\Services\ClickUpClient;
 use App\Services\GoogleTranslateService;
@@ -105,6 +107,105 @@ class ProvisionClickUpTasks
         return $request;
     }
 
+    public function photographyTask(ServiceRequest $request, PhotographyBooking $booking): ?ClickUpTask
+    {
+        return ClickUpTask::query()
+            ->where('request_id', $request->id)
+            ->where('integration_key', $request->uuid.':photo:'.$booking->id)
+            ->first();
+    }
+
+    /**
+     * One task per agreed session, sized at the shoot hours and due at its start. A
+     * moved session updates the same task. False only when ClickUp refused; the
+     * agreed time stays either way.
+     */
+    public function syncPhotographySession(ServiceRequest $request, PhotographyBooking $booking, string $label): bool
+    {
+        if (! $this->clickUp->configured()) {
+            return true;
+        }
+        $start = Carbon::parse($booking->starts_at?->format('Y-m-d H:i:s') ?? 'now', 'Asia/Damascus');
+        $when = $start->format('Y-m-d H:i');
+        $task = $this->photographyTask($request, $booking);
+        $assignee = $booking->employee?->clickup_user_id;
+
+        try {
+            if ($task instanceof ClickUpTask && filled($task->clickup_task_id)) {
+                $this->clickUp->updateTask((string) $task->clickup_task_id, null, $assignee, $start->getTimestamp() * 1000);
+                $this->clickUp->addTaskComment((string) $task->clickup_task_id, 'موعد الجلسة صار '.$when.'. '.$label.'.');
+                $task->forceFill(['employee_id' => $booking->employee_id ?? $task->employee_id])->save();
+
+                return true;
+            }
+
+            $hours = BookPhotographySlot::SHOOT_HOURS;
+            $created = $this->clickUp->createTasks($request->number, [[
+                'department' => 'photography',
+                'brief' => $label.'. جلسة تصوير متفق عليها يوم '.$when.'. الحضور '.$hours.' ساعات.',
+                'hours' => $hours,
+                'label' => $label.' · '.$when,
+                'due_at' => $start->toIso8601String(),
+                'clickup_user_id' => $assignee,
+            ]]);
+        } catch (Throwable $exception) {
+            Log::warning('ClickUp photography session sync failed.', [
+                'request' => $request->number,
+                'booking' => $booking->id,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return false;
+        }
+
+        $created = $created[0] ?? null;
+        if ($created === null) {
+            return false;
+        }
+        ClickUpTask::query()->updateOrCreate(
+            ['integration_key' => $request->uuid.':photo:'.$booking->id],
+            [
+                'request_id' => $request->id,
+                'task_type' => ClickUpTaskType::Photography,
+                'clickup_task_id' => $created['clickup_task_id'],
+                'clickup_list_id' => $this->clickUp->listIdForDepartment('photography'),
+                'clickup_user_id' => $assignee,
+                'employee_id' => $booking->employee_id,
+                'clickup_url' => 'https://app.clickup.com/t/'.$created['clickup_task_id'],
+                'status' => 'to do',
+                'planned_hours' => BookPhotographySlot::SHOOT_HOURS,
+                'period_key' => 'photo:'.$booking->id,
+            ],
+        );
+
+        return true;
+    }
+
+    /** Closes the session task after the shoot or a cancellation. */
+    public function closePhotographySession(ServiceRequest $request, PhotographyBooking $booking): bool
+    {
+        $task = $this->photographyTask($request, $booking);
+        if (! $task instanceof ClickUpTask || in_array($task->status, ['complete', 'closed', 'done'], true)) {
+            return true;
+        }
+        if ($this->clickUp->configured() && filled($task->clickup_task_id)) {
+            try {
+                $this->clickUp->updateTask((string) $task->clickup_task_id, (string) config('services.clickup.statuses.complete', 'complete'));
+            } catch (Throwable $exception) {
+                Log::warning('ClickUp photography close failed.', [
+                    'request' => $request->number,
+                    'booking' => $booking->id,
+                    'error' => $exception->getMessage(),
+                ]);
+
+                return false;
+            }
+        }
+        $task->forceFill(['status' => 'complete'])->save();
+
+        return true;
+    }
+
     /**
      * One payload per execution department that has no ClickUp task yet, so a
      * retry after a partial failure never creates a second task for a department.
@@ -169,7 +270,7 @@ class ProvisionClickUpTasks
                 }
                 $department = (string) ($operation['department'] ?? '');
                 $brief = $this->translator->toArabic((string) ($operation['brief'] ?? ''));
-                if ($department === '' || $brief === '') {
+                if ($department === '' || $department === 'photography' || $brief === '') {
                     continue;
                 }
                 $briefId = $request->briefs->first(

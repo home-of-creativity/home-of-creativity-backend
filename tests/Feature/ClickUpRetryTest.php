@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Actions\ProvisionClickUpTasks;
+use App\Enums\ClickUpTaskType;
 use App\Enums\RequestStatus;
 use App\Models\ClickUpTask;
 use App\Models\ServiceRequest;
@@ -106,6 +107,43 @@ class ClickUpRetryTest extends TestCase
         $this->assertSame(RequestStatus::InProgress, $done->status);
         $this->assertSame('cu-design', $done->clickupTasks->firstWhere('task_type.value', 'design')?->clickup_task_id);
         Http::assertNotSent(fn (Request $sent): bool => str_contains($sent->url(), 'n8n'));
+        Http::assertSent(fn (Request $sent): bool => str_contains($sent->url(), 'design-list')
+            && (int) $sent['time_estimate'] === 6 * 3_600_000);
+    }
+
+    public function test_photography_clickup_task_is_created_only_after_the_shoot_is_agreed(): void
+    {
+        $this->contentListDown = false;
+        config(['services.clickup.lists.photography' => 'photo-list']);
+        Http::fake([
+            'https://api.clickup.com/api/v2/list/design-list/task' => Http::response(['id' => 'cu-design'], 200),
+            'https://api.clickup.com/api/v2/list/content-list/task' => Http::response(['id' => 'cu-content'], 200),
+            'https://api.clickup.com/api/v2/list/photo-list/task' => Http::response(['id' => 'cu-photo'], 200),
+        ]);
+        $request = ServiceRequest::factory()->create([
+            'status' => RequestStatus::InProgress,
+            'paid_at' => now(),
+            'work_plan' => ['operations' => [
+                ['department' => 'design', 'brief' => 'تصميم', 'hours' => 16],
+                ['department' => 'content', 'brief' => 'محتوى', 'hours' => 32],
+                ['department' => 'photography', 'brief' => 'تصوير', 'hours' => 10],
+            ]],
+        ]);
+
+        $fresh = app(ProvisionClickUpTasks::class)->handle($request, (string) Str::uuid());
+        $this->assertEqualsCanonicalizing(
+            ['design', 'content'],
+            $fresh->clickupTasks->map(fn (ClickUpTask $task): string => $task->task_type->value)->all(),
+        );
+        $this->assertSame(32, (int) $fresh->clickupTasks->firstWhere('task_type', ClickUpTaskType::Content)?->planned_hours);
+
+        app(ProvisionClickUpTasks::class)->openPhotographySession($fresh, 41, '2026-10-20 10:00');
+
+        $photo = $request->fresh('clickupTasks')->clickupTasks->firstWhere('task_type', ClickUpTaskType::Photography);
+        $this->assertSame(3, (int) $photo?->planned_hours);
+        $this->assertSame('cu-photo', $photo?->clickup_task_id);
+        Http::assertSent(fn (Request $sent): bool => str_contains($sent->url(), 'photo-list')
+            && (int) $sent['time_estimate'] === 3 * 3_600_000);
     }
 
     private function paidRequest(): ServiceRequest

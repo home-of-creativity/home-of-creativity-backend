@@ -28,6 +28,7 @@ class PricingPackage extends Model
         'is_published',
         'allows_partial_payment',
         'work_lines',
+        'photography_sessions',
     ];
 
     /**
@@ -46,7 +47,19 @@ class PricingPackage extends Model
             'is_published' => 'boolean',
             'allows_partial_payment' => 'boolean',
             'work_lines' => 'array',
+            'photography_sessions' => 'integer',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        // Open paid requests that never had a count take this one once. A count a
+        // person already wrote on the request is not replaced.
+        static::saved(function (self $package): void {
+            if ($package->wasChanged('photography_sessions') || $package->wasRecentlyCreated) {
+                app(\App\Actions\PhotographySessions::class)->copyPackageCount($package);
+            }
+        });
     }
 
     public function subcategory(): BelongsTo

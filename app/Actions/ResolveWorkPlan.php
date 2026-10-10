@@ -39,13 +39,24 @@ class ResolveWorkPlan
         $template = Cache::remember($key, $ttl, fn (): array => $this->planTemplate($request));
 
         $templateList = is_array($template) ? $template : [];
-        $operations = $this->assignEmployees($templateList);
+        $photographyHours = 0;
+        $executable = [];
+        foreach ($templateList as $operation) {
+            if (($operation['department'] ?? '') === 'photography') {
+                $photographyHours += (int) ($operation['hours'] ?? 0);
+
+                continue;
+            }
+            $executable[] = $operation;
+        }
+        $operations = $this->assignEmployees($executable);
         $parallel = $this->calendar->parallelHours($operations);
         $plan = [
             'source' => WorkLines::fromRequest($request) !== [] ? 'lines' : ($fromCache ? 'cache' : 'ai'),
             'cache_key' => $key,
             'period_key' => (string) data_get($request->work_plan, 'period_key', 'initial'),
             'parallel_hours' => $parallel,
+            'photography_hours' => $photographyHours,
             'period_end' => $request->subscription_ends_at?->toIso8601String(),
             'client_due_at' => $this->calendar->addWorkHours(now(), $parallel)->toIso8601String(),
             'operations' => $operations,

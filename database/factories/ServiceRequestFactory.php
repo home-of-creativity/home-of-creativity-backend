@@ -31,4 +31,16 @@ class ServiceRequestFactory extends Factory
             'source' => RequestSource::Website,
         ];
     }
+
+    /** Paid, in progress, with photography sessions on the request. */
+    public function photography(int $sessions = 2): static
+    {
+        return $this->state(fn (): array => [
+            'status' => RequestStatus::InProgress,
+            'paid_at' => now(),
+            'photography_sessions' => $sessions,
+            'photography_sessions_used' => 0,
+            'photography_period_key' => 'initial',
+        ]);
+    }
 }

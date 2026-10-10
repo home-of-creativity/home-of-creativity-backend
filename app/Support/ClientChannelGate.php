@@ -17,7 +17,7 @@ class ClientChannelGate
 
     public const TELEGRAM_PAUSED_PHONE_MESSAGE = 'بوت تيليجرام متوقف مؤقتاً. أعد المحاولة لاحقاً، أو اتصل على '.self::SUPPORT_PHONE.'.';
 
-    public const WHATSAPP_PAUSED_MESSAGE = 'الواتساب واقف شوي هلق. جرب بعدين.';
+    public const WHATSAPP_PAUSED_MESSAGE = 'دقايق بعد اذنك شوي وبرد عليك';
 
     public static function telegramEnabled(): bool
     {

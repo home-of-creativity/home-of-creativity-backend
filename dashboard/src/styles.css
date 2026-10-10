@@ -8493,3 +8493,98 @@ html[dir="rtl"] .placement-tile-toggle[data-state="checked"] .placement-tile-tog
     margin-top: auto !important;
   }
 }
+
+/* Finance: Odoo sync line, state chips, sortable headers */
+.finance-sync {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  margin: -0.25rem 0 0.75rem;
+}
+
+.finance-filters {
+  margin-block: 1rem;
+}
+
+.finance-filters .finance-search {
+  flex: 2 1 16rem;
+}
+
+.finance-states {
+  flex: 1 1 100%;
+  padding-top: 0.25rem;
+}
+
+.chip.is-active {
+  border-color: var(--brand-purple);
+  background: color-mix(in srgb, var(--brand-purple) 14%, var(--brand-surface));
+  font-weight: 600;
+}
+
+.chip-clear {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--brand-muted);
+}
+
+.th-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  cursor: pointer;
+}
+
+.th-sort:hover,
+.th-sort:focus-visible {
+  color: var(--brand-purple);
+}
+
+.finance-expenses {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 2fr) minmax(16rem, 1fr);
+  align-items: start;
+  margin-top: 1rem;
+}
+
+@media (max-width: 960px) {
+  .finance-expenses {
+    grid-template-columns: 1fr;
+  }
+}
+
+.finance-filters .finance-narrow {
+  flex: 0 1 15rem;
+}
+
+/* The report title bar hides status text on phones; the finance sync line keeps it. */
+@media (max-width: 640px) {
+  .finance-sync .status-dot {
+    font-size: 0.8rem;
+    white-space: normal;
+  }
+}
+
+.spin {
+  animation: finance-spin 0.9s linear infinite;
+}
+
+@keyframes finance-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+  }
+}

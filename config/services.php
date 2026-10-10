@@ -163,6 +163,11 @@ return [
         'guide_url' => env('SITE_GUIDE_URL', 'https://hoc.agency/llms-full.txt'),
     ],
 
+    // A client message the bot assistant cannot answer is emailed here.
+    'client_assistant' => [
+        'escalation_email' => env('CLIENT_ASSISTANT_ESCALATION_EMAIL', 'developer@hoc.agency'),
+    ],
+
     'gemini' => [
         'api_key' => env('GEMINI_API_KEY', env('GOOGLE_API_KEY')),
         'base_url' => env('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta'),

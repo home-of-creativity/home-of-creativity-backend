@@ -16,6 +16,7 @@ const port = Number(process.env.WHATSAPP_WEB_PORT || 8090);
 const secret = process.env.WHATSAPP_WEB_SECRET || process.env.TELEGRAM_BOT_SECRET || "";
 const apiBase = (process.env.HOC_API_URL || "http://127.0.0.1:8000/api").replace(/\/$/, "");
 const authDir = process.env.WHATSAPP_WEB_AUTH_DIR || path.resolve("../../storage/app/whatsapp-web");
+const adminAuthDir = process.env.WHATSAPP_WEB_ADMIN_AUTH_DIR || path.resolve("../../storage/app/whatsapp-web-admin");
 const logger = pino({ level: "warn" });
 
 let sock = null;
@@ -26,7 +27,14 @@ let generation = 0;
 const jidByDigits = new Map();
 const menuByDigits = new Map();
 
+let adminSock = null;
+let adminConnected = false;
+let adminQr = "";
+let adminPhone = "";
+let adminGeneration = 0;
+
 fs.mkdirSync(authDir, { recursive: true });
+fs.mkdirSync(adminAuthDir, { recursive: true });
 
 function authorized(req) {
   return secret !== "" && req.headers["x-webhook-secret"] === secret;
@@ -310,6 +318,83 @@ async function sendToWhatsApp(body) {
   return sent?.key?.id || "ok";
 }
 
+async function startAdmin() {
+  const mine = ++adminGeneration;
+  try {
+    const { state, saveCreds } = await useMultiFileAuthState(adminAuthDir);
+    const { version } = await fetchLatestBaileysVersion();
+    if (mine !== adminGeneration) {
+      return;
+    }
+    adminSock = makeWASocket({
+      version,
+      auth: state,
+      logger,
+      printQRInTerminal: false,
+      browser: Browsers.macOS("HOC Admin"),
+      syncFullHistory: false,
+      markOnlineOnConnect: false,
+    });
+    adminSock.ev.on("creds.update", saveCreds);
+    adminSock.ev.on("connection.update", async (update) => {
+      if (mine !== adminGeneration) {
+        return;
+      }
+      if (update.qr) {
+        adminConnected = false;
+        adminPhone = "";
+        adminQr = await QRCode.toDataURL(update.qr);
+        logger.warn("Admin WhatsApp is waiting for a phone scan");
+      }
+      if (update.connection === "open") {
+        adminConnected = true;
+        adminPhone = phoneFromJid(adminSock?.user?.id);
+        adminQr = "";
+        logger.warn("Admin WhatsApp is linked");
+      }
+      if (update.connection === "close") {
+        adminConnected = false;
+        adminPhone = "";
+        const code = update.lastDisconnect?.error?.output?.statusCode;
+        const loggedOut = code === DisconnectReason.loggedOut;
+        if (loggedOut) {
+          fs.rmSync(adminAuthDir, { recursive: true, force: true });
+          fs.mkdirSync(adminAuthDir, { recursive: true });
+        }
+        setTimeout(() => {
+          if (mine === adminGeneration) {
+            startAdmin();
+          }
+        }, loggedOut ? 1000 : 4000);
+      }
+    });
+  } catch (error) {
+    logger.warn({ err: error }, "Admin WhatsApp failed to start");
+    setTimeout(() => {
+      if (mine === adminGeneration) {
+        startAdmin();
+      }
+    }, 5000);
+  }
+}
+
+async function unlinkAdmin() {
+  const current = adminSock;
+  adminGeneration += 1;
+  adminSock = null;
+  adminConnected = false;
+  adminPhone = "";
+  adminQr = "";
+  try {
+    await current?.logout();
+  } catch {
+    // The session is already gone. Clearing the files still starts a fresh code.
+  }
+  fs.rmSync(adminAuthDir, { recursive: true, force: true });
+  fs.mkdirSync(adminAuthDir, { recursive: true });
+  startAdmin();
+}
+
 async function unlinkPhone() {
   const current = sock;
   generation += 1;
@@ -338,6 +423,15 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, 200, { connected, qr: qrDataUrl || null, phone: linkedPhone || null });
       return;
     }
+    if (req.method === "GET" && url.pathname === "/admin/status") {
+      sendJson(res, 200, { connected: adminConnected, qr: adminQr || null, phone: adminPhone || null });
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/admin/logout") {
+      await unlinkAdmin();
+      sendJson(res, 200, { connected: false, qr: null, phone: null });
+      return;
+    }
     if (req.method === "POST" && url.pathname === "/logout") {
       await unlinkPhone();
       sendJson(res, 200, { connected: false, qr: null, phone: null });
@@ -358,4 +452,5 @@ const server = http.createServer(async (req, res) => {
 server.listen(port, "0.0.0.0", () => {
   logger.warn({ port }, "WhatsApp Web bridge listening");
   start();
+  startAdmin();
 });

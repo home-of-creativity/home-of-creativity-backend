@@ -43,4 +43,27 @@ class ClientChannelController extends Controller
             'message' => 'ok',
         ]);
     }
+
+    public function whatsappAdmin(WhatsAppWebClient $whatsAppWeb): JsonResponse
+    {
+        return response()->json([
+            'data' => $whatsAppWeb->adminStatus(),
+        ]);
+    }
+
+    public function unlinkWhatsappAdmin(WhatsAppWebClient $whatsAppWeb): JsonResponse
+    {
+        try {
+            $status = $whatsAppWeb->unlinkAdmin();
+        } catch (\Throwable) {
+            return response()->json([
+                'message' => 'Admin WhatsApp could not unlink the phone.',
+            ], 422);
+        }
+
+        return response()->json([
+            'data' => $status,
+            'message' => 'ok',
+        ]);
+    }
 }
