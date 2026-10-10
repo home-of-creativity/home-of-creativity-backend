@@ -2,7 +2,9 @@
 
 namespace Tests\Feature;
 
+use App\Actions\BookPhotographySlot;
 use App\Actions\ProvisionClickUpTasks;
+use App\Support\PhotographyActor;
 use App\Enums\ClickUpTaskType;
 use App\Enums\RequestStatus;
 use App\Models\ClickUpTask;
@@ -123,6 +125,8 @@ class ClickUpRetryTest extends TestCase
         $request = ServiceRequest::factory()->create([
             'status' => RequestStatus::InProgress,
             'paid_at' => now(),
+            'photography_sessions' => 2,
+            'photography_sessions_used' => 0,
             'work_plan' => ['operations' => [
                 ['department' => 'design', 'brief' => 'تصميم', 'hours' => 16],
                 ['department' => 'content', 'brief' => 'محتوى', 'hours' => 32],
@@ -137,7 +141,7 @@ class ClickUpRetryTest extends TestCase
         );
         $this->assertSame(32, (int) $fresh->clickupTasks->firstWhere('task_type', ClickUpTaskType::Content)?->planned_hours);
 
-        app(ProvisionClickUpTasks::class)->openPhotographySession($fresh, 41, '2026-10-20 10:00');
+        app(BookPhotographySlot::class)->book($fresh, '2026-10-20 10:00', PhotographyActor::system(), confirm: true);
 
         $photo = $request->fresh('clickupTasks')->clickupTasks->firstWhere('task_type', ClickUpTaskType::Photography);
         $this->assertSame(3, (int) $photo?->planned_hours);
