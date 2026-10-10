@@ -80,7 +80,7 @@ class ScenarioMatrixTest extends TestCase
         $this->assertLessThan(2, microtime(true) - $started);
 
         $this->assertSame('العنوان الأصلي', $request->fresh()->title);
-        Http::assertSent(fn (Request $sent): bool => str_contains((string) data_get($sent->data(), 'text'), 'لم يعد'));
+        Http::assertSent(fn (Request $sent): bool => str_contains((string) data_get($sent->data(), 'text'), 'ما عاد'));
 
         $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
             ->patchJson('/api/bot/telegram/requests/'.$request->id, [

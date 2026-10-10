@@ -569,7 +569,7 @@ class WhatsAppWebBotTest extends TestCase
             ->assertOk();
 
         Http::assertSent(fn (Request $request): bool => $request->url() === 'http://wa-web.test/send'
-            && str_contains((string) data_get($request->data(), 'text'), 'أهلاً'));
+            && str_contains((string) data_get($request->data(), 'text'), 'أهلين'));
         $this->assertSame('ar', Client::query()->where('telegram_user_id', 'wa:963922222222')->firstOrFail()->locale);
     }
 
