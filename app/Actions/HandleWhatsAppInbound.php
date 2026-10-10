@@ -2890,7 +2890,7 @@ class HandleWhatsAppInbound
 
         return match ($blocker) {
             'unpaid' => $this->tx("الطلب {$ref} مو مدفوع لهلق. حجز التصوير بيفتح بعد تأكيد الدفع.", "Request {$ref} is not paid yet. Booking opens after the payment is confirmed."),
-            'no_count' => $this->tx("عدد جلسات التصوير بالطلب {$ref} لسا ما انضبط. الفريق رح يضبطه ومنرجعلك.", "The photography sessions of {$ref} are not set yet. The team will set them and get back to you."),
+            'no_count' => $this->tx("الباقة بالطلب {$ref} فيها تصوير، بس عدد الجلسات فاضي. ساعات العمل ما بتتحول لجلسات. حط عدد الجلسات بالباقة ومنحجز.", "Request {$ref} includes photography, but the session count is empty. Work hours are not sessions. Set the session count on the package, then book."),
             'no_sessions' => $this->tx("الطلب {$ref} ما فيه جلسات تصوير.", "Request {$ref} has no photography sessions."),
             default => $this->tx("خلصت جلسات التصوير بالطلب {$ref} بهالفترة.", "The photography sessions of {$ref} are used for this period."),
         };
@@ -2901,7 +2901,10 @@ class HandleWhatsAppInbound
         $sessions = app(PhotographySessions::class);
         $requests = $client->requests()->with('pricingPackage')->latest('id')->get()
             ->reject(fn (ServiceRequest $request): bool => $request->hiddenFromClient());
-        $paidWithoutCount = $requests->first(fn (ServiceRequest $request): bool => $sessions->isPaidOpen($request) && $request->photography_sessions === null);
+        $requests->each(fn (ServiceRequest $request) => $sessions->cap($request));
+        $paidWithoutCount = $requests->first(fn (ServiceRequest $request): bool => $sessions->isPaidOpen($request)
+            && $request->photography_sessions === null
+            && $sessions->mentionsPhotography($request));
         if ($paidWithoutCount instanceof ServiceRequest) {
             return $this->photoBlockerText($paidWithoutCount, 'no_count');
         }

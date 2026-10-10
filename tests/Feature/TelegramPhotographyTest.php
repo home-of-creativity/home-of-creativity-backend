@@ -60,6 +60,18 @@ class TelegramPhotographyTest extends TestCase
         $this->say('مرحبا')->assertJson(['handled' => false]);
     }
 
+    public function test_a_request_without_a_count_takes_the_package_count_when_the_client_books(): void
+    {
+        $request = $this->photographyRequest();
+        $request->forceFill(['photography_sessions' => null, 'photography_period_key' => null])->save();
+
+        $this->say('بدي موعد تصوير')->assertOk()->assertJson(['handled' => true]);
+
+        $this->assertSame(2, $request->fresh()->photography_sessions);
+        $this->assertTelegram('اختار اليوم');
+        $this->assertTelegram('باقي جلستان من 2');
+    }
+
     private function say(string $text)
     {
         return $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])

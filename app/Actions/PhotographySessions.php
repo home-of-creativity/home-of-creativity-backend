@@ -26,7 +26,28 @@ class PhotographySessions
 
     public function cap(ServiceRequest $request): ?int
     {
+        if ($request->photography_sessions === null) {
+            $this->copyMissingCount($request);
+        }
+
         return $request->photography_sessions === null ? null : (int) $request->photography_sessions;
+    }
+
+    /**
+     * A request opened before the package had a session count stays empty. The
+     * package number is copied once, the first time the balance is read.
+     */
+    private function copyMissingCount(ServiceRequest $request): void
+    {
+        $request->loadMissing('pricingPackage');
+        $packageCap = $request->pricingPackage?->photography_sessions;
+        if ($packageCap === null || (int) $packageCap < 1) {
+            return;
+        }
+        $request->forceFill([
+            'photography_sessions' => (int) $packageCap,
+            'photography_period_key' => $request->photography_period_key ?: 'initial',
+        ])->save();
     }
 
     public function used(ServiceRequest $request): int
