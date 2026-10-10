@@ -4,6 +4,7 @@ namespace App\Actions;
 
 use App\Models\ServiceRequest;
 use App\Services\TelegramNotifier;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Throwable;
@@ -22,7 +23,10 @@ class NotifyClientChannels
     public function send(ServiceRequest $request, string $text, ?array $inlineButtons = null): bool
     {
         $request->loadMissing('client');
-        $chatId = $request->client?->telegram_user_id;
+        $preferred = Cache::get('hoc:client-reply:'.$request->client_id);
+        $chatId = is_string($preferred) && $preferred !== ''
+            ? $preferred
+            : $request->client?->telegram_user_id;
 
         try {
             if (is_string($chatId) && $chatId !== '' && $this->telegram->canReachClient($chatId)) {

@@ -1,6 +1,8 @@
 # Laravel API
 
-Last updated: 10 October 2026 (`POST /api/bot/telegram/photography` runs the same photography conversation as WhatsApp for the Telegram client and sends the reply on that chat. `handled: false` leaves the sentence to the assistant.)
+Last updated: 10 October 2026 (Photography refusals are plain text. Time lists page with `photo_more`. A company-phone reply posts `from_me` and pauses that chat for two hours. `NotifyClientChannels` prefers the last chat in `hoc:client-reply`. `ops:photography-expire` also nudges Media once after a confirmed shoot ends.)
+
+Previous: 10 October 2026 (`POST /api/bot/telegram/photography` runs the same photography conversation as WhatsApp for the Telegram client and sends the reply on that chat. `handled: false` leaves the sentence to the assistant.)
 
 Previous: 10 October 2026 (Photography expiry warns Media staff one hour before the 48-hour reply window closes, once per booking. The dashboard photography page calls the existing `/admin/photography` routes.)
 

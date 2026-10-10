@@ -1,5 +1,7 @@
 # Telegram bots
 
+A photography refusal is plain text, so the next digit is not the main menu. Day and time lists are buttons only; WhatsApp numbers them once. More than ten times adds «أوقات كمان». «لغي موعد التصوير» notifies Media and does not refund. If the photography API fails on a photography sentence, the client bot says so and does not pass the sentence to the assistant. A reply typed on the company WhatsApp pauses that chat for two hours; «رجوع للبوت» resumes it. Offers go to the chat that last spoke (`hoc:client-reply`).
+
 The client Telegram bot has a «حجز تصوير» button and posts every sentence to `POST /api/bot/telegram/photography` before the assistant. Laravel runs the same photography conversation as WhatsApp and sends the reply on the client's Telegram chat. A sentence that is not about a shoot returns `handled: false` and the assistant answers it. `photoyes` / `photonno` and the day, time, and request buttons call the same endpoint.
 
 WhatsApp client bot replies during the hours saved on the channels page (default 21:00–09:00 Asia/Damascus, crossing midnight). Team hours are separate (default 09:00–21:00) and are used for photography slots. The bot never tells the client that these clocks differ, and a closed reply does not state either clock. Client Arabic is Damascene and does not say it is a bot. The menu includes photography booking (day, then time, earliest slot is the channels-page lead in days, default 7, Friday skipped, shoots 5 hours apart, package allowance) and subscription renewal.

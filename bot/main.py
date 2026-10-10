@@ -1640,6 +1640,15 @@ async def client_request_action(update: Update, context: ContextTypes.DEFAULT_TY
             return
 
 
+def looks_like_photo(text: str | None) -> bool:
+    if not text:
+        return False
+    lowered = text.casefold()
+    return any(word in text for word in ("تصوير", "جلسة", "جلسه", "موعد")) or any(
+        word in lowered for word in ("shoot", "session", "photo")
+    )
+
+
 async def photography_chat(user_id: int, *, text: str | None = None, callback: str | None = None) -> str:
     """Ask Laravel to run the photography conversation. It sends the Telegram reply itself."""
     try:
@@ -1654,6 +1663,8 @@ async def photography_chat(user_id: int, *, text: str | None = None, callback: s
                 },
             )
     except Exception:
+        if callback is None and looks_like_photo(text):
+            return "تعذر فتح حجز التصوير. أعد المحاولة."
         return "pass" if callback is None else "تعذر فتح حجز التصوير. أعد المحاولة."
     if response.status_code == 503:
         message = ""
@@ -1663,6 +1674,8 @@ async def photography_chat(user_id: int, *, text: str | None = None, callback: s
             message = ""
         return message or "بوت تيليجرام متوقف مؤقتاً."
     if response.status_code >= 400:
+        if callback is None and looks_like_photo(text):
+            return "تعذر فتح حجز التصوير. أعد المحاولة."
         return "pass" if callback is None else "تعذر فتح حجز التصوير. أعد المحاولة."
     try:
         handled = bool(response.json().get("handled"))

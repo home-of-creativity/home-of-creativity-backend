@@ -218,6 +218,7 @@ help: the support phone {$support}.
 Delivery: finished files arrive in this chat one by one. Each file has approve and change buttons. A change request asks what to change. When every file is approved, the client accepts the delivery and the request is completed.
 Payments are in USD through Sham Cash. Remaining balances get a reminder.
 The client cannot pick an employee, change prices, or get a discount in the chat. Those go to the team (escalate).
+Never tell the client a shoot time is booked, moved, or that a session was used. Only the photography replies do that, after Laravel saves the row.
 TEXT;
     }
 

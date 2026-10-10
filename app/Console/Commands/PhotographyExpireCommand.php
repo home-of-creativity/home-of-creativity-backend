@@ -14,7 +14,8 @@ class PhotographyExpireCommand extends Command
     public function handle(BookPhotographySlot $bookPhotographySlot): int
     {
         $closed = $bookPhotographySlot->expireStale();
-        $this->info("Closed {$closed} photography booking(s).");
+        $nudged = $bookPhotographySlot->remindUnmarked();
+        $this->info("Closed {$closed} photography booking(s). Nudged {$nudged} finished shoot(s).");
 
         return self::SUCCESS;
     }

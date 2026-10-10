@@ -17,6 +17,7 @@ class WhatsAppWebController extends Controller
             'message_id' => ['required', 'string', 'max:128'],
             'text' => ['nullable', 'string', 'max:4000'],
             'button_id' => ['nullable', 'string', 'max:256'],
+            'from_me' => ['sometimes', 'boolean'],
             'media' => ['nullable', 'array'],
             'media.kind' => ['required_with:media', 'in:image,document,audio'],
             'media.mime' => ['nullable', 'string', 'max:80'],
@@ -27,6 +28,12 @@ class WhatsAppWebController extends Controller
         $phone = Client::normalizeWhatsAppPhone((string) $data['phone']);
         if ($phone === '') {
             return response()->json(['status' => 'ignored']);
+        }
+
+        if ($request->boolean('from_me')) {
+            $handleWhatsAppInbound->holdForHuman($phone);
+
+            return response()->json(['status' => 'held']);
         }
 
         $message = [

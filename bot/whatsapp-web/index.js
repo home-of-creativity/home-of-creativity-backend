@@ -157,6 +157,18 @@ async function forwardMessage(msg) {
   rememberJid(phone, replyJid);
   rememberJid(phoneFromJid(remoteJid), replyJid);
   if (!phone || msg.key?.fromMe) {
+    if (msg.key?.fromMe) {
+      const customer = phoneFromJid(remoteJid);
+      if (customer && !remoteJid.endsWith("@g.us") && !remoteJid.endsWith("@broadcast")) {
+        await postLaravel({
+          phone: customer,
+          profile_name: "",
+          message_id: `me:${msg.key.id || Date.now()}`,
+          text: messageText(msg.message || {}),
+          from_me: true,
+        });
+      }
+    }
     return;
   }
   logger.warn({ lid: remoteJid.endsWith("@lid") }, "WhatsApp Web received a chat message");
@@ -313,6 +325,10 @@ async function sendToWhatsApp(body) {
           };
     const sent = await sock.sendMessage(jid, content);
     return sent?.key?.id || "ok";
+  }
+  const digits = String(body.to || "").replace(/\D/g, "");
+  if (digits) {
+    menuByDigits.delete(digits);
   }
   const sent = await sock.sendMessage(jid, { text: String(body.text || "") });
   return sent?.key?.id || "ok";

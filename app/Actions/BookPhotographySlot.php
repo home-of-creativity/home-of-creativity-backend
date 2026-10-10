@@ -640,6 +640,36 @@ class BookPhotographySlot
         return $closed;
     }
 
+    /** After the three hours, ask Media to mark the shoot done or a no-show. The row stays confirmed. */
+    public function remindUnmarked(): int
+    {
+        $now = now('Asia/Damascus')->format('Y-m-d H:i:s');
+        $rows = PhotographyBooking::query()
+            ->with('request')
+            ->where('status', PhotographyBooking::CONFIRMED)
+            ->whereNotNull('ends_at')
+            ->where('ends_at', '<=', $now)
+            ->get();
+        $sent = 0;
+        foreach ($rows as $row) {
+            if (! Cache::add('hoc:photo-unmarked:'.$row->id, 1, now()->addDays(7))) {
+                continue;
+            }
+            $request = $row->request;
+            if (! $request instanceof ServiceRequest) {
+                continue;
+            }
+            $this->notifyEmployees->handle(
+                $request,
+                EmployeeProfession::Media,
+                "جلسة التصوير #{$row->id} للطلب #{$request->number} خلصت. علّمها تم أو لم يحضر من تاب التصوير. الخصم ما بيرجع إلا بزر لم يحضر.",
+            );
+            $sent++;
+        }
+
+        return $sent;
+    }
+
     /**
      * The day before an agreed shoot. A time agreed or moved on the reminder day itself
      * already carries a fresh message, so it is not reminded again.

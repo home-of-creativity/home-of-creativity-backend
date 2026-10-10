@@ -32,6 +32,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
+use RuntimeException;
 use Throwable;
 
 class HandleWhatsAppInbound
@@ -95,6 +96,16 @@ class HandleWhatsAppInbound
     /**
      * @param  array<string, mixed>  $payload
      */
+    /** A reply typed on the company phone pauses the bot for this client for two hours. */
+    public function holdForHuman(string $phone): void
+    {
+        $phone = Client::normalizeWhatsAppPhone($phone);
+        if ($phone === '') {
+            return;
+        }
+        Cache::put($this->humanKey($phone), 1, now()->addHours(2));
+    }
+
     public function handle(array $payload): void
     {
         if (ClientChannelGate::whatsappLocked()) {
@@ -165,6 +176,12 @@ class HandleWhatsAppInbound
         $calendar = app(WorkCalendar::class);
         if (! $calendar->isWhatsAppOpen()) {
             $this->whatsApp->markRead($wamid);
+            $queued = trim($this->messageText($message));
+            if ($queued !== '' && $this->photoRuleIntent($queued, true) !== null) {
+                $closedSession = $this->session($phone);
+                $closedSession['photo_queued'] = mb_substr($queued, 0, 300);
+                $this->putSession($phone, $closedSession);
+            }
             $this->replyClosedOnce($phone, $calendar);
 
             return;
@@ -175,16 +192,33 @@ class HandleWhatsAppInbound
         $chatId = Client::whatsappKey($phone);
         $client = $this->ensureClient($chatId, $phone, $profileName);
         $session = $this->session($phone);
+        Cache::put('hoc:client-reply:'.$client->id, $chatId, now()->addDays(30));
 
         try {
             $callback = $this->callbackId($message);
             $text = $this->messageText($message);
+            if ($this->heldByHuman($phone, $chatId, (string) $text)) {
+                return;
+            }
+            $queuedPhoto = is_string($session['photo_queued'] ?? null) ? (string) $session['photo_queued'] : '';
+            if ($queuedPhoto !== '') {
+                unset($session['photo_queued']);
+                $this->putSession($phone, $session);
+                $greeting = preg_match('/^(?:مرحبا|مرحباً|أهلا|اهلا|صباح الخير|مساء الخير|hi|hello)\s*$/ui', trim((string) $text)) === 1;
+                if (trim((string) $text) === '' || $greeting) {
+                    $text = $queuedPhoto;
+                }
+            }
             $media = $this->messageMedia($message);
             $voice = $this->voiceNote($message);
             if ($voice !== null) {
                 $spoken = app(GeminiService::class)->transcribeClientAudio($voice['mime_type'], $voice['file_base64']);
                 if ($spoken === '') {
-                    $this->safeSend($chatId, $this->tx('ما قدرت أفهم التسجيل. عيده أو اكتبه.', 'I could not understand the recording. Send it again or type it.'));
+                    if (str_starts_with((string) ($session['step'] ?? ''), 'photo_')) {
+                        $this->repeatPhotoQuestion($client, $chatId, $phone, $session);
+                    } else {
+                        $this->safeSend($chatId, $this->tx('ما قدرت أفهم التسجيل. عيده أو اكتبه.', 'I could not understand the recording. Send it again or type it.'));
+                    }
 
                     return;
                 }
@@ -812,6 +846,23 @@ class HandleWhatsAppInbound
         }
         if (str_starts_with($data, 'reqcancel:')) {
             $this->runOwned($client, substr($data, 10), function (ServiceRequest $request) use ($chatId): void {
+                $openShoot = $request->photographyBookings()
+                    ->whereIn('status', array_merge(PhotographyBooking::OPEN, [PhotographyBooking::CONFIRMED]))
+                    ->exists();
+                if ($openShoot) {
+                    $displayNumber = ResolveServiceRequest::displayNumber($request);
+                    $this->notifyEmployees->handle(
+                        $request,
+                        EmployeeProfession::Media,
+                        "الزبون طلب إلغاء الطلب وفيه موعد تصوير.\n#{$displayNumber} — {$request->title}",
+                    );
+                    $this->sendPlain($chatId, $this->tx(
+                        'على هالطلب موعد تصوير. الإلغاء من فريق التصوير قبل بداية يوم الجلسة.',
+                        'This request has a photography booking. The team cancels it before the shoot day starts.',
+                    ));
+
+                    return;
+                }
                 if (! $request->status->canTransitionTo(RequestStatus::Cancelled)) {
                     throw ValidationException::withMessages(['status' => 'This request cannot be cancelled in its current state.']);
                 }
@@ -2084,10 +2135,12 @@ class HandleWhatsAppInbound
             return;
         }
         if ($items->count() === 1) {
-            $this->renewSubscription->handle($items->first());
+            $request = $items->first();
+            $this->renewSubscription->handle($request);
+            $waiting = filled($request->fresh()?->photography_next_period_key);
             $this->safeSend($chatId, $this->tx(
-                'منبعتلك فاتورة التجديد بالمبلغ المتفق عليه.',
-                'The renewal invoice is on its way, with the agreed amount.',
+                'منبعتلك فاتورة التجديد بالمبلغ المتفق عليه.'.($waiting ? ' رصيد جلسات التصوير الجديد بينتظر لين ما تنقفل المواعيد المفتوحة.' : ''),
+                'The renewal invoice is on its way, with the agreed amount.'.($waiting ? ' The new photography balance waits until the open shoots close.' : ''),
             ));
 
             return;
@@ -2130,6 +2183,7 @@ class HandleWhatsAppInbound
     public function telegramPhotography(Client $client, string $chatId, ?string $text, ?string $callback): bool
     {
         $this->replyLang = $client->locale === 'en' ? 'en' : 'ar';
+        Cache::put('hoc:client-reply:'.$client->id, $chatId, now()->addDays(30));
         $key = 'tg:'.$client->id;
         $session = $this->session($key);
         $callback = trim((string) $callback);
@@ -2190,6 +2244,9 @@ class HandleWhatsAppInbound
     {
         $shoot = preg_match('/تصوير|جلس[ةه]|جلسات/u', $text) === 1
             || preg_match('/\b(?:shoot|session|photo)/i', $text) === 1;
+        if (preg_match('/(?:الغي|ألغي|لغي|الغِ|كنسل|cancel)\s*.{0,16}(?:موعد|تصوير|جلس)/u', $text) === 1) {
+            return 'photo_cancel';
+        }
         if (preg_match('/خل(?:ّ)?ي(?:ه|ها)?\s*(?:ال)?(?:موعد|جلس[ةه])?\s*(?:مثل|متل|زي|كيف|كما)\s*(?:ما\s*)?(?:هو|هي)|ما\s*بدي\s*(?:غير|أغير|اغير)\s*(?:ال)?موعد/u', $text) === 1
             || preg_match('/\bkeep (?:the|my) (?:time|shoot|appointment|session)\b/i', $text) === 1) {
             return ($shoot || $hasBookings) ? 'photo_keep' : null;
@@ -2219,6 +2276,7 @@ class HandleWhatsAppInbound
             'photo_balance' => $this->photoBalance($client, $chatId, $phone, $session),
             'photo_move' => $this->startPhotoMove($client, $chatId, $phone, $session, $text),
             'photo_keep' => $this->keepFromText($client, $chatId, $phone, $session, $text),
+            'photo_cancel' => $this->requestPhotoCancel($client, $chatId, $phone, $session),
             default => $this->startPhotography($client, $chatId, $phone, $session, $text, $ref),
         };
     }
@@ -2240,6 +2298,19 @@ class HandleWhatsAppInbound
         }
         if (str_starts_with($data, 'photo_day:')) {
             $this->pickPhotoDay($client, $chatId, $phone, $session, (int) substr($data, 10) + 1);
+
+            return true;
+        }
+        if ($data === 'photo_more' || str_starts_with($data, 'photo_more:')) {
+            $session['photo_slot_offset'] = (int) ($session['photo_slot_offset'] ?? 0) + (int) ($session['photo_page_size'] ?? 9);
+            $date = (string) ($session['photo_date'] ?? '');
+            $slots = $date !== '' ? $this->photoSlotsOn($session, $date) : [];
+            if ($slots === []) {
+                $this->sendPlain($chatId, $this->tx('ما في أوقات زيادة بهاليوم.', 'No further times on that day.'));
+
+                return true;
+            }
+            $this->showPhotoTimes($chatId, $phone, $session, $date, $slots);
 
             return true;
         }
@@ -2273,7 +2344,7 @@ class HandleWhatsAppInbound
             if ($booking instanceof PhotographyBooking) {
                 $this->keepBooking($chatId, $booking);
             } else {
-                $this->sendMenu($chatId, $this->tx('ما في طلب تعديل مفتوح على هالموعد.', 'No move is open on that booking.'));
+                $this->sendPlain($chatId, $this->tx('ما في طلب تعديل مفتوح على هالموعد.', 'No move is open on that booking.'));
             }
 
             return true;
@@ -2292,7 +2363,7 @@ class HandleWhatsAppInbound
             $this->resetPhoto($session);
             $this->putSession($phone, $session);
             if (! $booking instanceof PhotographyBooking) {
-                $this->sendMenu($chatId, $this->tx('ما في وقت تصوير ناطر جوابك هلق.', 'No shoot time is waiting for your answer.'));
+                $this->sendPlain($chatId, $this->tx('ما في وقت تصوير ناطر جوابك هلق.', 'No shoot time is waiting for your answer.'));
 
                 return true;
             }
@@ -2349,7 +2420,7 @@ class HandleWhatsAppInbound
             $this->putSession($phone, $session);
             $blocked = $candidates->first(fn (ServiceRequest $request): bool => $sessions->blocker($request) === 'held')
                 ?? $candidates->first();
-            $this->sendMenu($chatId, $blocked instanceof ServiceRequest
+            $this->sendPlain($chatId, $blocked instanceof ServiceRequest
                 ? $this->photoBlockerText($blocked, (string) $sessions->blocker($blocked))
                 : $this->noPhotographyReason($client));
 
@@ -2364,7 +2435,7 @@ class HandleWhatsAppInbound
         $rows = [];
         $ids = [];
         foreach ($eligible->take(10)->values() as $index => $request) {
-            $lines[] = ($index + 1).'. '.$book->ref($request).' — '.$this->photoBalanceText($request);
+            $lines[] = $book->ref($request).' — '.$this->photoBalanceText($request);
             $rows[] = [['text' => mb_substr('#'.$request->number, 0, 24), 'callback_data' => 'photo_sub:'.$request->id]];
             $ids[] = $request->id;
         }
@@ -2386,7 +2457,7 @@ class HandleWhatsAppInbound
         if ($blocker !== null) {
             $this->resetPhoto($session);
             $this->putSession($phone, $session);
-            $this->sendMenu($chatId, $this->photoBlockerText($request, $blocker));
+            $this->sendPlain($chatId, $this->photoBlockerText($request, $blocker));
 
             return;
         }
@@ -2394,7 +2465,7 @@ class HandleWhatsAppInbound
         if ($days === []) {
             $this->resetPhoto($session);
             $this->putSession($phone, $session);
-            $this->sendMenu($chatId, $this->tx('ما في يوم فاضي للتصوير هالفترة.', 'No photography day is free right now.'));
+            $this->sendPlain($chatId, $this->tx('ما في يوم فاضي للتصوير هالفترة.', 'No photography day is free right now.'));
 
             return;
         }
@@ -2410,17 +2481,15 @@ class HandleWhatsAppInbound
      */
     private function showPhotoDays(string $chatId, string $phone, array &$session, array $days, string $intro): void
     {
-        $lines = [$intro];
         $rows = [];
         foreach ($days as $index => $day) {
-            $lines[] = ($index + 1).'. '.$day['label'];
-            $rows[] = [['text' => $day['label'], 'callback_data' => 'photo_day:'.$index]];
+            $rows[] = [['text' => mb_substr($day['label'], 0, 24), 'callback_data' => 'photo_day:'.$index]];
         }
         $session['step'] = 'photo_day';
         $session['photo_days'] = array_column($days, 'date');
-        unset($session['photo_slots'], $session['photo_date']);
+        unset($session['photo_slots'], $session['photo_date'], $session['photo_slot_offset']);
         $this->putSession($phone, $session);
-        $this->telegram->sendInlineKeyboard($chatId, implode("\n", $lines), $rows);
+        $this->telegram->sendInlineKeyboard($chatId, $intro, $rows);
     }
 
     /**
@@ -2443,6 +2512,7 @@ class HandleWhatsAppInbound
             return;
         }
         $session['photo_date'] = $date;
+        $session['photo_slot_offset'] = 0;
         $this->showPhotoTimes($chatId, $phone, $session, $date, $slots);
     }
 
@@ -2463,18 +2533,28 @@ class HandleWhatsAppInbound
      */
     private function showPhotoTimes(string $chatId, string $phone, array &$session, string $date, array $slots): void
     {
-        $slots = array_slice($slots, 0, 10);
+        $offset = max(0, (int) ($session['photo_slot_offset'] ?? 0));
+        if ($offset >= count($slots)) {
+            $offset = 0;
+        }
+        $pageSize = count($slots) > 10 ? 9 : 10;
+        $page = array_slice($slots, $offset, $pageSize);
         $label = app(BookPhotographySlot::class)->dayLabel(Carbon::parse($date, 'Asia/Damascus'));
-        $lines = [$this->tx("اختار الوقت يوم {$label}:", "Pick a time on {$label}:")];
+        $intro = $this->tx("اختار الوقت يوم {$label}:", "Pick a time on {$label}:");
         $rows = [];
-        foreach ($slots as $index => $slot) {
-            $lines[] = ($index + 1).'. '.$slot['label'];
-            $rows[] = [['text' => $slot['label'], 'callback_data' => 'photo_time:'.$index]];
+        foreach ($page as $index => $slot) {
+            $rows[] = [['text' => mb_substr($slot['label'], 0, 24), 'callback_data' => 'photo_time:'.$index]];
+        }
+        if ($offset + $pageSize < count($slots)) {
+            $rows[] = [['text' => $this->tx('أوقات كمان', 'More times'), 'callback_data' => 'photo_more']];
         }
         $session['step'] = 'photo_time';
-        $session['photo_slots'] = array_column($slots, 'starts_at');
+        $session['photo_slots'] = array_column($page, 'starts_at');
+        $session['photo_slot_offset'] = $offset;
+        $session['photo_page_size'] = $pageSize;
+        $session['photo_slot_total'] = count($slots);
         $this->putSession($phone, $session);
-        $this->telegram->sendInlineKeyboard($chatId, implode("\n", $lines), $rows);
+        $this->telegram->sendInlineKeyboard($chatId, $intro, $rows);
     }
 
     /**
@@ -2498,7 +2578,7 @@ class HandleWhatsAppInbound
             $this->resetPhoto($session);
             $this->putSession($phone, $session);
             if (! $booking instanceof PhotographyBooking) {
-                $this->sendMenu($chatId, $this->tx('ما لقينا هالموعد.', 'That booking was not found.'));
+                $this->sendPlain($chatId, $this->tx('ما لقينا هالموعد.', 'That booking was not found.'));
 
                 return;
             }
@@ -2585,6 +2665,19 @@ class HandleWhatsAppInbound
             return;
         }
         if ($step === 'photo_time') {
+            $shown = is_array($session['photo_slots'] ?? null) ? count($session['photo_slots']) : 0;
+            $total = (int) ($session['photo_slot_total'] ?? $shown);
+            $offset = (int) ($session['photo_slot_offset'] ?? 0);
+            if ($choice === $shown + 1 && $offset + $shown < $total) {
+                $session['photo_slot_offset'] = $offset + (int) ($session['photo_page_size'] ?? 9);
+                $date = (string) ($session['photo_date'] ?? '');
+                $slots = $date !== '' ? $this->photoSlotsOn($session, $date) : [];
+                if ($slots !== []) {
+                    $this->showPhotoTimes($chatId, $phone, $session, $date, $slots);
+
+                    return;
+                }
+            }
             $this->pickPhotoTime($client, $chatId, $phone, $session, $choice);
 
             return;
@@ -2631,7 +2724,7 @@ class HandleWhatsAppInbound
         if ($rows->isEmpty()) {
             $this->resetPhoto($session);
             $this->putSession($phone, $session);
-            $this->sendMenu($chatId, $this->tx(
+            $this->sendPlain($chatId, $this->tx(
                 'ما عندك موعد تصوير مفتوح نعدله. لتحجز موعد جديد ابعت «موعد تصوير».',
                 'You have no open shoot to move. Send “photo booking” to book one.',
             ));
@@ -2664,7 +2757,7 @@ class HandleWhatsAppInbound
         $ids = [];
         foreach ($rows->take(10)->values() as $index => $row) {
             $time = $row->status === PhotographyBooking::NEEDS_CLIENT ? $row->proposed_starts_at : $row->starts_at;
-            $lines[] = ($index + 1).'. '.$this->tx('موعد', 'Booking').' #'.$row->id.' — '.$book->when($time).' — '.$book->statusLabel($row, $row->request?->client);
+            $lines[] = $this->tx('موعد', 'Booking').' #'.$row->id.' — '.$book->when($time).' — '.$book->statusLabel($row, $row->request?->client);
             $buttons[] = [['text' => mb_substr('#'.$row->id.' '.($time ? $book->dayLabel($time) : ''), 0, 24), 'callback_data' => 'photo_bk:'.$row->id]];
             $ids[] = $row->id;
         }
@@ -2687,7 +2780,7 @@ class HandleWhatsAppInbound
         if ($agreed && now('Asia/Damascus')->gte($day)) {
             $this->resetPhoto($session);
             $this->putSession($phone, $session);
-            $this->sendMenu($chatId, $this->tx('بلّش يوم الموعد، الجلسة بتبقى بيومها.', 'The shoot day has started, so the session stays on its day.'));
+            $this->sendPlain($chatId, $this->tx('بلّش يوم الموعد، الجلسة بتبقى بيومها.', 'The shoot day has started, so the session stays on its day.'));
 
             return;
         }
@@ -2695,7 +2788,7 @@ class HandleWhatsAppInbound
         if ($days === []) {
             $this->resetPhoto($session);
             $this->putSession($phone, $session);
-            $this->sendMenu($chatId, $this->tx('ما في يوم فاضي للتصوير هالفترة.', 'No photography day is free right now.'));
+            $this->sendPlain($chatId, $this->tx('ما في يوم فاضي للتصوير هالفترة.', 'No photography day is free right now.'));
 
             return;
         }
@@ -2786,7 +2879,7 @@ class HandleWhatsAppInbound
         try {
             $updated = app(BookPhotographySlot::class)->clientAnswer($booking, $yes);
         } catch (ValidationException) {
-            $this->sendMenu($chatId, $this->tx('ما في وقت تصوير ناطر جوابك هلق.', 'No shoot time is waiting for your answer.'));
+            $this->sendPlain($chatId, $this->tx('ما في وقت تصوير ناطر جوابك هلق.', 'No shoot time is waiting for your answer.'));
 
             return;
         }
@@ -2817,7 +2910,7 @@ class HandleWhatsAppInbound
         if ($moves->isEmpty()) {
             $this->resetPhoto($session);
             $this->putSession($phone, $session);
-            $this->sendMenu($chatId, $this->tx('ما في طلب تعديل مفتوح، ومواعيدك على حالها.', 'No move is open. Your bookings stay as they are.'));
+            $this->sendPlain($chatId, $this->tx('ما في طلب تعديل مفتوح، ومواعيدك على حالها.', 'No move is open. Your bookings stay as they are.'));
 
             return;
         }
@@ -2846,7 +2939,7 @@ class HandleWhatsAppInbound
         $this->putSession($phone, $session);
         $requests = $sessions->forClient($client);
         if ($requests->isEmpty()) {
-            $this->sendMenu($chatId, $this->noPhotographyReason($client));
+            $this->sendPlain($chatId, $this->noPhotographyReason($client));
 
             return;
         }
@@ -2860,7 +2953,7 @@ class HandleWhatsAppInbound
             }
             $lines[] = $line;
         }
-        $this->sendMenu($chatId, implode("\n", $lines));
+        $this->sendPlain($chatId, implode("\n", $lines));
     }
 
     private function photoBalanceText(ServiceRequest $request): string
@@ -3062,6 +3155,67 @@ class HandleWhatsAppInbound
         }
 
         return false;
+    }
+
+    private function humanKey(string $phone): string
+    {
+        return 'hoc:wa-human:'.$phone;
+    }
+
+    /** Staff typed on the company phone. The bot stays quiet until the client asks it back, or two hours pass. */
+    private function heldByHuman(string $phone, string $chatId, string $text): bool
+    {
+        if (! Cache::has($this->humanKey($phone))) {
+            return false;
+        }
+        if (preg_match('/رجوع\s*لل(?:بوت)|رجّع\s*البوت|return to (?:the )?bot/ui', $text) === 1) {
+            Cache::forget($this->humanKey($phone));
+            $this->sendPlain($chatId, $this->tx('رجعت معك. شو بدك؟', 'I am back. What do you need?'));
+
+            return true;
+        }
+
+        return true;
+    }
+
+    private function sendPlain(string $chatId, string $text): void
+    {
+        try {
+            $this->telegram->send($chatId, $text);
+        } catch (RuntimeException) {
+            // A failed note must not throw the inbound handler.
+        }
+    }
+
+    /**
+     * «لغي موعد التصوير» tells the team. It does not refund the session.
+     *
+     * @param  array<string, mixed>  $session
+     */
+    private function requestPhotoCancel(Client $client, string $chatId, string $phone, array &$session): void
+    {
+        $this->resetPhoto($session);
+        $this->putSession($phone, $session);
+        $open = app(BookPhotographySlot::class)->clientBookings($client);
+        if ($open->isEmpty()) {
+            $this->sendPlain($chatId, $this->tx('ما في موعد تصوير مفتوح نلغيه.', 'There is no open shoot to cancel.'));
+
+            return;
+        }
+        foreach ($open as $row) {
+            $request = $row->request;
+            if ($request instanceof ServiceRequest) {
+                $this->notifyEmployees->handle(
+                    $request,
+                    EmployeeProfession::Media,
+                    "الزبون طلب إلغاء موعد التصوير #{$row->id}. الإلغاء من الفريق قبل بداية يوم الجلسة.",
+                );
+            }
+        }
+        $this->sendPlain($chatId, $this->tx(
+            'وصل طلب الإلغاء لفريق التصوير. الجلسة ما بترجع إلا إذا ألغاها الفريق قبل بداية يوم التصوير.',
+            'The cancellation request reached the photography team. The session returns only if they cancel before the shoot day starts.',
+        ));
     }
 
     private function sendMenu(string $chatId, string $text): void
