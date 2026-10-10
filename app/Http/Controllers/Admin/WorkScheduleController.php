@@ -25,6 +25,7 @@ class WorkScheduleController extends Controller
                 'whatsapp_close' => $calendar->whatsappHours()['close'],
                 'team_open' => $calendar->teamHours()['open'],
                 'team_close' => $calendar->teamHours()['close'],
+                'photography_lead_days' => $calendar->photographyLeadDays(),
                 'work_days' => ['saturday', 'sunday', 'monday', 'tuesday', 'wednesday', 'thursday'],
                 'weekend' => 'friday',
             ],
@@ -41,6 +42,7 @@ class WorkScheduleController extends Controller
             'whatsapp_close' => ['nullable', 'date_format:H:i'],
             'team_open' => ['nullable', 'date_format:H:i'],
             'team_close' => ['nullable', 'date_format:H:i'],
+            'photography_lead_days' => ['nullable', 'integer', 'min:0', 'max:90'],
         ]);
 
         $calendar->saveHoursPerDay((int) $validated['hours_per_day']);
@@ -60,6 +62,9 @@ class WorkScheduleController extends Controller
                 ]);
             }
             $calendar->saveTeamHours((string) $validated['team_open'], (string) $validated['team_close']);
+        }
+        if (array_key_exists('photography_lead_days', $validated) && $validated['photography_lead_days'] !== null) {
+            $calendar->savePhotographyLeadDays((int) $validated['photography_lead_days']);
         }
 
         return $this->showCalendar($calendar);

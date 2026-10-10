@@ -712,6 +712,8 @@ export const copy = {
   channelsHours: { ar: "ساعات يوم العمل", en: "Hours in a work day" },
   channelsTeamHours: { ar: "دوام الفريق", en: "Team hours" },
   channelsTeamHoursHint: { ar: "من تسعة الصبح لتسعة المسا. لحجز التصوير ودوام الفريق، وما بينذكر للعميل بالبوت.", en: "From 9 in the morning to 9 in the evening. Used for the team and photography booking. The bot never tells the client about this." },
+  channelsPhotoLead: { ar: "أقرب حجز تصوير بعد (أيام)", en: "Earliest photography booking (days ahead)" },
+  channelsPhotoLeadHint: { ar: "صفر يعني اليوم مسموح. 7 يعني ما في حجز إلا بعد أسبوع.", en: "0 allows today. 7 means a booking can start only a week from now." },
   channelsWhatsappHours: { ar: "دوام بوت واتساب", en: "WhatsApp bot hours" },
   channelsWhatsappOpen: { ar: "من", en: "From" },
   channelsWhatsappClose: { ar: "حتى", en: "Until" },

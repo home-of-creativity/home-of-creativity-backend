@@ -742,6 +742,18 @@ class WhatsAppWebBotTest extends TestCase
             ->assertOk();
 
         Http::assertSent(fn (Request $request): bool => $request->url() === 'http://wa-web.test/send'
+            && str_contains((string) data_get($request->data(), 'text'), 'أي اشتراك'));
+
+        $requestId = ServiceRequest::query()->where('client_id', $client->id)->value('id');
+        $this->withHeaders(['X-Webhook-Secret' => 'web-secret'])
+            ->postJson('/api/bot/whatsapp/web', [
+                'phone' => '963933333332',
+                'message_id' => 'web-photo-pick',
+                'button_id' => 'photo_sub:'.$requestId,
+            ])
+            ->assertOk();
+
+        Http::assertSent(fn (Request $request): bool => $request->url() === 'http://wa-web.test/send'
             && str_contains((string) data_get($request->data(), 'text'), 'باقيلك 2')
             && str_contains((string) data_get($request->data(), 'text'), 'اختار اليوم')
             && ! str_contains((string) data_get($request->data(), 'text'), 'غير متاح'));

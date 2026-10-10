@@ -20,6 +20,8 @@ class WorkCalendar
 
     public const TEAM_CLOSE_KEY = 'team_work_close';
 
+    public const PHOTO_LEAD_KEY = 'photography_lead_days';
+
     public const DAY_START_HOUR = 9;
 
     /** @return list<int> */
@@ -135,6 +137,18 @@ class WorkCalendar
     {
         OpsSetting::setValue(self::TEAM_OPEN_KEY, $this->clockValue($open, '09:00'));
         OpsSetting::setValue(self::TEAM_CLOSE_KEY, $this->clockValue($close, '21:00'));
+    }
+
+    public function photographyLeadDays(): int
+    {
+        $value = (int) OpsSetting::getValue(self::PHOTO_LEAD_KEY, '7');
+
+        return max(0, min(90, $value));
+    }
+
+    public function savePhotographyLeadDays(int $days): void
+    {
+        OpsSetting::setValue(self::PHOTO_LEAD_KEY, (string) max(0, min(90, $days)));
     }
 
     /**

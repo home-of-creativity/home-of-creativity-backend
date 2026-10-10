@@ -1130,10 +1130,10 @@ export const api = {
     });
   },
   workCalendar() {
-    return request<Envelope<{ hours_per_day: number; holidays: string[]; whatsapp_open: string; whatsapp_close: string; team_open: string; team_close: string }>>("/admin/ops-settings/work-calendar");
+    return request<Envelope<{ hours_per_day: number; holidays: string[]; whatsapp_open: string; whatsapp_close: string; team_open: string; team_close: string; photography_lead_days: number }>>("/admin/ops-settings/work-calendar");
   },
-  saveWorkCalendar(payload: { hours_per_day: number; holidays: string[]; whatsapp_open: string; whatsapp_close: string; team_open: string; team_close: string }) {
-    return request<Envelope<{ hours_per_day: number; holidays: string[]; whatsapp_open: string; whatsapp_close: string; team_open: string; team_close: string }>>("/admin/ops-settings/work-calendar", {
+  saveWorkCalendar(payload: { hours_per_day: number; holidays: string[]; whatsapp_open: string; whatsapp_close: string; team_open: string; team_close: string; photography_lead_days: number }) {
+    return request<Envelope<{ hours_per_day: number; holidays: string[]; whatsapp_open: string; whatsapp_close: string; team_open: string; team_close: string; photography_lead_days: number }>>("/admin/ops-settings/work-calendar", {
       method: "PUT",
       body: JSON.stringify(payload),
     });

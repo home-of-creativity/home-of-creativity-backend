@@ -18,8 +18,6 @@ class BookPhotographySlot
 
     public const GAP_HOURS = 5;
 
-    public const LEAD_DAYS = 7;
-
     public function __construct(
         private WorkCalendar $calendar,
         private NotifyEmployees $notifyEmployees,
@@ -35,7 +33,7 @@ class BookPhotographySlot
     public function bookableDays(int $count = 8): array
     {
         $days = [];
-        $cursor = now('Asia/Damascus')->addDays(self::LEAD_DAYS)->startOfDay();
+        $cursor = now('Asia/Damascus')->addDays($this->calendar->photographyLeadDays())->startOfDay();
         for ($i = 0; count($days) < $count && $i < 40; $i++) {
             if ($this->calendar->isWorkDay($cursor) && $this->timesOn($cursor) !== []) {
                 $days[] = [
@@ -385,10 +383,11 @@ class BookPhotographySlot
     private function guardStart(string $startsAt): Carbon
     {
         $start = $this->clock(Carbon::parse($startsAt, 'Asia/Damascus'));
-        $earliest = now('Asia/Damascus')->addDays(self::LEAD_DAYS)->startOfDay();
+        $lead = $this->calendar->photographyLeadDays();
+        $earliest = now('Asia/Damascus')->addDays($lead)->startOfDay();
         if ($start->lt($earliest)) {
             throw ValidationException::withMessages([
-                'starts_at' => 'أقرب موعد للتصوير بعد أسبوع.',
+                'starts_at' => "أقرب موعد للتصوير بعد {$lead} أيام.",
             ]);
         }
         if (! $this->calendar->isWorkDay($start)) {

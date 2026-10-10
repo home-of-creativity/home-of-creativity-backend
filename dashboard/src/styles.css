@@ -7303,70 +7303,208 @@ html[dir="rtl"] .placement-tile-toggle[data-state="checked"] .placement-tile-tog
   width: 100%;
 }
 
+.channels-board {
+  display: grid;
+  gap: 0.9rem;
+  width: 100%;
+}
+
 .channel-studio {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.85rem;
-  align-items: start;
+  gap: 0.9rem;
+  align-items: stretch;
   width: 100%;
+}
+
+.channel-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  min-height: 100%;
+  padding-block-start: 1.25rem;
+  border-block-start: 3px solid var(--brand-line);
+}
+
+.channel-card.is-telegram {
+  border-block-start-color: var(--brand-telegram);
+}
+
+.channel-card.is-whatsapp {
+  border-block-start-color: var(--brand-teal);
+}
+
+.channel-card.is-paused {
+  border-block-start-color: var(--brand-line);
 }
 
 .channel-card-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
+  gap: 0.8rem;
+}
+
+.channel-mark {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--brand-ink) 6%, var(--tint-base));
+  color: var(--brand-ink);
+}
+
+.channel-card.is-telegram .channel-mark {
+  background: color-mix(in srgb, var(--brand-telegram) 16%, var(--tint-base));
+  color: var(--brand-telegram);
+}
+
+.channel-card.is-whatsapp .channel-mark {
+  background: color-mix(in srgb, var(--brand-teal) 16%, var(--tint-base));
+  color: var(--brand-teal);
 }
 
 .channel-card-head .form-title {
   margin: 0;
+  font-size: 1.05rem;
 }
 
 .channel-status {
   display: inline-flex;
   align-items: center;
-  padding: 0.2rem 0.65rem;
-  border-radius: 999px;
+  gap: 0.4rem;
+  margin-top: 0.25rem;
+  color: var(--brand-muted);
   font-size: 0.78rem;
   font-weight: 700;
 }
 
+.channel-status::before {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: currentColor;
+  content: "";
+}
+
 .channel-status.is-on {
-  background: color-mix(in srgb, var(--brand-orange) 18%, var(--tint-base));
-  color: var(--brand-orange);
+  color: var(--brand-teal);
 }
 
 .channel-status.is-off {
-  background: color-mix(in srgb, var(--brand-ink) 10%, transparent);
   color: var(--brand-muted);
 }
 
-.channel-card.is-paused {
-  opacity: 0.92;
+.channel-card .muted {
+  flex: 1;
+  margin: 0;
+}
+
+.channel-card .btn,
+.channel-card .confirm-action {
+  align-self: start;
+}
+
+.channels-link {
+  display: grid;
+  align-items: center;
+}
+
+.channels-link-row,
+.channels-link-scan {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.channels-link-kicker {
+  margin: 0;
+  color: var(--brand-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.channels-phone {
+  margin: 0.15rem 0 0.35rem;
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.channels-link .muted,
+.channels-link-scan p {
+  margin: 0;
 }
 
 .wa-link-qr {
-  width: 220px;
-  height: 220px;
+  width: 196px;
+  height: 196px;
+  flex: 0 0 auto;
   background: #fff;
   border-radius: 1rem;
-  padding: 0.5rem;
+  padding: 0.45rem;
 }
 
-.wa-link-phone strong {
-  font-size: 1.05rem;
+.channels-schedule {
+  display: grid;
+  gap: 1rem;
 }
 
-.holiday-calendar {
+.channels-schedule:hover {
+  border-color: var(--brand-line);
+  box-shadow: none;
+}
+
+.channels-metrics,
+.channels-windows {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.channels-window,
+.channels-calendar {
   margin: 0;
-  padding: 0;
-  border: 0;
+  padding: 0.9rem 1rem 1rem;
+  border: 1px solid var(--brand-line);
+  border-radius: calc(var(--radius) - 0.15rem);
+  background: color-mix(in srgb, var(--brand-ink) 3%, var(--tint-base));
+}
+
+.channels-window legend,
+.channels-calendar legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0 0.35rem;
+  color: var(--brand-ink);
+  font-weight: 700;
+}
+
+.channels-times {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.channels-times label,
+.channels-metrics .field-label {
+  display: grid;
+  gap: 0.35rem;
+  color: var(--brand-muted);
+  font-size: 0.85rem;
+}
+
+.channels-save {
+  display: flex;
+  justify-content: end;
 }
 
 .holiday-month {
   display: grid;
-  gap: 0.55rem;
-  max-width: 28rem;
+  gap: 0.65rem;
 }
 
 .holiday-month-nav,
@@ -7374,32 +7512,38 @@ html[dir="rtl"] .placement-tile-toggle[data-state="checked"] .placement-tile-tog
 .holiday-grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 0.3rem;
+  gap: 0.35rem;
   align-items: center;
 }
 
 .holiday-month-nav {
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
 }
 
-.holiday-month-nav strong,
+.channels-month-title,
 .holiday-week {
+  margin: 0;
   text-align: center;
 }
 
 .holiday-week {
   color: var(--brand-muted);
   font-size: 0.75rem;
+  font-weight: 700;
 }
 
 .holiday-day {
-  min-height: 2.2rem;
-  border: 1px solid var(--brand-line);
-  border-radius: 0.45rem;
+  min-height: 2.45rem;
+  border: 1px solid transparent;
+  border-radius: 0.7rem;
   background: var(--brand-surface);
   color: var(--brand-ink);
   font: inherit;
   cursor: pointer;
+}
+
+.holiday-day:hover {
+  border-color: color-mix(in srgb, var(--brand-orange) 55%, var(--brand-line));
 }
 
 .holiday-day.is-friday {
@@ -7410,6 +7554,10 @@ html[dir="rtl"] .placement-tile-toggle[data-state="checked"] .placement-tile-tog
   background: var(--brand-purple);
   border-color: var(--brand-purple);
   color: var(--on-brand);
+}
+
+.holiday-day.is-off:hover {
+  border-color: var(--brand-purple);
 }
 
 .pdf-preview {
@@ -7572,10 +7720,19 @@ html[dir="rtl"] .placement-tile-toggle[data-state="checked"] .placement-tile-tog
   .qr-studio,
   .pdf-studio,
   .channel-studio,
+  .channels-metrics,
+  .channels-windows,
+  .channels-times,
   .studio-platform-grid,
   .social-accounts-layout,
   .social-inbox-list {
     grid-template-columns: 1fr;
+  }
+
+  .channels-link-row,
+  .channels-link-scan {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .lt-admin-preview {

@@ -597,6 +597,11 @@ class HandleWhatsAppInbound
 
             return;
         }
+        if (str_starts_with($data, 'photo_sub:')) {
+            $this->confirmPhotographySubscription($client, $chatId, $phone, $session, (int) substr($data, 10));
+
+            return;
+        }
         if (str_starts_with($data, 'photo_day:')) {
             $this->pickPhotoDay($client, $chatId, $phone, $session, (int) substr($data, 10) + 1);
 
@@ -2003,11 +2008,41 @@ class HandleWhatsAppInbound
      */
     private function offerPhotography(Client $client, string $chatId, string $phone, array &$session): void
     {
-        $request = $this->photographyRequest($client);
-        if ($request === null) {
+        $requests = $this->photographyRequests($client);
+        if ($requests->isEmpty()) {
             $this->sendMenu($chatId, $this->tx(
                 'حجز التصوير للباقات يلي فيها تصوير واشتراكها شغال.',
                 'Photography booking is for an active package that includes photography.',
+            ));
+
+            return;
+        }
+        $rows = [];
+        $lines = [$this->tx('أي اشتراك بدك تحجز عليه التصوير؟', 'Which subscription should the shoot use?')];
+        $ids = [];
+        foreach ($requests as $index => $request) {
+            $name = $request->pricingPackage?->name_ar ?: $request->title;
+            $lines[] = ($index + 1).'. '.$name.' #'.$request->number;
+            $rows[] = [['text' => $name, 'callback_data' => 'photo_sub:'.$request->id]];
+            $ids[] = $request->id;
+        }
+        $session['step'] = 'photo_sub';
+        $session['photo_subs'] = $ids;
+        unset($session['photo_request'], $session['photo_days'], $session['photo_slots']);
+        $this->putSession($phone, $session);
+        $this->telegram->sendInlineKeyboard($chatId, implode("\n", $lines), $rows);
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function confirmPhotographySubscription(Client $client, string $chatId, string $phone, array &$session, int $requestId): void
+    {
+        $request = $this->photographyRequests($client)->first(fn (ServiceRequest $item): bool => $item->id === $requestId);
+        if (! $request instanceof ServiceRequest) {
+            $this->sendMenu($chatId, $this->tx(
+                'هاد الاشتراك مو شغال، أو ما فيه تصوير.',
+                'That subscription is not active, or it has no photography.',
             ));
 
             return;
@@ -2108,7 +2143,10 @@ class HandleWhatsAppInbound
         $this->safeSend($chatId, (string) $reply);
     }
 
-    private function photographyRequest(Client $client): ?ServiceRequest
+    /**
+     * @return \Illuminate\Support\Collection<int, ServiceRequest>
+     */
+    private function photographyRequests(Client $client): \Illuminate\Support\Collection
     {
         return $client->requests()
             ->with('pricingPackage')
@@ -2124,11 +2162,12 @@ class HandleWhatsAppInbound
             })
             ->latest('id')
             ->get()
-            ->first(function (ServiceRequest $item): bool {
+            ->filter(function (ServiceRequest $item): bool {
                 return ! $item->hiddenFromClient()
                     && ! $item->renewalDeclined()
                     && $this->shootAllowance($item) > 0;
-            });
+            })
+            ->values();
     }
 
     private function shootAllowance(ServiceRequest $request): int

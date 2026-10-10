@@ -1,3 +1,4 @@
+import { CalendarDays, Clock3, MessageCircle, Send } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { api, type ClientChannels, type WhatsAppWebStatus } from "../api";
@@ -17,6 +18,7 @@ export function ClientChannelsPage({ locale, t }: { locale: Locale; t: (c: { ar:
   const [closeAt, setCloseAt] = useState("09:00");
   const [teamOpen, setTeamOpen] = useState("09:00");
   const [teamClose, setTeamClose] = useState("21:00");
+  const [photoLead, setPhotoLead] = useState("7");
   const [holidays, setHolidays] = useState<string[]>([]);
   const [unlinking, setUnlinking] = useState(false);
 
@@ -40,6 +42,7 @@ export function ClientChannelsPage({ locale, t }: { locale: Locale; t: (c: { ar:
         setCloseAt(res.data.whatsapp_close || "09:00");
         setTeamOpen(res.data.team_open || "09:00");
         setTeamClose(res.data.team_close || "21:00");
+        setPhotoLead(String(res.data.photography_lead_days ?? 7));
         setHolidays(res.data.holidays);
       })
       .catch(() => undefined);
@@ -82,12 +85,14 @@ export function ClientChannelsPage({ locale, t }: { locale: Locale; t: (c: { ar:
         whatsapp_close: closeAt,
         team_open: teamOpen,
         team_close: teamClose,
+        photography_lead_days: Math.max(0, Math.min(90, Number(photoLead) || 0)),
       });
       setHours(String(res.data.hours_per_day));
       setOpenAt(res.data.whatsapp_open);
       setCloseAt(res.data.whatsapp_close);
       setTeamOpen(res.data.team_open);
       setTeamClose(res.data.team_close);
+      setPhotoLead(String(res.data.photography_lead_days));
       setHolidays(res.data.holidays);
       toast.success(t(copy.channelsSaved));
     } catch (err) {
@@ -131,103 +136,126 @@ export function ClientChannelsPage({ locale, t }: { locale: Locale; t: (c: { ar:
     <>
       <PageHeader title={t(copy.channelsTitle)} lede={t(copy.channelsLede)} />
       {error ? <p className="error">{error}</p> : null}
-      <div className="channel-studio">
-        <ChannelCard
-          title={t(copy.channelsTelegram)}
-          help={t(copy.channelsTelegramHelp)}
-          running={channels.telegram_enabled}
-          busy={busy === "telegram"}
-          t={t}
-          onPause={() => void save({ ...channels, telegram_enabled: false }, "telegram")}
-          onResume={() => void save({ ...channels, telegram_enabled: true }, "telegram")}
-        />
-        <ChannelCard
-          title={t(copy.channelsWhatsapp)}
-          help={t(channels.whatsapp_locked ? copy.channelsWhatsappLockedHelp : copy.channelsWhatsappHelp)}
-          running={channels.whatsapp_enabled}
-          locked={channels.whatsapp_locked === true}
-          busy={busy === "whatsapp"}
-          t={t}
-          onPause={() => void save({ ...channels, whatsapp_enabled: false }, "whatsapp")}
-          onResume={() => void save({ ...channels, whatsapp_enabled: true }, "whatsapp")}
-        />
+      <div className="channels-board">
+        <div className="channel-studio">
+          <ChannelCard
+            kind="telegram"
+            title={t(copy.channelsTelegram)}
+            help={t(copy.channelsTelegramHelp)}
+            running={channels.telegram_enabled}
+            busy={busy === "telegram"}
+            t={t}
+            onPause={() => void save({ ...channels, telegram_enabled: false }, "telegram")}
+            onResume={() => void save({ ...channels, telegram_enabled: true }, "telegram")}
+          />
+          <ChannelCard
+            kind="whatsapp"
+            title={t(copy.channelsWhatsapp)}
+            help={t(channels.whatsapp_locked ? copy.channelsWhatsappLockedHelp : copy.channelsWhatsappHelp)}
+            running={channels.whatsapp_enabled}
+            locked={channels.whatsapp_locked === true}
+            busy={busy === "whatsapp"}
+            t={t}
+            onPause={() => void save({ ...channels, whatsapp_enabled: false }, "whatsapp")}
+            onResume={() => void save({ ...channels, whatsapp_enabled: true }, "whatsapp")}
+          />
+        </div>
+        {channels.whatsapp_transport === "web" ? (
+          <section className="card channels-link">
+            {link?.connected ? (
+              <div className="channels-link-row">
+                <div>
+                  <p className="channels-link-kicker">{t(copy.channelsWhatsappPhone)}</p>
+                  {link.phone ? <p className="channels-phone" dir="ltr">+{link.phone}</p> : null}
+                  <p className="muted">{t(copy.channelsWhatsappLinked)}</p>
+                </div>
+                <ConfirmAction
+                  label={t(copy.channelsWhatsappChange)}
+                  confirmLabel={t(copy.channelsWhatsappChangeConfirm)}
+                  yesLabel={t(copy.channelsWhatsappChange)}
+                  noLabel={t(copy.cancel)}
+                  disabled={unlinking}
+                  onConfirm={() => void changeNumber()}
+                />
+              </div>
+            ) : link && !link.reachable ? (
+              <p className="error">{t(copy.channelsWhatsappOffline)}</p>
+            ) : link?.qr ? (
+              <div className="channels-link-scan">
+                <p>{t(copy.channelsWhatsappScan)}</p>
+                <img className="wa-link-qr" alt="" src={link.qr} />
+              </div>
+            ) : (
+              <p className="muted">{t(copy.channelsWhatsappScan)}</p>
+            )}
+          </section>
+        ) : null}
+        <form
+          className="card channels-schedule"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void saveCalendar();
+          }}
+        >
+          <div className="channels-metrics">
+            <label className="field-label">
+              {t(copy.channelsHours)}
+              <input className="field" value={hours} onChange={(event) => setHours(event.target.value)} inputMode="numeric" />
+            </label>
+            <label className="field-label">
+              {t(copy.channelsPhotoLead)}
+              <input className="field" value={photoLead} onChange={(event) => setPhotoLead(event.target.value)} inputMode="numeric" min={0} max={90} />
+              <span className="muted">{t(copy.channelsPhotoLeadHint)}</span>
+            </label>
+          </div>
+          <div className="channels-windows">
+            <fieldset className="channels-window">
+              <legend>
+                <Clock3 size={16} aria-hidden />
+                {t(copy.channelsTeamHours)}
+              </legend>
+              <div className="channels-times">
+                <label>
+                  {t(copy.channelsWhatsappOpen)}
+                  <input className="field" type="time" value={teamOpen} onChange={(event) => setTeamOpen(event.target.value)} />
+                </label>
+                <label>
+                  {t(copy.channelsWhatsappClose)}
+                  <input className="field" type="time" value={teamClose} onChange={(event) => setTeamClose(event.target.value)} />
+                </label>
+              </div>
+            </fieldset>
+            <fieldset className="channels-window">
+              <legend>
+                <Clock3 size={16} aria-hidden />
+                {t(copy.channelsWhatsappHours)}
+              </legend>
+              <div className="channels-times">
+                <label>
+                  {t(copy.channelsWhatsappOpen)}
+                  <input className="field" type="time" value={openAt} onChange={(event) => setOpenAt(event.target.value)} />
+                </label>
+                <label>
+                  {t(copy.channelsWhatsappClose)}
+                  <input className="field" type="time" value={closeAt} onChange={(event) => setCloseAt(event.target.value)} />
+                </label>
+              </div>
+            </fieldset>
+          </div>
+          <fieldset className="channels-calendar">
+            <legend>
+              <CalendarDays size={16} aria-hidden />
+              {t(copy.channelsHolidays)}
+            </legend>
+            <HolidayMonth locale={locale} dates={holidays} onToggle={toggleHoliday} t={t} />
+          </fieldset>
+          <div className="channels-save">
+            <button className="btn btn-teal" type="submit">
+              {t(copy.channelsSaveCalendar)}
+            </button>
+          </div>
+        </form>
       </div>
-      {channels.whatsapp_transport === "web" ? (
-        <section className="card stack">
-          {link?.connected ? (
-            <>
-              <p>{t(copy.channelsWhatsappLinked)}</p>
-              {link.phone ? (
-                <p className="wa-link-phone">
-                  {t(copy.channelsWhatsappPhone)} <strong dir="ltr">+{link.phone}</strong>
-                </p>
-              ) : null}
-              <ConfirmAction
-                label={t(copy.channelsWhatsappChange)}
-                confirmLabel={t(copy.channelsWhatsappChangeConfirm)}
-                yesLabel={t(copy.channelsWhatsappChange)}
-                noLabel={t(copy.cancel)}
-                disabled={unlinking}
-                onConfirm={() => void changeNumber()}
-              />
-            </>
-          ) : link && !link.reachable ? (
-            <p className="error">{t(copy.channelsWhatsappOffline)}</p>
-          ) : link?.qr ? (
-            <>
-              <p>{t(copy.channelsWhatsappScan)}</p>
-              <img className="wa-link-qr" alt="" src={link.qr} />
-            </>
-          ) : (
-            <p className="muted">{t(copy.channelsWhatsappScan)}</p>
-          )}
-        </section>
-      ) : null}
-      <form
-        className="form-grid"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void saveCalendar();
-        }}
-      >
-        <label className="field-label">
-          {t(copy.channelsHours)}
-          <input className="field" value={hours} onChange={(event) => setHours(event.target.value)} inputMode="numeric" />
-        </label>
-        <fieldset className="holiday-calendar">
-          <legend>{t(copy.channelsTeamHours)}</legend>
-          <div className="odoo-deliver">
-            <label>
-              {t(copy.channelsWhatsappOpen)}
-              <input className="field" type="time" value={teamOpen} onChange={(event) => setTeamOpen(event.target.value)} />
-            </label>
-            <label>
-              {t(copy.channelsWhatsappClose)}
-              <input className="field" type="time" value={teamClose} onChange={(event) => setTeamClose(event.target.value)} />
-            </label>
-          </div>
-        </fieldset>
-        <fieldset className="holiday-calendar">
-          <legend>{t(copy.channelsWhatsappHours)}</legend>
-          <div className="odoo-deliver">
-            <label>
-              {t(copy.channelsWhatsappOpen)}
-              <input className="field" type="time" value={openAt} onChange={(event) => setOpenAt(event.target.value)} />
-            </label>
-            <label>
-              {t(copy.channelsWhatsappClose)}
-              <input className="field" type="time" value={closeAt} onChange={(event) => setCloseAt(event.target.value)} />
-            </label>
-          </div>
-        </fieldset>
-        <fieldset className="holiday-calendar">
-          <legend>{t(copy.channelsHolidays)}</legend>
-          <HolidayMonth locale={locale} dates={holidays} onToggle={toggleHoliday} t={t} />
-        </fieldset>
-        <button className="btn btn-teal" type="submit">
-          {t(copy.channelsSaveCalendar)}
-        </button>
-      </form>
     </>
   );
 }
@@ -263,7 +291,7 @@ function HolidayMonth({
         <button type="button" className="btn btn-ghost" onClick={() => setCursor(new Date(year, month - 1, 1))}>
           {t(copy.channelsPrevMonth)}
         </button>
-        <strong>{title}</strong>
+        <p className="channels-month-title">{title}</p>
         <button type="button" className="btn btn-ghost" onClick={() => setCursor(new Date(year, month + 1, 1))}>
           {t(copy.channelsNextMonth)}
         </button>
@@ -297,6 +325,7 @@ function HolidayMonth({
 }
 
 function ChannelCard({
+  kind,
   title,
   help,
   running,
@@ -306,6 +335,7 @@ function ChannelCard({
   onPause,
   onResume,
 }: {
+  kind: "telegram" | "whatsapp";
   title: string;
   help: string;
   running: boolean;
@@ -315,13 +345,19 @@ function ChannelCard({
   onPause: () => void;
   onResume: () => void;
 }) {
+  const Icon = kind === "telegram" ? Send : MessageCircle;
   return (
-    <section className={running ? "card stack channel-card" : "card stack channel-card is-paused"}>
+    <section className={running ? `card channel-card is-${kind}` : `card channel-card is-${kind} is-paused`}>
       <div className="channel-card-head">
-        <h2 className="form-title">{title}</h2>
-        <span className={running ? "channel-status is-on" : "channel-status is-off"}>
-          {locked ? t(copy.channelsLocked) : running ? t(copy.channelsRunning) : t(copy.channelsPaused)}
+        <span className="channel-mark" aria-hidden>
+          <Icon size={18} />
         </span>
+        <div>
+          <h2 className="form-title">{title}</h2>
+          <span className={running ? "channel-status is-on" : "channel-status is-off"}>
+            {locked ? t(copy.channelsLocked) : running ? t(copy.channelsRunning) : t(copy.channelsPaused)}
+          </span>
+        </div>
       </div>
       <p className="muted">{help}</p>
       {locked ? null : running ? (

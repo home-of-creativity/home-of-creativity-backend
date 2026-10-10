@@ -376,7 +376,7 @@ class WorkScenarioCoverageTest extends TestCase
             $book->hold($request, Carbon::parse('2026-10-08 09:00:00', 'Asia/Damascus')->toIso8601String());
             $this->fail('A next-day photography slot must be refused.');
         } catch (ValidationException $exception) {
-            $this->assertStringContainsString('أسبوع', $exception->errors()['starts_at'][0]);
+            $this->assertStringContainsString('بعد 7 أيام', $exception->errors()['starts_at'][0]);
         }
 
         $held = $book->hold($request, Carbon::parse('2026-10-14 09:00:00', 'Asia/Damascus')->toIso8601String());

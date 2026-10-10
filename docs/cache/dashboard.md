@@ -1,6 +1,8 @@
 # Staff dashboard (Vite SPA)
 
-Last updated: 10 October 2026 (Channels page edits team hours, default 09:00–21:00, separately from WhatsApp bot hours, default 21:00–09:00. The bot does not tell clients about that split.)
+Last updated: 10 October 2026 (Client channels is a board: two channel cards, the linked WhatsApp session, then team hours, bot hours, and the days-off calendar in one panel.)
+
+Previous: 10 October 2026 (Channels page edits team hours, default 09:00–21:00, separately from WhatsApp bot hours, default 21:00–09:00. The bot does not tell clients about that split.)
 
 Previous: 8 October 2026 (Quotation and invoice forms list Odoo products between send and the line table. Each card has Add, then a quantity counter. Email and WhatsApp can both be checked. The quotation status bar has no sales-order step.)
 

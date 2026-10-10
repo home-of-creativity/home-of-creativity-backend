@@ -69,7 +69,15 @@ class WorkScenarioEdgesTest extends TestCase
         ])->assertOk()
             ->assertJsonPath('data.hours_per_day', 6)
             ->assertJsonPath('data.weekend', 'friday')
-            ->assertJsonPath('data.holidays.0', '2026-10-03');
+            ->assertJsonPath('data.holidays.0', '2026-10-03')
+            ->assertJsonPath('data.photography_lead_days', 7);
+
+        $this->putJson('/api/admin/ops-settings/work-calendar', [
+            'hours_per_day' => 6,
+            'holidays' => ['2026-10-03'],
+            'photography_lead_days' => 3,
+        ])->assertOk()->assertJsonPath('data.photography_lead_days', 3);
+        $this->assertSame(3, app(WorkCalendar::class)->photographyLeadDays());
 
         Http::assertNothingSent();
         $this->assertSame(6, app(WorkCalendar::class)->hoursPerDay());
