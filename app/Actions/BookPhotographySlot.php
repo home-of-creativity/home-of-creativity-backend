@@ -3,7 +3,9 @@
 namespace App\Actions;
 
 use App\Enums\EmployeeProfession;
+use App\Enums\StaffAbility;
 use App\Models\Client;
+use App\Models\User;
 use App\Models\Employee;
 use App\Models\PhotographyBooking;
 use App\Models\ServiceRequest;
@@ -1169,28 +1171,165 @@ class BookPhotographySlot
         );
     }
 
+    /**
+     * Applies a time that was moved in Google Calendar, then writes every open or
+     * agreed shoot back onto that calendar. A move by someone with the full photography ability
+     * is applied directly. Anyone else turns it into a client proposal.
+     */
+    public function syncGoogleCalendar(User $user): void
+    {
+        if (! $this->googleCalendar->configured()) {
+            return;
+        }
+
+        $direct = $user->canAbility(StaffAbility::OpsPhotographyAll);
+        $actor = PhotographyActor::user($user);
+        foreach ($this->googleCalendar->listShootEvents(now('Asia/Damascus')->subDay(), now('Asia/Damascus')->addDays(70)) as $event) {
+            $booking = PhotographyBooking::query()->find($event['booking_id']);
+            if (! $booking instanceof PhotographyBooking || $booking->google_event_id !== $event['id'] || $booking->starts_at === null) {
+                continue;
+            }
+            $remote = Carbon::parse($event['start'])->timezone('Asia/Damascus');
+            $current = $this->clock($booking->starts_at);
+            if ($remote->format('Y-m-d H:i') === $current->format('Y-m-d H:i')) {
+                continue;
+            }
+            try {
+                $this->reschedule($booking, $remote->format('Y-m-d H:i:s'), $actor, $direct, $direct);
+            } catch (ValidationException $exception) {
+                $fresh = $booking->fresh(['request.client', 'employee']);
+                if ($fresh instanceof PhotographyBooking) {
+                    $this->mirrorCalendar($fresh);
+                }
+                Log::info('Google Calendar move was not applied.', [
+                    'booking_id' => $booking->id,
+                    'error' => $exception->getMessage(),
+                ]);
+            }
+        }
+
+        $rows = PhotographyBooking::query()
+            ->with(['request.client', 'employee'])
+            ->whereIn('status', [...PhotographyBooking::OPEN, PhotographyBooking::CONFIRMED])
+            ->whereNotNull('starts_at')
+            ->where('starts_at', '>=', now('Asia/Damascus')->subDay()->format('Y-m-d H:i:s'))
+            ->orderBy('id')
+            ->limit(200)
+            ->get();
+
+        foreach ($rows as $booking) {
+            $this->mirrorCalendar($booking);
+        }
+    }
+
+    public function calendarLink(?string $eventId): ?string
+    {
+        return $this->googleCalendar->eventUrl($eventId);
+    }
+
+    public function calendarHome(): ?string
+    {
+        return $this->googleCalendar->openUrl();
+    }
+
+    private function mirrorCalendar(PhotographyBooking $booking): void
+    {
+        $booking = $booking->fresh(['request.client', 'employee']) ?? $booking;
+        if ($booking->starts_at === null || ! $this->googleCalendar->configured()) {
+            return;
+        }
+        if (! in_array($booking->status, [...PhotographyBooking::OPEN, PhotographyBooking::CONFIRMED], true)) {
+            return;
+        }
+        $start = $this->clock($booking->starts_at);
+        $end = $start->copy()->addHours(self::SHOOT_HOURS);
+        if (filled($booking->google_event_id) && $this->googleCalendar->updateShoot(
+            (string) $booking->google_event_id,
+            $this->calendarSummary($booking),
+            $this->calendarDescription($booking),
+            $start,
+            $end,
+            $this->calendarColor($booking->status),
+            (string) $booking->id,
+        )) {
+            if ($booking->calendar_failed_at !== null) {
+                $booking->forceFill(['calendar_failed_at' => null])->save();
+            }
+
+            return;
+        }
+
+        $eventId = $this->googleCalendar->createShoot(
+            $this->calendarSummary($booking),
+            $this->calendarDescription($booking),
+            $start,
+            $end,
+            $booking->status === PhotographyBooking::CONFIRMED ? array_values(array_filter([$booking->employee?->email])) : [],
+            $this->calendarColor($booking->status),
+            (string) $booking->id,
+        );
+        $booking->forceFill([
+            'google_event_id' => $eventId,
+            'calendar_failed_at' => $eventId === null ? now() : null,
+        ])->save();
+    }
+
+    private function calendarSummary(PhotographyBooking $booking): string
+    {
+        $request = $booking->request;
+        $label = match ($booking->status) {
+            PhotographyBooking::PENDING_STAFF => 'انتظار المصور',
+            PhotographyBooking::NEEDS_CLIENT => 'انتظار العميل',
+            PhotographyBooking::RESCHEDULING => 'تعديل الموعد',
+            default => 'موعد تصوير',
+        };
+
+        return $label.' · '.($request?->client?->name ?: 'العميل').' · #'.($request?->number ?? $booking->request_id);
+    }
+
+    private function calendarDescription(PhotographyBooking $booking): string
+    {
+        $request = $booking->request;
+
+        return implode("\n", array_filter([
+            $this->calendarSummary($booking),
+            $this->sessionLabel($booking),
+            $this->ref($request),
+            $request?->client?->phone,
+            $booking->employee?->name ? 'المصور: '.$booking->employee->name : null,
+            'مدة الحضور '.self::SHOOT_HOURS.' ساعات.',
+            'تحريك الموعد في جوجل كالندر يحدّث لوحة التصوير.',
+        ]));
+    }
+
+    private function calendarColor(string $status): string
+    {
+        return match ($status) {
+            PhotographyBooking::PENDING_STAFF => '6',
+            PhotographyBooking::NEEDS_CLIENT => '5',
+            PhotographyBooking::RESCHEDULING => '3',
+            default => '7',
+        };
+    }
+
     private function calendarCreate(PhotographyBooking $booking): void
     {
         $booking = $booking->fresh(['request.client', 'employee']) ?? $booking;
         if ($booking->status !== PhotographyBooking::CONFIRMED || filled($booking->google_event_id)) {
             return;
         }
-        if (! $this->googleCalendar->configured()) {
+        if (! $this->googleCalendar->configured() || $booking->starts_at === null) {
             return;
         }
-        $request = $booking->request;
         $start = $this->clock($booking->starts_at);
         $eventId = $this->googleCalendar->createShoot(
-            'تصوير #'.($request?->number ?? $booking->request_id).' · '.$this->sessionLabel($booking),
-            implode("\n", array_filter([
-                $this->ref($request),
-                $request?->client?->name,
-                $request?->client?->phone,
-                'مدة الحضور '.self::SHOOT_HOURS.' ساعات.',
-            ])),
+            $this->calendarSummary($booking),
+            $this->calendarDescription($booking),
             $start,
             $start->copy()->addHours(self::SHOOT_HOURS),
             array_values(array_filter([$booking->employee?->email])),
+            $this->calendarColor($booking->status),
+            (string) $booking->id,
         );
         $booking->forceFill([
             'google_event_id' => $eventId,

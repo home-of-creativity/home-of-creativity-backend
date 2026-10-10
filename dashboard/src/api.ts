@@ -1050,6 +1050,7 @@ export type PhotographyBookingRow = {
   client_notify_failed: boolean;
   calendar_missing: boolean;
   clickup_stale: boolean;
+  calendar_url: string | null;
   can: PhotographyCan;
 };
 
@@ -1069,6 +1070,7 @@ export type ComplaintRow = {
 };
 
 export type PhotographyBoard = {
+  calendar: PhotographyBookingRow[];
   queue: PhotographyBookingRow[];
   waiting_client: PhotographyBookingRow[];
   mine: PhotographyBookingRow[];
@@ -1076,7 +1078,8 @@ export type PhotographyBoard = {
   unbooked: PhotographyRequestRow[];
   needs_count: PhotographyRequestRow[];
   me: { employee_id: number | null; is_photographer: boolean; can_all: boolean };
-  settings: { lead_days: number; shoot_hours: number; gap_hours: number; reply_hours: number };
+  settings: { lead_days: number; shoot_hours: number; gap_hours: number; reply_hours: number; team_hours?: { open: string; close: string } };
+  calendar_url: string | null;
 };
 
 export type PhotographyAction =

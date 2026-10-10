@@ -79,6 +79,8 @@ class GoogleCalendarClient
         CarbonInterface $startAt,
         CarbonInterface $endAt,
         array $attendeeEmails = [],
+        ?string $colorId = null,
+        ?string $bookingKey = null,
     ): ?string {
         if (! $this->configured()) {
             return null;
@@ -122,6 +124,16 @@ class GoogleCalendarClient
             if ($attendees !== []) {
                 $payload['attendees'] = $attendees;
             }
+            if (filled($colorId)) {
+                $payload['colorId'] = $colorId;
+            }
+            if (filled($bookingKey)) {
+                $payload['extendedProperties'] = [
+                    'private' => [
+                        'hoc_booking' => $bookingKey,
+                    ],
+                ];
+            }
             $query = $attendees !== [] ? '?sendUpdates=all' : '';
 
             $response = Http::withToken($token)
@@ -148,6 +160,153 @@ class GoogleCalendarClient
 
             return null;
         }
+    }
+
+    /**
+     * @return list<array{id: string, booking_id: string, start: string, url: string|null}>
+     */
+    public function listShootEvents(CarbonInterface $from, CarbonInterface $to): array
+    {
+        if (! $this->configured()) {
+            return [];
+        }
+
+        $token = $this->auth->accessToken();
+        if ($token === null) {
+            return [];
+        }
+
+        try {
+            $calendarId = rawurlencode((string) config('services.google.calendar_id', 'primary'));
+            $response = Http::withToken($token)
+                ->timeout(20)
+                ->acceptJson()
+                ->get(self::API.'/calendars/'.$calendarId.'/events', [
+                    'timeMin' => $from->copy()->timezone('Asia/Damascus')->toIso8601String(),
+                    'timeMax' => $to->copy()->timezone('Asia/Damascus')->toIso8601String(),
+                    'singleEvents' => 'true',
+                    'orderBy' => 'startTime',
+                    'maxResults' => 250,
+                    'showDeleted' => 'false',
+                ]);
+
+            if (! $response->successful()) {
+                Log::warning('Google Calendar list failed.', ['status' => $response->status()]);
+
+                return [];
+            }
+
+            $events = [];
+            foreach ($response->json('items') ?? [] as $item) {
+                if (! is_array($item)) {
+                    continue;
+                }
+                $bookingId = $item['extendedProperties']['private']['hoc_booking'] ?? null;
+                $start = $item['start']['dateTime'] ?? null;
+                $id = $item['id'] ?? null;
+                if (! is_string($bookingId) || $bookingId === '' || ! is_string($start) || ! is_string($id) || $id === '') {
+                    continue;
+                }
+                $url = $item['htmlLink'] ?? null;
+                $events[] = [
+                    'id' => $id,
+                    'booking_id' => $bookingId,
+                    'start' => $start,
+                    'url' => is_string($url) && $url !== '' ? $url : $this->eventUrl($id),
+                ];
+            }
+
+            return $events;
+        } catch (Throwable $exception) {
+            Log::warning('Google Calendar list exception.', ['error' => $exception->getMessage()]);
+
+            return [];
+        }
+    }
+
+    public function updateShoot(
+        string $eventId,
+        string $summary,
+        string $description,
+        CarbonInterface $startAt,
+        CarbonInterface $endAt,
+        string $colorId,
+        string $bookingKey,
+    ): bool {
+        if (! $this->configured()) {
+            return false;
+        }
+
+        $token = $this->auth->accessToken();
+        if ($token === null) {
+            return false;
+        }
+
+        try {
+            $calendarId = rawurlencode((string) config('services.google.calendar_id', 'primary'));
+            $start = $startAt->copy()->timezone('Asia/Damascus');
+            $end = $endAt->copy()->timezone('Asia/Damascus');
+            $response = Http::withToken($token)
+                ->timeout(20)
+                ->acceptJson()
+                ->asJson()
+                ->patch(self::API.'/calendars/'.$calendarId.'/events/'.rawurlencode($eventId), [
+                    'summary' => $summary,
+                    'description' => $description,
+                    'colorId' => $colorId,
+                    'start' => [
+                        'dateTime' => $start->toIso8601String(),
+                        'timeZone' => 'Asia/Damascus',
+                    ],
+                    'end' => [
+                        'dateTime' => $end->toIso8601String(),
+                        'timeZone' => 'Asia/Damascus',
+                    ],
+                    'extendedProperties' => [
+                        'private' => [
+                            'hoc_booking' => $bookingKey,
+                        ],
+                    ],
+                ]);
+
+            if ($response->status() === 404 || $response->status() === 410) {
+                return false;
+            }
+
+            if (! $response->successful()) {
+                Log::warning('Google Calendar update failed.', ['status' => $response->status()]);
+
+                return false;
+            }
+
+            return true;
+        } catch (Throwable $exception) {
+            Log::warning('Google Calendar update exception.', ['error' => $exception->getMessage()]);
+
+            return false;
+        }
+    }
+
+    public function eventUrl(?string $eventId): ?string
+    {
+        $calendarId = (string) config('services.google.calendar_id', '');
+        if (! filled($eventId) || $calendarId === '') {
+            return null;
+        }
+
+        $token = rtrim(strtr(base64_encode($eventId.' '.$calendarId), '+/', '-_'), '=');
+
+        return 'https://calendar.google.com/calendar/event?eid='.$token;
+    }
+
+    public function openUrl(): ?string
+    {
+        $calendarId = (string) config('services.google.calendar_id', '');
+        if ($calendarId === '' || ! $this->configured()) {
+            return null;
+        }
+
+        return 'https://calendar.google.com/calendar/u/0/r?cid='.rawurlencode($calendarId);
     }
 
     public function deleteEvent(?string $eventId): void

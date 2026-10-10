@@ -738,8 +738,8 @@ export const copy = {
     en: "Client complaints from the bot: a title, a description, a photo, and a voice note.",
   },
   photographyLede: {
-    ar: "طلبات التصوير، المواعيد بانتظار العميل، ومواعيدك المثبتة. الجلسة تُخصم بعد الاتفاق فقط.",
-    en: "Shoot requests, times waiting on the client, and your agreed shoots. A session is charged only after agreement.",
+    ar: "تقويم التصوير. انتظار المصور، انتظار العميل، ومواعيدك على الأسبوع نفسه، وتتحرك من جوجل كالندر.",
+    en: "The photography week. The photographer queue, client replies, and your shoots sit on one calendar, and a move in Google Calendar comes back here.",
   },
   navPermissions: { ar: "الصلاحيات", en: "Permissions" },
   channelsTitle: { ar: "قنوات العملاء", en: "Client channels" },

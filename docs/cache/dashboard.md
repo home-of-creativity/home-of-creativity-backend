@@ -1,6 +1,8 @@
 # Staff dashboard (Vite SPA)
 
-Last updated: 10 October 2026 (Complaints is a dashboard page at /complaints, gated by ops.complaints. It lists client complaints and can open the photo, play the voice note, and mark a row reviewed.)
+Last updated: 10 October 2026 (Photography is a week calendar. Queue, client-waiting, and agreed shoots are layers on the same grid. Unbooked work and session counts stay beside it. Moving a shoot in Google Calendar updates the board.)
+
+Previous: 10 October 2026 (Complaints is a dashboard page at /complaints, gated by ops.complaints. It lists client complaints and can open the photo, play the voice note, and mark a row reviewed.)
 
 Previous: 10 October 2026 (Photography is a dashboard page at /photography, gated by ops.photography. It lists the photographer queue, client replies, agreed shoots, unbooked paid work, and a session-count editor for ops.photography_all. Package forms now save photography_sessions.)
 

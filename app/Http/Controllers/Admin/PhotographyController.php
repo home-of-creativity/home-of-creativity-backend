@@ -16,6 +16,8 @@ use App\Support\WorkCalendar;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 
 /**
  * The photography tab. Every button here calls the same booking operation as the
@@ -32,6 +34,13 @@ class PhotographyController extends Controller
     public function index(Request $request): JsonResponse
     {
         $user = $this->user($request);
+        if (Cache::add('hoc:photo-cal-sync:'.$user->id, 1, 45)) {
+            try {
+                $this->book->syncGoogleCalendar($user);
+            } catch (\Throwable $exception) {
+                Log::warning('Photography calendar sync failed.', ['error' => $exception->getMessage()]);
+            }
+        }
         $all = $user->canAbility(StaffAbility::OpsPhotographyAll);
         $employee = $user->employee;
         $today = now('Asia/Damascus')->startOfDay()->format('Y-m-d H:i:s');
@@ -66,6 +75,7 @@ class PhotographyController extends Controller
 
         return response()->json([
             'data' => [
+                'calendar' => $rows->map(fn (PhotographyBooking $row): array => $this->row($row, $user))->values()->all(),
                 'queue' => $queue->map(fn (PhotographyBooking $row): array => $this->row($row, $user))->values()->all(),
                 'waiting_client' => $waiting->map(fn (PhotographyBooking $row): array => $this->row($row, $user))->values()->all(),
                 'mine' => $mine->map(fn (PhotographyBooking $row): array => $this->row($row, $user))->values()->all(),
@@ -84,6 +94,7 @@ class PhotographyController extends Controller
                     'reply_hours' => BookPhotographySlot::REPLY_HOURS,
                     'team_hours' => $this->calendar->teamHours(),
                 ],
+                'calendar_url' => $this->book->calendarHome(),
             ],
         ]);
     }
@@ -346,6 +357,7 @@ class PhotographyController extends Controller
             'client_notify_failed' => (bool) $booking->client_notify_failed,
             'calendar_missing' => $booking->calendar_failed_at !== null,
             'clickup_stale' => $booking->clickup_failed_at !== null,
+            'calendar_url' => $this->book->calendarLink($booking->google_event_id),
             'can' => [
                 'accept' => in_array($status, [PhotographyBooking::PENDING_STAFF, PhotographyBooking::RESCHEDULING], true),
                 'decline' => in_array($status, [PhotographyBooking::PENDING_STAFF, PhotographyBooking::NEEDS_CLIENT, PhotographyBooking::RESCHEDULING], true),

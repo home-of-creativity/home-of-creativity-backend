@@ -1,6 +1,8 @@
 # Laravel API
 
-Last updated: 10 October 2026 (`requests.invoice_sent_at` is set when an invoice is sent. Client cancel is refused once that moment is 24 hours old. A WhatsApp or Telegram message that is only `.` or «نقطة» returns the welcome.)
+Last updated: 10 October 2026 (Opening `/admin/photography` mirrors open and agreed shoots onto Google Calendar, colored by status, then applies a time moved on that calendar.)
+
+Previous: 10 October 2026 (`requests.invoice_sent_at` is set when an invoice is sent. Client cancel is refused once that moment is 24 hours old. A WhatsApp or Telegram message that is only `.` or «نقطة» returns the welcome.)
 
 Previous: 10 October 2026 (Client complaints: `complaints` stores a title, description, optional image, and optional audio. `GET /admin/complaints` and `PATCH /admin/complaints/{id}` need `ops.complaints`. Files stream from `GET /admin/complaints/{id}/image|audio`. The bot conversation is `HandleClientComplaint`, shared by WhatsApp and `POST /bot/telegram/complaint`.)
 
