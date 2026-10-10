@@ -1,5 +1,7 @@
 # Telegram bots
 
+A message that is only «.» or «نقطة» returns the welcome. The client can cancel a request until 24 hours after the invoice was sent; after that the bot refuses. A photography booking is still cancelled by the team.
+
 The client bot has a «شكوى» button on WhatsApp and Telegram. The client sends a title, a description or a voice note, then an optional photo. Video is refused. Laravel stores the row and notifies Sales. `POST /api/bot/telegram/complaint` runs the same conversation as WhatsApp.
 
 A photography refusal is plain text, so the next digit is not the main menu. Day and time lists are buttons only; WhatsApp numbers them once. More than ten times adds «أوقات كمان». «لغي موعد التصوير» notifies Media and does not refund. If the photography API fails on a photography sentence, the client bot says so and does not pass the sentence to the assistant. A reply typed on the company WhatsApp pauses that chat for two hours; «رجوع للبوت» resumes it. Offers go to the chat that last spoke (`hoc:client-reply`). A company reply of «شركة كذا» stores the name after that word. A long sentence is read by Gemini. A vague reply is asked again. Assistant replies are checked before they are sent: another client's phone, email, or request number is dropped, and the team gets the message instead. Receipts must be a real jpeg, png, webp, or pdf. Each chat is limited to 60 Telegram calls and 30 WhatsApp messages a minute. In production the example webhook secret is rejected.

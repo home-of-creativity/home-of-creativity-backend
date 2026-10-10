@@ -77,6 +77,9 @@ class PublishOdooPaper
             $absolute,
             ($name !== '' ? $name : 'invoice').'.pdf',
         );
+        if ($this->delivered && $request->invoice_sent_at === null) {
+            $request->forceFill(['invoice_sent_at' => now()])->save();
+        }
 
         return $snapshot;
     }

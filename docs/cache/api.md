@@ -1,6 +1,8 @@
 # Laravel API
 
-Last updated: 10 October 2026 (Client complaints: `complaints` stores a title, description, optional image, and optional audio. `GET /admin/complaints` and `PATCH /admin/complaints/{id}` need `ops.complaints`. Files stream from `GET /admin/complaints/{id}/image|audio`. The bot conversation is `HandleClientComplaint`, shared by WhatsApp and `POST /bot/telegram/complaint`.)
+Last updated: 10 October 2026 (`requests.invoice_sent_at` is set when an invoice is sent. Client cancel is refused once that moment is 24 hours old. A WhatsApp or Telegram message that is only `.` or «نقطة» returns the welcome.)
+
+Previous: 10 October 2026 (Client complaints: `complaints` stores a title, description, optional image, and optional audio. `GET /admin/complaints` and `PATCH /admin/complaints/{id}` need `ops.complaints`. Files stream from `GET /admin/complaints/{id}/image|audio`. The bot conversation is `HandleClientComplaint`, shared by WhatsApp and `POST /bot/telegram/complaint`.)
 
 Previous: 10 October 2026 (Caddy sends `/photography-alarm*` to Laravel. The signed page offers a Google Calendar link and an `.ics` file. Android still opens the alarm intent.)
 

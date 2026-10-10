@@ -261,6 +261,22 @@ class HandleWhatsAppInbound
             }
             $this->rememberLanguage($callback === null ? $text : null, $phone, $session, $client);
 
+            if ($callback === null && $this->isWelcomeDot(is_string($text) ? $text : null)) {
+                $complaints->clear($phone);
+                $this->resetCompose($session);
+                $this->putSession($phone, $session);
+                $this->gateProfile($client, $chatId, $session, true);
+
+                return;
+            }
+
+            if ($callback === null && $this->operationIntent((string) $text) === 'cancel_request') {
+                $complaints->clear($phone);
+                $this->cancelFromChat($client, $chatId, $phone, $session, (string) $text);
+
+                return;
+            }
+
             if ($callback === null && ($complaints->active($phone) || $complaints->wants(is_string($text) ? $text : null))) {
                 if (! $complaints->active($phone)) {
                     $this->resetCompose($session);
@@ -906,36 +922,7 @@ class HandleWhatsAppInbound
         }
         if (str_starts_with($data, 'reqcancel:')) {
             $this->runOwned($client, substr($data, 10), function (ServiceRequest $request) use ($chatId): void {
-                $openShoot = $request->photographyBookings()
-                    ->whereIn('status', array_merge(PhotographyBooking::OPEN, [PhotographyBooking::CONFIRMED]))
-                    ->exists();
-                if ($openShoot) {
-                    $displayNumber = ResolveServiceRequest::displayNumber($request);
-                    $this->notifyEmployees->handle(
-                        $request,
-                        EmployeeProfession::Media,
-                        "الزبون طلب إلغاء الطلب وفيه موعد تصوير.\n#{$displayNumber} — {$request->title}",
-                    );
-                    $this->sendPlain($chatId, $this->tx(
-                        'على هالطلب موعد تصوير. الإلغاء من فريق التصوير قبل بداية يوم الجلسة.',
-                        'This request has a photography booking. The team cancels it before the shoot day starts.',
-                    ));
-
-                    return;
-                }
-                if (! $request->status->canTransitionTo(RequestStatus::Cancelled)) {
-                    throw ValidationException::withMessages(['status' => 'This request cannot be cancelled in its current state.']);
-                }
-                $updated = $this->transitions->transition($request, RequestStatus::Cancelled, 'client', 'Client cancelled via WhatsApp.');
-                $fresh = $updated->fresh('client') ?? $updated;
-                app(SyncClickUpFromStaff::class)->handle($fresh, ClickUpSyncEvent::Cancelled);
-                $displayNumber = ResolveServiceRequest::displayNumber($fresh);
-                $this->notifyEmployees->handle(
-                    $fresh,
-                    EmployeeProfession::Sales,
-                    "❌ ألغى الزبون الطلب\n#{$displayNumber} — {$fresh->title}\n{$fresh->client?->name}",
-                );
-                $this->sendMenu($chatId, $this->tx('تمام، لغينا الطلب.', 'The request was cancelled.'));
+                $this->cancelOwnedRequest($request, $chatId);
             });
         }
     }
@@ -1788,8 +1775,110 @@ class HandleWhatsAppInbound
             || preg_match('/\b(support|help)\b/i', $text) === 1) {
             return 'help';
         }
+        if (preg_match('/(?:الغي|ألغي|لغي|الغِ|إلغاء|الغاء|كنسل)\s*(?:ال)?طلب/u', $text) === 1
+            || preg_match('/\bcancel\b.{0,24}\b(?:request|order)\b/i', $text) === 1) {
+            return 'cancel_request';
+        }
 
         return null;
+    }
+
+    private function isWelcomeDot(?string $text): bool
+    {
+        $text = trim((string) $text);
+
+        return $text !== '' && preg_match('/^(?:\.|。|．|۔|نقطة|نقطه)$/u', $text) === 1;
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function cancelFromChat(Client $client, string $chatId, string $phone, array &$session, string $text): void
+    {
+        $this->resetCompose($session);
+        $this->putSession($phone, $session);
+
+        $ref = '';
+        if (preg_match('/REQ-\d{4}-\d+/i', $text, $match) === 1) {
+            $ref = $match[0];
+        } elseif (preg_match('/#(\d+)/', $text, $match) === 1) {
+            $ref = $match[1];
+        }
+        $named = $ref !== '' ? $this->ownedRequest($client, $ref) : null;
+        if ($named instanceof ServiceRequest) {
+            $this->cancelOwnedRequest($named, $chatId);
+
+            return;
+        }
+
+        $open = $client->requests()->latest('id')->get()
+            ->filter(fn (ServiceRequest $item): bool => ! $item->hiddenFromClient() && $item->status->canTransitionTo(RequestStatus::Cancelled))
+            ->values();
+        if ($open->isEmpty()) {
+            $this->sendPlain($chatId, $this->tx('ما في طلب فينا نلغيه هلق.', 'There is no request that can be cancelled now.'));
+
+            return;
+        }
+        if ($open->count() === 1) {
+            $this->cancelOwnedRequest($open->first(), $chatId);
+
+            return;
+        }
+
+        $rows = [];
+        foreach ($open->take(9) as $item) {
+            $rows[] = [[
+                'text' => mb_substr('#'.ResolveServiceRequest::displayNumber($item).' '.$item->title, 0, 24),
+                'callback_data' => 'reqcancel:'.ResolveServiceRequest::displayNumber($item),
+            ]];
+        }
+        $this->telegram->sendInlineKeyboard($chatId, $this->tx('أي طلب بدك نلغيه؟', 'Which request should be cancelled?'), $rows);
+    }
+
+    private function cancelOwnedRequest(ServiceRequest $request, string $chatId): void
+    {
+        if ($request->clientCancelClosed()) {
+            $this->sendPlain($chatId, $this->tx(
+                'ما فينا نلغي الطلب بعد ٢٤ ساعة من إرسال الفاتورة.',
+                'This request cannot be cancelled after 24 hours from the invoice.',
+            ));
+
+            return;
+        }
+
+        $openShoot = $request->photographyBookings()
+            ->whereIn('status', array_merge(PhotographyBooking::OPEN, [PhotographyBooking::CONFIRMED]))
+            ->exists();
+        if ($openShoot) {
+            $displayNumber = ResolveServiceRequest::displayNumber($request);
+            $this->notifyEmployees->handle(
+                $request,
+                EmployeeProfession::Media,
+                "الزبون طلب إلغاء الطلب وفيه موعد تصوير.\n#{$displayNumber} — {$request->title}",
+            );
+            $this->sendPlain($chatId, $this->tx(
+                'على هالطلب موعد تصوير. الإلغاء من فريق التصوير قبل بداية يوم الجلسة.',
+                'This request has a photography booking. The team cancels it before the shoot day starts.',
+            ));
+
+            return;
+        }
+        if (! $request->status->canTransitionTo(RequestStatus::Cancelled)) {
+            $this->sendPlain($chatId, $this->tx('هالطلب ما بينلغى من هالحالة.', 'This request cannot be cancelled in its current state.'));
+
+            return;
+        }
+
+        $updated = $this->transitions->transition($request, RequestStatus::Cancelled, 'client', 'Client cancelled via WhatsApp.');
+        $fresh = $updated->fresh('client') ?? $updated;
+        app(SyncClickUpFromStaff::class)->handle($fresh, ClickUpSyncEvent::Cancelled);
+        $displayNumber = ResolveServiceRequest::displayNumber($fresh);
+        $this->notifyEmployees->handle(
+            $fresh,
+            EmployeeProfession::Sales,
+            "❌ ألغى الزبون الطلب\n#{$displayNumber} — {$fresh->title}\n{$fresh->client?->name}",
+        );
+        $this->sendMenu($chatId, $this->tx('تمام، لغينا الطلب.', 'The request was cancelled.'));
     }
 
     /**

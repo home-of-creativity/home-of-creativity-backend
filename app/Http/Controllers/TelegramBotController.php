@@ -434,6 +434,12 @@ class TelegramBotController extends Controller
     {
         $this->assertClientOwns($request, $serviceRequest);
 
+        if ($serviceRequest->clientCancelClosed()) {
+            throw ValidationException::withMessages([
+                'status' => 'ما فينا نلغي الطلب بعد ٢٤ ساعة من إرسال الفاتورة.',
+            ]);
+        }
+
         if (! $serviceRequest->status->canTransitionTo(RequestStatus::Cancelled)) {
             throw ValidationException::withMessages([
                 'status' => 'This request cannot be cancelled in its current state.',

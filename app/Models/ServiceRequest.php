@@ -48,6 +48,7 @@ class ServiceRequest extends Model
         'odoo_quotation_id',
         'odoo_invoice_id',
         'paid_at',
+        'invoice_sent_at',
         'payment_method',
         'aggregate_version',
         'gemini_status',
@@ -94,6 +95,7 @@ class ServiceRequest extends Model
             'edit_rounds' => 'integer',
             'edit_estimate_hours' => 'integer',
             'paid_at' => 'datetime',
+            'invoice_sent_at' => 'datetime',
             'gemini_processed_at' => 'datetime',
             'quotation_amount' => 'decimal:2',
             'amount_total' => 'decimal:2',
@@ -424,6 +426,33 @@ class ServiceRequest extends Model
     public function invoices(): HasMany
     {
         return $this->hasMany(Invoice::class, 'request_id');
+    }
+
+    /** The moment the invoice reached the client. Cancel stays open for 24 hours after that. */
+    public function invoiceSentAt(): ?\Illuminate\Support\Carbon
+    {
+        if ($this->invoice_sent_at !== null) {
+            return $this->invoice_sent_at;
+        }
+
+        $issued = $this->invoices()
+            ->where('kind', '!=', 'received')
+            ->whereNotNull('issued_at')
+            ->min('issued_at');
+        if ($issued) {
+            return \Illuminate\Support\Carbon::parse($issued);
+        }
+
+        $synced = OdooInvoice::query()->where('request_id', $this->id)->min('created_at');
+
+        return $synced ? \Illuminate\Support\Carbon::parse($synced) : null;
+    }
+
+    public function clientCancelClosed(): bool
+    {
+        $sent = $this->invoiceSentAt();
+
+        return $sent !== null && $sent->lte(now()->subHours(24));
     }
 
     public function statusHistory(): HasMany

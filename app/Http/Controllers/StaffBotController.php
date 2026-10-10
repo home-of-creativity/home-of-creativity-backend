@@ -666,18 +666,18 @@ class StaffBotController extends Controller
         $ref = ResolveServiceRequest::displayNumber($serviceRequest);
 
         return match ($serviceRequest->status) {
-            RequestStatus::Submitted, RequestStatus::QuotationRejected => [
+            RequestStatus::Submitted, RequestStatus::QuotationRejected => array_values(array_filter([
                 ['text' => '✅ أوافق على المتابعة', 'callback_data' => "reqack:{$ref}"],
-                ['text' => '❌ إلغاء الطلب', 'callback_data' => "reqcancel:{$ref}"],
-            ],
+                $serviceRequest->clientCancelClosed() ? null : ['text' => '❌ إلغاء الطلب', 'callback_data' => "reqcancel:{$ref}"],
+            ])),
             RequestStatus::QuotationSent => [
                 ['text' => '✅ موافقة على العرض', 'callback_data' => "approve:{$ref}"],
                 ['text' => '❌ رفض العرض', 'callback_data' => "reject:{$ref}"],
             ],
-            RequestStatus::AwaitingPayment => [
+            RequestStatus::AwaitingPayment => array_values(array_filter([
                 ['text' => '📎 رفع وصل الدفع', 'callback_data' => "receipt_hint:{$ref}"],
-                ['text' => '❌ إلغاء الطلب', 'callback_data' => "reqcancel:{$ref}"],
-            ],
+                $serviceRequest->clientCancelClosed() ? null : ['text' => '❌ إلغاء الطلب', 'callback_data' => "reqcancel:{$ref}"],
+            ])),
             RequestStatus::ReadyForReview => [
                 ['text' => '✅ اعتماد التسليم', 'callback_data' => "complete:{$ref}"],
             ],

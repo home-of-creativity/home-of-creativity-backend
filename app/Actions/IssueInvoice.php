@@ -68,6 +68,9 @@ class IssueInvoice
                 'payment_method' => $request->payment_method,
                 'odoo_invoice_id' => $odooInvoiceId,
             ]);
+            if ($request->invoice_sent_at === null) {
+                $request->forceFill(['invoice_sent_at' => now()])->save();
+            }
 
             try {
                 if ($pdfPath !== '') {

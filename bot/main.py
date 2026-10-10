@@ -1083,6 +1083,17 @@ async def create_catalog_request(
     await send_catalog_result(message, text, replace=True)
 
 
+WELCOME_DOTS = {".", "。", "．", "۔", "نقطة", "نقطه"}
+
+
+async def welcome_on_dot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    text = update.message.text.strip() if update.message and update.message.text else ""
+    if text not in WELCOME_DOTS:
+        return
+    await start(update, context)
+    raise ApplicationHandlerStop
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     if user is None or update.message is None:
@@ -2182,6 +2193,7 @@ def main() -> None:
         .build()
     )
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.Regex(r"^(?:\.|。|．|۔|نقطة|نقطه)$"), welcome_on_dot), group=-1)
     application.add_handler(CallbackQueryHandler(skip_email_callback, pattern=r"^noemail$"), group=-2)
     application.add_handler(
         CallbackQueryHandler(
