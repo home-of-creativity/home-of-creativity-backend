@@ -65,6 +65,12 @@ return [
         'timeout' => (int) env('N8N_TIMEOUT', 12),
     ],
 
+    'firebase' => [
+        // Mobile app Google / Facebook sign-in. ID tokens must name this project.
+        'project_id' => env('FIREBASE_PROJECT_ID'),
+        'certs_url' => 'https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com',
+    ],
+
     'telegram' => [
         'bot_token' => env('TELEGRAM_BOT_TOKEN'),
         'staff_chat_id' => env('TELEGRAM_STAFF_CHAT_ID'),

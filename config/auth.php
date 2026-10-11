@@ -120,4 +120,19 @@ return [
     */
     'api_throttle_per_minute' => max(1, (int) env('AUTH_THROTTLE_PER_MINUTE', 5)),
 
+    /*
+    | Mobile app sign-in. Access tokens are short Sanctum tokens. Refresh
+    | tokens rotate on every use and a reused one revokes its whole family.
+    | The OTP reaches the account's bot chat, never an SMS.
+    */
+    'app' => [
+        'access_ttl_minutes' => max(5, (int) env('APP_ACCESS_TTL_MINUTES', 30)),
+        'refresh_ttl_days' => max(1, (int) env('APP_REFRESH_TTL_DAYS', 30)),
+        'otp_length' => 6,
+        'otp_ttl_seconds' => max(60, (int) env('APP_OTP_TTL_SECONDS', 300)),
+        'otp_max_attempts' => max(1, (int) env('APP_OTP_MAX_ATTEMPTS', 5)),
+        'otp_resend_seconds' => max(15, (int) env('APP_OTP_RESEND_SECONDS', 60)),
+        'otp_per_phone_per_hour' => max(1, (int) env('APP_OTP_PER_PHONE_PER_HOUR', 6)),
+    ],
+
 ];

@@ -34,9 +34,13 @@ class TelegramNotifier
             && $this->configured('client', $chatId);
     }
 
-    public function send(string $chatId, string $text, string $bot = 'client'): void
+    /**
+     * `$transactional` skips the dashboard channel pause. Only app sign-in
+     * codes use it, so a paused bot never locks a client out of the app.
+     */
+    public function send(string $chatId, string $text, string $bot = 'client', bool $transactional = false): void
     {
-        if ($this->clientDeliveryBlocked($chatId, $bot)) {
+        if (! $transactional && $this->clientDeliveryBlocked($chatId, $bot)) {
             return;
         }
 

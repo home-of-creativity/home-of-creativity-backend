@@ -2,9 +2,9 @@
 
 use App\Http\Controllers\Admin\ArticleController as AdminArticleController;
 use App\Http\Controllers\Admin\ClientChannelController as AdminClientChannelController;
-use App\Http\Controllers\Admin\ComplaintController as AdminComplaintController;
 use App\Http\Controllers\Admin\ClientController as AdminClientController;
 use App\Http\Controllers\Admin\ClientReportController as AdminClientReportController;
+use App\Http\Controllers\Admin\ComplaintController as AdminComplaintController;
 use App\Http\Controllers\Admin\ContactChannelController as AdminContactChannelController;
 use App\Http\Controllers\Admin\DriveFolderController as AdminDriveFolderController;
 use App\Http\Controllers\Admin\EmployeeController as AdminEmployeeController;
@@ -36,11 +36,13 @@ use App\Http\Controllers\Admin\SocialStaffController as AdminSocialStaffControll
 use App\Http\Controllers\Admin\StaffAccessController;
 use App\Http\Controllers\Admin\WorkScheduleController as AdminWorkScheduleController;
 use App\Http\Controllers\AdminBotController;
+use App\Http\Controllers\AppAuthController;
 use App\Http\Controllers\ArticleController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BotDraftController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\DevBotController;
+use App\Http\Controllers\GithubWebhookController;
 use App\Http\Controllers\GoogleDriveAccountController;
 use App\Http\Controllers\IntegrationController;
 use App\Http\Controllers\LandingReelController;
@@ -50,7 +52,6 @@ use App\Http\Controllers\N8nWebhookController;
 use App\Http\Controllers\PortfolioController;
 use App\Http\Controllers\PricingController;
 use App\Http\Controllers\ProfilePdfController;
-use App\Http\Controllers\GithubWebhookController;
 use App\Http\Controllers\SentryWebhookController;
 use App\Http\Controllers\ServiceRequestController;
 use App\Http\Controllers\SiteAskController;
@@ -71,6 +72,17 @@ Route::prefix('auth')->group(function () {
     Route::middleware('auth:sanctum')->group(function () {
         Route::post('logout', [AuthController::class, 'logout']);
         Route::get('me', [AuthController::class, 'me']);
+    });
+});
+
+Route::prefix('app/auth')->group(function () {
+    Route::post('otp/send', [AppAuthController::class, 'sendOtp'])->middleware('throttle:6,1');
+    Route::post('otp/verify', [AppAuthController::class, 'verifyOtp'])->middleware('throttle:10,1');
+    Route::post('social', [AppAuthController::class, 'social'])->middleware('throttle:10,1');
+    Route::post('refresh', [AppAuthController::class, 'refresh'])->middleware('throttle:30,1');
+    Route::middleware('auth:sanctum')->group(function () {
+        Route::post('logout', [AppAuthController::class, 'logout']);
+        Route::get('me', [AppAuthController::class, 'me']);
     });
 });
 

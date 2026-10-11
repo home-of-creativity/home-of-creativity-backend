@@ -33,7 +33,19 @@ class User extends Authenticatable
     protected $hidden = [
         'password',
         'remember_token',
+        'firebase_uid',
     ];
+
+    /**
+     * Accounts created by the mobile app for a bot client or employee with
+     * no email get an address on this reserved domain. It never receives mail.
+     */
+    public const APP_PLACEHOLDER_EMAIL_DOMAIN = 'app.hoc.invalid';
+
+    public function hasPlaceholderEmail(): bool
+    {
+        return str_ends_with((string) $this->email, '@'.self::APP_PLACEHOLDER_EMAIL_DOMAIN);
+    }
 
     protected function casts(): array
     {
