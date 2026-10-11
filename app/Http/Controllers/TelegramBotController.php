@@ -39,6 +39,7 @@ use App\Services\OdooLeadLog;
 use App\Services\RequestStatusTransitionService;
 use App\Support\ChatLanguage;
 use Illuminate\Support\Facades\Cache;
+use App\Support\ClientPhone;
 use App\Support\ClientProfileValue;
 use App\Support\ResolveCompanyName;
 use App\Support\ClientUploadGuard;
@@ -140,8 +141,7 @@ class TelegramBotController extends Controller
         }
 
         if (array_key_exists('phone', $validated)) {
-            $values['phone'] = ClientProfileValue::usablePhone(trim((string) $validated['phone']))
-                ?? throw ValidationException::withMessages(['phone' => 'أرسل رقم هاتف صالح، مثل 0991234567.']);
+            $values['phone'] = $this->resolveTelegramPhone($client, trim((string) $validated['phone']));
         }
 
         if (array_key_exists('company_name', $validated)) {
@@ -169,6 +169,46 @@ class TelegramBotController extends Controller
         }
 
         return $values;
+    }
+
+    private function resolveTelegramPhone(Client $client, string $raw): string
+    {
+        $pendingKey = 'client-phone-country:'.$client->telegram_user_id;
+        $pending = Cache::get($pendingKey);
+
+        if (is_string($pending) && $pending !== '') {
+            $applied = ClientPhone::applyCountry($pending, $raw);
+            if ($applied !== null) {
+                Cache::forget($pendingKey);
+
+                return $applied;
+            }
+            $again = ClientPhone::interpret($raw);
+            if ($again['status'] === 'ready') {
+                Cache::forget($pendingKey);
+
+                return (string) $again['phone'];
+            }
+            if ($again['status'] === 'country') {
+                Cache::put($pendingKey, $again['national'], now()->addHour());
+                throw ValidationException::withMessages(['phone' => 'من أي بلد هاد الرقم؟']);
+            }
+            throw ValidationException::withMessages(['phone' => 'ما لقيت هاد البلد. اكتب اسمه أو المفتاح، مثل سوريا أو 963.']);
+        }
+
+        $read = ClientPhone::interpret($raw);
+        if ($read['status'] === 'current') {
+            throw ValidationException::withMessages(['phone' => 'بهالشات ما في رقم واتساب. ابعت الرقم نفسه.']);
+        }
+        if ($read['status'] === 'ready') {
+            return (string) $read['phone'];
+        }
+        if ($read['status'] === 'country') {
+            Cache::put($pendingKey, $read['national'], now()->addHour());
+            throw ValidationException::withMessages(['phone' => 'من أي بلد هاد الرقم؟']);
+        }
+
+        throw ValidationException::withMessages(['phone' => 'الرقم مو واضح. ابعت رقم الموبايل مع مفتاح الدولة، مثل +963944123456.']);
     }
 
     public function submit(TelegramSubmitRequest $request, SubmitServiceRequest $submitServiceRequest): JsonResponse

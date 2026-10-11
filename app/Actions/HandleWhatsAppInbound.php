@@ -22,6 +22,7 @@ use App\Support\PhotographyActor;
 use App\Support\ChatLanguage;
 use App\Support\ClientChannelGate;
 use App\Support\ClientUploadGuard;
+use App\Support\ClientPhone;
 use App\Support\ClientProfileValue;
 use App\Support\PricingCatalog;
 use App\Support\ResolveCompanyName;
@@ -345,6 +346,11 @@ class HandleWhatsAppInbound
             }
 
             $step = (string) ($session['step'] ?? 'idle');
+            if ($step === 'phone_country') {
+                $this->capturePhoneCountry($client, $chatId, $phone, $session, $text);
+
+                return;
+            }
             if (in_array($step, ['name', 'phone', 'company_name'], true)) {
                 $this->captureProfile($client, $chatId, $phone, $session, $text);
 
@@ -546,10 +552,7 @@ class HandleWhatsAppInbound
 
         $prompt = match ($field) {
             'name' => $this->tx('شو اسمك؟', 'What is your full name?'),
-            'phone' => $this->tx(
-                "عطينا رقمك لحتى نرجعلك لما يجهز العرض.\nشو رقمك؟",
-                "We ask for a phone number so we can reach you when the quotation is ready.\nWhat is your phone number?",
-            ),
+            'phone' => $this->phonePrompt(),
             default => $this->tx(
                 "شو اسم الشركة أو المحل؟ منحط العرض والفاتورة عاسمه.\n",
                 "We ask for the company name so the quotation and invoice use it.\nWhat is the company name?",
@@ -559,6 +562,133 @@ class HandleWhatsAppInbound
         $this->safeSend($chatId, $intro.$prompt);
 
         return false;
+    }
+
+    private function phonePrompt(): string
+    {
+        return $this->tx(
+            "ابعت الرقم مع مفتاح الدولة، مثل +963944123456.\nإذا الرقم بدون مفتاح، منسألك أي بلد.\nوإذا بدك رقم الواتساب الحالي، اكتب: خذ رقمي الحالي.",
+            "Send the number with its country code, such as +963944123456.\nIf it has no country code, we ask which country.\nTo keep this WhatsApp number, send: خذ رقمي الحالي.",
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function acceptTypedPhone(string $chatId, string $phone, array &$session, string $value, string $resume): ?string
+    {
+        $read = ClientPhone::interpret($value);
+        if ($read['status'] === 'current') {
+            $current = ClientPhone::fromCallerDigits($phone);
+            if ($current === null) {
+                $this->safeSend($chatId, $this->tx('ما قدرنا ناخذ رقم الواتساب الحالي. ابعت الرقم.', 'Send the phone number.'));
+
+                return null;
+            }
+
+            return $current;
+        }
+        if ($read['status'] === 'ready') {
+            return $read['phone'];
+        }
+        if ($read['status'] === 'country') {
+            $session['step'] = 'phone_country';
+            $session['phone_national'] = $read['national'];
+            $session['phone_resume'] = $resume;
+            $this->putSession($phone, $session);
+            $this->safeSend($chatId, $this->tx('من أي بلد هاد الرقم؟', 'Which country is this number from?'));
+
+            return null;
+        }
+
+        $this->safeSend($chatId, $this->tx(
+            'الرقم مو واضح. ابعت رقم الموبايل، أو اكتب خذ رقمي الحالي.',
+            'Send a mobile number, or send: خذ رقمي الحالي.',
+        ));
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function capturePhoneCountry(Client $client, string $chatId, string $phone, array $session, ?string $text): void
+    {
+        $national = (string) ($session['phone_national'] ?? '');
+        $value = trim((string) $text);
+        if (ClientPhone::wantsCurrentNumber($value)) {
+            $current = ClientPhone::fromCallerDigits($phone);
+            if ($current === null) {
+                $this->safeSend($chatId, $this->tx('ما قدرنا ناخذ رقم الواتساب الحالي. ابعت الرقم.', 'Send the phone number.'));
+
+                return;
+            }
+            $this->storeResolvedPhone($client, $chatId, $phone, $session, $current);
+
+            return;
+        }
+
+        $again = ClientPhone::interpret($value);
+        if ($again['status'] === 'ready') {
+            $this->storeResolvedPhone($client, $chatId, $phone, $session, (string) $again['phone']);
+
+            return;
+        }
+        if ($again['status'] === 'country') {
+            $session['phone_national'] = $again['national'];
+            $this->putSession($phone, $session);
+            $this->safeSend($chatId, $this->tx('من أي بلد هاد الرقم؟', 'Which country is this number from?'));
+
+            return;
+        }
+
+        $stored = ClientPhone::applyCountry($national, $value);
+        if ($stored === null) {
+            $this->safeSend($chatId, $this->tx(
+                'ما لقيت هاد البلد. اكتب اسمه أو المفتاح، مثل سوريا أو 963.',
+                'That country was not found. Send its name or code, such as Syria or 963.',
+            ));
+
+            return;
+        }
+
+        $this->storeResolvedPhone($client, $chatId, $phone, $session, $stored);
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function storeResolvedPhone(Client $client, string $chatId, string $phone, array $session, string $stored): void
+    {
+        $resume = (string) ($session['phone_resume'] ?? 'profile');
+        unset($session['phone_national'], $session['phone_resume']);
+        $client->forceFill(['phone' => $stored])->save();
+        $client = $client->fresh() ?? $client;
+        $this->pushCompletedClientToOdoo($client);
+
+        if ($resume === 'edit') {
+            $this->safeSend($chatId, $this->tx('تمام، حدّثنا بياناتك.', 'Your details were updated.'));
+            if (filled($session['quote_ref'] ?? null)) {
+                $this->safeSend($chatId, $this->tx(
+                    "بياناتك:\nالاسم: {$client->name}\nالهاتف: {$client->phone}\nالشركة: {$client->company_name}",
+                    "Your details:\nName: {$client->name}\nPhone: {$client->phone}\nCompany: {$client->company_name}",
+                ));
+                $this->showQuoteDecision($chatId, $phone, $session);
+
+                return;
+            }
+            $this->showProfile($client, $chatId, $phone, $session);
+
+            return;
+        }
+
+        $session['step'] = 'idle';
+        $this->putSession($phone, $session);
+        if (! $this->gateProfile($client, $chatId, $session)) {
+            return;
+        }
+
+        $this->sendMenu($chatId, $this->tx('تمام، سجلنا بياناتك. شو بدك نساوي؟', 'Your details are saved. Reply with the option number.'));
     }
 
     /**
@@ -579,10 +709,12 @@ class HandleWhatsAppInbound
 
             return;
         }
-        if ($field === 'phone' && ClientProfileValue::usablePhone($value) === null) {
-            $this->safeSend($chatId, $this->tx('الرقم مو واضح، ابعت رقم الموبايل.', 'Send a valid phone number.'));
-
-            return;
+        if ($field === 'phone') {
+            $stored = $this->acceptTypedPhone($chatId, $phone, $session, $value, 'profile');
+            if ($stored === null) {
+                return;
+            }
+            $value = $stored;
         }
         if ($field === 'company_name') {
             $stored = app(ResolveCompanyName::class)->resolve($value, $chatId);
@@ -658,7 +790,7 @@ class HandleWhatsAppInbound
             $this->putSession($phone, $session);
             $prompt = match ($field) {
                 'name' => $this->tx('شو الاسم الجديد؟', 'What is the new full name?'),
-                'phone' => $this->tx('شو الرقم الجديد؟', 'What is the new phone number?'),
+                'phone' => $this->phonePrompt(),
                 default => $this->tx('شو اسم الشركة الجديد؟', 'What is the new company name?'),
             };
             $this->safeSend($chatId, $prompt);
@@ -3449,6 +3581,12 @@ class HandleWhatsAppInbound
      */
     private function saveProfileEdit(Client $client, string $chatId, string $phone, array $session, ?string $text): void
     {
+        if (filled($session['phone_national'] ?? null)) {
+            $this->capturePhoneCountry($client, $chatId, $phone, $session, $text);
+
+            return;
+        }
+
         $field = (string) ($session['profile_field'] ?? '');
         $value = trim((string) $text);
         if ($value === '' || ClientProfileValue::isKeyboardLabel($value) || ! in_array($field, ['name', 'phone', 'company_name'], true)) {
@@ -3457,9 +3595,17 @@ class HandleWhatsAppInbound
             return;
         }
 
+        if ($field === 'phone') {
+            $storedPhone = $this->acceptTypedPhone($chatId, $phone, $session, $value, 'edit');
+            if ($storedPhone === null) {
+                return;
+            }
+            $value = $storedPhone;
+        }
+
         $stored = match ($field) {
             'name' => ClientProfileValue::usableName($value),
-            'phone' => ClientProfileValue::usablePhone($value),
+            'phone' => $value,
             default => app(ResolveCompanyName::class)->resolve($value, $chatId),
         };
         if ($stored === null) {

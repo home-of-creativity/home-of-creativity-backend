@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Client;
+use Illuminate\Support\Facades\Cache;
 use App\Models\PricingCategory;
 use App\Models\PricingPackage;
 use App\Models\PricingSubcategory;
@@ -108,6 +109,27 @@ class WhatsAppClientBotTest extends TestCase
             return str_contains($request->url(), '/555/messages')
                 && (str_contains($text, 'اختر الفئة') || str_contains($titles, 'اشتراكات'));
         });
+    }
+
+    public function test_a_local_number_takes_the_country_code_and_the_current_whatsapp_number(): void
+    {
+        $this->signedPost($this->textPayload('963911111111', 'Nour', 'مرحبا', 'wamid.phone.1'))->assertOk();
+        Cache::put('hoc:wa-session:963911111111', ['step' => 'phone'], now()->addHour());
+        Client::query()->where('telegram_user_id', 'wa:963911111111')->update(['phone' => null]);
+
+        $this->signedPost($this->textPayload('963911111111', 'Nour', '0944123456', 'wamid.phone.2'))->assertOk();
+        $this->assertNull(Client::query()->where('telegram_user_id', 'wa:963911111111')->value('phone'));
+
+        $this->signedPost($this->textPayload('963911111111', 'Nour', 'سوريا', 'wamid.phone.3'))->assertOk();
+        $this->assertSame('+963944123456', Client::query()->where('telegram_user_id', 'wa:963911111111')->value('phone'));
+
+        Cache::put('hoc:wa-session:963911111111', ['step' => 'phone'], now()->addHour());
+        $this->signedPost($this->textPayload('963911111111', 'Nour', 'خذ رقمي الحالي', 'wamid.phone.4'))->assertOk();
+        $this->assertSame('+963911111111', Client::query()->where('telegram_user_id', 'wa:963911111111')->value('phone'));
+
+        Cache::put('hoc:wa-session:963911111111', ['step' => 'phone'], now()->addHour());
+        $this->signedPost($this->textPayload('963911111111', 'Nour', '+44 7700 900123', 'wamid.phone.5'))->assertOk();
+        $this->assertSame('+447700900123', Client::query()->where('telegram_user_id', 'wa:963911111111')->value('phone'));
     }
 
     public function test_notifier_routes_wa_chats_to_graph(): void
