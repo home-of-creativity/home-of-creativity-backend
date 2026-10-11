@@ -2,6 +2,7 @@
 
 use App\Http\Middleware\EnsureAbility;
 use App\Http\Middleware\EnsureAdmin;
+use App\Http\Middleware\EnsureAppClient;
 use App\Http\Middleware\EnsureClientTelegramEnabled;
 use App\Http\Middleware\EnsureCrudAbility;
 use App\Http\Middleware\StripPoweredByHeader;
@@ -30,6 +31,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'telegram.client' => EnsureClientTelegramEnabled::class,
             'bot.sender' => ThrottleBotSender::class,
             'admin' => EnsureAdmin::class,
+            'app.client' => EnsureAppClient::class,
             'ability' => EnsureAbility::class,
             'crud' => EnsureCrudAbility::class,
         ]);

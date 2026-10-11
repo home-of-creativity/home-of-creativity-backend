@@ -67,7 +67,7 @@ return [
 
     'firebase' => [
         // Mobile app Google / Facebook sign-in. ID tokens must name this project.
-        'project_id' => env('FIREBASE_PROJECT_ID'),
+        'project_id' => env('FIREBASE_PROJECT_ID', 'project-9c32a8a1-2afa-499c-882'),
         'certs_url' => 'https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com',
     ],
 

@@ -1,5 +1,7 @@
 # Telegram bots
 
+Mobile app sign-in codes arrive as a plain bot message: clients get them from the client bot (or WhatsApp for `wa:` chats), employees from the staff bot. The message names the app, the 6-digit code, the 5-minute lifetime, and asks not to share it. It is sent even while the dashboard pauses the client channel. A number that never started a bot chat gets nothing; the app points the person to the client bot. See `api.md` › Mobile app.
+
 A message that is only «.» or «نقطة» returns the welcome. The client can cancel a request until 24 hours after the invoice was sent; after that the bot refuses. A photography booking is still cancelled by the team.
 
 The client bot has a «شكوى» button on WhatsApp and Telegram. The client sends a title, a description or a voice note, then an optional photo. Video is refused. Laravel stores the row and notifies Sales. `POST /api/bot/telegram/complaint` runs the same conversation as WhatsApp.

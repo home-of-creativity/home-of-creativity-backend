@@ -37,6 +37,7 @@ use App\Http\Controllers\Admin\StaffAccessController;
 use App\Http\Controllers\Admin\WorkScheduleController as AdminWorkScheduleController;
 use App\Http\Controllers\AdminBotController;
 use App\Http\Controllers\AppAuthController;
+use App\Http\Controllers\AppClientController;
 use App\Http\Controllers\ArticleController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BotDraftController;
@@ -84,6 +85,21 @@ Route::prefix('app/auth')->group(function () {
         Route::post('logout', [AppAuthController::class, 'logout']);
         Route::get('me', [AppAuthController::class, 'me']);
     });
+});
+
+Route::prefix('app/client')->middleware(['auth:sanctum', 'app.client'])->group(function () {
+    Route::get('home', [AppClientController::class, 'home']);
+    Route::get('requests', [AppClientController::class, 'requests']);
+    Route::get('requests/{id}', [AppClientController::class, 'showRequest'])->whereNumber('id');
+    Route::get('quotations', [AppClientController::class, 'quotations']);
+    Route::post('quotations/{id}/approve', [AppClientController::class, 'approveQuotation'])->whereNumber('id')->middleware('throttle:10,1');
+    Route::post('quotations/{id}/reject', [AppClientController::class, 'rejectQuotation'])->whereNumber('id')->middleware('throttle:10,1');
+    Route::get('quotations/{id}/pdf', [AppClientController::class, 'quotationPdf'])->whereNumber('id');
+    Route::get('reports', [AppClientController::class, 'reports']);
+    Route::get('reports/{id}/pdf', [AppClientController::class, 'reportPdf'])->whereNumber('id');
+    Route::get('profile', [AppClientController::class, 'profile']);
+    Route::patch('profile', [AppClientController::class, 'updateProfile'])->middleware('throttle:10,1');
+    Route::post('assistant', [AppClientController::class, 'assistant'])->middleware('throttle:20,1');
 });
 
 Route::get('pricing', [PricingController::class, 'index']);
