@@ -16,6 +16,7 @@ use App\Http\Controllers\Admin\LegalPageController as AdminLegalPageController;
 use App\Http\Controllers\Admin\LiveController;
 use App\Http\Controllers\Admin\OdooController as AdminOdooController;
 use App\Http\Controllers\Admin\OverviewController;
+use App\Http\Controllers\Admin\PhotographyCalendarController as AdminPhotographyCalendarController;
 use App\Http\Controllers\Admin\PhotographyController as AdminPhotographyController;
 use App\Http\Controllers\Admin\PortfolioCategoryController as AdminPortfolioCategoryController;
 use App\Http\Controllers\Admin\PortfolioProjectController as AdminPortfolioProjectController;
@@ -255,6 +256,15 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
     Route::middleware('ability:ops.photography')->group(function () {
         Route::get('photography', [AdminPhotographyController::class, 'index']);
         Route::get('photography/slots', [AdminPhotographyController::class, 'slots']);
+        Route::get('photography/calendar/bookings', [AdminPhotographyController::class, 'range']);
+        Route::get('photography/calendar/calendars', [AdminPhotographyCalendarController::class, 'calendars']);
+        Route::post('photography/calendar/calendars', [AdminPhotographyCalendarController::class, 'subscribe']);
+        Route::delete('photography/calendar/calendars', [AdminPhotographyCalendarController::class, 'unsubscribe']);
+        Route::get('photography/calendar/events', [AdminPhotographyCalendarController::class, 'index']);
+        Route::get('photography/calendar/event', [AdminPhotographyCalendarController::class, 'show']);
+        Route::post('photography/calendar/events', [AdminPhotographyCalendarController::class, 'store']);
+        Route::patch('photography/calendar/events', [AdminPhotographyCalendarController::class, 'update']);
+        Route::delete('photography/calendar/events', [AdminPhotographyCalendarController::class, 'destroy']);
         Route::get('photography/requests', [AdminPhotographyController::class, 'requests']);
         Route::post('photography/bookings', [AdminPhotographyController::class, 'store']);
         Route::put('photography/requests/{service_request}/sessions', [AdminPhotographyController::class, 'sessions']);

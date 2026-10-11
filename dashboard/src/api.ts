@@ -1082,6 +1082,70 @@ export type PhotographyBoard = {
   calendar_url: string | null;
 };
 
+export type CalendarSource = {
+  id: string;
+  summary: string;
+  description: string | null;
+  color: string | null;
+  foreground: string | null;
+  access_role: string;
+  main: boolean;
+  writable: boolean;
+};
+
+export type CalendarDirectory = {
+  configured: boolean;
+  calendars: CalendarSource[];
+  service_email: string | null;
+  can_manage: boolean;
+};
+
+export type CalendarReminder = { method: "popup" | "email"; minutes: number };
+
+export type CalendarEventRow = {
+  id: string;
+  calendar_id: string;
+  title: string;
+  description: string | null;
+  location: string | null;
+  all_day: boolean;
+  start: string;
+  end: string;
+  color_id: string | null;
+  recurring_event_id: string | null;
+  recurrence: string[] | null;
+  attendees: Array<{ email: string; name: string | null; response: string; organizer: boolean; optional: boolean }>;
+  reminders: { use_default: boolean; overrides: CalendarReminder[] };
+  meet_url: string | null;
+  html_link: string | null;
+  status: string;
+  transparency: "opaque" | "transparent" | string;
+  visibility: "default" | "public" | "private" | string;
+  organizer: string | null;
+  editable: boolean;
+  conference_failed?: boolean;
+};
+
+export type CalendarScope = "this" | "following" | "all";
+
+export type CalendarEventInput = {
+  calendar_id: string;
+  title?: string;
+  description?: string | null;
+  location?: string | null;
+  all_day?: boolean;
+  start?: string;
+  end?: string | null;
+  color_id?: string | null;
+  attendees?: string[];
+  reminders?: { use_default: boolean; overrides: CalendarReminder[] };
+  recurrence?: string[] | null;
+  transparency?: "opaque" | "transparent";
+  visibility?: "default" | "public" | "private";
+  meet?: boolean;
+  notify?: boolean;
+};
+
 export type PhotographyAction =
   | "accept"
   | "decline"
@@ -1334,6 +1398,36 @@ export const api = {
   },
   photographyBoard() {
     return request<Envelope<PhotographyBoard>>("/admin/photography");
+  },
+  photographyRange(from: string, to: string, closed = false) {
+    return request<Envelope<PhotographyBookingRow[]>>(`/admin/photography/calendar/bookings${queryString({ from, to, closed: closed ? 1 : undefined })}`);
+  },
+  photographyCalendars(fresh = false) {
+    return request<Envelope<CalendarDirectory>>(`/admin/photography/calendar/calendars${queryString({ fresh: fresh ? 1 : undefined })}`);
+  },
+  addPhotographyCalendar(calendarId: string) {
+    return request<Envelope<CalendarSource>>("/admin/photography/calendar/calendars", { method: "POST", body: JSON.stringify({ calendar_id: calendarId }) });
+  },
+  removePhotographyCalendar(calendarId: string) {
+    return request<{ message: string }>("/admin/photography/calendar/calendars", { method: "DELETE", body: JSON.stringify({ calendar_id: calendarId }) });
+  },
+  photographyEvents(params: { from: string; to: string; calendars: string[]; q?: string }) {
+    const search = new URLSearchParams({ from: params.from, to: params.to });
+    params.calendars.forEach((id) => search.append("calendars[]", id));
+    if (params.q) search.set("q", params.q);
+    return request<{ data: CalendarEventRow[]; errors: Array<{ calendar_id: string; message: string }> }>(`/admin/photography/calendar/events?${search.toString()}`);
+  },
+  photographyEvent(calendarId: string, eventId: string) {
+    return request<Envelope<CalendarEventRow>>(`/admin/photography/calendar/event${queryString({ calendar_id: calendarId, event_id: eventId })}`);
+  },
+  createPhotographyEvent(payload: CalendarEventInput) {
+    return request<Envelope<CalendarEventRow>>("/admin/photography/calendar/events", { method: "POST", body: JSON.stringify(payload) });
+  },
+  updatePhotographyEvent(payload: Partial<CalendarEventInput> & { calendar_id: string; event_id: string; scope?: CalendarScope; target_calendar_id?: string }) {
+    return request<Envelope<CalendarEventRow>>("/admin/photography/calendar/events", { method: "PATCH", body: JSON.stringify(payload) });
+  },
+  deletePhotographyEvent(payload: { calendar_id: string; event_id: string; scope?: CalendarScope; notify?: boolean }) {
+    return request<{ message: string }>("/admin/photography/calendar/events", { method: "DELETE", body: JSON.stringify(payload) });
   },
   photographySlots(date: string, booking?: number) {
     return request<Envelope<PhotographySlot[]>>(`/admin/photography/slots${queryString({ date, booking })}`);

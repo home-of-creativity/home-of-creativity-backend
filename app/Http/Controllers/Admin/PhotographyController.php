@@ -99,6 +99,36 @@ class PhotographyController extends Controller
         ]);
     }
 
+    /** Shoots that start inside the visible range of the calendar, past ones included. */
+    public function range(Request $request): JsonResponse
+    {
+        $user = $this->user($request);
+        $validated = $request->validate([
+            'from' => ['required', 'date'],
+            'to' => ['required', 'date', 'after:from'],
+            'closed' => ['boolean'],
+        ]);
+        $from = Carbon::parse($validated['from'], 'Asia/Damascus')->timezone('Asia/Damascus');
+        $to = Carbon::parse($validated['to'], 'Asia/Damascus')->timezone('Asia/Damascus');
+        abort_if($from->diffInDays($to) > 400, 422, 'المدى أطول من سنة.');
+        $statuses = [...PhotographyBooking::OPEN, PhotographyBooking::CONFIRMED, PhotographyBooking::DONE, PhotographyBooking::NOSHOW];
+        if ($request->boolean('closed')) {
+            $statuses = [...$statuses, PhotographyBooking::CANCELLED, PhotographyBooking::DECLINED, PhotographyBooking::EXPIRED];
+        }
+
+        $rows = PhotographyBooking::query()
+            ->with(['request.client', 'request.pricingPackage', 'employee'])
+            ->whereIn('status', $statuses)
+            ->whereNotNull('starts_at')
+            ->where('starts_at', '>=', $from->format('Y-m-d H:i:s'))
+            ->where('starts_at', '<', $to->format('Y-m-d H:i:s'))
+            ->orderBy('starts_at')
+            ->limit(1000)
+            ->get();
+
+        return response()->json(['data' => $rows->map(fn (PhotographyBooking $row): array => $this->row($row, $user))->values()->all()]);
+    }
+
     public function show(Request $request, PhotographyBooking $booking): JsonResponse
     {
         $user = $this->user($request);

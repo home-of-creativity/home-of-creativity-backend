@@ -1,364 +1,755 @@
-import { useEffect, useMemo, useState } from "react";
+import FullCalendar, {
+  useCalendarController,
+  type CalendarRef,
+  type DateSelectInfo,
+  type DatesSetInfo,
+  type EventClickInfo,
+  type EventDropInfo,
+  type EventInput,
+  type EventResizeDoneInfo,
+} from "@fullcalendar/react";
+import dayGridPlugin from "@fullcalendar/react/daygrid";
+import interactionPlugin from "@fullcalendar/react/interaction";
+import listPlugin from "@fullcalendar/react/list";
+import arLocale from "@fullcalendar/react/locales/ar";
+import enGbLocale from "@fullcalendar/react/locales/en-gb";
+import multiMonthPlugin from "@fullcalendar/react/multimonth";
+import classicTheme from "@fullcalendar/react/themes/classic";
+import timeGridPlugin from "@fullcalendar/react/timegrid";
+import "@fullcalendar/react/skeleton.css";
+import "@fullcalendar/react/themes/classic/theme.css";
+import "@fullcalendar/react/themes/classic/palette.css";
+import * as Popover from "@radix-ui/react-popover";
+import { ChevronLeft, ChevronRight, ExternalLink, Menu, RefreshCw, Search, Settings, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import {
   api,
+  type CalendarDirectory,
+  type CalendarEventRow,
+  type CalendarScope,
   type PhotographyAction,
   type PhotographyBoard,
   type PhotographyBookingRow,
   type PhotographyRequestRow,
-  type PhotographySlot,
 } from "../api";
 import { LoadingLottie } from "../components/LoadingLottie";
 import { PageHeader } from "../components/PageHeader";
 import { copy, type Locale } from "../i18n";
+import { CalendarSidebar } from "./photography/CalendarSidebar";
+import { EventDialog, draftFromRow, emptyDraft, scopeLabel, type DialogState } from "./photography/EventDialog";
+import { BookingDetails, GoogleEventDetails } from "./photography/EventDetails";
+import {
+  TONE_COLORS,
+  VIEWS,
+  ZONE,
+  bookingLayer,
+  bookingTone,
+  contrast,
+  eventColor,
+  loadPrefs,
+  savePrefs,
+  statusCopy,
+  wallClock,
+  zoned,
+  type Layer,
+  type Prefs,
+  type ViewId,
+} from "./photography/model";
 
-type Layer = "queue" | "waiting" | "mine";
+type Pending =
+  | { kind: "booking"; row: PhotographyBookingRow; startsAt: string; revert: () => void }
+  | { kind: "google"; row: CalendarEventRow; change: { all_day: boolean; start: string; end: string }; revert: () => void };
 
-const statusCopy: Record<string, { ar: string; en: string }> = {
-  pending_staff: { ar: "بانتظار المصور", en: "Waiting on photographer" },
-  needs_client: { ar: "بانتظار العميل", en: "Waiting on client" },
-  confirmed: { ar: "مثبت", en: "Confirmed" },
-  rescheduling: { ar: "تعديل بانتظار الرد", en: "Reschedule pending" },
-  declined: { ar: "مرفوض", en: "Declined" },
-  cancelled: { ar: "ملغى", en: "Cancelled" },
-  expired: { ar: "انتهت المهلة", en: "Expired" },
-  done: { ar: "تم التصوير", en: "Shot done" },
-  noshow: { ar: "لم يحضر", en: "No show" },
+type ActExtra = { starts_at?: string; direct?: boolean; override_lead?: boolean };
+
+const plugins = [classicTheme, dayGridPlugin, timeGridPlugin, listPlugin, multiMonthPlugin, interactionPlugin];
+
+const views = {
+  timeGridFourDay: { type: "timeGrid", duration: { days: 4 } },
 };
 
-const dayNames = {
-  ar: ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"],
-  en: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
-};
+const SNAP = { minutes: 15 };
 
-function wallClock(iso: string) {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso.replace("T", " ").slice(0, 16);
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+const CLOCK = { hour: "2-digit", minute: "2-digit", hour12: false } as const;
+
+function localStamp(date: Date) {
+  const { date: day, time } = zoned(date);
+  return `${day}T${time}`;
 }
 
-function dayKey(date = new Date()) {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Damascus", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
-}
-
-function addDays(key: string, days: number) {
-  const [year, month, day] = key.split("-").map(Number);
-  const date = new Date(Date.UTC(year, month - 1, day + days));
-  return date.toISOString().slice(0, 10);
-}
-
-function sundayOf(key: string) {
-  const [year, month, day] = key.split("-").map(Number);
-  return addDays(key, -new Date(Date.UTC(year, month - 1, day)).getUTCDay());
-}
-
-function clockParts(iso: string) {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Asia/Damascus",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(new Date(iso));
-  const hour = Number(parts.find((part) => part.type === "hour")?.value ?? "0");
-  const minute = Number(parts.find((part) => part.type === "minute")?.value ?? "0");
-  return { hour, minute };
-}
-
-function eventDay(iso: string) {
-  return dayKey(new Date(iso));
+function message(err: unknown) {
+  return err instanceof Error ? err.message : String(err);
 }
 
 export function PhotographyPage({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
+  const ar = locale === "ar";
+  const [prefs, setPrefsState] = useState<Prefs>(loadPrefs);
   const [board, setBoard] = useState<PhotographyBoard | null>(null);
-  const [error, setError] = useState("");
-  const [layers, setLayers] = useState<Layer[]>(["queue", "waiting", "mine"]);
-  const [week, setWeek] = useState(() => sundayOf(dayKey()));
+  const [directory, setDirectory] = useState<CalendarDirectory | null>(null);
+  const [range, setRange] = useState<{ from: string; to: string } | null>(null);
+  const [bookings, setBookings] = useState<PhotographyBookingRow[]>([]);
+  const [events, setEvents] = useState<CalendarEventRow[]>([]);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(false);
+  const [query, setQuery] = useState("");
+  const [search, setSearch] = useState("");
+  const [viewBeforeSearch, setViewBeforeSearch] = useState<ViewId | null>(null);
+  const [selected, setSelected] = useState<{ key: string; rect: DOMRect } | null>(null);
+  const [dialog, setDialog] = useState<DialogState | null>(null);
+  const [pending, setPending] = useState<Pending | null>(null);
+  const [pendingScope, setPendingScope] = useState<CalendarScope>("this");
+  const [pendingNotify, setPendingNotify] = useState(true);
   const [busy, setBusy] = useState("");
-  const [times, setTimes] = useState<Record<number, string>>({});
-  const [slots, setSlots] = useState<Record<number, PhotographySlot[]>>({});
-  const [bookRequest, setBookRequest] = useState("");
-  const [bookDate, setBookDate] = useState("");
-  const [bookTime, setBookTime] = useState("");
-  const [bookSlots, setBookSlots] = useState<PhotographySlot[]>([]);
-  const [bookConfirm, setBookConfirm] = useState(false);
-  const [caps, setCaps] = useState<Record<number, string>>({});
-  const [openId, setOpenId] = useState<number | null>(null);
+  const [sideOpen, setSideOpen] = useState(false);
+  const [error, setError] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
+  const [current, setCurrent] = useState(() => new Date());
+  const calendarRef = useRef<CalendarRef>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const controller = useCalendarController();
 
-  async function load() {
+  const updatePrefs = useCallback((change: (value: Prefs) => Prefs) => {
+    setPrefsState((value) => {
+      const next = change(value);
+      savePrefs(next);
+      return next;
+    });
+  }, []);
+
+  const loadBoard = useCallback(async () => {
     const res = await api.photographyBoard();
     setBoard(res.data);
-    setCaps(Object.fromEntries(res.data.needs_count.map((row) => [row.id, String(row.sessions)])));
-  }
+  }, []);
+
+  const loadDirectory = useCallback(async (fresh = false) => {
+    try {
+      const res = await api.photographyCalendars(fresh);
+      setDirectory(res.data);
+    } catch (err) {
+      setDirectory({ configured: false, calendars: [], service_email: null, can_manage: false });
+      toast.error(message(err));
+    }
+  }, []);
+
+  const reload = useCallback(() => {
+    setReloadKey((value) => value + 1);
+    loadBoard().catch((err) => toast.error(message(err)));
+  }, [loadBoard]);
 
   useEffect(() => {
-    load().catch((err) => setError(err instanceof Error ? err.message : t(copy.saveFailed)));
-  }, [t]);
+    loadBoard().catch((err) => setError(message(err)));
+    void loadDirectory();
+  }, [loadBoard, loadDirectory]);
 
-  async function act(row: PhotographyBookingRow, action: PhotographyAction, extra?: { starts_at?: string; direct?: boolean; override_lead?: boolean }) {
-    const key = `${row.id}:${action}${extra?.direct ? ":direct" : ""}`;
-    setBusy(key);
+  useEffect(() => {
+    if (!range) return;
+    let cancelled = false;
+    setLoading(true);
+    const ids = directory?.configured ? directory.calendars.map((calendar) => calendar.id) : [];
+    Promise.allSettled([
+      api.photographyRange(range.from, range.to, prefs.showClosed),
+      ids.length ? api.photographyEvents({ from: range.from, to: range.to, calendars: ids, q: search || undefined }) : Promise.resolve({ data: [] as CalendarEventRow[], errors: [] }),
+    ])
+      .then(([shoots, google]) => {
+        if (cancelled) return;
+        if (shoots.status === "fulfilled") setBookings(shoots.value.data);
+        else toast.error(message(shoots.reason));
+        if (google.status === "fulfilled") {
+          setEvents(google.value.data);
+          setErrors(Object.fromEntries(google.value.errors.map((item) => [item.calendar_id, item.message])));
+        } else {
+          toast.error(message(google.reason));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [range, directory, prefs.showClosed, search, reloadKey]);
+
+  // Google Calendar and the bots change shoots too; pick that up while the tab is open.
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (document.visibilityState !== "visible" || dialog || pending) return;
+      reload();
+    }, 60_000);
+    return () => window.clearInterval(id);
+  }, [dialog, pending, reload]);
+
+  const calendarById = useMemo(() => new Map((directory?.calendars ?? []).map((calendar) => [calendar.id, calendar])), [directory]);
+  const writable = useMemo(() => (directory?.calendars ?? []).filter((calendar) => calendar.writable), [directory]);
+  const canEvent = directory?.can_manage === true && writable.length > 0;
+  const canShoot = board?.me.can_all === true || board?.me.is_photographer === true;
+  const canCreate = canEvent || canShoot;
+
+  const counts = useMemo(() => {
+    const result: Record<Layer, number> = { queue: 0, waiting: 0, agreed: 0, finished: 0 };
+    for (const row of bookings) {
+      const layer = bookingLayer(row);
+      if (layer !== "closed") result[layer] += 1;
+    }
+    return result;
+  }, [bookings]);
+
+  const fcEvents = useMemo<EventInput[]>(() => {
+    const list: EventInput[] = [];
+    const needle = search.trim().toLowerCase();
+    const me = board?.me.employee_id ?? null;
+    const shootMs = (board?.settings.shoot_hours ?? 3) * 3_600_000;
+    if (prefs.showBookings) {
+      for (const row of bookings) {
+        if (!row.starts_at) continue;
+        const layer = bookingLayer(row);
+        if (layer === "closed" ? !prefs.showClosed : !prefs.layers.includes(layer)) continue;
+        if (prefs.mineOnly && row.employee?.id !== me) continue;
+        const name = row.client?.name ?? row.request?.client_name ?? row.request?.number ?? "";
+        if (needle && ![name, row.client?.company_name, row.client?.phone, row.request?.number].some((value) => value?.toLowerCase().includes(needle))) continue;
+        const tone = bookingTone(row, me);
+        const movable = row.can.propose || row.can.reschedule || row.can.reschedule_direct;
+        list.push({
+          id: `b:${row.id}`,
+          title: `${name} · ${statusCopy[row.status]?.[locale] ?? row.status}`,
+          start: row.starts_at,
+          end: row.ends_at ?? new Date(new Date(row.starts_at).getTime() + shootMs).toISOString(),
+          color: TONE_COLORS[tone],
+          contrastColor: "#1a1224",
+          editable: movable,
+          startEditable: movable,
+          durationEditable: false,
+          className: `gcal-ev is-booking is-${tone}`,
+          extendedProps: { kind: "booking", bookingId: row.id },
+        });
+        if (row.proposed_starts_at && row.proposed_starts_at !== row.starts_at) {
+          list.push({
+            id: `p:${row.id}`,
+            title: `${ar ? "مقترح" : "Proposed"} · ${name}`,
+            start: row.proposed_starts_at,
+            end: new Date(new Date(row.proposed_starts_at).getTime() + shootMs).toISOString(),
+            color: TONE_COLORS[tone],
+            contrastColor: "#1a1224",
+            editable: false,
+            className: "gcal-ev is-proposed",
+            extendedProps: { kind: "booking", bookingId: row.id },
+          });
+        }
+      }
+    }
+    for (const row of events) {
+      if (prefs.hidden.includes(row.calendar_id)) continue;
+      const color = eventColor(row.color_id, calendarById.get(row.calendar_id)?.color ?? null);
+      list.push({
+        id: `g:${row.calendar_id}|${row.id}`,
+        title: row.title || (ar ? "(بلا عنوان)" : "(No title)"),
+        start: row.start,
+        end: row.end,
+        allDay: row.all_day,
+        color,
+        contrastColor: contrast(color),
+        editable: row.editable,
+        className: ["gcal-ev", row.transparency === "transparent" ? "is-free" : "", row.status === "tentative" ? "is-tentative" : ""].join(" "),
+        extendedProps: { kind: "google" },
+      });
+    }
+    return list;
+  }, [bookings, events, prefs, board, search, locale, ar, calendarById]);
+
+  const selectedBooking = selected?.key.startsWith("b:") ? bookings.find((row) => `b:${row.id}` === selected.key) ?? null : null;
+  const selectedEvent = selected?.key.startsWith("g:") ? events.find((row) => `g:${row.calendar_id}|${row.id}` === selected.key) ?? null : null;
+
+  function onDatesSet(info: DatesSetInfo) {
+    setRange((value) => (value?.from === info.startStr && value?.to === info.endStr ? value : { from: info.startStr, to: info.endStr }));
+    const date = controller.getDate() ?? info.start;
+    setCurrent((value) => (value.getTime() === date.getTime() ? value : date));
+    const type = info.view.type as ViewId;
+    if (VIEWS.some((view) => view.id === type)) updatePrefs((value) => (value.view === type ? value : { ...value, view: type }));
+  }
+
+  function openCreate(start: Date, end: Date, allDay: boolean, request?: PhotographyRequestRow) {
+    if (!canCreate) return;
+    const main = writable.find((calendar) => calendar.main) ?? writable[0];
+    setSelected(null);
+    setDialog({
+      kind: "create",
+      draft: emptyDraft(main?.id ?? "", start, end, allDay),
+      tab: request || !canEvent ? "shoot" : "event",
+      requestId: request?.id,
+    });
+  }
+
+  function openQuickCreate(request?: PhotographyRequestRow) {
+    const start = new Date(Math.ceil(Date.now() / 3_600_000) * 3_600_000);
+    openCreate(start, new Date(start.getTime() + 3_600_000), false, request);
+  }
+
+  function onSelect(info: DateSelectInfo) {
+    calendarRef.current?.getApi().unselect();
+    let end = info.end;
+    if (!info.allDay && end.getTime() - info.start.getTime() <= prefs.slotMinutes * 60_000) end = new Date(info.start.getTime() + 3_600_000);
+    openCreate(info.start, end, info.allDay);
+  }
+
+  function onEventClick(info: EventClickInfo) {
+    info.jsEvent.preventDefault();
+    const id = info.event.id;
+    setSelected({ key: id.startsWith("p:") ? `b:${id.slice(2)}` : id, rect: info.el.getBoundingClientRect() });
+  }
+
+  function onEventChange(info: EventDropInfo | EventResizeDoneInfo) {
+    const { event } = info;
+    if (!event.start) {
+      info.revert();
+      return;
+    }
+    if (event.extendedProps.kind === "booking") {
+      const row = bookings.find((item) => item.id === event.extendedProps.bookingId);
+      if (!row || event.allDay) {
+        info.revert();
+        if (row) toast.error(ar ? "موعد التصوير له ساعة محددة. انقله إلى خانة وقت." : "A shoot needs a time. Drop it on a time slot.");
+        return;
+      }
+      setPending({ kind: "booking", row, startsAt: wallClock(event.start), revert: info.revert });
+      return;
+    }
+    const row = events.find((item) => `g:${item.calendar_id}|${item.id}` === event.id);
+    if (!row) {
+      info.revert();
+      return;
+    }
+    const end = event.end ?? new Date(event.start.getTime() + (event.allDay ? 86_400_000 : 3_600_000));
+    const change = event.allDay
+      ? { all_day: true, start: zoned(event.start).date, end: zoned(end).date }
+      : { all_day: false, start: localStamp(event.start), end: localStamp(end) };
+    if (row.recurring_event_id || row.attendees.length) {
+      setPendingScope("this");
+      setPendingNotify(true);
+      setPending({ kind: "google", row, change, revert: info.revert });
+      return;
+    }
+    void applyGoogleChange(row, change, "this", false, info.revert);
+  }
+
+  async function applyGoogleChange(row: CalendarEventRow, change: { all_day: boolean; start: string; end: string }, scope: CalendarScope, notify: boolean, revert: () => void) {
+    try {
+      const res = await api.updatePhotographyEvent({
+        calendar_id: row.calendar_id,
+        event_id: row.id,
+        scope: row.recurring_event_id ? scope : undefined,
+        notify,
+        ...change,
+      });
+      toast.success(res.message || (ar ? "حُفظ." : "Saved."));
+      reload();
+    } catch (err) {
+      revert();
+      toast.error(message(err));
+    }
+  }
+
+  async function act(row: PhotographyBookingRow, action: PhotographyAction, extra?: ActExtra) {
+    setBusy(`${row.id}:${action}`);
     try {
       const res = await api.photographyAction(row.id, action, extra);
       toast.success(res.message || t(copy.saved));
-      await load();
+      reload();
+      return true;
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t(copy.saveFailed));
+      toast.error(message(err));
+      return false;
     } finally {
       setBusy("");
     }
   }
 
-  async function loadSlots(id: number, date: string) {
-    if (!date) return;
-    try {
-      const res = await api.photographySlots(date, id);
-      setSlots((current) => ({ ...current, [id]: res.data }));
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t(copy.saveFailed));
-    }
-  }
-
-  async function loadBookSlots(date: string) {
-    setBookDate(date);
-    if (!date) return;
-    try {
-      const res = await api.photographySlots(date);
-      setBookSlots(res.data);
-      setBookTime("");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t(copy.saveFailed));
-    }
-  }
-
-  async function book() {
-    if (!bookRequest || !bookTime) return;
-    setBusy("book");
-    try {
-      const res = await api.bookPhotography({
-        request_id: Number(bookRequest),
-        starts_at: wallClock(bookTime),
-        confirm: bookConfirm,
-        override_lead: board?.me.can_all === true,
-      });
-      toast.success(res.message || t(copy.saved));
-      setBookTime("");
-      setBookConfirm(false);
-      await load();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t(copy.saveFailed));
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function saveCap(row: PhotographyRequestRow) {
-    const sessions = Number(caps[row.id]);
-    if (!Number.isInteger(sessions) || sessions < 0 || sessions > 100) {
-      toast.error(locale === "ar" ? "عدد الجلسات من 0 إلى 100." : "Sessions must be from 0 to 100.");
+  async function settlePending(choice: "propose" | "reschedule" | "direct" | "google") {
+    if (!pending) return;
+    const item = pending;
+    setPending(null);
+    if (item.kind === "google") {
+      await applyGoogleChange(item.row, item.change, pendingScope, pendingNotify && item.row.attendees.length > 0, item.revert);
       return;
     }
-    setBusy(`cap:${row.id}`);
+    const canAll = board?.me.can_all === true;
+    const ok =
+      choice === "propose"
+        ? await act(item.row, "propose", { starts_at: item.startsAt, override_lead: canAll })
+        : await act(item.row, "reschedule", { starts_at: item.startsAt, direct: choice === "direct", override_lead: choice === "direct" || canAll });
+    if (!ok) item.revert();
+  }
+
+  function cancelPending() {
+    pending?.revert();
+    setPending(null);
+  }
+
+  async function openEdit(row: CalendarEventRow) {
     try {
-      const res = await api.setPhotographySessions(row.id, sessions);
-      toast.success(res.message || t(copy.saved));
-      await load();
+      const res = await api.photographyEvent(row.calendar_id, row.id);
+      setSelected(null);
+      setDialog({ kind: "edit", row: res.data, draft: draftFromRow(res.data) });
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t(copy.saveFailed));
-    } finally {
-      setBusy("");
+      toast.error(message(err));
     }
   }
 
-  const openHour = Number((board?.settings.team_hours?.open ?? "09:00").slice(0, 2)) || 9;
-  const closeHour = Number((board?.settings.team_hours?.close ?? "21:00").slice(0, 2)) || 21;
-  const hours = Array.from({ length: Math.max(closeHour - openHour, 1) }, (_, index) => openHour + index);
-  const days = Array.from({ length: 7 }, (_, index) => addDays(week, index));
-  const today = dayKey();
-
-  const events = useMemo(() => {
-    const rows = board?.calendar ?? [];
-    return rows.filter((row) => {
-      if (!row.starts_at) return false;
-      const mine = board?.me.employee_id != null && row.employee?.id === board.me.employee_id;
-      if (row.status === "confirmed") return true;
-      if (layers.includes("queue") && (row.status === "pending_staff" || row.status === "rescheduling")) return true;
-      if (layers.includes("waiting") && row.status === "needs_client") return true;
-      if (layers.includes("mine") && mine) return true;
-      return false;
-    });
-  }, [board, layers]);
-
-  const selected = events.find((row) => row.id === openId) ?? board?.calendar.find((row) => row.id === openId) ?? null;
-
-  function toggle(layer: Layer) {
-    setLayers((current) => (current.includes(layer) ? current.filter((item) => item !== layer) : [...current, layer]));
+  function openDuplicate(row: CalendarEventRow) {
+    const draft = draftFromRow(row);
+    const main = writable.find((calendar) => calendar.main) ?? writable[0];
+    if (!writable.some((calendar) => calendar.id === draft.calendar_id)) draft.calendar_id = main?.id ?? "";
+    setSelected(null);
+    setDialog({ kind: "create", draft: { ...draft, title: row.title, recurrence: row.recurrence ?? [] }, tab: "event" });
   }
+
+  function submitSearch(event: FormEvent) {
+    event.preventDefault();
+    const value = query.trim();
+    setSearch(value);
+    if (value && !viewBeforeSearch) {
+      setViewBeforeSearch(prefs.view);
+      controller.changeView("listYear");
+    }
+    if (!value) clearSearch();
+  }
+
+  function clearSearch() {
+    setQuery("");
+    setSearch("");
+    if (viewBeforeSearch) controller.changeView(viewBeforeSearch);
+    setViewBeforeSearch(null);
+  }
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select, [contenteditable='true'], [role='dialog']")) return;
+      if (dialog || pending) return;
+      const key = event.key.toLowerCase();
+      const view = VIEWS.find((item) => item.key === key);
+      if (view) controller.changeView(view.id);
+      else if (key === "t") controller.today();
+      else if (key === "j" || key === "n") controller.next();
+      else if (key === "k" || key === "p") controller.prev();
+      else if (key === "c" && canCreate) openQuickCreate();
+      else if (key === "r") reload();
+      else if (key === "/") searchRef.current?.focus();
+      else if (key === "escape") setSelected(null);
+      else return;
+      event.preventDefault();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
+  const openHour = board?.settings.team_hours?.open ?? "09:00";
+  const closeHour = board?.settings.team_hours?.close ?? "21:00";
+  // FullCalendar re-reads every option whose reference changes, so each object stays stable.
+  const calendarLocale = useMemo(() => (ar ? { ...arLocale, code: "ar-SY-u-nu-latn" } : enGbLocale), [ar]);
+  const businessHours = useMemo(() => ({ daysOfWeek: [0, 1, 2, 3, 4, 6], startTime: openHour, endTime: closeHour }), [openHour, closeHour]);
+  const slotDuration = useMemo(() => ({ minutes: prefs.slotMinutes }), [prefs.slotMinutes]);
+  const hiddenDays = useMemo(() => (prefs.hideFriday ? [5] : []), [prefs.hideFriday]);
+  const scrollTime = `${String(Math.max(Number(openHour.slice(0, 2)) - 1, 0)).padStart(2, "0")}:00:00`;
 
   if (!board && !error) return <LoadingLottie variant="page" label={t(copy.loading)} />;
 
-  const chips: Array<{ id: Layer; label: { ar: string; en: string }; count: number }> = board
-    ? [
-        { id: "queue", label: { ar: "انتظار المصور", en: "Photographer" }, count: board.queue.length },
-        { id: "waiting", label: { ar: "انتظار العميل", en: "Client" }, count: board.waiting_client.length },
-        { id: "mine", label: { ar: "مواعيدي", en: "Mine" }, count: board.mine.length },
-      ]
-    : [];
+  const activeView = (controller.view?.type ?? prefs.view) as string;
+  const failed = Object.entries(errors);
 
   return (
     <>
       <PageHeader title={t(copy.navPhotography)} lede={t(copy.photographyLede)} />
       {error ? <p className="error">{error}</p> : null}
-      {board ? (
-        <div className="photo-cal-toolbar">
-          <div className="photo-cal-nav">
-            <button type="button" className="btn btn-ghost" onClick={() => setWeek(addDays(week, -7))}>{locale === "ar" ? "الأسبوع السابق" : "Previous"}</button>
-            <button type="button" className="btn btn-ghost" onClick={() => setWeek(sundayOf(today))}>{locale === "ar" ? "هذا الأسبوع" : "This week"}</button>
-            <button type="button" className="btn btn-ghost" onClick={() => setWeek(addDays(week, 7))}>{locale === "ar" ? "الأسبوع التالي" : "Next"}</button>
-            <strong dir="ltr">{days[0]} — {days[6]}</strong>
-          </div>
-          <div className="photo-cal-legend" role="group">
-            {chips.map((chip) => (
-              <button key={chip.id} type="button" className={layers.includes(chip.id) ? `photo-chip is-${chip.id}` : "photo-chip"} onClick={() => toggle(chip.id)}>
-                {chip.label[locale]} ({chip.count})
+
+      <div className="gcal-toolbar">
+        <button type="button" className="gcal-icon-btn gcal-side-toggle" onClick={() => setSideOpen((value) => !value)} aria-expanded={sideOpen} aria-label={ar ? "لوحة التقاويم" : "Calendar panel"}>
+          <Menu size={18} aria-hidden />
+        </button>
+        <button type="button" className="btn btn-ghost" onClick={() => controller.today()} title="T">{ar ? "اليوم" : "Today"}</button>
+        <div className="gcal-nav">
+          <button type="button" className="gcal-icon-btn" onClick={() => controller.prev()} aria-label={ar ? "السابق" : "Previous"} title="K">
+            {ar ? <ChevronRight size={18} aria-hidden /> : <ChevronLeft size={18} aria-hidden />}
+          </button>
+          <button type="button" className="gcal-icon-btn" onClick={() => controller.next()} aria-label={ar ? "التالي" : "Next"} title="J">
+            {ar ? <ChevronLeft size={18} aria-hidden /> : <ChevronRight size={18} aria-hidden />}
+          </button>
+        </div>
+        <h2 className="gcal-title">{controller.view?.title ?? ""}</h2>
+        {loading ? <span className="gcal-spinner" role="status" aria-label={ar ? "جارٍ التحميل" : "Loading"} /> : null}
+        <form className="gcal-search" onSubmit={submitSearch} role="search">
+          <Search size={15} aria-hidden />
+          <input ref={searchRef} type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={ar ? "ابحث في الأحداث والمواعيد" : "Search events and shoots"} aria-label={ar ? "بحث" : "Search"} />
+          {search ? (
+            <button type="button" className="gcal-icon-btn" onClick={clearSearch} aria-label={ar ? "مسح البحث" : "Clear search"}>
+              <X size={14} aria-hidden />
+            </button>
+          ) : null}
+        </form>
+        <div className="gcal-views" role="tablist" aria-label={ar ? "طريقة العرض" : "View"}>
+          {VIEWS.map((view) => (
+            <button key={view.id} type="button" role="tab" aria-selected={activeView === view.id} className={activeView === view.id ? "is-active" : ""} onClick={() => controller.changeView(view.id)} title={`${view.label[locale]} (${view.key.toUpperCase()})`}>
+              {view.label[locale]}
+            </button>
+          ))}
+        </div>
+        <select className="field gcal-views-select" value={VIEWS.some((view) => view.id === activeView) ? activeView : prefs.view} onChange={(event) => controller.changeView(event.target.value)} aria-label={ar ? "طريقة العرض" : "View"}>
+          {VIEWS.map((view) => <option key={view.id} value={view.id}>{view.label[locale]}</option>)}
+        </select>
+        <SettingsMenu locale={locale} prefs={prefs} onChange={(next) => updatePrefs(() => next)} />
+        <button type="button" className="gcal-icon-btn" onClick={reload} aria-label={ar ? "تحديث" : "Refresh"} title="R">
+          <RefreshCw size={17} aria-hidden />
+        </button>
+        {board?.calendar_url ? (
+          <a className="gcal-icon-btn" href={board.calendar_url} target="_blank" rel="noreferrer" aria-label={ar ? "فتح جوجل كالندر" : "Open Google Calendar"} title={ar ? "فتح جوجل كالندر" : "Open Google Calendar"}>
+            <ExternalLink size={17} aria-hidden />
+          </a>
+        ) : null}
+      </div>
+
+      {failed.length ? (
+        <p className="gcal-warning" role="alert">
+          {ar ? "تعذرت قراءة: " : "Could not read: "}
+          {failed.map(([id, text]) => `${calendarById.get(id)?.summary ?? id} (${text})`).join(" · ")}
+        </p>
+      ) : null}
+
+      <div className={sideOpen ? "gcal is-side-open" : "gcal"}>
+        <CalendarSidebar
+          locale={locale}
+          prefs={prefs}
+          setPrefs={(next) => updatePrefs(() => next)}
+          directory={directory}
+          errors={errors}
+          board={board}
+          current={current}
+          counts={counts}
+          canCreate={canCreate}
+          onPickDate={(date) => {
+            // The mini calendar hands back the browser's midnight; the big one reads the day in Damascus.
+            controller.gotoDate(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`);
+            setSideOpen(false);
+          }}
+          onCreate={() => openQuickCreate()}
+          onBook={(row) => openQuickCreate(row)}
+          onDirectoryChanged={() => void loadDirectory(true)}
+          onBoardChanged={reload}
+        />
+        <section className="gcal-main" aria-label={ar ? "تقويم التصوير" : "Photography calendar"}>
+          <FullCalendar
+            ref={calendarRef}
+            controller={controller}
+            plugins={plugins}
+            views={views}
+            initialView={prefs.view}
+            headerToolbar={false}
+            locale={calendarLocale}
+            direction={ar ? "rtl" : "ltr"}
+            timeZone={ZONE}
+            firstDay={prefs.firstDay}
+            hiddenDays={hiddenDays}
+            slotDuration={slotDuration}
+            snapDuration={SNAP}
+            weekNumbers={prefs.weekNumbers}
+            slotHeaderFormat={CLOCK}
+            eventTimeFormat={CLOCK}
+            businessHours={businessHours}
+            scrollTime={scrollTime}
+            nowIndicator
+            navLinks
+            editable
+            selectable={canCreate}
+            selectMirror
+            dayMaxEvents
+            height="100%"
+            events={fcEvents}
+            datesSet={onDatesSet}
+            select={onSelect}
+            eventClick={onEventClick}
+            eventDrop={onEventChange}
+            eventResize={onEventChange}
+          />
+        </section>
+      </div>
+
+      <Popover.Root open={selected != null && (selectedBooking != null || selectedEvent != null)} onOpenChange={(open) => !open && setSelected(null)}>
+        {selected ? (
+          <Popover.Anchor asChild>
+            <span className="gcal-anchor" style={{ left: selected.rect.left, top: selected.rect.top, width: selected.rect.width, height: selected.rect.height }} />
+          </Popover.Anchor>
+        ) : null}
+        <Popover.Portal>
+          <Popover.Content className="gcal-popover" side={ar ? "left" : "right"} align="start" sideOffset={8} collisionPadding={12} onOpenAutoFocus={(event) => event.preventDefault()}>
+            {selectedEvent ? (
+              <GoogleEventDetails
+                locale={locale}
+                row={selectedEvent}
+                calendar={calendarById.get(selectedEvent.calendar_id)}
+                onEdit={() => void openEdit(selectedEvent)}
+                onDuplicate={canEvent ? () => openDuplicate(selectedEvent) : undefined}
+                onDeleted={() => {
+                  setSelected(null);
+                  reload();
+                }}
+                onClose={() => setSelected(null)}
+              />
+            ) : selectedBooking ? (
+              <BookingDetails locale={locale} row={selectedBooking} board={board} busy={busy} onAct={(row, action, extra) => void act(row, action, extra)} onClose={() => setSelected(null)} />
+            ) : null}
+          </Popover.Content>
+        </Popover.Portal>
+      </Popover.Root>
+
+      {pending ? (
+        <div className="form-dialog" role="dialog" aria-modal="true" aria-labelledby="gcal-move-title">
+          <div className="form-dialog-backdrop" onClick={cancelPending} />
+          <div className="form-dialog-panel gcal-move">
+            <div className="form-dialog-head">
+              <h2 className="form-dialog-title" id="gcal-move-title">
+                {pending.kind === "booking" ? (ar ? "نقل موعد التصوير" : "Move the shoot") : ar ? "تعديل الحدث" : "Change the event"}
+              </h2>
+              <button type="button" className="form-dialog-close" onClick={cancelPending} aria-label={ar ? "إلغاء" : "Cancel"}>
+                <X aria-hidden />
               </button>
-            ))}
-            <span className="photo-chip is-static">{locale === "ar" ? `بدون موعد (${board.unbooked.length})` : `Unbooked (${board.unbooked.length})`}</span>
-            {board.me.can_all ? <span className="photo-chip is-static">{locale === "ar" ? `عدد الجلسات (${board.needs_count.length})` : `Sessions (${board.needs_count.length})`}</span> : null}
+            </div>
+            <div className="form-dialog-body">
+              {pending.kind === "booking" ? (
+                <>
+                  <p>
+                    <strong>{pending.row.client?.name ?? pending.row.request?.number}</strong>
+                    <br />
+                    {ar ? "الوقت الجديد: " : "New time: "}
+                    <span dir="ltr">{pending.startsAt}</span>
+                  </p>
+                  <div className="gcal-choices">
+                    {pending.row.can.reschedule_direct ? (
+                      <button type="button" className="gcal-choice is-primary" onClick={() => void settlePending("direct")}>
+                        <strong>{ar ? "انقل مباشرة" : "Move now"}</strong>
+                        <small>{ar ? "يتغير الموعد فوراً ويُبلغ العميل." : "The shoot moves now and the client is told."}</small>
+                      </button>
+                    ) : null}
+                    {pending.row.can.reschedule ? (
+                      <button type="button" className="gcal-choice" onClick={() => void settlePending("reschedule")}>
+                        <strong>{ar ? "اطلب التعديل" : "Request the move"}</strong>
+                        <small>{ar ? "يبقى الوقت القديم محجوزاً حتى يقبل المصور." : "The old time stays held until the photographer accepts."}</small>
+                      </button>
+                    ) : null}
+                    {pending.row.can.propose ? (
+                      <button type="button" className="gcal-choice" onClick={() => void settlePending("propose")}>
+                        <strong>{ar ? "اقترح على العميل" : "Propose to the client"}</strong>
+                        <small>{ar ? "يصل العميل الوقت ليقبله أو يرفضه." : "The client gets the time to accept or decline."}</small>
+                      </button>
+                    ) : null}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p>
+                    <strong>{pending.row.title}</strong>
+                    <br />
+                    <span dir="ltr">{pending.change.start.replace("T", " ")} – {pending.change.end.replace("T", " ")}</span>
+                  </p>
+                  {pending.row.recurring_event_id ? (
+                    <fieldset className="gcal-scope">
+                      <legend>{ar ? "تطبيق على" : "Apply to"}</legend>
+                      {(["this", "following", "all"] as CalendarScope[]).map((item) => (
+                        <label key={item} className="checkbox-row">
+                          <input type="radio" name="pending-scope" checked={pendingScope === item} onChange={() => setPendingScope(item)} />
+                          {scopeLabel(item, locale)}
+                        </label>
+                      ))}
+                    </fieldset>
+                  ) : null}
+                  {pending.row.attendees.length ? (
+                    <label className="checkbox-row">
+                      <input type="checkbox" checked={pendingNotify} onChange={(event) => setPendingNotify(event.target.checked)} />
+                      {ar ? "أرسل التحديث للمدعوين" : "Send the update to guests"}
+                    </label>
+                  ) : null}
+                </>
+              )}
+            </div>
+            <div className="form-dialog-actions">
+              {pending.kind === "google" ? <button type="button" className="btn btn-primary" onClick={() => void settlePending("google")}>{ar ? "حفظ" : "Save"}</button> : null}
+              <button type="button" className="btn btn-ghost" onClick={cancelPending}>{ar ? "تراجع" : "Undo"}</button>
+            </div>
           </div>
-          {board.calendar_url ? <a className="btn btn-primary" href={board.calendar_url} target="_blank" rel="noreferrer">{locale === "ar" ? "فتح جوجل كالندر" : "Open Google Calendar"}</a> : null}
         </div>
       ) : null}
 
-      <div className="photo-cal-layout">
-        <section className="photo-cal" aria-label={locale === "ar" ? "تقويم التصوير" : "Photography calendar"}>
-          <div className="photo-cal-head">
-            <span />
-            {days.map((day, index) => (
-              <button key={day} type="button" className={day === today ? "is-today" : index === 5 ? "is-friday" : ""} onClick={() => loadBookSlots(day)}>
-                <small>{dayNames[locale][index]}</small>
-                <strong>{Number(day.slice(8))}</strong>
-              </button>
-            ))}
-          </div>
-          <div className="photo-cal-body" style={{ ["--hours" as string]: hours.length }}>
-            <div className="photo-cal-hours">
-              {hours.map((hour) => <span key={hour}>{String(hour).padStart(2, "0")}:00</span>)}
-            </div>
-            {days.map((day) => (
-              <div key={day} className="photo-cal-day" style={{ ["--hours" as string]: hours.length }}>
-                {hours.map((hour) => <span key={hour} className="photo-cal-line" />)}
-                {events.filter((row) => row.starts_at && eventDay(row.starts_at) === day).map((row) => {
-                  const start = clockParts(row.starts_at!);
-                  const end = row.ends_at ? clockParts(row.ends_at) : { hour: start.hour + (board?.settings.shoot_hours ?? 3), minute: start.minute };
-                  const top = ((start.hour + start.minute / 60) - openHour) * 52;
-                  const height = Math.max(((end.hour + end.minute / 60) - (start.hour + start.minute / 60)) * 52, 36);
-                  const tone = row.status === "needs_client" ? "waiting" : row.status === "pending_staff" ? "queue" : row.status === "rescheduling" ? "move" : row.employee?.id === board?.me.employee_id ? "mine" : "agreed";
-                  return (
-                    <button
-                      key={row.id}
-                      type="button"
-                      className={`photo-event is-${tone}${openId === row.id ? " is-open" : ""}`}
-                      style={{ top, height }}
-                      onClick={() => setOpenId(row.id)}
-                    >
-                      <strong>{row.client?.name ?? row.request?.client_name ?? row.request?.number}</strong>
-                      <small>{statusCopy[row.status]?.[locale] ?? row.status}</small>
-                    </button>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <aside className="photo-cal-rail">
-          {selected ? (
-            <section className="panel">
-              <h2>{selected.client?.name ?? selected.request?.client_name ?? "—"}</h2>
-              <p>{selected.request?.number} · {statusCopy[selected.status]?.[locale] ?? selected.status}</p>
-              <p dir="ltr">{selected.when}</p>
-              {selected.proposed_when ? <p className="muted">{locale === "ar" ? "مقترح: " : "Proposed: "}{selected.proposed_when}</p> : null}
-              {selected.session_label ? <p className="muted">{selected.session_label}</p> : null}
-              {selected.employee ? <p className="muted">{selected.employee.name}</p> : null}
-              {selected.calendar_url ? <a href={selected.calendar_url} target="_blank" rel="noreferrer">{locale === "ar" ? "هذا الموعد في جوجل كالندر" : "This shoot in Google Calendar"}</a> : null}
-              <div className="toolbar">
-                {selected.can.accept ? <button type="button" className="btn btn-primary" disabled={busy !== ""} onClick={() => act(selected, "accept")}>{locale === "ar" ? "قبول" : "Accept"}</button> : null}
-                {selected.can.decline ? <button type="button" className="btn btn-ghost" disabled={busy !== ""} onClick={() => act(selected, "decline")}>{locale === "ar" ? "رفض" : "Decline"}</button> : null}
-                {selected.can.cancel ? <button type="button" className="btn btn-ghost" disabled={busy !== ""} onClick={() => act(selected, "cancel")}>{locale === "ar" ? "إلغاء" : "Cancel"}</button> : null}
-                {selected.can.done ? <button type="button" className="btn btn-primary" disabled={busy !== ""} onClick={() => act(selected, "done")}>{locale === "ar" ? "تم" : "Done"}</button> : null}
-                {selected.can.noshow ? <button type="button" className="btn btn-ghost" disabled={busy !== ""} onClick={() => act(selected, "noshow")}>{locale === "ar" ? "لم يحضر" : "No show"}</button> : null}
-                {selected.can.refund ? <button type="button" className="btn btn-ghost" disabled={busy !== ""} onClick={() => act(selected, "refund")}>{locale === "ar" ? "رد الجلسة" : "Refund"}</button> : null}
-                {selected.can.resend ? <button type="button" className="btn btn-ghost" disabled={busy !== ""} onClick={() => act(selected, "resend")}>{locale === "ar" ? "أعد الإرسال" : "Resend"}</button> : null}
-                {selected.can.retry_calendar ? <button type="button" className="btn btn-ghost" disabled={busy !== ""} onClick={() => act(selected, "retry_calendar")}>{locale === "ar" ? "أعد التقويم" : "Retry calendar"}</button> : null}
-                {selected.can.retry_clickup ? <button type="button" className="btn btn-ghost" disabled={busy !== ""} onClick={() => act(selected, "retry_clickup")}>ClickUp</button> : null}
-              </div>
-              {selected.can.propose || selected.can.reschedule ? (
-                <div className="toolbar">
-                  <input className="field" type="date" onChange={(event) => loadSlots(selected.id, event.target.value)} />
-                  <select className="field" value={times[selected.id] ?? ""} onChange={(event) => setTimes((current) => ({ ...current, [selected.id]: event.target.value }))}>
-                    <option value="">{locale === "ar" ? "وقت" : "Time"}</option>
-                    {(slots[selected.id] ?? []).map((slot) => <option key={slot.starts_at} value={slot.starts_at}>{slot.label}</option>)}
-                  </select>
-                  {selected.can.propose ? <button type="button" className="btn btn-ghost" disabled={busy !== "" || !times[selected.id]} onClick={() => act(selected, "propose", { starts_at: wallClock(times[selected.id]), override_lead: board?.me.can_all === true })}>{locale === "ar" ? "اقترح" : "Propose"}</button> : null}
-                  {selected.can.reschedule ? <button type="button" className="btn btn-ghost" disabled={busy !== "" || !times[selected.id]} onClick={() => act(selected, "reschedule", { starts_at: wallClock(times[selected.id]), override_lead: board?.me.can_all === true })}>{locale === "ar" ? "عدّل" : "Move"}</button> : null}
-                  {selected.can.reschedule_direct ? <button type="button" className="btn btn-ghost" disabled={busy !== "" || !times[selected.id]} onClick={() => act(selected, "reschedule", { starts_at: wallClock(times[selected.id]), direct: true, override_lead: true })}>{locale === "ar" ? "انقل مباشرة" : "Move now"}</button> : null}
-                </div>
-              ) : null}
-            </section>
-          ) : null}
-
-          {board ? (
-            <section className="panel">
-              <h2>{locale === "ar" ? "بدون موعد" : "Unbooked"}</h2>
-              <label className="field-label">
-                {locale === "ar" ? "الطلب" : "Request"}
-                <select className="field" value={bookRequest} onChange={(event) => setBookRequest(event.target.value)}>
-                  <option value="">{locale === "ar" ? "اختر طلباً" : "Choose a request"}</option>
-                  {board.unbooked.map((row) => (
-                    <option key={row.id} value={row.id}>{row.number} — {row.client_name} ({row.remaining}/{row.sessions})</option>
-                  ))}
-                </select>
-              </label>
-              <label className="field-label">
-                {locale === "ar" ? "اليوم" : "Day"}
-                <input className="field" type="date" value={bookDate} onChange={(event) => loadBookSlots(event.target.value)} />
-              </label>
-              <label className="field-label">
-                {locale === "ar" ? "الوقت" : "Time"}
-                <select className="field" value={bookTime} onChange={(event) => setBookTime(event.target.value)}>
-                  <option value="">{locale === "ar" ? "اختر وقتاً" : "Choose a time"}</option>
-                  {bookSlots.map((slot) => <option key={slot.starts_at} value={slot.starts_at}>{slot.label}</option>)}
-                </select>
-              </label>
-              {board.me.can_all || board.me.is_photographer ? (
-                <label className="checkbox-row">
-                  <input type="checkbox" checked={bookConfirm} onChange={(event) => setBookConfirm(event.target.checked)} />
-                  {locale === "ar" ? "تثبيت فوري وخصم الجلسة" : "Confirm now and charge the session"}
-                </label>
-              ) : null}
-              <button type="button" className="btn btn-primary" disabled={busy === "book" || !bookRequest || !bookTime} onClick={book}>
-                {locale === "ar" ? "احجز على التقويم" : "Put it on the calendar"}
-              </button>
-            </section>
-          ) : null}
-
-          {board?.me.can_all ? (
-            <section className="panel">
-              <h2>{locale === "ar" ? "عدد الجلسات" : "Session count"}</h2>
-              {board.needs_count.length === 0 ? <p className="muted">{locale === "ar" ? "كل الطلبات المؤهلة لها عدد جلسات." : "Every eligible request has a session count."}</p> : null}
-              {board.needs_count.map((row) => (
-                <div className="toolbar" key={row.id}>
-                  <strong>{row.number}</strong>
-                  <span>{row.client_name}</span>
-                  <input className="field" type="number" min={0} max={100} value={caps[row.id] ?? ""} onChange={(event) => setCaps((current) => ({ ...current, [row.id]: event.target.value }))} />
-                  <button type="button" className="btn btn-primary" disabled={busy === `cap:${row.id}`} onClick={() => saveCap(row)}>{locale === "ar" ? "حفظ" : "Save"}</button>
-                </div>
-              ))}
-            </section>
-          ) : null}
-        </aside>
-      </div>
+      {dialog ? (
+        <EventDialog
+          locale={locale}
+          state={dialog}
+          calendars={directory?.calendars ?? []}
+          board={board}
+          canManage={directory?.can_manage === true}
+          onClose={() => setDialog(null)}
+          onSaved={() => {
+            setDialog(null);
+            reload();
+          }}
+        />
+      ) : null}
     </>
+  );
+}
+
+function SettingsMenu({ locale, prefs, onChange }: { locale: Locale; prefs: Prefs; onChange: (next: Prefs) => void }) {
+  const ar = locale === "ar";
+  const shortcuts: Array<[string, string]> = [
+    ["T", ar ? "اليوم" : "Today"],
+    ["J / K", ar ? "التالي / السابق" : "Next / previous"],
+    ["D · X · W · M · Y · A", ar ? "يوم · 4 أيام · أسبوع · شهر · سنة · جدول" : "Day · 4 days · week · month · year · schedule"],
+    ["C", ar ? "إنشاء" : "Create"],
+    ["/", ar ? "بحث" : "Search"],
+    ["R", ar ? "تحديث" : "Refresh"],
+  ];
+  return (
+    <Popover.Root>
+      <Popover.Trigger asChild>
+        <button type="button" className="gcal-icon-btn" aria-label={ar ? "إعدادات التقويم" : "Calendar settings"} title={ar ? "إعدادات التقويم" : "Calendar settings"}>
+          <Settings size={17} aria-hidden />
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content className="gcal-popover gcal-settings" align="end" sideOffset={6} collisionPadding={12}>
+          <h3>{ar ? "إعدادات التقويم" : "Calendar settings"}</h3>
+          <label className="field-label">
+            {ar ? "بداية الأسبوع" : "Start of week"}
+            <select className="field" value={prefs.firstDay} onChange={(event) => onChange({ ...prefs, firstDay: Number(event.target.value) as Prefs["firstDay"] })}>
+              <option value={6}>{ar ? "السبت" : "Saturday"}</option>
+              <option value={0}>{ar ? "الأحد" : "Sunday"}</option>
+              <option value={1}>{ar ? "الاثنين" : "Monday"}</option>
+            </select>
+          </label>
+          <label className="field-label">
+            {ar ? "حجم خانة الوقت" : "Time slot size"}
+            <select className="field" value={prefs.slotMinutes} onChange={(event) => onChange({ ...prefs, slotMinutes: Number(event.target.value) as Prefs["slotMinutes"] })}>
+              <option value={15}>{ar ? "15 دقيقة" : "15 minutes"}</option>
+              <option value={30}>{ar ? "30 دقيقة" : "30 minutes"}</option>
+              <option value={60}>{ar ? "ساعة" : "1 hour"}</option>
+            </select>
+          </label>
+          <label className="checkbox-row">
+            <input type="checkbox" checked={prefs.hideFriday} onChange={(event) => onChange({ ...prefs, hideFriday: event.target.checked })} />
+            {ar ? "إخفاء الجمعة" : "Hide Friday"}
+          </label>
+          <label className="checkbox-row">
+            <input type="checkbox" checked={prefs.weekNumbers} onChange={(event) => onChange({ ...prefs, weekNumbers: event.target.checked })} />
+            {ar ? "أرقام الأسابيع" : "Week numbers"}
+          </label>
+          <h4>{ar ? "اختصارات لوحة المفاتيح" : "Keyboard shortcuts"}</h4>
+          <dl className="gcal-keys">
+            {shortcuts.map(([keys, label]) => (
+              <div key={keys}>
+                <dt><kbd>{keys}</kbd></dt>
+                <dd>{label}</dd>
+              </div>
+            ))}
+          </dl>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }

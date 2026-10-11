@@ -1,6 +1,8 @@
 # Staff dashboard (Vite SPA)
 
-Last updated: 10 October 2026 (Photography is a week calendar. Queue, client-waiting, and agreed shoots are layers on the same grid. Unbooked work and session counts stay beside it. Moving a shoot in Google Calendar updates the board.)
+Last updated: 11 October 2026 (Photography is a FullCalendar 7 page in a Google Calendar layout: day, 4 days, week, month, year, and schedule views; mini calendar; calendar list with show, hide, add, and remove; shoot layers; search; keyboard shortcuts; settings kept in localStorage `hoc:photo-cal:prefs`. Dragging a shoot opens the booking move choices. Google events open a details popover and a create or edit dialog with recurrence, guests, reminders, color, Meet, availability, and visibility. Files: `pages/Photography.tsx`, `pages/photography/*`.)
+
+Previous: 10 October 2026 (Photography is a week calendar. Queue, client-waiting, and agreed shoots are layers on the same grid. Unbooked work and session counts stay beside it. Moving a shoot in Google Calendar updates the board.)
 
 Previous: 10 October 2026 (Complaints is a dashboard page at /complaints, gated by ops.complaints. It lists client complaints and can open the photo, play the voice note, and mark a row reviewed.)
 

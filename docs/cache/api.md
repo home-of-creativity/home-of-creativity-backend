@@ -1,6 +1,8 @@
 # Laravel API
 
-Last updated: 10 October 2026 (Opening `/admin/photography` mirrors open and agreed shoots onto Google Calendar, colored by status, then applies a time moved on that calendar.)
+Last updated: 11 October 2026 (Photography calendar routes under `ops.photography`: `GET /admin/photography/calendar/bookings` (shoots in a range, `closed=1` adds cancelled), `GET|POST|DELETE /admin/photography/calendar/calendars` (service account calendar list), `GET /admin/photography/calendar/events` and `/event`, `POST|PATCH|DELETE /admin/photography/calendar/events` with `scope` this|following|all. Writes need `ops.photography_all` and a writer calendar. `ManageCalendarEvents` refuses `hoc_booking` events on the main calendar; `RecurrenceRule` edits RRULE lines.)
+
+Previous: 10 October 2026 (Opening `/admin/photography` mirrors open and agreed shoots onto Google Calendar, colored by status, then applies a time moved on that calendar.)
 
 Previous: 10 October 2026 (`requests.invoice_sent_at` is set when an invoice is sent. Client cancel is refused once that moment is 24 hours old. A WhatsApp or Telegram message that is only `.` or «نقطة» returns the welcome.)
 

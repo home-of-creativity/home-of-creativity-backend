@@ -30,6 +30,7 @@ export default defineConfig({
           lottie: ["lottie-react"],
           forms: ["react-hook-form", "@hookform/resolvers", "zod"],
           pickers: ["react-day-picker", "date-fns", "react-dropzone"],
+          calendar: ["@fullcalendar/react", "@fullcalendar/core", "@full-ui/headless-calendar", "temporal-polyfill"],
           command: ["cmdk"],
           toast: ["sonner"],
           skeleton: ["react-loading-skeleton"],

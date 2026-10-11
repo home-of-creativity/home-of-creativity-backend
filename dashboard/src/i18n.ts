@@ -738,8 +738,8 @@ export const copy = {
     en: "Client complaints from the bot: a title, a description, a photo, and a voice note.",
   },
   photographyLede: {
-    ar: "تقويم التصوير. انتظار المصور، انتظار العميل، ومواعيدك على الأسبوع نفسه، وتتحرك من جوجل كالندر.",
-    en: "The photography week. The photographer queue, client replies, and your shoots sit on one calendar, and a move in Google Calendar comes back here.",
+    ar: "مواعيد التصوير وأحداث جوجل كالندر على تقويم واحد. اضغط خانة فارغة لتنشئ، واسحب موعداً لتنقله، وكل تعديل يصل جوجل كالندر.",
+    en: "Shoots and Google Calendar events on one calendar. Click an empty slot to create, drag to move, and every change reaches Google Calendar.",
   },
   navPermissions: { ar: "الصلاحيات", en: "Permissions" },
   channelsTitle: { ar: "قنوات العملاء", en: "Client channels" },

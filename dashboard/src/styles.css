@@ -8589,132 +8589,937 @@ html[dir="rtl"] .placement-tile-toggle[data-state="checked"] .placement-tile-tog
   }
 }
 
-.photo-cal-toolbar,
-.photo-cal-nav,
-.photo-cal-legend {
+/* Photography calendar: FullCalendar in a Google Calendar layout */
+
+.gcal-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.75rem;
+}
+
+.gcal-title {
+  margin: 0;
+  min-width: 9ch;
+  font-size: 1.3rem;
+  font-weight: 600;
+}
+
+.gcal-nav {
+  display: inline-flex;
+  gap: 0.1rem;
+}
+
+.gcal-icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  flex: none;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--brand-ink);
+  cursor: pointer;
+  transition: background-color var(--ease);
+}
+
+.gcal-icon-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--brand-ink) 8%, transparent);
+}
+
+.gcal-icon-btn:focus-visible,
+.gcal-choice:focus-visible,
+.gcal-create:focus-visible,
+.gcal-views button:focus-visible,
+.gcal-segment button:focus-visible {
+  outline: 2px solid var(--brand-orange);
+  outline-offset: 2px;
+}
+
+.gcal-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.gcal-search {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 14rem;
+  height: 2.5rem;
+  margin-inline-start: auto;
+  padding-inline: 0.8rem 0.2rem;
+  border: 1px solid var(--brand-line);
+  border-radius: 999px;
+  background: var(--brand-surface);
+  color: var(--brand-muted);
+}
+
+.gcal-search:focus-within {
+  border-color: color-mix(in srgb, var(--brand-orange) 55%, var(--brand-line));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-orange) 20%, transparent);
+}
+
+.gcal-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--brand-ink);
+  font: inherit;
+}
+
+.gcal-search input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.gcal-search .gcal-icon-btn {
+  width: 2rem;
+  height: 2rem;
+}
+
+.gcal-views,
+.gcal-segment {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--brand-line);
+  border-radius: 999px;
+  background: var(--brand-surface);
+}
+
+.gcal-views button,
+.gcal-segment button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.8rem;
+  border: 0;
+  background: transparent;
+  color: var(--brand-ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.gcal-views button + button,
+.gcal-segment button + button {
+  border-inline-start: 1px solid var(--brand-line);
+}
+
+.gcal-views button.is-active,
+.gcal-segment button.is-active {
+  background: color-mix(in srgb, var(--brand-orange) 24%, var(--brand-surface));
+  font-weight: 700;
+}
+
+.gcal-segment {
+  justify-self: start;
+}
+
+.gcal-views-select {
+  display: none;
+  width: auto;
+}
+
+.gcal-side-toggle {
+  display: none;
+}
+
+.gcal-spinner {
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid var(--brand-line);
+  border-top-color: var(--brand-orange);
+  border-radius: 50%;
+  animation: finance-spin 0.8s linear infinite;
+}
+
+.gcal-warning {
+  margin: 0 0 0.75rem;
+  padding: 0.55rem 0.85rem;
+  border-radius: 0.8rem;
+  background: color-mix(in srgb, #f3de86 35%, var(--brand-surface));
+  color: var(--brand-ink);
+  font-size: 0.9rem;
+}
+
+.gcal {
+  display: grid;
+  grid-template-columns: 16.5rem minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.gcal-main {
+  --fc-classic-primary: var(--brand-orange);
+  --fc-classic-primary-foreground: var(--brand-purple-deep);
+  --fc-classic-event: var(--brand-purple);
+  --fc-classic-event-contrast: #ffffff;
+  --fc-classic-background: var(--brand-surface);
+  --fc-classic-foreground: var(--brand-ink);
+  --fc-classic-muted-foreground: var(--brand-muted);
+  --fc-classic-faint-foreground: color-mix(in srgb, var(--brand-muted) 70%, transparent);
+  --fc-classic-border: var(--brand-line);
+  --fc-classic-strong-border: color-mix(in srgb, var(--brand-ink) 24%, transparent);
+  --fc-classic-faint: color-mix(in srgb, var(--brand-ink) 4%, transparent);
+  --fc-classic-muted: color-mix(in srgb, var(--brand-ink) 8%, transparent);
+  --fc-classic-strong: color-mix(in srgb, var(--brand-ink) 14%, transparent);
+  --fc-classic-today: color-mix(in srgb, var(--brand-orange) 11%, transparent);
+  --fc-classic-highlight: color-mix(in srgb, var(--brand-teal) 20%, transparent);
+  --fc-classic-now: #e5484d;
+  --fc-classic-button: var(--brand-surface);
+  --fc-classic-button-border: var(--brand-line);
+  --fc-classic-button-strong: color-mix(in srgb, var(--brand-ink) 10%, var(--brand-surface));
+  --fc-classic-button-strong-border: var(--brand-line);
+  --fc-classic-button-outline: color-mix(in srgb, var(--brand-orange) 50%, transparent);
+  --fc-classic-button-foreground: var(--brand-ink);
+  height: max(36rem, calc(100svh - 14rem));
+  overflow: hidden;
+  border: 1px solid var(--brand-line);
+  border-radius: 16px;
+  background: var(--brand-surface);
+  color: var(--brand-ink);
+}
+
+.gcal-main .gcal-ev {
+  cursor: pointer;
+}
+
+.gcal-main .gcal-ev.is-proposed {
+  opacity: 0.72;
+  background-image: repeating-linear-gradient(135deg, transparent 0 6px, rgb(255 255 255 / 0.45) 6px 12px);
+  outline: 1px dashed #1a1224;
+  outline-offset: -1px;
+}
+
+.gcal-main .gcal-ev.is-tentative {
+  background-image: repeating-linear-gradient(135deg, transparent 0 6px, rgb(255 255 255 / 0.3) 6px 12px);
+}
+
+.gcal-main .gcal-ev.is-free {
+  opacity: 0.8;
+}
+
+.gcal-main .gcal-ev.is-closed {
+  opacity: 0.7;
+  text-decoration: line-through;
+}
+
+.gcal-side {
+  display: grid;
+  gap: 0.9rem;
+  align-content: start;
+}
+
+.gcal-create {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  justify-self: start;
+  padding: 0.85rem 1.3rem;
+  border: 0;
+  border-radius: 1.1rem;
+  background: var(--brand-surface);
+  color: var(--brand-ink);
+  font: inherit;
+  font-weight: 700;
+  box-shadow: 0 1px 3px rgb(10 6 24 / 0.18), 0 4px 12px rgb(10 6 24 / 0.08);
+  cursor: pointer;
+  transition: box-shadow var(--ease), background-color var(--ease);
+}
+
+.gcal-create:hover {
+  background: color-mix(in srgb, var(--brand-orange) 10%, var(--brand-surface));
+  box-shadow: 0 2px 6px rgb(10 6 24 / 0.2), 0 8px 20px rgb(10 6 24 / 0.12);
+}
+
+.gcal-create svg {
+  color: var(--brand-orange);
+}
+
+.gcal kbd,
+.gcal-settings kbd {
+  padding: 0.05rem 0.35rem;
+  border: 1px solid var(--brand-line);
+  border-bottom-width: 2px;
+  border-radius: 0.35rem;
+  background: var(--brand-off-white);
+  color: var(--brand-muted);
+  font: 600 0.72rem/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.gcal-side .gcal-mini {
+  --rdp-accent-color: var(--brand-orange);
+  --rdp-accent-background-color: color-mix(in srgb, var(--brand-orange) 16%, var(--tint-base));
+  --rdp-today-color: var(--brand-teal);
+  --rdp-day-width: 2.15rem;
+  --rdp-day-height: 2.1rem;
+  --rdp-day_button-width: 1.95rem;
+  --rdp-day_button-height: 1.95rem;
+  --rdp-day_button-border: 1px solid transparent;
+  --rdp-nav_button-width: 1.8rem;
+  --rdp-nav_button-height: 1.8rem;
+  --rdp-nav-height: 2.2rem;
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.gcal-mini .rdp-month_caption {
+  font-size: 0.92rem;
+}
+
+/* The dashboard's table rules (cell padding, striping) would stretch the mini calendar. */
+.gcal-mini table,
+.gcal-mini .rdp-month_grid {
+  width: max-content;
+  min-width: 0;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+
+.gcal-mini th,
+.gcal-mini td,
+.gcal-mini .rdp-weekday,
+.gcal-mini .rdp-day {
+  width: var(--rdp-day-width);
+  height: var(--rdp-day-height);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.gcal-mini tbody tr:nth-child(even),
+.gcal-mini tbody tr:hover {
+  background: transparent;
+}
+
+.gcal-side-section {
+  display: grid;
+  gap: 0.45rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--brand-line);
+}
+
+.gcal-side-section h2 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+details.gcal-side-section > summary {
+  cursor: pointer;
+}
+
+details.gcal-side-section > summary h2 {
+  display: inline;
+}
+
+.gcal-side-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.gcal-side-head .gcal-icon-btn {
+  width: 2rem;
+  height: 2rem;
+}
+
+.gcal-cal-list {
+  display: grid;
+  gap: 0.05rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gcal-cal-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.gcal-cal {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  padding: 0.35rem 0.4rem;
+  border-radius: 0.6rem;
+  cursor: pointer;
+}
+
+.gcal-cal:hover {
+  background: color-mix(in srgb, var(--brand-ink) 6%, transparent);
+}
+
+.gcal-cal input {
+  width: 1.05rem;
+  height: 1.05rem;
+  flex: none;
+  margin: 0;
+}
+
+.gcal-cal > svg {
+  flex: none;
+  color: var(--brand-muted);
+}
+
+.gcal-cal > span:not(.gcal-swatch) {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gcal-cal .is-warn,
+.gcal-pop-list .is-warn {
+  color: #b4540a;
+}
+
+.gcal-cal-remove {
+  width: 1.8rem;
+  height: 1.8rem;
+  opacity: 0.6;
+}
+
+.gcal-cal-remove:hover {
+  opacity: 1;
+}
+
+.gcal-swatch {
+  width: 0.8rem;
+  height: 0.8rem;
+  flex: none;
+  border-radius: 3px;
+}
+
+.gcal-add {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.65rem;
+  border-radius: 0.8rem;
+  background: color-mix(in srgb, var(--brand-ink) 4%, transparent);
+}
+
+.gcal-add p {
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.gcal-email {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px dashed var(--brand-line);
+  border-radius: 0.6rem;
+  background: var(--brand-surface);
+  color: var(--brand-ink);
+  font: inherit;
+  font-size: 0.76rem;
+  text-align: start;
+  word-break: break-all;
+  cursor: copy;
+}
+
+.gcal-unbooked {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gcal-unbooked li,
+.gcal-cap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.gcal-unbooked div,
+.gcal-cap div {
+  display: grid;
+  min-width: 0;
+}
+
+.gcal-unbooked .btn,
+.gcal-cap .btn,
+.gcal-pop .btn,
+.gcal-dialog .gcal-line .btn {
+  min-height: 2.3rem;
+  padding: 0.4rem 1rem;
+}
+
+.gcal-num {
+  width: 4.6rem;
+  flex: none;
+}
+
+/* Event popover */
+
+.gcal-anchor {
+  position: fixed;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.gcal-popover {
+  z-index: 70;
+  width: min(25rem, calc(100vw - 1.5rem));
+  max-height: min(80svh, 40rem);
+  overflow: auto;
+  border: 1px solid var(--brand-line);
+  border-radius: 1rem;
+  background: var(--brand-surface);
+  color: var(--brand-ink);
+  box-shadow: 0 24px 60px rgb(10 6 24 / 0.28);
+  animation: form-dialog-panel-in 180ms ease;
+}
+
+.gcal-pop {
+  padding: 0.4rem 1rem 1rem;
+}
+
+.gcal-pop-tools {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.1rem;
+  margin-inline-end: -0.5rem;
+}
+
+.gcal-pop-tools .gcal-icon-btn {
+  width: 2.2rem;
+  height: 2.2rem;
+}
+
+.gcal-pop-head,
+.gcal-pop-list > li {
+  display: grid;
+  grid-template-columns: 1.1rem minmax(0, 1fr);
+  gap: 0.8rem;
+  align-items: start;
+}
+
+.gcal-pop-head h3 {
+  margin: 0 0 0.2rem;
+  font-size: 1.2rem;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.gcal-pop-head p {
+  margin: 0;
+}
+
+.gcal-pop-head p svg {
+  vertical-align: -2px;
+}
+
+.gcal-dot {
+  display: inline-block;
+  width: 0.95rem;
+  height: 0.95rem;
+  flex: none;
+  margin-top: 0.35rem;
+  border-radius: 4px;
+}
+
+.gcal-pop-list {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0.9rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gcal-pop-list > li > svg {
+  margin-top: 0.15rem;
+  color: var(--brand-muted);
+}
+
+.gcal-pop-list > li > div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.gcal-pop-list a {
+  color: var(--link);
+  overflow-wrap: anywhere;
+}
+
+.gcal-pop-gap {
+  display: block;
+}
+
+.gcal-pop-desc {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.gcal-pop .btn.gcal-meet {
+  justify-self: start;
+  color: var(--brand-purple-deep);
+}
+
+.gcal-guests {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0.35rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gcal-guests li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.gcal-guests li span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gcal-guests .is-yes {
+  color: #1f9d55;
+}
+
+.gcal-guests .is-no {
+  color: #d14343;
+}
+
+.gcal-guests .is-maybe {
+  color: var(--brand-muted);
+}
+
+.gcal-pop-actions {
+  flex-wrap: wrap;
+  margin-top: 1rem;
+}
+
+.gcal-pop-move {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.9rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--brand-line);
+}
+
+.gcal-pop-move p {
+  margin: 0;
+}
+
+.gcal-pop-confirm {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.8rem;
+  padding: 0.7rem 0.8rem;
+  border-radius: 0.8rem;
+  background: color-mix(in srgb, #d14343 9%, var(--brand-surface));
+}
+
+.gcal-pop-confirm p {
+  margin: 0;
+}
+
+/* Create and edit dialog */
+
+.gcal-form {
+  display: grid;
+  grid-auto-rows: max-content;
+  gap: 0.85rem;
+}
+
+.gcal-dialog .checkbox-row {
+  min-height: auto;
+}
+
+.gcal-title-input {
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.gcal-line {
+  display: grid;
+  grid-template-columns: 1.4rem minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.gcal-line > svg,
+.gcal-line > .gcal-dot {
+  margin-top: 0.8rem;
+  color: var(--brand-muted);
+}
+
+.gcal-line-body {
+  display: grid;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.gcal-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
 }
 
-.photo-cal-toolbar {
-  justify-content: space-between;
-  margin-bottom: 0.8rem;
-}
-
-.photo-chip {
-  border: 1px solid var(--brand-line);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--brand-ink);
-  padding: 0.28rem 0.7rem;
-  font: inherit;
-}
-
-.photo-chip.is-queue { background: color-mix(in srgb, var(--brand-orange) 28%, var(--brand-surface)); }
-.photo-chip.is-waiting { background: color-mix(in srgb, #e6c24a 35%, var(--brand-surface)); }
-.photo-chip.is-mine { background: color-mix(in srgb, var(--brand-teal) 30%, var(--brand-surface)); }
-.photo-chip.is-static { color: var(--brand-muted); }
-
-.photo-cal-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
-  gap: 0.9rem;
-  align-items: start;
-}
-
-.photo-cal {
-  overflow: auto;
-  border: 1px solid var(--brand-line);
-  border-radius: 16px;
-  background: var(--brand-surface);
-}
-
-.photo-cal-head,
-.photo-cal-body {
-  display: grid;
-  grid-template-columns: 52px repeat(7, minmax(0, 1fr));
+.gcal-row > .field {
+  flex: 1 1 8rem;
+  width: auto;
   min-width: 0;
 }
 
-.photo-cal-head button,
-.photo-cal-head span {
+.gcal-row > .gcal-num {
+  flex: 0 0 4.6rem;
+}
+
+.gcal-when > .field[type="time"] {
+  flex: 0 1 7.5rem;
+}
+
+.gcal-row.gcal-line-body {
+  display: flex;
+}
+
+.gcal-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.gcal-swatches button {
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.gcal-swatches button.is-on {
+  border-color: var(--brand-ink);
+  box-shadow: inset 0 0 0 2px var(--brand-cream);
+}
+
+.gcal-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gcal-chips li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.25rem 0.2rem 0.7rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--brand-teal) 16%, var(--brand-surface));
+  font-size: 0.85rem;
+}
+
+.gcal-chips button {
   display: grid;
-  justify-items: center;
-  gap: 0.1rem;
-  padding: 0.45rem 0.2rem;
+  place-items: center;
+  width: 1.4rem;
+  height: 1.4rem;
   border: 0;
-  border-bottom: 1px solid var(--brand-line);
+  border-radius: 50%;
   background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.gcal-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.gcal-days button {
+  width: 2.3rem;
+  height: 2.3rem;
+  border: 1px solid var(--brand-line);
+  border-radius: 50%;
+  background: var(--brand-surface);
   color: var(--brand-ink);
   font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
 }
 
-.photo-cal-head .is-today strong {
-  color: var(--brand-purple);
+.gcal-days button.is-on {
+  border-color: var(--brand-orange);
+  background: var(--brand-orange);
+  color: var(--brand-purple-deep);
+  font-weight: 700;
 }
 
-.photo-cal-head .is-friday {
-  color: var(--brand-muted);
-}
-
-.photo-cal-hours,
-.photo-cal-day {
-  position: relative;
-  height: calc(var(--hours, 12) * 52px);
-}
-
-.photo-cal-hours span,
-.photo-cal-line {
-  display: block;
-  height: 52px;
-  border-bottom: 1px solid var(--brand-line);
-}
-
-.photo-cal-hours span {
-  padding: 0.15rem 0.3rem 0 0;
-  color: var(--brand-muted);
-  font-size: 0.75rem;
-}
-
-.photo-event {
-  position: absolute;
-  inset-inline: 3px;
-  z-index: 1;
-  overflow: hidden;
-  border: 0;
-  border-radius: 8px;
-  padding: 0.25rem 0.35rem;
-  color: #1a1224;
-  text-align: start;
-  font: inherit;
-}
-
-.photo-event strong,
-.photo-event small {
-  display: block;
-}
-
-.photo-event.is-queue { background: #f0b56a; }
-.photo-event.is-waiting { background: #f3de86; }
-.photo-event.is-move { background: #d7c4f5; }
-.photo-event.is-mine { background: #8edfd6; }
-.photo-event.is-agreed { background: #c9d7f5; }
-.photo-event.is-open { outline: 2px solid var(--brand-purple); }
-
-.photo-cal-rail {
-  display: grid;
-  gap: 0.8rem;
-}
-
-.photo-cal-rail .panel {
+.gcal-custom-rule {
   display: grid;
   gap: 0.55rem;
+  padding: 0.7rem;
+  border-radius: 0.8rem;
+  background: color-mix(in srgb, var(--brand-ink) 4%, transparent);
 }
 
-@media (max-width: 1100px) {
-  .photo-cal-layout {
-    grid-template-columns: 1fr;
+.gcal-scope {
+  display: grid;
+  gap: 0.15rem;
+  margin: 0;
+  padding: 0.5rem 0.9rem 0.7rem;
+  border: 1px solid var(--brand-line);
+  border-radius: 0.9rem;
+}
+
+.gcal-scope legend {
+  padding: 0 0.35rem;
+  font-weight: 700;
+}
+
+.gcal-hint {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.gcal-choices {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.gcal-choice {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.8rem 1rem;
+  border: 1px solid var(--brand-line);
+  border-radius: 0.9rem;
+  background: var(--brand-surface);
+  color: var(--brand-ink);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.gcal-choice:hover {
+  border-color: var(--brand-orange);
+}
+
+.gcal-choice.is-primary {
+  border-color: var(--brand-orange);
+  background: color-mix(in srgb, var(--brand-orange) 14%, var(--brand-surface));
+}
+
+.gcal-choice small {
+  color: var(--brand-muted);
+}
+
+/* Settings popover */
+
+.gcal-settings {
+  display: grid;
+  gap: 0.65rem;
+  width: min(20rem, calc(100vw - 1.5rem));
+  padding: 1rem;
+}
+
+.gcal-settings h3,
+.gcal-settings h4 {
+  margin: 0;
+}
+
+.gcal-settings h4 {
+  margin-top: 0.4rem;
+  font-size: 0.9rem;
+}
+
+.gcal-keys {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+}
+
+.gcal-keys div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.gcal-keys dd {
+  margin: 0;
+  color: var(--brand-muted);
+  font-size: 0.85rem;
+  text-align: end;
+}
+
+@media (max-width: 1320px) {
+  .gcal-views {
+    display: none;
+  }
+
+  .gcal-views-select {
+    display: inline-block;
+  }
+}
+
+@media (max-width: 1180px) {
+  .gcal {
+    grid-template-columns: 14.5rem minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 860px) {
+  .gcal {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .gcal-side {
+    display: none;
+  }
+
+  .gcal.is-side-open .gcal-side {
+    display: grid;
+    padding: 0.9rem;
+    border: 1px solid var(--brand-line);
+    border-radius: 16px;
+    background: var(--brand-surface);
+  }
+
+  .gcal-side-toggle {
+    display: inline-grid;
+  }
+
+  .gcal-title {
+    flex: 1 1 9rem;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 1.05rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .gcal-search {
+    order: 10;
+    flex: 1 1 100%;
+    min-width: 0;
+    margin-inline-start: 0;
+  }
+
+  .gcal-main {
+    height: max(30rem, calc(100svh - 12rem));
+    border-radius: 12px;
   }
 }
