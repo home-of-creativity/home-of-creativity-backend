@@ -34,9 +34,14 @@ class Role extends Model
             return true;
         }
 
-        $base = preg_replace('/\.(view|create|update|delete)$/', '', $ability) ?? $ability;
+        // A role that still holds the whole feature has each of its operations.
+        $dot = strrpos($ability, '.');
+        if ($dot === false) {
+            return false;
+        }
+        $base = substr($ability, 0, $dot);
 
-        return $base !== $ability && in_array($base, $granted, true);
+        return StaffAbility::actionsOf($base) !== [] && in_array($base, $granted, true);
     }
 
     public function includesSocial(): bool

@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, type Client, type OdooInvoice, type OdooQuotation, type PageMeta } from "../api";
 import { ConfirmAction } from "../components/ConfirmAction";
+import { useCan } from "../lib/useCan";
 import { DriveFolderPicker } from "../components/DriveFolderPicker";
 import { LoadingTableRow } from "../components/LoadingTableRow";
 import { OdooPaperForm } from "../components/OdooPaperForm";
@@ -70,6 +71,7 @@ function tabLabel(tab: Tab, t: (c: { ar: string; en: string }) => string) {
 }
 
 export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
+  const can = useCan();
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = readTab(searchParams.get("tab"));
   const partnerFilter = searchParams.get("partner") ?? "";
@@ -296,7 +298,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
           tab === "clients" ? (
             <>
               {odooReady ? (
-                <>
+                can("ops.clients.odoo") ? <>
                   <button
                     type="button"
                     className="btn btn-secondary"
@@ -315,22 +317,24 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                       if (file) void importCrmExcel(file);
                     }}
                   />
-                </>
+                </> : null
               ) : (
                 <span className="muted">{t(copy.odooNotConfigured)}</span>
               )}
-              <Link className="btn btn-primary" to="/clients/new">
-                {t(copy.addClient)}
-              </Link>
+              {can("ops.clients.create") ? (
+                <Link className="btn btn-primary" to="/clients/new">
+                  {t(copy.addClient)}
+                </Link>
+              ) : null}
               <a className="btn btn-telegram" href={`https://t.me/${TELEGRAM_BOT}`} target="_blank" rel="noreferrer">
                 {t(copy.signupCta)}
               </a>
             </>
-          ) : tab === "quotations" && odooReady ? (
+          ) : tab === "quotations" && odooReady && can("ops.clients.odoo") ? (
             <button type="button" className="btn btn-primary" onClick={() => setPaper({ kind: "quotation" })}>
               {t(copy.createQuotation)}
             </button>
-          ) : tab === "invoices" && odooReady ? (
+          ) : tab === "invoices" && odooReady && can("ops.clients.odoo") ? (
             <button type="button" className="btn btn-primary" onClick={() => setPaper({ kind: "invoice" })}>
               {t(copy.createInvoice)}
             </button>
@@ -519,22 +523,26 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                           {t(copy.clientPaperInvoices)}
                         </button>
                         <Link className="btn btn-ghost" to={`/reports/clients/${item.id}`}>{t(copy.reportsTitle)}</Link>
-                        <button
-                          type="button"
-                          className="btn btn-ghost"
-                          onClick={() => setFolderClient(item)}
-                        >
-                          {t(copy.driveFolder)}
-                        </button>
+                        {can("ops.clients.update") || can("ops.reports.update") ? (
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            onClick={() => setFolderClient(item)}
+                          >
+                            {t(copy.driveFolder)}
+                          </button>
+                        ) : null}
                         <Link className="btn btn-ghost" to={`/clients/${item.id}/edit`}>
-                          {t(copy.editEmployee)}
+                          {can("ops.clients.update") ? t(copy.editEmployee) : t(copy.view)}
                         </Link>
-                        <ConfirmAction
-                          label={t(copy.deleteEmployee)}
-                          yesLabel={t(copy.delete)}
-                          noLabel={t(copy.cancel)}
-                          onConfirm={() => void removeClient(item.id)}
-                        />
+                        {can("ops.clients.delete") ? (
+                          <ConfirmAction
+                            label={t(copy.deleteEmployee)}
+                            yesLabel={t(copy.delete)}
+                            noLabel={t(copy.cancel)}
+                            onConfirm={() => void removeClient(item.id)}
+                          />
+                        ) : null}
                       </td>
                     </tr>
                   ))

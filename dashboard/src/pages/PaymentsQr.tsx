@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useCan } from "../lib/useCan";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { api, type OpsSettings } from "../api";
@@ -86,6 +87,7 @@ export function ShamCashQrThumb({ alt }: { alt: string }) {
 }
 
 export function PaymentsQr({ locale, t }: { locale?: Locale; t: (c: { ar: string; en: string }) => string }) {
+  const can = useCan();
   const { settings, preview, error, busy, upload } = useShamCashQr(t);
   const lang: Locale = locale ?? (document.documentElement.lang === "en" ? "en" : "ar");
 
@@ -121,13 +123,13 @@ export function PaymentsQr({ locale, t }: { locale?: Locale; t: (c: { ar: string
             <p className="muted">{t(copy.qrMissing)}</p>
           )}
           {error ? <p className="error">{error}</p> : null}
-          <FileDropzone
+          {can("ops.payments.qr") ? <FileDropzone
             accept={{ "image/png": [], "image/jpeg": [], "image/webp": [] }}
             disabled={busy}
             hint={settings?.sham_cash_qr ? t(copy.replaceQr) : t(copy.uploadQr)}
             activeHint={t(copy.dropzoneActive)}
             onFiles={(files) => void upload(files)}
-          />
+          /> : null}
         </section>
         <ol className="qr-steps" aria-label={t(copy.qrFlowTitle)}>
           <li>

@@ -172,6 +172,7 @@ export const copy = {
   inactive: { ar: "متوقف", en: "Inactive" },
   actions: { ar: "إجراءات", en: "Actions" },
   cancel: { ar: "إلغاء", en: "Cancel" },
+  view: { ar: "عرض", en: "View" },
   close: { ar: "إغلاق", en: "Close" },
   openStaffBot: { ar: "فتح بوت الموظفين", en: "Open staff bot" },
   login: { ar: "دخول الفريق", en: "Staff login" },

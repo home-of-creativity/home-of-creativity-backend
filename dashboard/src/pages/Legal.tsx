@@ -106,6 +106,7 @@ export function Legal({
 
   return (
     <FormPage
+      ability={"site.legal.update"}
       eyebrow={t(copy.brandMark)}
       title={pageTitle}
       backTo="/"

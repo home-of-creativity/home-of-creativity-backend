@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCan } from "../lib/useCan";
 import { Link, useSearchParams } from "react-router-dom";
 import { ArrowDown, ArrowUp, ExternalLink, Info, Pencil, RefreshCw, Search, X } from "lucide-react";
 import { toast } from "sonner";
@@ -96,6 +97,7 @@ export function Finance({ locale, t }: { locale: Locale; t: (c: { ar: string; en
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<{ id: number; amount: string; category: string; note: string; spent_at: string } | null>(null);
   const [rowBusy, setRowBusy] = useState(0);
+  const can = useCan();
   const [refresh, setRefresh] = useState(0);
   const [query, setQuery] = useState(params.get("q") ?? "");
 
@@ -280,7 +282,7 @@ export function Finance({ locale, t }: { locale: Locale; t: (c: { ar: string; en
         title={t(copy.financeTitle)}
         lede={t(copy.financeLede)}
         actions={
-          sync?.configured ? (
+          sync?.configured && can("ops.finance.sync") ? (
             <button type="button" className="btn" onClick={syncNow} disabled={syncing} aria-busy={syncing}>
               <RefreshCw size={16} aria-hidden="true" className={syncing ? "spin" : undefined} />
               {syncing ? t(copy.financeSyncing) : t(copy.financeSyncNow)}
@@ -583,7 +585,7 @@ export function Finance({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                             <td>{row.note ?? "—"}</td>
                             <td className="nowrap">{row.spent_at ?? "—"}</td>
                             <td className="row-actions nowrap">
-                              <button
+                              {can("ops.finance.expense_update") ? <button
                                 type="button"
                                 className="btn btn-ghost btn-sm"
                                 disabled={rowBusy !== 0}
@@ -592,8 +594,8 @@ export function Finance({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                                 onClick={() => setEditing({ id: row.id, amount: String(row.amount), category: row.category, note: row.note ?? "", spent_at: row.spent_at ?? "" })}
                               >
                                 <Pencil size={14} aria-hidden="true" />
-                              </button>
-                              <ConfirmAction
+                              </button> : null}
+                              {can("ops.finance.expense_delete") ? <ConfirmAction
                                 label={t(copy.delete)}
                                 confirmLabel={t(copy.financeDeleteExpenseConfirm)}
                                 yesLabel={t(copy.delete)}
@@ -601,7 +603,7 @@ export function Finance({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                                 className="btn btn-ghost btn-sm btn-danger"
                                 disabled={rowBusy !== 0}
                                 onConfirm={() => void removeExpense(row.id)}
-                              />
+                              /> : null}
                             </td>
                           </tr>
                         ),
@@ -611,7 +613,7 @@ export function Finance({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                 </table>
               </div>
             </section>
-            <form className="card form-grid" onSubmit={addExpense}>
+            {can("ops.finance.expense_create") ? <form className="card form-grid" onSubmit={addExpense}>
               <h2 className="form-title field-span">{t(copy.financeAddExpense)}</h2>
               <label className="field-label">
                 {t(copy.financeTotal)}
@@ -647,7 +649,7 @@ export function Finance({ locale, t }: { locale: Locale; t: (c: { ar: string; en
               <button className="btn btn-primary" type="submit" disabled={busy} aria-busy={busy}>
                 {t(copy.financeSave)}
               </button>
-            </form>
+            </form> : null}
           </div>
         </>
       ) : null}

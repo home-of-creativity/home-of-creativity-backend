@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Search } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmAction } from "../components/ConfirmAction";
+import { useCan } from "../lib/useCan";
 import { LoadingTableRow } from "../components/LoadingTableRow";
 import { PageHeader } from "../components/PageHeader";
 import { Pagination } from "../components/Pagination";
@@ -10,6 +11,7 @@ import { api, type ClickUpMember, type Employee, type PageMeta } from "../api";
 import { copy, professions, type Locale } from "../i18n";
 
 export function Employees({ t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
+  const can = useCan();
   const [items, setItems] = useState<Employee[]>([]);
   const [members, setMembers] = useState<ClickUpMember[]>([]);
   const [loading, setLoading] = useState(true);
@@ -147,14 +149,16 @@ export function Employees({ t }: { locale: Locale; t: (c: { ar: string; en: stri
         lede={t(copy.employeesLede)}
         actions={
           <>
-            {!odooReady ? <span className="muted">{t(copy.odooNotConfigured)}</span> : (
+            {!can("ops.employees.sync") ? null : !odooReady ? <span className="muted">{t(copy.odooNotConfigured)}</span> : (
               <button className="btn btn-ghost" type="button" disabled={syncing} onClick={() => void syncFromOdoo()}>
                 {t(copy.syncEmployees)}
               </button>
             )}
-            <Link className="btn btn-primary" to="/employees/new">
-              {t(copy.addEmployee)}
-            </Link>
+            {can("ops.employees.create") ? (
+              <Link className="btn btn-primary" to="/employees/new">
+                {t(copy.addEmployee)}
+              </Link>
+            ) : null}
             {staffBot ? (
               <a className="btn btn-telegram" href={`https://t.me/${staffBot}`} target="_blank" rel="noreferrer">
                 {t(copy.openStaffBot)}
@@ -258,20 +262,22 @@ export function Employees({ t }: { locale: Locale; t: (c: { ar: string; en: stri
                     </span>
                   </td>
                   <td className="actions-cell">
-                    {item.status === "pending" ? (
+                    {item.status === "pending" && can("ops.employees.approve") ? (
                       <Link className="btn btn-teal" to={`/employees/${item.id}/approve`}>
                         {t(copy.approveEmployee)}
                       </Link>
                     ) : null}
                     <Link className="btn btn-ghost" to={`/employees/${item.id}/edit`}>
-                      {t(copy.editEmployee)}
+                      {can("ops.employees.update") ? t(copy.editEmployee) : t(copy.view)}
                     </Link>
-                    <ConfirmAction
-                      label={t(copy.deleteEmployee)}
-                      yesLabel={t(copy.delete)}
-                      noLabel={t(copy.cancel)}
-                      onConfirm={() => void remove(item.id)}
-                    />
+                    {can("ops.employees.delete") ? (
+                      <ConfirmAction
+                        label={t(copy.deleteEmployee)}
+                        yesLabel={t(copy.delete)}
+                        noLabel={t(copy.cancel)}
+                        onConfirm={() => void remove(item.id)}
+                      />
+                    ) : null}
                   </td>
                 </tr>
               ))

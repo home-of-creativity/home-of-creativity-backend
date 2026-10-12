@@ -295,6 +295,7 @@ export function PricingPackageForm({ locale, t }: { locale: Locale; t: (c: { ar:
 
   return (
     <FormPage
+      ability={editingId ? "site.pricing.update" : "site.pricing.create"}
       eyebrow={t(copy.pricingTitle)}
       title={editingId ? t(copy.edit) : t(copy.addPricingPackage)}
       backTo="/pricing?tab=packages"

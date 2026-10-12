@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useCan } from "../../lib/useCan";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { ConfirmAction } from "../../components/ConfirmAction";
@@ -9,6 +10,7 @@ import { Pagination } from "../../components/Pagination";
 import { copy, type Locale } from "../../i18n";
 
 export function ClientLogosPanel({ t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
+  const can = useCan();
   const [clients, setClients] = useState<ShowcaseClient[]>([]);
   const [meta, setMeta] = useState<PageMeta | null>(null);
   const [page, setPage] = useState(1);
@@ -66,12 +68,12 @@ export function ClientLogosPanel({ t }: { locale: Locale; t: (c: { ar: string; e
   return (
     <>
       <div className="toolbar">
-        <Link className="btn btn-primary" to="/clients/logos/new">
+        {can("site.projects.create") || can("ops.clients.create") ? (<Link className="btn btn-primary" to="/clients/logos/new">
           {t(copy.addShowcaseClient)}
-        </Link>
-        <button type="button" className="btn btn-ghost" onClick={() => void removeAll()} disabled={clients.length === 0}>
+        </Link>) : null}
+        {can("site.projects.delete") || can("ops.clients.delete") ? (<button type="button" className="btn btn-ghost" onClick={() => void removeAll()} disabled={clients.length === 0}>
           {t(copy.deleteAll)}
-        </button>
+        </button>) : null}
       </div>
 
       {notice ? <p className="muted">{notice}</p> : null}
@@ -137,12 +139,12 @@ export function ClientLogosPanel({ t }: { locale: Locale; t: (c: { ar: string; e
                     <Link className="btn btn-ghost" to={`/clients/logos/${item.id}/edit`}>
                       {t(copy.edit)}
                     </Link>
-                    <ConfirmAction
+                    {can("site.projects.delete") || can("ops.clients.delete") ? (<ConfirmAction
                       label={t(copy.delete)}
                       yesLabel={t(copy.delete)}
                       noLabel={t(copy.cancel)}
                       onConfirm={() => void remove(item.id)}
-                    />
+                    />) : null}
                   </td>
                 </tr>
               ))

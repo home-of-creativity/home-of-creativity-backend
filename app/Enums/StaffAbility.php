@@ -19,6 +19,7 @@ enum StaffAbility: string
     case OpsDrive = 'ops.drive';
     case OpsPhotography = 'ops.photography';
     case OpsPhotographyAll = 'ops.photography_all';
+    case OpsPhotographyCalendars = 'ops.photography_calendars';
     case OpsComplaints = 'ops.complaints';
     case SiteProjects = 'site.projects';
     case SiteCategories = 'site.categories';
@@ -35,28 +36,123 @@ enum StaffAbility: string
     case SocialAccounts = 'social.accounts';
     case SocialLinks = 'social.links';
 
-    /** @return list<string> */
-    public static function crudResources(): array
+    /**
+     * The operations of each feature that is split. A role grants `feature.action`; a
+     * role that still holds the bare feature has every operation of it. Features not
+     * listed here are one switch.
+     *
+     * @return array<string, array<string, array{ar: string, en: string}>>
+     */
+    public static function actionCatalog(): array
     {
+        $view = ['ar' => 'عرض', 'en' => 'View'];
+        $crud = [
+            'view' => $view,
+            'create' => ['ar' => 'إضافة', 'en' => 'Create'],
+            'update' => ['ar' => 'تعديل', 'en' => 'Edit'],
+            'delete' => ['ar' => 'حذف', 'en' => 'Delete'],
+        ];
+        $edit = ['view' => $view, 'update' => ['ar' => 'تعديل', 'en' => 'Edit']];
+
         return [
-            self::OpsRequests->value,
-            self::OpsClients->value,
-            self::OpsReports->value,
-            self::OpsVouchers->value,
-            self::OpsEmployees->value,
-            self::SiteProjects->value,
-            self::SiteCategories->value,
-            self::SiteReels->value,
-            self::SiteArticles->value,
-            self::SitePricing->value,
-            self::SiteContact->value,
+            self::OpsRequests->value => [
+                'view' => $view,
+                'edit' => ['ar' => 'تعديل الطلب', 'en' => 'Edit request'],
+                'quotation' => ['ar' => 'عرض السعر وقرار العميل', 'en' => 'Quotation and client decision'],
+                'payments' => ['ar' => 'تأكيد الدفع وطلب الإيصال', 'en' => 'Confirm payment and ask for receipt'],
+                'work_plan' => ['ar' => 'خطة العمل والتمديد', 'en' => 'Work plan and extension'],
+                'integrations' => ['ar' => 'ClickUp وDrive والذكاء وإعادة المحاولة', 'en' => 'ClickUp, Drive, AI and retries'],
+                'renew' => ['ar' => 'التجديد', 'en' => 'Renew'],
+            ],
+            self::OpsClients->value => $crud + [
+                'odoo' => ['ar' => 'Odoo: مزامنة واستيراد وعروض وفواتير', 'en' => 'Odoo: sync, import, quotations, invoices'],
+            ],
+            self::OpsReports->value => $crud,
+            self::OpsEmployees->value => $crud + [
+                'approve' => ['ar' => 'قبول ورفض الانضمام', 'en' => 'Approve and reject joins'],
+                'sync' => ['ar' => 'مزامنة Odoo', 'en' => 'Odoo sync'],
+            ],
+            self::OpsPayments->value => [
+                'view' => $view,
+                'qr' => ['ar' => 'تغيير رمز QR', 'en' => 'Change QR code'],
+            ],
+            self::OpsFinance->value => [
+                'view' => $view,
+                'expense_create' => ['ar' => 'إضافة مصروف', 'en' => 'Add expense'],
+                'expense_update' => ['ar' => 'تعديل مصروف', 'en' => 'Edit expense'],
+                'expense_delete' => ['ar' => 'حذف مصروف', 'en' => 'Delete expense'],
+                'sync' => ['ar' => 'المزامنة مع Odoo', 'en' => 'Odoo sync'],
+            ],
+            self::OpsVouchers->value => $crud,
+            self::OpsChannels->value => [
+                'view' => $view,
+                'update' => ['ar' => 'تعديل الإعدادات والساعات', 'en' => 'Edit settings and hours'],
+                'whatsapp' => ['ar' => 'ربط وفصل واتساب', 'en' => 'Link and unlink WhatsApp'],
+            ],
+            self::OpsComplaints->value => [
+                'view' => $view,
+                'reply' => ['ar' => 'الرد وفتح التذكرة', 'en' => 'Reply and open ticket'],
+                'status' => ['ar' => 'تغيير الحالة', 'en' => 'Change status'],
+            ],
+            self::SiteProjects->value => $crud,
+            self::SiteCategories->value => $crud,
+            self::SiteReels->value => $crud,
+            self::SiteArticles->value => $crud,
+            self::SitePricing->value => $crud,
+            self::SiteContact->value => $crud,
+            self::SiteLegal->value => $edit,
+            self::SiteProfilePdf->value => $edit,
         ];
     }
 
     /** @return list<string> */
+    public static function actionsOf(string $feature): array
+    {
+        return array_keys(self::actionCatalog()[$feature] ?? []);
+    }
+
+    /** @return list<string> */
+    public static function crudResources(): array
+    {
+        return array_keys(self::actionCatalog());
+    }
+
+    /** HTTP verbs the `crud:` middleware maps to actions. */
     public static function crudActions(): array
     {
         return ['view', 'create', 'update', 'delete'];
+    }
+
+    /**
+     * Roles saved before features were split keep exactly what they could do: the old
+     * view, create, update, and delete grants become the operations that used them.
+     *
+     * @param  list<string>  $abilities
+     * @return list<string>
+     */
+    public static function upgradeLegacy(array $abilities): array
+    {
+        $map = [
+            'ops.requests.create' => ['ops.requests.quotation', 'ops.requests.payments', 'ops.requests.work_plan', 'ops.requests.integrations', 'ops.requests.renew'],
+            'ops.requests.update' => ['ops.requests.edit', 'ops.requests.work_plan'],
+            'ops.requests.delete' => [],
+            'ops.clients.create' => ['ops.clients.create', 'ops.clients.odoo'],
+            'ops.employees.create' => ['ops.employees.create', 'ops.employees.approve', 'ops.employees.sync'],
+        ];
+        $next = [];
+        foreach ($abilities as $ability) {
+            if (! is_string($ability)) {
+                continue;
+            }
+            foreach ($map[$ability] ?? [$ability] as $mapped) {
+                $next[] = $mapped;
+            }
+            if ($ability === self::OpsPhotographyAll->value) {
+                $next[] = self::OpsPhotographyCalendars->value;
+            }
+        }
+
+        return array_values(array_unique($next));
     }
 
     /** @return list<string> */
@@ -91,6 +187,7 @@ enum StaffAbility: string
             self::OpsDrive => ['ar' => 'حساب تخزين Drive', 'en' => 'Drive storage account'],
             self::OpsPhotography => ['ar' => 'التصوير: الطابور ومواعيدي', 'en' => 'Photography: queue and my shoots'],
             self::OpsPhotographyAll => ['ar' => 'التصوير: كل المواعيد والإلغاء وضبط الجلسات', 'en' => 'Photography: all bookings, cancel, session counts'],
+            self::OpsPhotographyCalendars => ['ar' => 'التصوير: إضافة التقاويم وصلاحياتها', 'en' => 'Photography: add calendars and their access'],
             self::OpsComplaints => ['ar' => 'الشكاوى', 'en' => 'Complaints'],
             self::SiteProjects => ['ar' => 'المشاريع', 'en' => 'Projects'],
             self::SiteCategories => ['ar' => 'التصنيفات', 'en' => 'Categories'],
@@ -145,8 +242,9 @@ enum StaffAbility: string
     {
         $values = [];
         foreach (self::cases() as $case) {
-            if (in_array($case->value, self::crudResources(), true)) {
-                foreach (self::crudActions() as $action) {
+            $actions = self::actionsOf($case->value);
+            if ($actions !== []) {
+                foreach ($actions as $action) {
                     $values[] = $case->value.'.'.$action;
                 }
 
@@ -170,8 +268,9 @@ enum StaffAbility: string
             if (! is_string($ability) || $ability === '') {
                 continue;
             }
-            if (in_array($ability, self::crudResources(), true)) {
-                foreach (self::crudActions() as $action) {
+            $actions = self::actionsOf($ability);
+            if ($actions !== []) {
+                foreach ($actions as $action) {
                     $expanded[] = $ability.'.'.$action;
                 }
 

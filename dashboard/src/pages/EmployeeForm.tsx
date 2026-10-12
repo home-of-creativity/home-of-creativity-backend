@@ -160,6 +160,7 @@ export function EmployeeForm({ t }: { locale: Locale; t: (c: { ar: string; en: s
 
   return (
     <FormPage
+      ability={isApprove ? "ops.employees.approve" : editingId ? "ops.employees.update" : "ops.employees.create"}
       eyebrow={t(copy.employees)}
       title={title}
       backTo="/employees"

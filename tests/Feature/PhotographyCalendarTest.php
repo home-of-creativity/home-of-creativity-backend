@@ -60,7 +60,7 @@ class PhotographyCalendarTest extends TestCase
                 ['id' => 'holiday', 'summary' => 'عطلة', 'start' => ['date' => '2026-10-14'], 'end' => ['date' => '2026-10-15']],
             ]]),
         ]);
-        $this->actAs([StaffAbility::OpsPhotography->value, StaffAbility::OpsPhotographyAll->value]);
+        $this->actAs([StaffAbility::OpsPhotography->value, StaffAbility::OpsPhotographyAll->value, StaffAbility::OpsPhotographyCalendars->value]);
 
         $this->getJson('/api/admin/photography/calendar/calendars')
             ->assertOk()
@@ -112,7 +112,7 @@ class PhotographyCalendarTest extends TestCase
                 $this->item('new', $request['start']['dateTime'], $request['end']['dateTime'], ['summary' => $request['summary'], 'recurrence' => $request['recurrence']]),
             ),
         ]);
-        $this->actAs([StaffAbility::OpsPhotography->value, StaffAbility::OpsPhotographyAll->value]);
+        $this->actAs([StaffAbility::OpsPhotography->value, StaffAbility::OpsPhotographyAll->value, StaffAbility::OpsPhotographyCalendars->value]);
 
         $this->postJson('/api/admin/photography/calendar/events', [
             'calendar_id' => self::MAIN,
@@ -148,7 +148,7 @@ class PhotographyCalendarTest extends TestCase
                 'extendedProperties' => ['private' => ['hoc_booking' => '5']],
             ])),
         ]);
-        $this->actAs([StaffAbility::OpsPhotography->value, StaffAbility::OpsPhotographyAll->value]);
+        $this->actAs([StaffAbility::OpsPhotography->value, StaffAbility::OpsPhotographyAll->value, StaffAbility::OpsPhotographyCalendars->value]);
 
         $this->patchJson('/api/admin/photography/calendar/events', [
             'calendar_id' => self::MAIN, 'event_id' => 'shoot', 'start' => '2026-10-13T13:00',
@@ -169,7 +169,7 @@ class PhotographyCalendarTest extends TestCase
             self::API.'/calendars/'.rawurlencode(self::MAIN).'/events/series_20261012T060000Z' => Http::response($instance),
             self::API.'/calendars/'.rawurlencode(self::MAIN).'/events/series*' => fn (Request $request) => Http::response($request->method() === 'PATCH' ? [...$master, ...$request->data()] : $master),
         ]);
-        $this->actAs([StaffAbility::OpsPhotography->value, StaffAbility::OpsPhotographyAll->value]);
+        $this->actAs([StaffAbility::OpsPhotography->value, StaffAbility::OpsPhotographyAll->value, StaffAbility::OpsPhotographyCalendars->value]);
 
         $this->patchJson('/api/admin/photography/calendar/events', [
             'calendar_id' => self::MAIN,
@@ -206,7 +206,7 @@ class PhotographyCalendarTest extends TestCase
             self::API.'/calendars/'.rawurlencode(self::MAIN).'/events/series*' => fn (Request $request) => Http::response($request->method() === 'PATCH' ? [...$master, ...$request->data()] : $master),
             self::API.'/calendars/'.rawurlencode(self::MAIN).'/events?*' => fn (Request $request) => Http::response([...$request->data(), 'id' => 'series2']),
         ]);
-        $this->actAs([StaffAbility::OpsPhotography->value, StaffAbility::OpsPhotographyAll->value]);
+        $this->actAs([StaffAbility::OpsPhotography->value, StaffAbility::OpsPhotographyAll->value, StaffAbility::OpsPhotographyCalendars->value]);
 
         $this->patchJson('/api/admin/photography/calendar/events', [
             'calendar_id' => self::MAIN,
@@ -236,7 +236,7 @@ class PhotographyCalendarTest extends TestCase
             self::API.'/calendars/'.rawurlencode(self::MAIN).'/events/series_20261008T060000Z' => Http::response($instance),
             self::API.'/calendars/'.rawurlencode(self::MAIN).'/events/series*' => Http::response($master),
         ]);
-        $this->actAs([StaffAbility::OpsPhotography->value, StaffAbility::OpsPhotographyAll->value]);
+        $this->actAs([StaffAbility::OpsPhotography->value, StaffAbility::OpsPhotographyAll->value, StaffAbility::OpsPhotographyCalendars->value]);
 
         $this->deleteJson('/api/admin/photography/calendar/events', [
             'calendar_id' => self::MAIN, 'event_id' => 'series_20261008T060000Z', 'scope' => 'following',
@@ -293,7 +293,7 @@ class PhotographyCalendarTest extends TestCase
         $viewers = Role::query()->create(['name' => 'المبيعات', 'abilities' => [StaffAbility::OpsPhotography->value]]);
         $outside = Role::query()->create(['name' => 'التصميم', 'abilities' => [StaffAbility::OpsPhotography->value]]);
 
-        $this->actAs([StaffAbility::OpsPhotography->value, StaffAbility::OpsPhotographyAll->value]);
+        $this->actAs([StaffAbility::OpsPhotography->value, StaffAbility::OpsPhotographyAll->value, StaffAbility::OpsPhotographyCalendars->value]);
         $this->putJson('/api/admin/photography/calendar/permissions', [
             'calendar_id' => $team,
             'roles' => [$editors->id => 'edit', $viewers->id => 'view', $outside->id => 'none'],

@@ -116,6 +116,7 @@ export function ArticleForm({ locale, t }: { locale: Locale; t: (c: { ar: string
 
   return (
     <FormPage
+      ability={editingId ? "site.articles.update" : "site.articles.create"}
       eyebrow={t(copy.articlesTitle)}
       title={editingId ? t(copy.edit) : t(copy.addArticle)}
       backTo="/articles"

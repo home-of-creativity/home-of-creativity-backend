@@ -162,6 +162,7 @@ export function ContactChannelForm({ t }: { locale: Locale; t: (c: { ar: string;
 
   return (
     <FormPage
+      ability={editingId ? "site.contact.update" : "site.contact.create"}
       eyebrow={t(copy.contactTitle)}
       title={title}
       backTo={`/contact?tab=${tab}`}

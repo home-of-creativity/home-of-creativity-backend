@@ -25,6 +25,7 @@ const abilityLabels: Record<StaffModule, { ar: string; en: string }> = {
   "ops.channels": { ar: "قنوات البوت", en: "Bot channels" },
   "ops.photography": { ar: "التصوير: الطابور ومواعيدي", en: "Photography: queue and my shoots" },
   "ops.photography_all": { ar: "التصوير: كل المواعيد والإلغاء وضبط الجلسات", en: "Photography: all bookings, cancel, session counts" },
+  "ops.photography_calendars": { ar: "التصوير: إضافة التقاويم وصلاحياتها", en: "Photography: add calendars and their access" },
   "ops.complaints": { ar: "الشكاوى", en: "Complaints" },
   "ops.report_gemini": { ar: "مساعد التقارير", en: "Report assistant" },
   "ops.report_templates": { ar: "قوالب التقارير", en: "Report templates" },
@@ -55,7 +56,14 @@ const crudLabels: Record<CrudAction, { ar: string; en: string }> = {
 
 const pageAbilities = ["social.content", "social.approve", "social.engage", "social.messages"] as const;
 
-type AbilityModule = { key: StaffModule; group: "ops" | "site" | "social"; actions: CrudAction[]; label_ar?: string; label_en?: string };
+type AbilityModule = {
+  key: StaffModule;
+  group: "ops" | "site" | "social";
+  actions: string[];
+  action_labels?: Record<string, { ar: string; en: string }>;
+  label_ar?: string;
+  label_en?: string;
+};
 
 type Draft = {
   id: number | null;
@@ -63,25 +71,13 @@ type Draft = {
   abilities: string[];
 };
 
-const crudBases = [
-  "ops.requests",
-  "ops.clients",
-  "ops.reports",
-  "ops.employees",
-  "site.projects",
-  "site.categories",
-  "site.reels",
-  "site.articles",
-  "site.pricing",
-  "site.contact",
-];
-
-function expandAbilities(abilities: string[]) {
+/** A role that holds a whole feature shows each of its operations ticked. */
+function expandAbilities(abilities: string[], groups: AbilityModule[]) {
   const next: string[] = [];
   for (const ability of abilities) {
-    if (crudBases.includes(ability)) {
-      for (const action of ["view", "create", "update", "delete"] as const) next.push(`${ability}.${action}`);
-    } else next.push(ability);
+    const item = groups.find((module) => module.key === ability);
+    if (item && item.actions.length) for (const action of item.actions) next.push(`${ability}.${action}`);
+    else next.push(ability);
   }
   return [...new Set(next)];
 }
@@ -155,7 +151,7 @@ export function Permissions({ locale, t }: { locale: Locale; t: (c: { ar: string
     load().catch((err) => setError(err instanceof Error ? err.message : t(copy.saveFailed)));
   }, [t]);
 
-  function toggleAbility(module: string, action?: CrudAction) {
+  function toggleAbility(module: string, action?: string) {
     setDraft((current) => {
       if (!action) {
         const abilities = current.abilities.includes(module)
@@ -165,7 +161,7 @@ export function Permissions({ locale, t }: { locale: Locale; t: (c: { ar: string
       }
 
       if (current.abilities.includes(module)) {
-        const abilities = (["view", "create", "update", "delete"] as const)
+        const abilities = (groups.find((item) => item.key === module)?.actions ?? [])
           .filter((verb) => verb !== action)
           .map((verb) => `${module}.${verb}`);
         return {
@@ -186,7 +182,7 @@ export function Permissions({ locale, t }: { locale: Locale; t: (c: { ar: string
     setBusy(true);
     setError("");
     try {
-      const body = { name: draft.name.trim(), abilities: expandAbilities(draft.abilities) as StaffAbility[] };
+      const body = { name: draft.name.trim(), abilities: expandAbilities(draft.abilities, groups) as StaffAbility[] };
       if (draft.id) await api.updateRole(draft.id, body);
       else await api.createRole(body);
       await load();
@@ -354,7 +350,7 @@ export function Permissions({ locale, t }: { locale: Locale; t: (c: { ar: string
                               checked={holds(draft.abilities, item.key, action)}
                               onChange={() => toggleAbility(item.key, action)}
                             />
-                            {t(crudLabels[action])}
+                            {item.action_labels?.[action] ? t(item.action_labels[action]) : crudLabels[action as CrudAction] ? t(crudLabels[action as CrudAction]) : action}
                           </label>
                         ))}
                       </div>
@@ -370,7 +366,7 @@ export function Permissions({ locale, t }: { locale: Locale; t: (c: { ar: string
           <ul className="plain-list">
             {roles.map((role) => (
               <li key={role.id}>
-                <button type="button" className="btn btn-ghost" onClick={() => setDraft({ id: role.id, name: role.name, abilities: expandAbilities(role.abilities) })}>
+                <button type="button" className="btn btn-ghost" onClick={() => setDraft({ id: role.id, name: role.name, abilities: expandAbilities(role.abilities, groups) })}>
                   {role.name}
                 </button>
                 <small> · {role.users_count ?? 0}</small>

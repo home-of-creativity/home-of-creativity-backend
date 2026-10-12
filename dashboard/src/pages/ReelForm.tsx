@@ -143,6 +143,7 @@ export function ReelForm({ locale, t }: { locale: Locale; t: (c: { ar: string; e
 
   return (
     <FormPage
+      ability={editingId ? "site.reels.update" : "site.reels.create"}
       eyebrow={t(copy.reelsTitle)}
       title={editingId ? t(copy.edit) : t(copy.addReel)}
       backTo="/reels"

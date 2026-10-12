@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useCan } from "../../lib/useCan";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { ConfirmAction } from "../../components/ConfirmAction";
@@ -10,6 +11,7 @@ import { copy, type Locale } from "../../i18n";
 import { categoryLabel } from "./utils";
 
 export function PortfolioProjects({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
+  const can = useCan();
   const [projects, setProjects] = useState<PortfolioProject[]>([]);
   const [, setCategories] = useState<PortfolioCategory[]>([]);
   const [meta, setMeta] = useState<PageMeta | null>(null);
@@ -79,12 +81,12 @@ export function PortfolioProjects({ locale, t }: { locale: Locale; t: (c: { ar: 
         lede={t(copy.projectsLede)}
         actions={
           <>
-            <Link className="btn btn-primary" to="/projects/new">
+            {can("site.projects.create") ? (<Link className="btn btn-primary" to="/projects/new">
               {t(copy.addPortfolioProject)}
-            </Link>
-            <button type="button" className="btn btn-ghost" onClick={() => void removeAll()} disabled={projects.length === 0}>
+            </Link>) : null}
+            {can("site.projects.delete") ? (<button type="button" className="btn btn-ghost" onClick={() => void removeAll()} disabled={projects.length === 0}>
               {t(copy.deleteAll)}
-            </button>
+            </button>) : null}
           </>
         }
       />
@@ -126,12 +128,12 @@ export function PortfolioProjects({ locale, t }: { locale: Locale; t: (c: { ar: 
                     <Link className="btn btn-ghost" to={`/projects/${item.id}/edit`}>
                       {t(copy.edit)}
                     </Link>
-                    <ConfirmAction
+                    {can("site.projects.delete") ? (<ConfirmAction
                       label={t(copy.delete)}
                       yesLabel={t(copy.delete)}
                       noLabel={t(copy.cancel)}
                       onConfirm={() => void remove(item.id)}
-                    />
+                    />) : null}
                   </td>
                 </tr>
               ))

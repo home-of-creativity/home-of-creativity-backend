@@ -185,9 +185,10 @@ class PhotographyCalendarController extends Controller
         ];
     }
 
+    /** Adding calendars and setting which roles reach them is its own operation. */
     private function canManage(User $user): bool
     {
-        return $user->canAbility(StaffAbility::OpsPhotographyAll);
+        return $user->canAbility(StaffAbility::OpsPhotographyCalendars);
     }
 
     private function manager(Request $request): User

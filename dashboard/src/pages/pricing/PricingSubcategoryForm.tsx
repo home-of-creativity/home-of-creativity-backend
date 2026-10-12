@@ -150,6 +150,7 @@ export function PricingSubcategoryForm({ locale, t }: { locale: Locale; t: (c: {
 
   return (
     <FormPage
+      ability={editingId ? "site.pricing.update" : "site.pricing.create"}
       eyebrow={t(copy.pricingTitle)}
       title={editingId ? t(copy.edit) : t(copy.addPricingSubcategory)}
       backTo="/pricing?tab=subcategories"

@@ -3,12 +3,14 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { api, type ClientChannels, type WhatsAppWebStatus } from "../api";
 import { ConfirmAction } from "../components/ConfirmAction";
+import { useCan } from "../lib/useCan";
 import { PageHeader } from "../components/PageHeader";
 import { copy, type Locale } from "../i18n";
 
 const defaults: ClientChannels = { telegram_enabled: true, whatsapp_enabled: true };
 
 export function ClientChannelsPage({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
+  const can = useCan();
   const [channels, setChannels] = useState<ClientChannels>(defaults);
   const [link, setLink] = useState<WhatsAppWebStatus | null>(null);
   const [adminLink, setAdminLink] = useState<WhatsAppWebStatus | null>(null);
@@ -177,6 +179,7 @@ export function ClientChannelsPage({ locale, t }: { locale: Locale; t: (c: { ar:
             title={t(copy.channelsTelegram)}
             help={t(copy.channelsTelegramHelp)}
             running={channels.telegram_enabled}
+            readOnly={!can("ops.channels.update")}
             busy={busy === "telegram"}
             t={t}
             onPause={() => void save({ ...channels, telegram_enabled: false }, "telegram")}
@@ -188,6 +191,7 @@ export function ClientChannelsPage({ locale, t }: { locale: Locale; t: (c: { ar:
             help={t(channels.whatsapp_locked ? copy.channelsWhatsappLockedHelp : copy.channelsWhatsappHelp)}
             running={channels.whatsapp_enabled}
             locked={channels.whatsapp_locked === true}
+            readOnly={!can("ops.channels.update")}
             busy={busy === "whatsapp"}
             t={t}
             onPause={() => void save({ ...channels, whatsapp_enabled: false }, "whatsapp")}
@@ -203,14 +207,16 @@ export function ClientChannelsPage({ locale, t }: { locale: Locale; t: (c: { ar:
                   {link.phone ? <p className="channels-phone" dir="ltr">+{link.phone}</p> : null}
                   <p className="muted">{t(copy.channelsWhatsappLinked)}</p>
                 </div>
-                <ConfirmAction
-                  label={t(copy.channelsWhatsappChange)}
-                  confirmLabel={t(copy.channelsWhatsappChangeConfirm)}
-                  yesLabel={t(copy.channelsWhatsappChange)}
-                  noLabel={t(copy.cancel)}
-                  disabled={unlinking}
-                  onConfirm={() => void changeNumber()}
-                />
+                {can("ops.channels.whatsapp") ? (
+                  <ConfirmAction
+                    label={t(copy.channelsWhatsappChange)}
+                    confirmLabel={t(copy.channelsWhatsappChangeConfirm)}
+                    yesLabel={t(copy.channelsWhatsappChange)}
+                    noLabel={t(copy.cancel)}
+                    disabled={unlinking}
+                    onConfirm={() => void changeNumber()}
+                  />
+                ) : null}
               </div>
             ) : link && !link.reachable ? (
               <p className="error">{t(copy.channelsWhatsappOffline)}</p>
@@ -233,14 +239,16 @@ export function ClientChannelsPage({ locale, t }: { locale: Locale; t: (c: { ar:
                   {adminLink.phone ? <p className="channels-phone" dir="ltr">+{adminLink.phone}</p> : null}
                   <p className="muted">{t(copy.channelsAdminWhatsappLinked)}</p>
                 </div>
-                <ConfirmAction
-                  label={t(copy.channelsWhatsappChange)}
-                  confirmLabel={t(copy.channelsWhatsappChangeConfirm)}
-                  yesLabel={t(copy.channelsWhatsappChange)}
-                  noLabel={t(copy.cancel)}
-                  disabled={unlinkingAdmin}
-                  onConfirm={() => void changeAdminNumber()}
-                />
+                {can("ops.channels.whatsapp") ? (
+                  <ConfirmAction
+                    label={t(copy.channelsWhatsappChange)}
+                    confirmLabel={t(copy.channelsWhatsappChangeConfirm)}
+                    yesLabel={t(copy.channelsWhatsappChange)}
+                    noLabel={t(copy.cancel)}
+                    disabled={unlinkingAdmin}
+                    onConfirm={() => void changeAdminNumber()}
+                  />
+                ) : null}
               </div>
             ) : adminLink && !adminLink.reachable ? (
               <p className="error">{t(copy.channelsWhatsappOffline)}</p>
@@ -313,11 +321,13 @@ export function ClientChannelsPage({ locale, t }: { locale: Locale; t: (c: { ar:
             </legend>
             <HolidayMonth locale={locale} dates={holidays} onToggle={toggleHoliday} t={t} />
           </fieldset>
-          <div className="channels-save">
-            <button className="btn btn-teal" type="submit">
-              {t(copy.channelsSaveCalendar)}
-            </button>
-          </div>
+          {can("ops.channels.update") ? (
+            <div className="channels-save">
+              <button className="btn btn-teal" type="submit">
+                {t(copy.channelsSaveCalendar)}
+              </button>
+            </div>
+          ) : null}
         </form>
       </div>
     </>
@@ -394,6 +404,7 @@ function ChannelCard({
   help,
   running,
   locked = false,
+  readOnly = false,
   busy,
   t,
   onPause,
@@ -404,6 +415,7 @@ function ChannelCard({
   help: string;
   running: boolean;
   locked?: boolean;
+  readOnly?: boolean;
   busy: boolean;
   t: (c: { ar: string; en: string }) => string;
   onPause: () => void;
@@ -424,7 +436,7 @@ function ChannelCard({
         </div>
       </div>
       <p className="muted">{help}</p>
-      {locked ? null : running ? (
+      {locked || readOnly ? null : running ? (
         <ConfirmAction
           label={t(copy.channelsPause)}
           confirmLabel={t(copy.channelsPauseConfirm)}

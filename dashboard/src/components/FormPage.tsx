@@ -1,6 +1,7 @@
 import { ArrowLeft } from "lucide-react";
 import type { FormEvent, ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useCan } from "../lib/useCan";
 
 export function FormPage({
   eyebrow,
@@ -16,6 +17,7 @@ export function FormPage({
   children,
   wide,
   extraActions,
+  ability,
 }: {
   eyebrow?: string;
   title: string;
@@ -30,11 +32,15 @@ export function FormPage({
   children: ReactNode;
   wide?: boolean;
   extraActions?: ReactNode;
+  /** The operation this form saves with; any one of a list is enough. Without it the form is read only. */
+  ability?: string | string[];
 }) {
   const navigate = useNavigate();
+  const can = useCan();
+  const allowed = ability === undefined || (Array.isArray(ability) ? ability : [ability]).some((item) => can(item));
 
   return (
-    <form className={wide ? "form-page is-wide" : "form-page"} onSubmit={onSubmit}>
+    <form className={wide ? "form-page is-wide" : "form-page"} onSubmit={(event) => (allowed ? onSubmit(event) : event.preventDefault())}>
       <header className="form-page-head">
         <div>
           <Link className="back-link" to={backTo}>
@@ -47,22 +53,25 @@ export function FormPage({
           <h1 className="page-title">{title}</h1>
         </div>
         <div className="form-page-actions">
-          {extraActions}
+          {allowed ? extraActions : null}
           <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => navigate(backTo)}>
             {cancelLabel}
           </button>
-          <button type="submit" className="btn btn-primary" disabled={busy}>
-            {submitLabel}
-          </button>
+          {allowed ? (
+            <button type="submit" className="btn btn-primary" disabled={busy}>
+              {submitLabel}
+            </button>
+          ) : null}
         </div>
       </header>
+      {!allowed ? <p className="notice" role="status">عرض فقط: لا تملك صلاحية الحفظ هنا. / View only: you cannot save here.</p> : null}
       {notice ? <p className="notice">{notice}</p> : null}
       {error ? (
         <p className="error" role="alert">
           {error}
         </p>
       ) : null}
-      <div className="form-page-body">{children}</div>
+      <fieldset className="form-page-body form-page-fieldset" disabled={!allowed}>{children}</fieldset>
     </form>
   );
 }

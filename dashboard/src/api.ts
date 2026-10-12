@@ -33,6 +33,7 @@ export type StaffModule =
   | "ops.channels"
   | "ops.photography"
   | "ops.photography_all"
+  | "ops.photography_calendars"
   | "ops.complaints"
   | "ops.report_gemini"
   | "ops.report_templates"
@@ -53,16 +54,19 @@ export type StaffModule =
   | "social.accounts"
   | "social.links";
 
-export type StaffAbility = StaffModule | `${Extract<StaffModule, "ops.requests" | "ops.clients" | "ops.reports" | "ops.vouchers" | "ops.employees" | "site.projects" | "site.categories" | "site.reels" | "site.articles" | "site.pricing" | "site.contact">}.${CrudAction}`;
+/** A whole feature, or one of its operations ("ops.finance.expense_create"). */
+export type StaffAbility = StaffModule | `${StaffModule}.${string}`;
 
-const crudActions: CrudAction[] = ["view", "create", "update", "delete"];
-
+/**
+ * `feature.action` is granted by that operation or by the whole feature. A bare feature
+ * asks whether the user may open its page: any one of its operations is enough.
+ */
 export function canAbility(user: User | null | undefined, ability: string) {
-  const list = user?.abilities ?? [];
-  if (list.includes(ability as StaffAbility)) return true;
-  const verb = ability.match(/\.(view|create|update|delete)$/);
-  if (verb) return list.includes(ability.slice(0, -verb[0].length) as StaffAbility);
-  return crudActions.some((action) => list.includes(`${ability}.${action}` as StaffAbility));
+  const list = (user?.abilities ?? []) as string[];
+  if (list.includes(ability)) return true;
+  const dot = ability.lastIndexOf(".");
+  if (dot > 0 && list.includes(ability.slice(0, dot)) && ability.split(".").length > 2) return true;
+  return list.some((item) => item.startsWith(`${ability}.`));
 }
 
 export type User = {

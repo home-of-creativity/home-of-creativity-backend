@@ -168,7 +168,8 @@ class StaffAccessTest extends TestCase
         $this->assertContains('ops.clients.view', $role->abilities);
         $this->assertContains('ops.clients.delete', $role->abilities);
         $this->assertNotContains('ops.clients', $role->abilities);
-        $this->assertContains('ops.payments', $role->abilities);
+        $this->assertContains('ops.payments.view', $role->abilities);
+        $this->assertContains('ops.payments.qr', $role->abilities);
     }
 
     public function test_feature_abilities_appear_on_the_permissions_catalog(): void
@@ -183,7 +184,6 @@ class StaffAccessTest extends TestCase
         );
 
         foreach ([
-            StaffAbility::OpsFinance,
             StaffAbility::OpsReportGemini,
             StaffAbility::OpsReportTemplates,
             StaffAbility::OpsReportMedia,
@@ -194,6 +194,47 @@ class StaffAccessTest extends TestCase
             $this->assertSame($ability->labels()['ar'], $row['label_ar']);
             $this->assertSame([], $row['actions']);
         }
+
+        $finance = $catalog->firstWhere('key', StaffAbility::OpsFinance->value);
+        $this->assertSame(['view', 'expense_create', 'expense_update', 'expense_delete', 'sync'], $finance['actions']);
+        $this->assertSame('إضافة مصروف', $finance['action_labels']['expense_create']['ar']);
+        $requests = $catalog->firstWhere('key', StaffAbility::OpsRequests->value);
+        $this->assertSame(['view', 'edit', 'quotation', 'payments', 'work_plan', 'integrations', 'renew'], $requests['actions']);
+    }
+
+    public function test_each_operation_is_its_own_permission(): void
+    {
+        $role = Role::query()->create([
+            'name' => 'مالية جزئية',
+            'abilities' => ['ops.finance.view', 'ops.finance.expense_create', 'ops.requests.view', 'ops.requests.quotation', 'ops.complaints.view'],
+        ]);
+        Sanctum::actingAs(User::factory()->create(['role_id' => $role->id]));
+        \Illuminate\Support\Facades\Http::fake();
+        $expense = \App\Models\OpsExpense::query()->create(['amount' => 10, 'category' => 'أخرى', 'spent_at' => now()]);
+
+        $this->getJson('/api/admin/finance')->assertOk();
+        $this->postJson('/api/admin/finance/expenses', ['amount' => 5, 'category' => 'أخرى'])->assertCreated();
+        $this->putJson("/api/admin/finance/expenses/{$expense->id}", ['amount' => 5, 'category' => 'أخرى', 'spent_at' => '2026-10-01'])->assertForbidden();
+        $this->deleteJson("/api/admin/finance/expenses/{$expense->id}")->assertForbidden();
+        $this->postJson('/api/admin/finance/sync')->assertForbidden();
+
+        $request = \App\Models\ServiceRequest::factory()->create();
+        $this->getJson('/api/admin/requests')->assertOk();
+        $this->postJson("/api/admin/requests/{$request->id}/confirm-payment")->assertForbidden();
+        $this->postJson("/api/admin/requests/{$request->id}/renew")->assertForbidden();
+
+        $complaint = \App\Models\Complaint::query()->create(['client_id' => $request->client_id, 'title' => 'ت', 'description' => 'و', 'status' => 'open']);
+        $this->getJson('/api/admin/complaints')->assertOk();
+        $this->postJson("/api/admin/complaints/{$complaint->id}/replies", ['body' => 'x', 'channel' => 'note'])->assertForbidden();
+        $this->patchJson("/api/admin/complaints/{$complaint->id}", ['status' => 'resolved'])->assertForbidden();
+    }
+
+    public function test_old_role_grants_become_the_operations_they_covered(): void
+    {
+        $this->assertSame(
+            ['ops.requests.view', 'ops.requests.quotation', 'ops.requests.payments', 'ops.requests.work_plan', 'ops.requests.integrations', 'ops.requests.renew', 'ops.requests.edit', 'ops.clients.create', 'ops.clients.odoo', 'ops.photography_all', 'ops.photography_calendars'],
+            StaffAbility::upgradeLegacy(['ops.requests.view', 'ops.requests.create', 'ops.requests.update', 'ops.clients.create', 'ops.photography_all']),
+        );
     }
 
     public function test_report_editor_keeps_feature_abilities_and_payments_keep_finance(): void

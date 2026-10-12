@@ -81,6 +81,7 @@ export function PortfolioCategoryForm({ t }: { locale: Locale; t: (c: { ar: stri
 
   return (
     <FormPage
+      ability={editingId ? "site.categories.update" : "site.categories.create"}
       eyebrow={t(copy.portfolioTabCategories)}
       title={editingId ? t(copy.edit) : t(copy.addPortfolioCategory)}
       backTo="/categories"

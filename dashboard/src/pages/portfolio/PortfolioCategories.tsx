@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useCan } from "../../lib/useCan";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { ConfirmAction } from "../../components/ConfirmAction";
@@ -15,6 +16,7 @@ export function PortfolioCategories({
   locale: Locale;
   t: (c: { ar: string; en: string }) => string;
 }) {
+  const can = useCan();
   const [categories, setCategories] = useState<PortfolioCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -81,12 +83,12 @@ export function PortfolioCategories({
         lede={t(copy.categoriesLede)}
         actions={
           <>
-            <Link className="btn btn-primary" to="/categories/new">
+            {can("site.categories.create") ? (<Link className="btn btn-primary" to="/categories/new">
               {t(copy.addPortfolioCategory)}
-            </Link>
-            <button type="button" className="btn btn-ghost" onClick={() => void removeAll()} disabled={categories.length === 0}>
+            </Link>) : null}
+            {can("site.categories.delete") ? (<button type="button" className="btn btn-ghost" onClick={() => void removeAll()} disabled={categories.length === 0}>
               {t(copy.deleteAll)}
-            </button>
+            </button>) : null}
           </>
         }
       />
@@ -125,7 +127,7 @@ export function PortfolioCategories({
                         type="button"
                         className="btn btn-order"
                         aria-label={t(copy.moveUp)}
-                        disabled={index === 0 || movingId === item.id}
+                        disabled={!(can("site.categories.update")) || index === 0 || movingId === item.id}
                         onClick={() => void move(item.id, "up")}
                       >
                         ↑
@@ -134,7 +136,7 @@ export function PortfolioCategories({
                         type="button"
                         className="btn btn-order"
                         aria-label={t(copy.moveDown)}
-                        disabled={index === categories.length - 1 || movingId === item.id}
+                        disabled={!(can("site.categories.update")) || index === categories.length - 1 || movingId === item.id}
                         onClick={() => void move(item.id, "down")}
                       >
                         ↓
@@ -146,12 +148,12 @@ export function PortfolioCategories({
                     <Link className="btn btn-ghost" to={`/categories/${item.id}/edit`}>
                       {t(copy.edit)}
                     </Link>
-                    <ConfirmAction
+                    {can("site.categories.delete") ? (<ConfirmAction
                       label={t(copy.delete)}
                       yesLabel={t(copy.delete)}
                       noLabel={t(copy.cancel)}
                       onConfirm={() => void remove(item.id)}
-                    />
+                    />) : null}
                   </td>
                 </tr>
               ))

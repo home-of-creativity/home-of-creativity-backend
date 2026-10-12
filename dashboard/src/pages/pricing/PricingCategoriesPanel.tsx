@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useCan } from "../../lib/useCan";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { ConfirmAction } from "../../components/ConfirmAction";
@@ -14,6 +15,7 @@ export function PricingCategoriesPanel({
   locale: Locale;
   t: (c: { ar: string; en: string }) => string;
 }) {
+  const can = useCan();
   const [items, setItems] = useState<PricingCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -75,12 +77,12 @@ export function PricingCategoriesPanel({
   return (
     <>
       <div className="toolbar">
-        <Link className="btn btn-primary" to="/pricing/categories/new">
+        {can("site.pricing.create") ? (<Link className="btn btn-primary" to="/pricing/categories/new">
           {t(copy.addPricingCategory)}
-        </Link>
-        <button type="button" className="btn btn-ghost" onClick={() => void removeAll()} disabled={items.length === 0}>
+        </Link>) : null}
+        {can("site.pricing.delete") ? (<button type="button" className="btn btn-ghost" onClick={() => void removeAll()} disabled={items.length === 0}>
           {t(copy.deleteAll)}
-        </button>
+        </button>) : null}
       </div>
 
       {notice ? <p className="muted">{notice}</p> : null}
@@ -122,14 +124,14 @@ export function PricingCategoriesPanel({
                   </td>
                   <td>
                     <div className="order-actions">
-                      <button type="button" className="btn btn-order" aria-label={t(copy.moveUp)} disabled={index === 0 || movingId === item.id} onClick={() => void move(item.id, "up")}>↑</button>
-                      <button type="button" className="btn btn-order" aria-label={t(copy.moveDown)} disabled={index === items.length - 1 || movingId === item.id} onClick={() => void move(item.id, "down")}>↓</button>
+                      <button type="button" className="btn btn-order" aria-label={t(copy.moveUp)} disabled={!(can("site.pricing.update")) || index === 0 || movingId === item.id} onClick={() => void move(item.id, "up")}>↑</button>
+                      <button type="button" className="btn btn-order" aria-label={t(copy.moveDown)} disabled={!(can("site.pricing.update")) || index === items.length - 1 || movingId === item.id} onClick={() => void move(item.id, "down")}>↓</button>
                     </div>
                   </td>
                   <td>{item.is_published ? t(copy.published) : t(copy.inactive)}</td>
                   <td className="actions-cell">
                     <Link className="btn btn-ghost" to={`/pricing/categories/${item.id}/edit`}>{t(copy.edit)}</Link>
-                    <ConfirmAction label={t(copy.delete)} yesLabel={t(copy.delete)} noLabel={t(copy.cancel)} onConfirm={() => void remove(item.id)} />
+                    {can("site.pricing.delete") ? (<ConfirmAction label={t(copy.delete)} yesLabel={t(copy.delete)} noLabel={t(copy.cancel)} onConfirm={() => void remove(item.id)} />) : null}
                   </td>
                 </tr>
               ))

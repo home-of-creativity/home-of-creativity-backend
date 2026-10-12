@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useCan } from "../lib/useCan";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { ConfirmAction } from "../components/ConfirmAction";
@@ -9,6 +10,7 @@ import { api, type LandingReel, type PageMeta } from "../api";
 import { copy, type Locale } from "../i18n";
 
 export function LandingReels({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
+  const can = useCan();
   const [reels, setReels] = useState<LandingReel[]>([]);
   const [meta, setMeta] = useState<PageMeta | null>(null);
   const [page, setPage] = useState(1);
@@ -83,12 +85,12 @@ export function LandingReels({ locale, t }: { locale: Locale; t: (c: { ar: strin
         lede={t(copy.reelsLede)}
         actions={
           <>
-            <Link className="btn btn-primary" to="/reels/new">
+            {can("site.reels.create") ? (<Link className="btn btn-primary" to="/reels/new">
               {t(copy.addReel)}
-            </Link>
-            <button type="button" className="btn btn-ghost" onClick={() => void removeAll()} disabled={reels.length === 0}>
+            </Link>) : null}
+            {can("site.reels.delete") ? (<button type="button" className="btn btn-ghost" onClick={() => void removeAll()} disabled={reels.length === 0}>
               {t(copy.deleteAll)}
-            </button>
+            </button>) : null}
           </>
         }
       />
@@ -138,7 +140,7 @@ export function LandingReels({ locale, t }: { locale: Locale; t: (c: { ar: strin
                     <Link className="btn btn-ghost" to={`/reels/${item.id}/edit`}>
                       {t(copy.edit)}
                     </Link>
-                    {item.poster_url ? (
+                    {item.poster_url && can("site.reels.update") ? (
                       <ConfirmAction
                         label={t(copy.removeCoverImage)}
                         yesLabel={t(copy.delete)}
@@ -146,12 +148,12 @@ export function LandingReels({ locale, t }: { locale: Locale; t: (c: { ar: strin
                         onConfirm={() => void removePoster(item.id)}
                       />
                     ) : null}
-                    <ConfirmAction
+                    {can("site.reels.delete") ? (<ConfirmAction
                       label={t(copy.delete)}
                       yesLabel={t(copy.delete)}
                       noLabel={t(copy.cancel)}
                       onConfirm={() => void remove(item.id)}
-                    />
+                    />) : null}
                   </td>
                 </tr>
               ))

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useCan } from "../lib/useCan";
 import { Search } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
 import { ExternalLink, FileText, FolderOpen, Plus } from "lucide-react";
@@ -16,6 +17,7 @@ function when(value: string | null | undefined, locale: Locale) {
 }
 
 export function ClientReports({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
+  const can = useCan();
   const params = useParams();
   const clientId = Number(params.id);
   const [client, setClient] = useState<Client | null>(null);
@@ -71,7 +73,7 @@ export function ClientReports({ locale, t }: { locale: Locale; t: (c: { ar: stri
             <button type="button" className="btn btn-ghost" onClick={() => setFolderOpen((open) => !open)}>
               <FolderOpen size={16} aria-hidden="true" />{t(copy.driveFolder)}
             </button>
-            <Link className="btn btn-primary" to={newReport}><Plus size={16} aria-hidden="true" />{t(copy.addReport)}</Link>
+            {can("ops.reports.create") ? (<Link className="btn btn-primary" to={newReport}><Plus size={16} aria-hidden="true" />{t(copy.addReport)}</Link>) : null}
           </>
         )}
       />
@@ -94,7 +96,7 @@ export function ClientReports({ locale, t }: { locale: Locale; t: (c: { ar: stri
           <FileText size={30} aria-hidden="true" />
           <h2>{t(copy.reportEmptyTitle)}</h2>
           <p>{t(copy.reportEmptyLede)}</p>
-          <Link className="btn btn-primary" to={newReport}><Plus size={16} aria-hidden="true" />{t(copy.addReport)}</Link>
+          {can("ops.reports.create") ? (<Link className="btn btn-primary" to={newReport}><Plus size={16} aria-hidden="true" />{t(copy.addReport)}</Link>) : null}
         </div>
       ) : (
         <>
@@ -159,14 +161,14 @@ export function ClientReports({ locale, t }: { locale: Locale; t: (c: { ar: stri
                     </td>
                     <td className="row-actions-cell">
                       <Link className="btn btn-ghost btn-sm" to={`/reports/${report.id}/edit`}>{t(copy.reportOpen)}</Link>
-                      <ConfirmAction
+                      {can("ops.reports.delete") ? (<ConfirmAction
                         label={t(copy.delete)}
                         confirmLabel={t(copy.confirmDelete)}
                         yesLabel={t(copy.delete)}
                         noLabel={t(copy.cancel)}
                         className="btn btn-ghost btn-sm btn-danger"
                         onConfirm={() => void remove(report.id)}
-                      />
+                      />) : null}
                     </td>
                   </tr>
                 );

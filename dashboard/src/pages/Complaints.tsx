@@ -1,4 +1,5 @@
 import { CircleCheck, Mail, MessageSquare, Search, Send, StickyNote, Ticket, TriangleAlert, X } from "lucide-react";
+import { useCan } from "../lib/useCan";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { api, type ComplaintDetail, type ComplaintRow, type ComplaintStatus } from "../api";
@@ -181,6 +182,9 @@ function ComplaintTicket({
 }) {
   const ar = locale === "ar";
   const [row, setRow] = useState<ComplaintDetail | null>(null);
+  const can = useCan();
+  const canReply = can("ops.complaints.reply");
+  const canStatus = can("ops.complaints.status");
   const [body, setBody] = useState("");
   const [channel, setChannel] = useState<Channel>("bot");
   const [resolve, setResolve] = useState(false);
@@ -305,14 +309,14 @@ function ComplaintTicket({
                   {row.channels.email ? <a href={`mailto:${row.channels.email}`} dir="ltr">{row.channels.email}</a> : null}
                 </div>
                 <div className="complaint-actions">
-                  {!row.ticket_number ? (
+                  {!row.ticket_number && canReply ? (
                     <button type="button" className="btn btn-primary btn-sm" disabled={busy !== ""} onClick={() => void run("ticket", () => api.openComplaintTicket(id))}>
                       <Ticket size={14} aria-hidden="true" /> {ar ? "فتح تذكرة" : "Open ticket"}
                     </button>
                   ) : null}
                   <label className="field-label">
                     {ar ? "الحالة" : "Status"}
-                    <select className="field" value={status} disabled={busy !== ""} onChange={(event) => void run("status", () => api.updateComplaint(id, event.target.value as ComplaintStatus))}>
+                    <select className="field" value={status} disabled={busy !== "" || !canStatus} onChange={(event) => void run("status", () => api.updateComplaint(id, event.target.value as ComplaintStatus))}>
                       {(["open", "in_progress", "resolved"] as ComplaintStatus[]).map((item) => (
                         <option key={item} value={item}>{STATUS_COPY[item][locale]}</option>
                       ))}
@@ -352,7 +356,7 @@ function ComplaintTicket({
                   <p className="muted complaint-empty">{ar ? "لا ردود بعد. أول رد يفتح تذكرة ويصل العميل." : "No replies yet. The first reply opens a ticket and reaches the client."}</p>
                 )}
 
-                <div className="complaint-reply">
+                {canReply ? <div className="complaint-reply">
                   <div className="gcal-segment complaint-channels" role="radiogroup" aria-label={ar ? "قناة الرد" : "Reply channel"}>
                     <button type="button" role="radio" aria-checked={channel === "bot"} className={channel === "bot" ? "is-active" : ""} disabled={!row.channels.bot} onClick={() => setChannel("bot")} title={row.channels.bot ? undefined : ar ? "العميل لا يصله البوت الآن" : "The bot cannot reach the client now"}>
                       <Send size={14} aria-hidden="true" /> {botLabel}
@@ -376,10 +380,10 @@ function ComplaintTicket({
                   />
                   {channel === "bot" ? <small className="muted">{ar ? "ما يكتبه العميل على البوت خلال 24 ساعة يُضاف هنا تلقائياً، وبعدها بزر «رد على التذكرة»." : "What the client writes on the bot within 24 hours lands here; after that, through the «reply» button."}</small> : null}
                   {channel === "email" ? <small className="muted">{ar ? "رد العميل على الإيميل يظهر هنا خلال دقيقتين." : "The client's email answer appears here within two minutes."}</small> : null}
-                </div>
+                </div> : <p className="muted">{ar ? "عرض فقط: لا تملك صلاحية الرد على الشكاوى." : "View only: you cannot reply to complaints."}</p>}
               </div>
             </div>
-            <div className="form-dialog-actions">
+            {canReply ? <div className="form-dialog-actions">
               <button type="submit" className="btn btn-primary" disabled={busy !== "" || !body.trim()} aria-busy={busy === "reply"}>
                 <Send size={15} aria-hidden="true" /> {channel === "note" ? (ar ? "حفظ الملاحظة" : "Save note") : ar ? "إرسال الرد" : "Send reply"}
               </button>
@@ -387,7 +391,7 @@ function ComplaintTicket({
                 <input type="checkbox" checked={resolve} onChange={(event) => setResolve(event.target.checked)} />
                 <CircleCheck size={15} aria-hidden="true" /> {ar ? "أغلق التذكرة كمحلولة" : "Close the ticket as resolved"}
               </label>
-            </div>
+            </div> : null}
           </form>
         )}
       </div>

@@ -121,6 +121,7 @@ export function PricingCategoryForm({ t }: { locale: Locale; t: (c: { ar: string
 
   return (
     <FormPage
+      ability={editingId ? "site.pricing.update" : "site.pricing.create"}
       eyebrow={t(copy.pricingTitle)}
       title={editingId ? t(copy.edit) : t(copy.addPricingCategory)}
       backTo="/pricing"

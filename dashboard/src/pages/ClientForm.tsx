@@ -92,6 +92,7 @@ export function ClientForm({ t }: { locale: Locale; t: (c: { ar: string; en: str
 
   return (
     <FormPage
+      ability={editingId ? "ops.clients.update" : "ops.clients.create"}
       eyebrow={t(copy.clients)}
       title={editingId ? t(copy.editClient) : t(copy.addClient)}
       backTo="/clients"

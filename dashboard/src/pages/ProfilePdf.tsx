@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useCan } from "../lib/useCan";
 import { toast } from "sonner";
 import { api, type ProfilePdf as ProfilePdfPayload } from "../api";
 import { ConfirmAction } from "../components/ConfirmAction";
@@ -14,6 +15,7 @@ function previewSrc(pdf: ProfilePdfPayload | null) {
 }
 
 export function ProfilePdf({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
+  const can = useCan();
   const [pdf, setPdf] = useState<ProfilePdfPayload | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -82,7 +84,7 @@ export function ProfilePdf({ locale, t }: { locale: Locale; t: (c: { ar: string;
             </a>
           ) : null}
         </section>
-        <section className="card stack pdf-manage">
+        {can("site.profile_pdf.update") ? <section className="card stack pdf-manage">
           <h2 className="form-title">{t(copy.profilePdfManage)}</h2>
           <p className="muted">{t(copy.profilePdfHelp)}</p>
           {error ? <p className="error">{error}</p> : null}
@@ -103,7 +105,7 @@ export function ProfilePdf({ locale, t }: { locale: Locale; t: (c: { ar: string;
               onConfirm={() => void remove()}
             />
           ) : null}
-        </section>
+        </section> : null}
       </div>
     </>
   );

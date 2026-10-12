@@ -133,7 +133,7 @@ class StaffAccessController extends Controller
     }
 
     /**
-     * @return list<array{key: string, group: string, actions: list<string>}>
+     * @return list<array{key: string, group: string, actions: list<string>, action_labels: object}>
      */
     private function catalog(): array
     {
@@ -151,9 +151,8 @@ class StaffAccessController extends Controller
                 'group' => $group,
                 'label_ar' => $labels['ar'],
                 'label_en' => $labels['en'],
-                'actions' => in_array($ability->value, StaffAbility::crudResources(), true)
-                    ? StaffAbility::crudActions()
-                    : [],
+                'actions' => StaffAbility::actionsOf($ability->value),
+                'action_labels' => (object) (StaffAbility::actionCatalog()[$ability->value] ?? []),
             ];
         }, StaffAbility::cases());
     }

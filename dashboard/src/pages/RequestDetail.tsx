@@ -4,6 +4,7 @@ import { LoadingLottie } from "../components/LoadingLottie";
 import { PageHeader } from "../components/PageHeader";
 import { api, type ServiceRequest } from "../api";
 import { copy, sources, statuses, type Locale } from "../i18n";
+import { useCan } from "../lib/useCan";
 import { useLive, useLiveStamp } from "../live";
 import { ShamCashQrThumb } from "./PaymentsQr";
 import { formatWhen } from "./social/helpers";
@@ -48,6 +49,7 @@ function createQuotationLine(): QuotationLine {
 export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
   const { id } = useParams();
   const [item, setItem] = useState<ServiceRequest | null>(null);
+  const can = useCan();
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState("");
   const [quotationLines, setQuotationLines] = useState<QuotationLine[]>([createQuotationLine()]);
@@ -326,10 +328,14 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
   if (loading) return <LoadingLottie variant="page" label={t(copy.loading)} />;
   if (!item) return <p className="muted">{t(copy.empty)}</p>;
 
-  const canSendQuotation = ["submitted", "quotation_rejected"].includes(item.status);
+  const canSendQuotation = ["submitted", "quotation_rejected"].includes(item.status) && can("ops.requests.quotation");
   const remaining = Number(item.amount_remaining ?? 0);
-  const canConfirmPayment = item.status === "awaiting_payment";
-  const canConfirmRemaining = remaining > 0.009 && Boolean(item.paid_at);
+  const canPayments = can("ops.requests.payments");
+  const canIntegrations = can("ops.requests.integrations");
+  const canWorkPlan = can("ops.requests.work_plan");
+  const canEdit = can("ops.requests.edit");
+  const canConfirmPayment = item.status === "awaiting_payment" && canPayments;
+  const canConfirmRemaining = remaining > 0.009 && Boolean(item.paid_at) && canPayments;
   const showReceipts = item.status === "awaiting_payment";
   const receipts = item.files?.filter((file) => file.kind === "payment_receipt") ?? [];
   const attachments = item.files?.filter((file) => file.kind === "brief_attachment") ?? [];
@@ -345,7 +351,7 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
   const quoteDecisionOpen = item.status === "quotation_sent";
   const revisionOpen = ["in_progress", "ready_for_review", "revision_requested"].includes(item.status);
   const completionOpen = item.status === "ready_for_review";
-  const showClientFallback = item.client_bot_reachable === false && (quoteDecisionOpen || revisionOpen || completionOpen);
+  const showClientFallback = item.client_bot_reachable === false && (quoteDecisionOpen || revisionOpen || completionOpen) && can("ops.requests.quotation");
 
   return (
     <div className="detail">
@@ -480,7 +486,7 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
               ) : (
                 "—"
               )}
-              {!item.google_drive_folder_ready ? (
+              {!item.google_drive_folder_ready && canIntegrations ? (
                 <button
                   type="button"
                   className="btn btn-ghost"
@@ -515,9 +521,11 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
               <div className="briefs">
                 <h3>{t(copy.driveDeliveries)}</h3>
                 <p className="muted">{t(copy.driveDeliveriesHelp)}</p>
-                <button type="button" className="btn btn-ghost" disabled={pollingDrive} onClick={() => void pollDrive()}>
-                  {pollingDrive ? t(copy.driveRefreshing) : t(copy.driveRefresh)}
-                </button>
+                {canIntegrations ? (
+                  <button type="button" className="btn btn-ghost" disabled={pollingDrive} onClick={() => void pollDrive()}>
+                    {pollingDrive ? t(copy.driveRefreshing) : t(copy.driveRefresh)}
+                  </button>
+                ) : null}
                 {item.drive_deliveries?.length ? (
                   <ul>
                     {item.drive_deliveries.map((delivery) => (
@@ -743,16 +751,18 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
       <section className="card action-card">
         <h2 className="form-title">{t(copy.status)}</h2>
         <form className="toolbar" onSubmit={onSave}>
-          <select className="field" value={status} onChange={(e) => setStatus(e.target.value)} aria-label={t(copy.status)}>
+          <select className="field" value={status} onChange={(e) => setStatus(e.target.value)} aria-label={t(copy.status)} disabled={!canEdit}>
             {Object.entries(statuses).map(([key, label]) => (
               <option key={key} value={key}>
                 {t(label)}
               </option>
             ))}
           </select>
-          <button className="btn btn-primary" type="submit">
-            {t(copy.save)}
-          </button>
+          {canEdit ? (
+            <button className="btn btn-primary" type="submit">
+              {t(copy.save)}
+            </button>
+          ) : null}
           {canConfirmPayment || canConfirmRemaining ? (
             <label className="field-label" htmlFor="received-amount">
               {t(copy.receivedAmount)}
@@ -785,23 +795,27 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
               {t(copy.confirmRemaining)}
             </button>
           ) : null}
-          {item.can_renew ? (
+          {item.can_renew && can("ops.requests.renew") ? (
             <button className="btn" type="button" onClick={() => void renew()}>
               {t(copy.renewSubscription)}
             </button>
           ) : null}
-          <button className="btn" type="button" onClick={() => void confirmPlan()}>
-            تأكيد الخطة
-          </button>
-          <button className="btn" type="button" onClick={() => void extendSchedule()}>
-            زيادة المدة
-          </button>
-          {item.gemini_status === "failed" ? (
+          {canWorkPlan ? (
+            <>
+              <button className="btn" type="button" onClick={() => void confirmPlan()}>
+                تأكيد الخطة
+              </button>
+              <button className="btn" type="button" onClick={() => void extendSchedule()}>
+                زيادة المدة
+              </button>
+            </>
+          ) : null}
+          {item.gemini_status === "failed" && canIntegrations ? (
             <button className="btn" type="button" onClick={() => void api.retryGemini(item.id).then((res) => setItem(res.data))}>
               {t(copy.retryGemini)}
             </button>
           ) : null}
-          {item.clickup_error ? (
+          {item.clickup_error && canIntegrations ? (
             <button className="btn" type="button" onClick={() => void provisionClickUp()}>
               {t(copy.retryClickUp)}
             </button>
@@ -864,7 +878,7 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
           </ul>
         </section>
       ) : null}
-      {showReceipts ? (
+      {showReceipts && canPayments ? (
         <section className="card action-card">
           <h2 className="form-title">{t(copy.receipts)}</h2>
           <div className="toolbar">
@@ -884,9 +898,11 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
         <h2 className="form-title">{t(copy.shamCashQr)}</h2>
         <p className="muted">{t(copy.shamCashQrHelp)}</p>
         <ShamCashQrThumb alt={t(copy.shamCashQr)} />
-        <Link className="btn btn-primary" to="/payments">
-          {t(copy.qrManage)}
-        </Link>
+        {can("ops.payments.qr") ? (
+          <Link className="btn btn-primary" to="/payments">
+            {t(copy.qrManage)}
+          </Link>
+        ) : null}
       </section>
       </aside>
       </div>

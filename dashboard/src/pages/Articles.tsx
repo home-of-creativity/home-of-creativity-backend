@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useCan } from "../lib/useCan";
 import { Link } from "react-router-dom";
 import { Search } from "lucide-react";
 import { toast } from "sonner";
@@ -10,6 +11,7 @@ import { api, type Article, type PageMeta } from "../api";
 import { copy, type Locale } from "../i18n";
 
 export function Articles({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
+  const can = useCan();
   const [articles, setArticles] = useState<Article[]>([]);
   const [meta, setMeta] = useState<PageMeta | null>(null);
   const [page, setPage] = useState(1);
@@ -93,12 +95,12 @@ export function Articles({ locale, t }: { locale: Locale; t: (c: { ar: string; e
         lede={t(copy.articlesLede)}
         actions={
           <>
-            <Link className="btn btn-primary" to="/articles/new">
+            {can("site.articles.create") ? (<Link className="btn btn-primary" to="/articles/new">
               {t(copy.addArticle)}
-            </Link>
-            <button type="button" className="btn btn-ghost" onClick={() => void removeAll()} disabled={articles.length === 0}>
+            </Link>) : null}
+            {can("site.articles.delete") ? (<button type="button" className="btn btn-ghost" onClick={() => void removeAll()} disabled={articles.length === 0}>
               {t(copy.deleteAll)}
-            </button>
+            </button>) : null}
           </>
         }
       />
@@ -151,12 +153,12 @@ export function Articles({ locale, t }: { locale: Locale; t: (c: { ar: string; e
                     <Link className="btn btn-ghost" to={`/articles/${item.id}/edit`}>
                       {t(copy.edit)}
                     </Link>
-                    <ConfirmAction
+                    {can("site.articles.delete") ? (<ConfirmAction
                       label={t(copy.delete)}
                       yesLabel={t(copy.delete)}
                       noLabel={t(copy.cancel)}
                       onConfirm={() => void remove(item.id)}
-                    />
+                    />) : null}
                   </td>
                 </tr>
               ))

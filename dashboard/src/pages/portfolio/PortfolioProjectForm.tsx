@@ -214,6 +214,7 @@ export function PortfolioProjectForm({ locale, t }: { locale: Locale; t: (c: { a
 
   return (
     <FormPage
+      ability={editingId ? "site.projects.update" : "site.projects.create"}
       eyebrow={t(copy.portfolioTabProjects)}
       title={editingId ? t(copy.edit) : t(copy.addPortfolioProject)}
       backTo="/projects"

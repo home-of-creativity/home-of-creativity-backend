@@ -139,11 +139,9 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::get('overview', OverviewController::class);
     });
 
-    Route::middleware('ability:site.legal')->group(function () {
-        Route::get('legal', [AdminLegalPageController::class, 'index']);
-        Route::get('legal/{slug}', [AdminLegalPageController::class, 'show'])->whereIn('slug', LegalPage::SLUGS);
-        Route::put('legal/{slug}', [AdminLegalPageController::class, 'update'])->whereIn('slug', LegalPage::SLUGS);
-    });
+    Route::get('legal', [AdminLegalPageController::class, 'index'])->middleware('ability:site.legal.view');
+    Route::get('legal/{slug}', [AdminLegalPageController::class, 'show'])->whereIn('slug', LegalPage::SLUGS)->middleware('ability:site.legal.view');
+    Route::put('legal/{slug}', [AdminLegalPageController::class, 'update'])->whereIn('slug', LegalPage::SLUGS)->middleware('ability:site.legal.update');
 
     Route::middleware('crud:site.contact')->group(function () {
         Route::get('contact', [AdminContactChannelController::class, 'index']);
@@ -159,13 +157,15 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::put('clients/{client}', [AdminClientController::class, 'update']);
         Route::delete('clients/{client}', [AdminClientController::class, 'destroy']);
         Route::get('odoo/status', [AdminOdooController::class, 'status']);
+        Route::get('odoo/products', [AdminOdooController::class, 'products']);
+        Route::get('odoo/quotations', [AdminOdooController::class, 'quotations']);
+        Route::get('odoo/invoices', [AdminOdooController::class, 'invoices']);
+    });
+    Route::middleware('ability:ops.clients.odoo')->group(function () {
         Route::post('odoo/sync-partners', [AdminOdooController::class, 'syncPartners']);
         Route::post('odoo/import-crm-clients', [AdminOdooController::class, 'importCrmClients']);
         Route::post('odoo/import-crm-clients/excel', [AdminOdooController::class, 'importCrmClientsExcel']);
-        Route::get('odoo/products', [AdminOdooController::class, 'products']);
-        Route::get('odoo/quotations', [AdminOdooController::class, 'quotations']);
         Route::post('odoo/quotations', [AdminOdooController::class, 'storeQuotation']);
-        Route::get('odoo/invoices', [AdminOdooController::class, 'invoices']);
         Route::post('odoo/invoices', [AdminOdooController::class, 'storeInvoice']);
     });
 
@@ -210,49 +210,51 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
     });
 
     Route::middleware('crud:ops.employees')->group(function () {
-        Route::post('odoo/sync-employees', [AdminOdooController::class, 'syncEmployees']);
         Route::get('clickup/members', [AdminEmployeeController::class, 'clickupMembers']);
         Route::apiResource('employees', AdminEmployeeController::class);
+    });
+    Route::post('odoo/sync-employees', [AdminOdooController::class, 'syncEmployees'])->middleware('ability:ops.employees.sync');
+    Route::middleware('ability:ops.employees.approve')->group(function () {
         Route::post('employees/{employee}/approve', [AdminEmployeeController::class, 'approve']);
         Route::post('employees/{employee}/reject', [AdminEmployeeController::class, 'reject']);
     });
 
-    Route::middleware('crud:ops.requests')->group(function () {
+    Route::middleware('ability:ops.requests.view')->group(function () {
         Route::get('requests', [AdminServiceRequestController::class, 'index']);
         Route::get('requests/{service_request}', [AdminServiceRequestController::class, 'show']);
-        Route::patch('requests/{service_request}', [AdminServiceRequestController::class, 'update']);
+        Route::get('requests/{service_request}/files/{file}/receipt', [AdminServiceRequestController::class, 'receipt']);
+    });
+    Route::patch('requests/{service_request}', [AdminServiceRequestController::class, 'update'])->middleware('ability:ops.requests.edit');
+    Route::middleware('ability:ops.requests.quotation')->group(function () {
         Route::post('requests/{service_request}/quotation', [AdminServiceRequestController::class, 'sendQuotation']);
-        Route::post('requests/{service_request}/confirm-payment', [AdminServiceRequestController::class, 'confirmPayment']);
-        Route::post('requests/{service_request}/retry-gemini', [AdminServiceRequestController::class, 'retryGemini']);
-        Route::post('requests/{service_request}/provision-clickup', [AdminServiceRequestController::class, 'provisionClickUp']);
         Route::post('requests/{service_request}/client-decision', [AdminServiceRequestController::class, 'clientDecision']);
-        Route::post('requests/{service_request}/ensure-drive-folder', [AdminServiceRequestController::class, 'ensureDriveFolder']);
-        Route::post('requests/{service_request}/poll-drive', [AdminServiceRequestController::class, 'pollDrive']);
+    });
+    Route::middleware('ability:ops.requests.payments')->group(function () {
+        Route::post('requests/{service_request}/confirm-payment', [AdminServiceRequestController::class, 'confirmPayment']);
         Route::post('requests/{service_request}/re-request-receipt', [AdminServiceRequestController::class, 'reRequestReceipt']);
-        Route::post('requests/{service_request}/renew', [AdminServiceRequestController::class, 'renew']);
+    });
+    Route::middleware('ability:ops.requests.work_plan')->group(function () {
         Route::post('requests/{service_request}/confirm-plan', [AdminWorkScheduleController::class, 'confirmPlan']);
         Route::put('requests/{service_request}/draft-work-lines', [AdminWorkScheduleController::class, 'draftLines']);
         Route::post('requests/{service_request}/extend-schedule', [AdminWorkScheduleController::class, 'extendSchedule']);
-        Route::get('requests/{service_request}/files/{file}/receipt', [AdminServiceRequestController::class, 'receipt']);
+    });
+    Route::middleware('ability:ops.requests.integrations')->group(function () {
+        Route::post('requests/{service_request}/retry-gemini', [AdminServiceRequestController::class, 'retryGemini']);
+        Route::post('requests/{service_request}/provision-clickup', [AdminServiceRequestController::class, 'provisionClickUp']);
+        Route::post('requests/{service_request}/ensure-drive-folder', [AdminServiceRequestController::class, 'ensureDriveFolder']);
+        Route::post('requests/{service_request}/poll-drive', [AdminServiceRequestController::class, 'pollDrive']);
         Route::post('integration-events/{integrationEvent}/retry', [AdminServiceRequestController::class, 'retryIntegrationEvent']);
     });
+    Route::post('requests/{service_request}/renew', [AdminServiceRequestController::class, 'renew'])->middleware('ability:ops.requests.renew');
 
-    Route::middleware('ability:ops.payments,ops.channels')->group(function () {
-        Route::get('ops-settings', [AdminServiceRequestController::class, 'opsSettings']);
-    });
-
-    Route::middleware('ability:ops.payments')->group(function () {
-        Route::get('ops-settings/sham-cash-qr', [AdminServiceRequestController::class, 'shamCashQrPreview']);
-        Route::post('ops-settings/sham-cash-qr', [AdminServiceRequestController::class, 'uploadShamCashQr']);
-    });
-
-    Route::middleware('ability:ops.finance')->group(function () {
-        Route::get('finance', [AdminFinanceController::class, 'index']);
-        Route::post('finance/expenses', [AdminFinanceController::class, 'storeExpense']);
-        Route::put('finance/expenses/{expense}', [AdminFinanceController::class, 'updateExpense']);
-        Route::delete('finance/expenses/{expense}', [AdminFinanceController::class, 'destroyExpense']);
-        Route::post('finance/sync', [AdminFinanceController::class, 'sync']);
-    });
+    Route::get('ops-settings', [AdminServiceRequestController::class, 'opsSettings'])->middleware('ability:ops.payments.view,ops.channels.view');
+    Route::get('ops-settings/sham-cash-qr', [AdminServiceRequestController::class, 'shamCashQrPreview'])->middleware('ability:ops.payments.view');
+    Route::post('ops-settings/sham-cash-qr', [AdminServiceRequestController::class, 'uploadShamCashQr'])->middleware('ability:ops.payments.qr');
+    Route::get('finance', [AdminFinanceController::class, 'index'])->middleware('ability:ops.finance.view');
+    Route::post('finance/expenses', [AdminFinanceController::class, 'storeExpense'])->middleware('ability:ops.finance.expense_create');
+    Route::put('finance/expenses/{expense}', [AdminFinanceController::class, 'updateExpense'])->middleware('ability:ops.finance.expense_update');
+    Route::delete('finance/expenses/{expense}', [AdminFinanceController::class, 'destroyExpense'])->middleware('ability:ops.finance.expense_delete');
+    Route::post('finance/sync', [AdminFinanceController::class, 'sync'])->middleware('ability:ops.finance.sync');
 
     Route::middleware('crud:ops.vouchers')->group(function () {
         Route::get('voucher-templates', [AdminFinancialVoucherTemplateController::class, 'index']);
@@ -266,8 +268,8 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::delete('vouchers/{voucher}', [AdminFinancialVoucherController::class, 'destroy']);
     });
 
-    Route::middleware('ability:site.profile_pdf')->group(function () {
-        Route::get('ops-settings/profile-pdf', [AdminProfilePdfController::class, 'show']);
+    Route::get('ops-settings/profile-pdf', [AdminProfilePdfController::class, 'show'])->middleware('ability:site.profile_pdf.view');
+    Route::middleware('ability:site.profile_pdf.update')->group(function () {
         Route::post('ops-settings/profile-pdf', [AdminProfilePdfController::class, 'store']);
         Route::delete('ops-settings/profile-pdf', [AdminProfilePdfController::class, 'destroy']);
     });
@@ -277,13 +279,15 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::put('ops-settings/social-profile', [AdminServiceRequestController::class, 'updateSocialProfile']);
     });
 
-    Route::middleware('ability:ops.complaints')->group(function () {
+    Route::middleware('ability:ops.complaints.view')->group(function () {
         Route::get('complaints', [AdminComplaintController::class, 'index']);
         Route::get('complaints/{complaint}', [AdminComplaintController::class, 'show'])->whereNumber('complaint');
-        Route::patch('complaints/{complaint}', [AdminComplaintController::class, 'update']);
+        Route::get('complaints/{complaint}/{kind}', [AdminComplaintController::class, 'file'])->whereIn('kind', ['image', 'audio']);
+    });
+    Route::patch('complaints/{complaint}', [AdminComplaintController::class, 'update'])->middleware('ability:ops.complaints.status');
+    Route::middleware('ability:ops.complaints.reply')->group(function () {
         Route::post('complaints/{complaint}/ticket', [AdminComplaintController::class, 'openTicket']);
         Route::post('complaints/{complaint}/replies', [AdminComplaintController::class, 'reply']);
-        Route::get('complaints/{complaint}/{kind}', [AdminComplaintController::class, 'file'])->whereIn('kind', ['image', 'audio']);
     });
 
     Route::middleware('ability:ops.photography')->group(function () {
@@ -317,14 +321,18 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::post('photography/{booking}/retry-clickup', [AdminPhotographyController::class, 'retryClickUp'])->whereNumber('booking');
     });
 
-    Route::middleware('ability:ops.channels')->group(function () {
-        Route::put('ops-settings/client-channels', [AdminClientChannelController::class, 'update']);
+    Route::middleware('ability:ops.channels.view')->group(function () {
         Route::get('ops-settings/whatsapp-web', [AdminClientChannelController::class, 'whatsappWeb']);
-        Route::post('ops-settings/whatsapp-web/logout', [AdminClientChannelController::class, 'unlinkWhatsapp']);
         Route::get('ops-settings/whatsapp-admin', [AdminClientChannelController::class, 'whatsappAdmin']);
-        Route::post('ops-settings/whatsapp-admin/logout', [AdminClientChannelController::class, 'unlinkWhatsappAdmin']);
         Route::get('ops-settings/work-calendar', [AdminWorkScheduleController::class, 'showCalendar']);
+    });
+    Route::middleware('ability:ops.channels.update')->group(function () {
+        Route::put('ops-settings/client-channels', [AdminClientChannelController::class, 'update']);
         Route::put('ops-settings/work-calendar', [AdminWorkScheduleController::class, 'updateCalendar']);
+    });
+    Route::middleware('ability:ops.channels.whatsapp')->group(function () {
+        Route::post('ops-settings/whatsapp-web/logout', [AdminClientChannelController::class, 'unlinkWhatsapp']);
+        Route::post('ops-settings/whatsapp-admin/logout', [AdminClientChannelController::class, 'unlinkWhatsappAdmin']);
     });
 
     Route::middleware('crud:site.categories')->group(function () {

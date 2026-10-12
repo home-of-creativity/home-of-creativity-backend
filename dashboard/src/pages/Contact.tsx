@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useCan } from "../lib/useCan";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { ConfirmAction } from "../components/ConfirmAction";
@@ -18,6 +19,7 @@ function readTab(value: string | null): Tab {
 }
 
 export function Contact({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
+  const can = useCan();
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = readTab(searchParams.get("tab"));
   const [items, setItems] = useState<ContactChannel[]>([]);
@@ -108,7 +110,7 @@ export function Contact({ locale, t }: { locale: Locale; t: (c: { ar: string; en
         title={t(copy.contactTitle)}
         lede={t(copy.contactLede)}
         actions={
-          tab === "sham-cash" ? null : (
+          tab === "sham-cash" || !can("site.contact.create") ? null : (
             <Link className="btn btn-primary" to={`/contact/new?tab=${tab}`}>
               {tab === "social" ? t(copy.addContactSocial) : tab === "locations" ? t(copy.addContactLocation) : t(copy.addContactNumber)}
             </Link>
@@ -216,10 +218,10 @@ export function Contact({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                   <td>{item.is_published ? t(copy.published) : t(copy.inactive)}</td>
                   <td>
                     <div className="order-actions">
-                      <button type="button" className="btn-order" disabled={movingId === item.id || index === 0} onClick={() => void move(item.id, "up")} aria-label={t(copy.moveUp)}>
+                      <button type="button" className="btn-order" disabled={!(can("site.contact.update")) || movingId === item.id || index === 0} onClick={() => void move(item.id, "up")} aria-label={t(copy.moveUp)}>
                         ↑
                       </button>
-                      <button type="button" className="btn-order" disabled={movingId === item.id || index === visible.length - 1} onClick={() => void move(item.id, "down")} aria-label={t(copy.moveDown)}>
+                      <button type="button" className="btn-order" disabled={!(can("site.contact.update")) || movingId === item.id || index === visible.length - 1} onClick={() => void move(item.id, "down")} aria-label={t(copy.moveDown)}>
                         ↓
                       </button>
                     </div>
@@ -228,12 +230,12 @@ export function Contact({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                     <Link className="btn btn-ghost" to={`/contact/${item.id}/edit`}>
                       {t(copy.edit)}
                     </Link>
-                    <ConfirmAction
+                    {can("site.contact.delete") ? (<ConfirmAction
                       label={t(copy.delete)}
                       yesLabel={t(copy.delete)}
                       noLabel={t(copy.cancel)}
                       onConfirm={() => void remove(item.id)}
-                    />
+                    />) : null}
                   </td>
                 </tr>
               ))

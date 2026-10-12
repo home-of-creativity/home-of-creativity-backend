@@ -9861,3 +9861,11 @@ details.gcal-side-section > summary h2 {
     max-width: 100%;
   }
 }
+
+/* The shared form body is a fieldset so a read-only form disables every field at once. */
+fieldset.form-page-fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
