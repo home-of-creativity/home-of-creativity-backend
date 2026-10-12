@@ -168,6 +168,9 @@ class SendQuotation
     private function adoptPreparedPdf(ServiceRequest $request, array $prepared, int $version): string
     {
         if (filled($prepared['odoo_quotation_id'] ?? null)) {
+            if ((string) $request->odoo_quotation_id !== (string) $prepared['odoo_quotation_id']) {
+                $this->retirePreviousQuotation($request);
+            }
             $request->forceFill(['odoo_quotation_id' => (string) $prepared['odoo_quotation_id']])->save();
         }
         if (filled($prepared['odoo_partner_id'] ?? null)) {
@@ -187,6 +190,33 @@ class SendQuotation
     }
 
     /**
+     * One open Odoo quotation per request. Before a new version is linked, the previous
+     * one is deleted (draft) or cancelled (sent), so a rejected or replaced id is never
+     * reused. A confirmed sales order is left alone.
+     */
+    private function retirePreviousQuotation(ServiceRequest $request): void
+    {
+        $previous = (int) ($request->odoo_quotation_id ?? 0);
+        if ($previous <= 0 || ! $this->odoo->configured()) {
+            return;
+        }
+
+        try {
+            $state = $this->odoo->removeQuotation($previous);
+        } catch (Throwable $exception) {
+            Log::warning('Previous Odoo quotation stayed open; a new version replaces it.', [
+                'request' => $request->number,
+                'odoo_quotation_id' => $previous,
+                'error' => $exception->getMessage(),
+            ]);
+            $state = '';
+        }
+        if ($state !== 'sale') {
+            $request->forceFill(['odoo_quotation_id' => null])->save();
+        }
+    }
+
+    /**
      * @param  list<array{title: string, amount: float|int|string, notes?: string|null}>|null  $lines
      */
     private function resolveQuotationPdf(
@@ -199,6 +229,8 @@ class SendQuotation
         if (! $this->odoo->configured()) {
             return $this->localQuotationPdf($request, $amount, $notes, $version, $lines);
         }
+
+        $this->retirePreviousQuotation($request);
 
         try {
             $created = $this->odoo->createQuotation(

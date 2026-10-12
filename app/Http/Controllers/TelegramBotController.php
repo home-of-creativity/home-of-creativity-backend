@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Actions\ApproveDriveDelivery;
 use App\Actions\ApproveQuotation;
+use App\Actions\CancelClientRequest;
 use App\Actions\ClientAssistant;
 use App\Actions\CompleteRequest;
 use App\Actions\CreateCatalogRequest;
@@ -20,8 +21,6 @@ use App\Actions\RenewSubscription;
 use App\Actions\RequestRevision;
 use App\Actions\ResolveTelegramClient;
 use App\Actions\SubmitServiceRequest;
-use App\Actions\SyncClickUpFromStaff;
-use App\Enums\ClickUpSyncEvent;
 use App\Enums\EmployeeProfession;
 use App\Enums\RequestStatus;
 use App\Http\Requests\TelegramLinkRequest;
@@ -36,19 +35,18 @@ use App\Models\ServiceRequest;
 use App\Models\SupportMessage;
 use App\Services\ClickUpStatusMapper;
 use App\Services\OdooLeadLog;
-use App\Services\RequestStatusTransitionService;
 use App\Support\ChatLanguage;
-use Illuminate\Support\Facades\Cache;
 use App\Support\ClientPhone;
 use App\Support\ClientProfileValue;
-use App\Support\ResolveCompanyName;
 use App\Support\ClientUploadGuard;
 use App\Support\PricingCatalog;
+use App\Support\ResolveCompanyName;
 use App\Support\ResolveServiceRequest;
 use App\Support\ShamCashQr;
 use App\Support\StatusLabel;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -490,31 +488,11 @@ class TelegramBotController extends Controller
         ]);
     }
 
-    public function cancel(Request $request, ServiceRequest $serviceRequest, RequestStatusTransitionService $transitions, NotifyEmployees $notifyEmployees): ServiceRequestResource
+    public function cancel(Request $request, ServiceRequest $serviceRequest, CancelClientRequest $cancelClientRequest): ServiceRequestResource
     {
         $this->assertClientOwns($request, $serviceRequest);
 
-        if ($serviceRequest->clientCancelClosed()) {
-            throw ValidationException::withMessages([
-                'status' => 'ما فينا نلغي الطلب بعد ٢٤ ساعة من إرسال الفاتورة.',
-            ]);
-        }
-
-        if (! $serviceRequest->status->canTransitionTo(RequestStatus::Cancelled)) {
-            throw ValidationException::withMessages([
-                'status' => 'This request cannot be cancelled in its current state.',
-            ]);
-        }
-
-        $updated = $transitions->transition($serviceRequest, RequestStatus::Cancelled, 'client', 'Client cancelled via Telegram.');
-        $fresh = $updated->fresh('client') ?? $updated;
-        app(SyncClickUpFromStaff::class)->handle($fresh, ClickUpSyncEvent::Cancelled);
-        $displayNumber = ResolveServiceRequest::displayNumber($fresh);
-        $notifyEmployees->handle(
-            $fresh,
-            EmployeeProfession::Sales,
-            "❌ ألغى الزبون الطلب\n#{$displayNumber} — {$fresh->title}\n{$fresh->client?->name}",
-        );
+        $fresh = $cancelClientRequest->handle($serviceRequest, 'Telegram');
 
         return ServiceRequestResource::make($fresh)
             ->additional(['message' => 'Cancelled.']);

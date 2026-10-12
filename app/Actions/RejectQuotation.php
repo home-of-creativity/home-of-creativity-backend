@@ -98,11 +98,17 @@ class RejectQuotation
                 $this->odoo->markLeadRejected($leadId, '');
             }
 
+            // A rejected quotation does not stay open in Odoo: a draft is deleted, a sent
+            // one cancelled. A confirmed sales order is left alone.
             $orderId = (int) ($request->odoo_quotation_id ?? 0);
             if ($orderId > 0) {
                 $this->odoo->messagePost('sale.order', $orderId, $html, true);
+                $this->odoo->removeQuotation($orderId);
             }
         } catch (\Throwable $exception) {
+            if ((bool) config('services.telegram.strict')) {
+                throw $exception;
+            }
             Log::warning('Odoo quotation rejection push failed.', [
                 'request' => $request->number,
                 'error' => $exception->getMessage(),

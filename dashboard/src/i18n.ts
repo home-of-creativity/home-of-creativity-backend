@@ -179,6 +179,8 @@ export const copy = {
   paperCancel: { ar: "إلغاء", en: "Cancel" },
   paperCancelQuotationConfirm: { ar: "إلغاء العرض في Odoo وإلغاء طلبه وإبلاغ العميل؟", en: "Cancel it in Odoo, cancel its request, and tell the client?" },
   paperCancelInvoiceConfirm: { ar: "إلغاء الفاتورة في Odoo وإبلاغ العميل؟ يبقى الطلب بانتظار الدفع.", en: "Cancel it in Odoo and tell the client? The request keeps waiting for payment." },
+  paperCancelOrder: { ar: "إلغاء أمر البيع", en: "Cancel sales order" },
+  paperCancelOrderConfirm: { ar: "إلغاء أمر البيع في Odoo مع فواتيره غير المدفوعة، وإلغاء طلبه وإبلاغ العميل؟ لا يُلغى إن دُفعت فاتورة منه.", en: "Cancel the sales order in Odoo with its unpaid invoices, cancel its request, and tell the client? It stays if any invoice is paid." },
   paperQuotationEditFlow: {
     ar: "يُحدَّث العرض في Odoo. إن كان مرسلاً يصل العميل كنسخة جديدة مع زرّي الموافقة والرفض، ويبقى الطلب بانتظار موافقته.",
     en: "The quotation updates in Odoo. If it was sent, the client gets a new version with approve and reject buttons, and the request keeps waiting.",

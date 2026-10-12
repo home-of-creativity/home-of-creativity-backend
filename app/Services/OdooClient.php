@@ -1244,6 +1244,7 @@ class OdooClient
                     'title' => (string) ($row['name'] ?? ''),
                     'display_type' => $display,
                 ];
+
                 continue;
             }
             $lines[] = [
@@ -1510,6 +1511,35 @@ class OdooClient
         if ($state !== 'cancel') {
             $this->call('account.move', 'button_cancel', ['ids' => [$id]]);
         }
+    }
+
+    /**
+     * Cancels a confirmed sales order. Its unpaid invoices are cancelled first. Null,
+     * and nothing touched, when one of its invoices has a payment.
+     *
+     * @return list<int>|null the invoices that were cancelled
+     */
+    public function cancelSalesOrder(int $id): ?array
+    {
+        $order = $this->firstRecord($this->searchRead('sale.order', [['id', '=', $id]], ['state', 'invoice_ids'], 1));
+        $invoiceIds = array_values(array_filter(array_map('intval', (array) ($order['invoice_ids'] ?? []))));
+        $invoices = $invoiceIds === [] ? [] : $this->searchRead('account.move', [['id', 'in', $invoiceIds]], ['id', 'state', 'payment_state'], 50);
+        foreach ($invoices as $invoice) {
+            if (($invoice['state'] ?? '') === 'posted' && ($invoice['payment_state'] ?? 'not_paid') !== 'not_paid') {
+                return null;
+            }
+        }
+
+        $cancelled = [];
+        foreach ($invoices as $invoice) {
+            if (($invoice['state'] ?? '') !== 'cancel') {
+                $this->cancelInvoice((int) $invoice['id']);
+                $cancelled[] = (int) $invoice['id'];
+            }
+        }
+        $this->callWithContext('sale.order', 'action_cancel', [$id], ['disable_cancel_warning' => true]);
+
+        return $cancelled;
     }
 
     /**

@@ -2,7 +2,7 @@
 
 namespace App\Actions;
 
-use App\Enums\ClickUpSyncEvent;
+use App\Contracts\WhatsAppMessenger;
 use App\Enums\ClickUpTaskType;
 use App\Enums\EmployeeProfession;
 use App\Enums\RequestStatus;
@@ -15,22 +15,21 @@ use App\Models\ServiceRequest;
 use App\Services\GeminiService;
 use App\Services\RequestStatusTransitionService;
 use App\Services\TelegramNotifier;
-use App\Contracts\WhatsAppMessenger;
 use App\Support\BillingPeriod;
-use App\Support\PaymentPlanResolver;
-use App\Support\PhotographyActor;
 use App\Support\ChatLanguage;
 use App\Support\ClientChannelGate;
-use App\Support\ClientUploadGuard;
 use App\Support\ClientPhone;
 use App\Support\ClientProfileValue;
+use App\Support\ClientUploadGuard;
+use App\Support\PaymentPlanResolver;
+use App\Support\PhotographyActor;
 use App\Support\PricingCatalog;
 use App\Support\ResolveCompanyName;
 use App\Support\ResolveServiceRequest;
 use App\Support\StatusLabel;
 use App\Support\WorkCalendar;
-use App\Support\WorkLines;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
@@ -2018,7 +2017,7 @@ class HandleWhatsAppInbound
         }
 
         $open = $client->requests()->latest('id')->get()
-            ->filter(fn (ServiceRequest $item): bool => ! $item->hiddenFromClient() && $item->status->canTransitionTo(RequestStatus::Cancelled))
+            ->filter(fn (ServiceRequest $item): bool => ! $item->hiddenFromClient() && app(CancelClientRequest::class)->refusal($item) !== 'state')
             ->values();
         if ($open->isEmpty()) {
             $this->sendPlain($chatId, $this->tx('ما في طلب فينا نلغيه هلق.', 'There is no request that can be cancelled now.'));
@@ -2043,10 +2042,20 @@ class HandleWhatsAppInbound
 
     private function cancelOwnedRequest(ServiceRequest $request, string $chatId): void
     {
-        if ($request->clientCancelClosed()) {
+        $cancel = app(CancelClientRequest::class);
+        $refusal = $cancel->refusal($request);
+        if ($refusal === 'closed') {
             $this->sendPlain($chatId, $this->tx(
                 'ما فينا نلغي الطلب بعد ٢٤ ساعة من إرسال الفاتورة.',
                 'This request cannot be cancelled after 24 hours from the invoice.',
+            ));
+
+            return;
+        }
+        if ($refusal === 'paid') {
+            $this->sendPlain($chatId, $this->tx(
+                'الطلب مدفوع، فما بينلغى من هون. احكي مع فريق المبيعات.',
+                'This request is paid, so it cannot be cancelled here. Please contact sales.',
             ));
 
             return;
@@ -2069,21 +2078,13 @@ class HandleWhatsAppInbound
 
             return;
         }
-        if (! $request->status->canTransitionTo(RequestStatus::Cancelled)) {
+        if ($refusal !== null) {
             $this->sendPlain($chatId, $this->tx('هالطلب ما بينلغى من هالحالة.', 'This request cannot be cancelled in its current state.'));
 
             return;
         }
 
-        $updated = $this->transitions->transition($request, RequestStatus::Cancelled, 'client', 'Client cancelled via WhatsApp.');
-        $fresh = $updated->fresh('client') ?? $updated;
-        app(SyncClickUpFromStaff::class)->handle($fresh, ClickUpSyncEvent::Cancelled);
-        $displayNumber = ResolveServiceRequest::displayNumber($fresh);
-        $this->notifyEmployees->handle(
-            $fresh,
-            EmployeeProfession::Sales,
-            "❌ ألغى الزبون الطلب\n#{$displayNumber} — {$fresh->title}\n{$fresh->client?->name}",
-        );
+        $cancel->handle($request, 'WhatsApp');
         $this->sendMenu($chatId, $this->tx('تمام، لغينا الطلب.', 'The request was cancelled.'));
     }
 
@@ -3096,9 +3097,9 @@ class HandleWhatsAppInbound
 
     /**
      * @param  array<string, mixed>  $session
-     * @param  \Illuminate\Support\Collection<int, PhotographyBooking>  $rows
+     * @param  Collection<int, PhotographyBooking>  $rows
      */
-    private function askWhichBooking(string $chatId, string $phone, array &$session, \Illuminate\Support\Collection $rows, string $purpose, string $question): void
+    private function askWhichBooking(string $chatId, string $phone, array &$session, Collection $rows, string $purpose, string $question): void
     {
         $book = app(BookPhotographySlot::class);
         $lines = [$question];
@@ -3196,9 +3197,9 @@ class HandleWhatsAppInbound
      * Each open question with its own buttons, so a typed word is never applied to
      * the wrong booking.
      *
-     * @param  \Illuminate\Support\Collection<int, PhotographyBooking>  $rows
+     * @param  Collection<int, PhotographyBooking>  $rows
      */
-    private function askWhichAnswer(string $chatId, \Illuminate\Support\Collection $rows): void
+    private function askWhichAnswer(string $chatId, Collection $rows): void
     {
         $book = app(BookPhotographySlot::class);
         $lines = [$this->tx('أي موعد تقصد؟', 'Which booking do you mean?')];
@@ -3384,9 +3385,9 @@ class HandleWhatsAppInbound
      * A booking named in the sentence by its number («موعد 12», «#12»), its weekday,
      * or its date (20/10). Null when nothing matches exactly one row.
      *
-     * @param  \Illuminate\Support\Collection<int, PhotographyBooking>  $rows
+     * @param  Collection<int, PhotographyBooking>  $rows
      */
-    private function bookingFromText(\Illuminate\Support\Collection $rows, string $text): ?PhotographyBooking
+    private function bookingFromText(Collection $rows, string $text): ?PhotographyBooking
     {
         $text = trim($text);
         if ($text === '' || $rows->isEmpty()) {
@@ -3725,8 +3726,8 @@ class HandleWhatsAppInbound
         $session['step'] = 'ask';
         $this->putSession($phone, $session);
         $this->safeSend($chatId, $this->tx(
-            "اكتب سؤالك: عن طلباتك، الدفع، التصوير، التجديد، أو عن الخدمات والباقة الأنسب لنشاطك.",
-            "Write your question: about your requests, payment, photography, renewal, or the services and the package that fits your business.",
+            'اكتب سؤالك: عن طلباتك، الدفع، التصوير، التجديد، أو عن الخدمات والباقة الأنسب لنشاطك.',
+            'Write your question: about your requests, payment, photography, renewal, or the services and the package that fits your business.',
         ));
     }
 

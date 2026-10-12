@@ -2,31 +2,30 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Actions\ApplyQuotationAcceptance;
+use App\Actions\ApproveQuotation;
 use App\Actions\ImportOdooCrmClients;
 use App\Actions\ImportOdooCrmClientsFromExcel;
-use App\Actions\ApplyQuotationAcceptance;
-use App\Actions\DeliverClientDocument;
 use App\Actions\NotifyClientChannels;
-use App\Actions\ApproveQuotation;
 use App\Actions\OpenRequestFromStaffInvoice;
 use App\Actions\PublishOdooPaper;
 use App\Actions\SendQuotation;
 use App\Actions\SyncOdooEmployees;
 use App\Actions\SyncOdooPartners;
+use App\Enums\RequestStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\ImportOdooCrmClientsExcelRequest;
 use App\Http\Requests\StoreOdooInvoiceRequest;
 use App\Http\Requests\StoreOdooQuotationRequest;
-use App\Enums\RequestStatus;
 use App\Models\Client;
 use App\Models\ServiceRequest;
 use App\Services\OdooClient;
 use App\Services\RequestStatusTransitionService;
 use App\Services\TelegramNotifier;
+use App\Support\Money;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Storage;
 
 class OdooController extends Controller
 {
@@ -370,6 +369,9 @@ class OdooController extends Controller
     public function destroyQuotation(int $id, OdooClient $odoo, RequestStatusTransitionService $transitions, NotifyClientChannels $notify): JsonResponse
     {
         $snapshot = $this->paper($odoo, 'sale.order', $id);
+        if (($snapshot['state'] ?? '') === 'sale') {
+            return $this->cancelSalesOrder($id, $snapshot, $odoo, $transitions, $notify);
+        }
         abort_unless(in_array($snapshot['state'] ?? '', ['draft', 'sent', 'cancel'], true), 422, 'عرض السعر أصبح أمر بيع، فلا يُحذف من هنا.');
 
         try {
@@ -388,6 +390,41 @@ class OdooController extends Controller
         }
 
         return response()->json(['data' => ['id' => $id, 'result' => $result], 'message' => $message]);
+    }
+
+    /**
+     * Sales cancel a confirmed sales order: its unpaid invoices go first, then the order,
+     * and a request still waiting for payment is cancelled. Anything paid stops it.
+     *
+     * @param  array<string, mixed>  $snapshot
+     */
+    private function cancelSalesOrder(int $id, array $snapshot, OdooClient $odoo, RequestStatusTransitionService $transitions, NotifyClientChannels $notify): JsonResponse
+    {
+        $linked = ServiceRequest::query()->with('client')->where('odoo_quotation_id', (string) $id)->latest('id')->first();
+        abort_if($linked !== null && (float) ($linked->amount_paid ?? 0) > 0.009, 422, 'دُفع جزء من هذا الطلب، فلا يُلغى أمر البيع من هنا.');
+
+        try {
+            $cancelled = $odoo->cancelSalesOrder($id);
+        } catch (\Throwable $exception) {
+            return response()->json(['message' => 'تعذر إلغاء أمر البيع في أودو: '.$exception->getMessage()], 502);
+        }
+        abort_if($cancelled === null, 422, 'على أمر البيع فاتورة مدفوعة، فلا يُلغى.');
+
+        $message = $cancelled === [] ? 'أُلغي أمر البيع في أودو.' : 'أُلغي أمر البيع في أودو مع فواتيره غير المدفوعة.';
+        $open = [RequestStatus::Submitted, RequestStatus::QuotationSent, RequestStatus::QuotationRejected, RequestStatus::AwaitingPayment];
+        if ($linked !== null && in_array($linked->status, $open, true)) {
+            $invoiceIds = array_map('strval', $cancelled);
+            $linked->invoices()->whereIn('odoo_invoice_id', $invoiceIds)->update(['status' => 'cancelled']);
+            if (in_array((string) $linked->odoo_invoice_id, $invoiceIds, true)) {
+                $linked->forceFill(['odoo_invoice_id' => null])->save();
+            }
+            $transitions->transition($linked, RequestStatus::Cancelled, 'admin', 'Sales order cancelled from the dashboard.');
+            $name = (string) ($snapshot['name'] ?? '');
+            $notify->send($linked->fresh(['client']) ?? $linked, "أُلغي أمر البيع {$name} للطلب #{$linked->number}. إذا عندك أي سؤال تواصل معنا.");
+            $message .= " وأُلغي الطلب {$linked->number}.";
+        }
+
+        return response()->json(['data' => ['id' => $id, 'result' => 'cancelled'], 'message' => $message]);
     }
 
     /** An unpaid invoice: corrected in Odoo, posted again, and sent to the client again. */
@@ -669,7 +706,7 @@ class OdooController extends Controller
     {
         $name = (string) ($snapshot['name'] ?? '');
         $caption = trim("الفاتورة {$name} للطلب #{$request->number}")."\n"
-            .'المبلغ: '.\App\Support\Money::format((float) ($snapshot['amount_total'] ?? $request->amount_total ?? 0))."\n"
+            .'المبلغ: '.Money::format((float) ($snapshot['amount_total'] ?? $request->amount_total ?? 0))."\n"
             .'بعد التحويل ابعت صورة الإيصال هون ليتأكد الدفع ونكمل الطلب.';
         try {
             if ($pdfPath !== '') {

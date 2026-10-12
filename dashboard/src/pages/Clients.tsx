@@ -690,6 +690,17 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                           />
                         </>
                       ) : null}
+                      {can("ops.clients.odoo") && item.state === "sale" ? (
+                        <ConfirmAction
+                          label={t(copy.paperCancelOrder)}
+                          confirmLabel={t(copy.paperCancelOrderConfirm)}
+                          yesLabel={t(copy.paperCancelOrder)}
+                          noLabel={t(copy.cancel)}
+                          className="btn btn-ghost btn-sm btn-danger"
+                          disabled={paperBusy !== ""}
+                          onConfirm={() => void removePaper("quotation", item.id)}
+                        />
+                      ) : null}
                       <button
                         type="button"
                         className="btn btn-ghost"

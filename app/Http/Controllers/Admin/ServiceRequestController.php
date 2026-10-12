@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Actions\CancelClientRequest;
 use App\Actions\CompleteRequest;
 use App\Actions\ConfirmRequestPayment;
 use App\Actions\DispatchStatusWorkflow;
@@ -163,6 +164,9 @@ class ServiceRequestController extends Controller
         } else {
             $serviceRequest = $transitions->transition($serviceRequest, $status, 'admin');
             $dispatchStatusWorkflow->handle($serviceRequest, $status);
+            if ($status === RequestStatus::Cancelled) {
+                app(CancelClientRequest::class)->closeOdooPapers($serviceRequest, 'admin');
+            }
         }
 
         $serviceRequest->load('client');
