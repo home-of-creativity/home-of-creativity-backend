@@ -22,11 +22,13 @@ class HandleClientComplaint
         private ClientUploadGuard $uploads,
         private GeminiService $gemini,
         private NotifyEmployees $notifyEmployees,
+        private ComplaintTickets $tickets,
     ) {}
 
     public function active(string $key): bool
     {
-        return in_array($this->state($key)['step'] ?? '', ['title', 'body', 'extra'], true);
+        return in_array($this->state($key)['step'] ?? '', ['title', 'body', 'extra'], true)
+            || $this->tickets->awaiting($key);
     }
 
     public function wants(?string $text): bool
@@ -49,6 +51,7 @@ class HandleClientComplaint
             }
         }
         Cache::forget($this->cacheKey($key));
+        $this->tickets->forget($key);
     }
 
     public function start(Client $client, string $chatId, string $key, string $lang): void
@@ -73,6 +76,14 @@ class HandleClientComplaint
         bool $video,
     ): bool {
         $text = trim((string) $text);
+        if (preg_match('/^'.ComplaintTickets::REPLY_CALLBACK.'\d+$/', $text) === 1) {
+            $this->clear($key);
+
+            return $this->tickets->awaitReply($client, $chatId, $key, $text, $lang);
+        }
+        if ($this->tickets->awaiting($key)) {
+            return $this->ticketTurn($client, $chatId, $key, $lang, $text, $image, $audio, $video);
+        }
         if ($this->isEscape($text)) {
             if ($this->active($key)) {
                 $this->clear($key);
@@ -226,6 +237,7 @@ class HandleClientComplaint
             'image_mime' => $state['image_mime'] ?? null,
             'audio_path' => $state['audio_path'] ?? null,
             'audio_mime' => $state['audio_mime'] ?? null,
+            'chat_id' => $chatId,
             'status' => 'open',
         ]);
         Cache::forget($this->cacheKey($key));
@@ -324,6 +336,38 @@ class HandleClientComplaint
         } catch (Throwable) {
             // The complaint step stays so the client can answer again.
         }
+    }
+
+    /**
+     * The client chose to answer a ticket. Text (or a voice note, transcribed) goes on it;
+     * a menu button or «cancel» leaves it.
+     *
+     * @param  array{file_name?: string, file_base64: string, mime_type: string}|null  $image
+     * @param  array{file_base64: string, mime_type: string}|null  $audio
+     */
+    private function ticketTurn(Client $client, string $chatId, string $key, string $lang, string $text, ?array $image, ?array $audio, bool $video): bool
+    {
+        if ($this->isEscape($text)) {
+            $this->tickets->forget($key);
+
+            return false;
+        }
+        if (preg_match('/^(إلغاء|الغاء|cancel)$/ui', $text) === 1) {
+            $this->tickets->forget($key);
+            $this->say($chatId, $lang, 'تمام، ما انضاف رد.', 'OK, no reply was added.');
+
+            return true;
+        }
+        if ($text === '' && $audio !== null) {
+            $text = $this->gemini->transcribeClientAudio($audio['mime_type'], $audio['file_base64']);
+        }
+        if ($text === '' || $image !== null || $video) {
+            $this->say($chatId, $lang, 'اكتب ردك نصاً أو ابعته تسجيلاً صوتياً.', 'Type your reply or send it as a voice note.');
+
+            return true;
+        }
+
+        return $this->tickets->clientReply($client, $chatId, $key, $text, $lang);
     }
 
     private function isEscape(string $text): bool

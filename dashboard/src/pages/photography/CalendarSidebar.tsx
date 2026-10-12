@@ -1,10 +1,11 @@
-import { Camera, Copy, Eye, EyeOff, Lock, Plus, TriangleAlert, X } from "lucide-react";
+import { Camera, Copy, Eye, EyeOff, Lock, Plus, Shield, TriangleAlert, UserLock, X } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { DayPicker } from "react-day-picker";
 import "react-day-picker/style.css";
 import { toast } from "sonner";
-import { api, type CalendarDirectory, type PhotographyBoard, type PhotographyRequestRow } from "../../api";
+import { api, type CalendarDirectory, type CalendarSource, type PhotographyBoard, type PhotographyRequestRow } from "../../api";
 import type { Locale } from "../../i18n";
+import { CalendarPermissionsDialog } from "./CalendarPermissionsDialog";
 import { DEFAULT_CALENDAR_COLOR, TONE_COLORS, intlTag, type Layer, type Prefs } from "./model";
 
 const LAYERS: Array<{ id: Layer; label: { ar: string; en: string }; color: string }> = [
@@ -51,6 +52,7 @@ export function CalendarSidebar({
   const [calendarId, setCalendarId] = useState("");
   const [busy, setBusy] = useState("");
   const [caps, setCaps] = useState<Record<number, string>>({});
+  const [permissionsFor, setPermissionsFor] = useState<CalendarSource | null>(null);
   const tag = intlTag(locale);
 
   useEffect(() => setMonth(current), [current]);
@@ -191,9 +193,15 @@ export function CalendarSidebar({
                   <input type="checkbox" checked={visible} onChange={() => toggleCalendar(calendar.id)} style={{ accentColor: calendar.color ?? DEFAULT_CALENDAR_COLOR }} />
                   {visible ? <Eye size={14} aria-hidden /> : <EyeOff size={14} aria-hidden />}
                   <span>{calendar.summary}{calendar.main ? (ar ? " · رئيسي" : " · main") : ""}</span>
+                  {calendar.restricted ? <UserLock size={12} aria-label={ar ? "محصور بأدوار" : "Limited to roles"} /> : null}
                   {!calendar.writable ? <Lock size={12} aria-label={ar ? "قراءة فقط" : "Read only"} /> : null}
                   {errors[calendar.id] ? <TriangleAlert size={13} className="is-warn" aria-label={errors[calendar.id]} /> : null}
                 </label>
+                {directory?.can_manage ? (
+                  <button type="button" className="gcal-icon-btn gcal-cal-remove" onClick={() => setPermissionsFor(calendar)} title={ar ? "صلاحيات التقويم" : "Calendar access"} aria-label={ar ? `صلاحيات ${calendar.summary}` : `Access for ${calendar.summary}`}>
+                    <Shield size={13} aria-hidden />
+                  </button>
+                ) : null}
                 {directory?.can_manage && !calendar.main ? (
                   <button type="button" className="gcal-icon-btn gcal-cal-remove" disabled={busy === `remove:${calendar.id}`} onClick={() => removeCalendar(calendar.id)} title={ar ? "أزل من القائمة" : "Remove from list"} aria-label={ar ? `أزل ${calendar.summary}` : `Remove ${calendar.summary}`}>
                     <X size={13} aria-hidden />
@@ -279,6 +287,17 @@ export function CalendarSidebar({
             </div>
           ))}
         </details>
+      ) : null}
+      {permissionsFor ? (
+        <CalendarPermissionsDialog
+          locale={locale}
+          calendar={permissionsFor}
+          onClose={() => setPermissionsFor(null)}
+          onSaved={() => {
+            setPermissionsFor(null);
+            onDirectoryChanged();
+          }}
+        />
       ) : null}
     </aside>
   );

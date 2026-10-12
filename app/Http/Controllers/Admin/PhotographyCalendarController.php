@@ -12,7 +12,8 @@ use Illuminate\Support\Carbon;
 
 /**
  * Every Google Calendar on the service account's list, inside the photography tab.
- * Anyone on the tab reads them; staff with the full photography ability write.
+ * Who reads and writes each calendar follows ManageCalendarEvents::access(). Staff with
+ * the full photography ability add calendars and set which roles reach each one.
  */
 class PhotographyCalendarController extends Controller
 {
@@ -26,7 +27,7 @@ class PhotographyCalendarController extends Controller
         return response()->json([
             'data' => [
                 'configured' => $configured,
-                'calendars' => $configured ? $this->events->calendars($request->boolean('fresh')) : [],
+                'calendars' => $configured ? $this->events->calendarsFor($user, $request->boolean('fresh')) : [],
                 'service_email' => $configured ? $this->events->serviceEmail() : null,
                 'can_manage' => $this->canManage($user),
             ],
@@ -53,6 +54,29 @@ class PhotographyCalendarController extends Controller
         return response()->json(['message' => 'أُزيل التقويم من القائمة.']);
     }
 
+    public function permissions(Request $request): JsonResponse
+    {
+        $this->manager($request);
+        $validated = $request->validate(['calendar_id' => ['required', 'string', 'max:255']]);
+
+        return response()->json(['data' => $this->events->permissions($validated['calendar_id'])]);
+    }
+
+    public function savePermissions(Request $request): JsonResponse
+    {
+        $this->manager($request);
+        $validated = $request->validate([
+            'calendar_id' => ['required', 'string', 'max:255'],
+            'roles' => ['present', 'array'],
+            'roles.*' => ['in:none,view,edit'],
+        ]);
+
+        return response()->json([
+            'data' => $this->events->setPermissions($validated['calendar_id'], $validated['roles']),
+            'message' => 'حُفظت صلاحيات التقويم.',
+        ]);
+    }
+
     public function index(Request $request): JsonResponse
     {
         $user = $this->user($request);
@@ -69,7 +93,7 @@ class PhotographyCalendarController extends Controller
         if (! $this->events->configured()) {
             return response()->json(['data' => [], 'errors' => []]);
         }
-        $result = $this->events->events($validated['calendars'] ?? [], $from, $to, $validated['q'] ?? null, $this->canManage($user));
+        $result = $this->events->events($user, $validated['calendars'] ?? [], $from, $to, $validated['q'] ?? null);
 
         return response()->json(['data' => $result['events'], 'errors' => $result['errors']]);
     }
@@ -82,18 +106,18 @@ class PhotographyCalendarController extends Controller
             'event_id' => ['required', 'string', 'max:1024'],
         ]);
 
-        return response()->json(['data' => $this->events->find($validated['calendar_id'], $validated['event_id'], $this->canManage($user))]);
+        return response()->json(['data' => $this->events->find($user, $validated['calendar_id'], $validated['event_id'])]);
     }
 
     public function store(Request $request): JsonResponse
     {
-        $this->manager($request);
+        $user = $this->user($request);
         $validated = $request->validate([
             'calendar_id' => ['required', 'string', 'max:255'],
             ...$this->eventRules(),
             'start' => ['required', 'string', 'max:40'],
         ]);
-        $row = $this->events->create($validated);
+        $row = $this->events->create($user, $validated);
 
         return response()->json([
             'data' => $row,
@@ -103,7 +127,7 @@ class PhotographyCalendarController extends Controller
 
     public function update(Request $request): JsonResponse
     {
-        $this->manager($request);
+        $user = $this->user($request);
         $validated = $request->validate([
             'calendar_id' => ['required', 'string', 'max:255'],
             'event_id' => ['required', 'string', 'max:1024'],
@@ -113,7 +137,7 @@ class PhotographyCalendarController extends Controller
             'start' => ['sometimes', 'required', 'string', 'max:40'],
         ]);
         $input = array_diff_key($validated, array_flip(['calendar_id', 'event_id', 'scope']));
-        $row = $this->events->update($validated['calendar_id'], $validated['event_id'], $input, $validated['scope'] ?? 'this');
+        $row = $this->events->update($user, $validated['calendar_id'], $validated['event_id'], $input, $validated['scope'] ?? 'this');
 
         return response()->json([
             'data' => $row,
@@ -123,14 +147,14 @@ class PhotographyCalendarController extends Controller
 
     public function destroy(Request $request): JsonResponse
     {
-        $this->manager($request);
+        $user = $this->user($request);
         $validated = $request->validate([
             'calendar_id' => ['required', 'string', 'max:255'],
             'event_id' => ['required', 'string', 'max:1024'],
             'scope' => ['nullable', 'in:this,following,all'],
             'notify' => ['boolean'],
         ]);
-        $this->events->delete($validated['calendar_id'], $validated['event_id'], $validated['scope'] ?? 'this', (bool) ($validated['notify'] ?? false));
+        $this->events->delete($user, $validated['calendar_id'], $validated['event_id'], $validated['scope'] ?? 'this', (bool) ($validated['notify'] ?? false));
 
         return response()->json(['message' => 'حُذف الحدث.']);
     }

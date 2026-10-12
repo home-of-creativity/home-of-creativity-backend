@@ -1056,11 +1056,33 @@ export type PhotographyBookingRow = {
 
 export type PhotographySlot = { starts_at: string; label: string };
 
+export type ComplaintStatus = "open" | "in_progress" | "resolved";
+
+export type ComplaintMessage = {
+  id: number;
+  author: "staff" | "client";
+  author_name: string | null;
+  channel: "telegram" | "whatsapp" | "email" | "note" | string;
+  body: string;
+  delivered: boolean;
+  created_at: string | null;
+};
+
+export type ComplaintDetail = ComplaintRow & {
+  ticket_opened_at: string | null;
+  resolved_at: string | null;
+  channels: { bot: "telegram" | "whatsapp" | null; email: string | null };
+  messages: ComplaintMessage[];
+};
+
 export type ComplaintRow = {
   id: number;
+  ticket_number: string | null;
+  messages_count: number;
+  last_activity_at: string | null;
   title: string;
   description: string;
-  status: "open" | "reviewed" | string;
+  status: ComplaintStatus | string;
   has_image: boolean;
   has_audio: boolean;
   client_name: string | null;
@@ -1091,6 +1113,15 @@ export type CalendarSource = {
   access_role: string;
   main: boolean;
   writable: boolean;
+  restricted?: boolean;
+};
+
+export type CalendarRoleLevel = "none" | "view" | "edit";
+
+export type CalendarPermissions = {
+  calendar_id: string;
+  restricted: boolean;
+  roles: Array<{ id: number; name: string; level: CalendarRoleLevel; full: boolean }>;
 };
 
 export type CalendarDirectory = {
@@ -1249,6 +1280,15 @@ export const api = {
       method: "POST",
     });
   },
+  updateExpense(id: number, payload: { amount: number; category: string; note?: string | null; spent_at: string }) {
+    return request<Envelope<FinanceSummary>>(`/admin/finance/expenses/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+  deleteExpense(id: number) {
+    return request<Envelope<FinanceSummary>>(`/admin/finance/expenses/${id}`, { method: "DELETE" });
+  },
   addExpense(payload: { amount: number; category: string; note?: string }) {
     return request<Envelope<FinanceSummary>>("/admin/finance/expenses", {
       method: "POST",
@@ -1382,10 +1422,22 @@ export const api = {
   complaints() {
     return request<Envelope<ComplaintRow[]>>("/admin/complaints");
   },
-  updateComplaint(id: number, status: "open" | "reviewed") {
-    return request<Envelope<{ id: number; status: string }>>(`/admin/complaints/${id}`, {
+  complaint(id: number) {
+    return request<Envelope<ComplaintDetail>>(`/admin/complaints/${id}`);
+  },
+  updateComplaint(id: number, status: ComplaintStatus) {
+    return request<Envelope<ComplaintDetail>>(`/admin/complaints/${id}`, {
       method: "PATCH",
       body: JSON.stringify({ status }),
+    });
+  },
+  openComplaintTicket(id: number) {
+    return request<Envelope<ComplaintDetail>>(`/admin/complaints/${id}/ticket`, { method: "POST" });
+  },
+  replyComplaint(id: number, payload: { body: string; channel: "bot" | "email" | "note"; resolve?: boolean }) {
+    return request<Envelope<ComplaintDetail>>(`/admin/complaints/${id}/replies`, {
+      method: "POST",
+      body: JSON.stringify(payload),
     });
   },
   async complaintFile(id: number, kind: "image" | "audio") {
@@ -1410,6 +1462,15 @@ export const api = {
   },
   removePhotographyCalendar(calendarId: string) {
     return request<{ message: string }>("/admin/photography/calendar/calendars", { method: "DELETE", body: JSON.stringify({ calendar_id: calendarId }) });
+  },
+  photographyCalendarPermissions(calendarId: string) {
+    return request<Envelope<CalendarPermissions>>(`/admin/photography/calendar/permissions${queryString({ calendar_id: calendarId })}`);
+  },
+  savePhotographyCalendarPermissions(calendarId: string, roles: Record<number, CalendarRoleLevel>) {
+    return request<Envelope<CalendarPermissions>>("/admin/photography/calendar/permissions", {
+      method: "PUT",
+      body: JSON.stringify({ calendar_id: calendarId, roles }),
+    });
   },
   photographyEvents(params: { from: string; to: string; calendars: string[]; q?: string }) {
     const search = new URLSearchParams({ from: params.from, to: params.to });

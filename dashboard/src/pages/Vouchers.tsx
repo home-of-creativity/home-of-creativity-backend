@@ -21,6 +21,7 @@ export function Vouchers({ locale, t }: { locale: Locale; t: (c: { ar: string; e
   const [kind, setKind] = useState<"" | VoucherKind>("");
   const canCreate = canAbility(user, "ops.vouchers.create");
   const canDelete = canAbility(user, "ops.vouchers.delete");
+  const canUpdate = canAbility(user, "ops.vouchers.update");
 
   useEffect(() => {
     api
@@ -121,7 +122,9 @@ export function Vouchers({ locale, t }: { locale: Locale; t: (c: { ar: string; e
                       <span className={row.signed ? "status-dot is-live" : "status-dot"}>{row.signed ? t(copy.voucherSigned) : t(copy.voucherDraft)}</span>
                     </td>
                     <td className="row-actions">
-                      <Link className="btn btn-ghost btn-sm" to={`/vouchers/${row.id}`}>{t(copy.voucherOpen)}</Link>
+                      <Link className={canUpdate ? "btn btn-primary btn-sm" : "btn btn-ghost btn-sm"} to={`/vouchers/${row.id}`}>
+                        {canUpdate ? t(copy.voucherEdit) : t(copy.voucherOpen)}
+                      </Link>
                       {canDelete ? (
                         <button type="button" className="btn btn-ghost btn-sm" onClick={() => void remove(row)}>{t(copy.delete)}</button>
                       ) : null}

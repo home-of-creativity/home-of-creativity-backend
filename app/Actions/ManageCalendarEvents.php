@@ -2,23 +2,35 @@
 
 namespace App\Actions;
 
+use App\Enums\StaffAbility;
+use App\Models\PhotographyCalendarRole;
+use App\Models\Role;
+use App\Models\User;
 use App\Services\GoogleCalendarClient;
 use App\Support\RecurrenceRule;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 /**
  * Google Calendar events that are not photography bookings, for the photography tab.
  * Shoots stay with BookPhotographySlot: their events carry a hoc_booking key and are
  * refused here, so a drag in the tab always goes through the booking rules.
+ *
+ * Roles can be limited per calendar. A calendar with no role rows is open: everyone on
+ * the tab reads it and staff with the full photography ability write. Once a role is
+ * listed, only listed roles see it, and only roles marked to edit change it.
  */
 class ManageCalendarEvents
 {
     public const ZONE = 'Asia/Damascus';
 
     private const CALENDARS_KEY = 'hoc:gcal:calendars';
+
+    /** @var array<string, array<int, bool>>|null calendar id => role id => can edit */
+    private ?array $rules = null;
 
     public function __construct(private GoogleCalendarClient $google) {}
 
@@ -64,6 +76,91 @@ class ManageCalendarEvents
         throw ValidationException::withMessages(['calendar_id' => 'هذا التقويم ليس في قائمة التقاويم.']);
     }
 
+    /**
+     * The calendars this user may see. `writable` is true only when Google lets the
+     * service account write and this user's role may edit.
+     *
+     * @return list<array{id: string, summary: string, description: string|null, color: string|null, foreground: string|null, access_role: string, main: bool, writable: bool, restricted: bool}>
+     */
+    public function calendarsFor(User $user, bool $fresh = false): array
+    {
+        $rows = [];
+        foreach ($this->calendars($fresh) as $row) {
+            $access = $this->access($user, $row['id']);
+            if ($access['view']) {
+                $rows[] = [...$row, 'writable' => $row['writable'] && $access['edit'], 'restricted' => isset($this->rules()[$row['id']])];
+            }
+        }
+
+        return $rows;
+    }
+
+    /** @return array{view: bool, edit: bool} */
+    public function access(User $user, string $calendarId): array
+    {
+        $manager = $user->canAbility(StaffAbility::OpsPhotographyAll);
+        $rules = $this->rules()[$calendarId] ?? null;
+        if ($rules === null) {
+            return ['view' => true, 'edit' => $manager];
+        }
+        if ($manager) {
+            return ['view' => true, 'edit' => true];
+        }
+        $roleId = $user->role_id;
+        if ($roleId !== null && array_key_exists((int) $roleId, $rules)) {
+            return ['view' => true, 'edit' => $rules[(int) $roleId]];
+        }
+
+        return ['view' => false, 'edit' => false];
+    }
+
+    /**
+     * Every dashboard role with its level on one calendar: none, view, or edit.
+     *
+     * @return array{calendar_id: string, restricted: bool, roles: list<array{id: int, name: string, level: string, full: bool}>}
+     */
+    public function permissions(string $calendarId): array
+    {
+        $this->calendar($calendarId);
+        $rules = $this->rules()[$calendarId] ?? null;
+
+        return [
+            'calendar_id' => $calendarId,
+            'restricted' => $rules !== null,
+            'roles' => Role::query()->orderBy('name')->get()->map(fn (Role $role): array => [
+                'id' => (int) $role->id,
+                'name' => (string) $role->name,
+                'level' => $rules === null || ! array_key_exists((int) $role->id, $rules) ? 'none' : ($rules[(int) $role->id] ? 'edit' : 'view'),
+                // Roles with the full photography ability always see and edit.
+                'full' => $role->allows(StaffAbility::OpsPhotographyAll),
+            ])->values()->all(),
+        ];
+    }
+
+    /**
+     * @param  array<int|string, string>  $levels  role id => none|view|edit
+     * @return array{calendar_id: string, restricted: bool, roles: list<array{id: int, name: string, level: string, full: bool}>}
+     */
+    public function setPermissions(string $calendarId, array $levels): array
+    {
+        $this->calendar($calendarId);
+        $known = Role::query()->pluck('id')->map(fn ($id): int => (int) $id)->all();
+        PhotographyCalendarRole::query()->where('calendar_id', $calendarId)->delete();
+        foreach ($levels as $roleId => $level) {
+            if (! in_array((int) $roleId, $known, true) || ! in_array($level, ['view', 'edit'], true)) {
+                continue;
+            }
+            PhotographyCalendarRole::query()->create([
+                'calendar_id' => $calendarId,
+                'role_id' => (int) $roleId,
+                'can_edit' => $level === 'edit',
+            ]);
+        }
+        $this->rules = null;
+
+        return $this->permissions($calendarId);
+    }
+
     /** @return array{id: string, summary: string, description: string|null, color: string|null, foreground: string|null, access_role: string, main: bool, writable: bool} */
     public function subscribe(string $calendarId): array
     {
@@ -91,6 +188,7 @@ class ManageCalendarEvents
         if (! $this->google->unsubscribe($calendarId)) {
             $this->fail('calendar_id', 'تعذرت إزالة التقويم.');
         }
+        PhotographyCalendarRole::query()->where('calendar_id', $calendarId)->delete();
         $this->calendars(true);
     }
 
@@ -98,10 +196,10 @@ class ManageCalendarEvents
      * @param  list<string>  $calendarIds
      * @return array{events: list<array<string, mixed>>, errors: list<array{calendar_id: string, message: string}>}
      */
-    public function events(array $calendarIds, Carbon $from, Carbon $to, ?string $search, bool $canManage): array
+    public function events(User $user, array $calendarIds, Carbon $from, Carbon $to, ?string $search): array
     {
         $known = [];
-        foreach ($this->calendars() as $row) {
+        foreach ($this->calendarsFor($user) as $row) {
             $known[$row['id']] = $row;
         }
         $events = [];
@@ -121,7 +219,7 @@ class ManageCalendarEvents
                 if ($calendar['main'] && $this->bookingKey($item) !== null) {
                     continue;
                 }
-                $row = $this->row($item, $calendar, $canManage);
+                $row = $this->row($item, $calendar);
                 if ($row !== null) {
                     $events[] = $row;
                 }
@@ -132,11 +230,11 @@ class ManageCalendarEvents
     }
 
     /** One event, with the series rule when it is an occurrence. */
-    public function find(string $calendarId, string $eventId, bool $canManage): array
+    public function find(User $user, string $calendarId, string $eventId): array
     {
-        $calendar = $this->calendar($calendarId);
+        $calendar = $this->visible($user, $calendarId);
         $item = $this->google->event($calendarId, $eventId) ?? $this->fail('event_id', $this->google->lastError() ?? 'الحدث غير موجود.');
-        $row = $this->row($item, $calendar, $canManage) ?? $this->fail('event_id', 'الحدث بلا وقت.');
+        $row = $this->row($item, $calendar) ?? $this->fail('event_id', 'الحدث بلا وقت.');
         if (filled($item['recurringEventId'] ?? null)) {
             $master = $this->google->event($calendarId, (string) $item['recurringEventId']);
             $row['recurrence'] = $master['recurrence'] ?? null;
@@ -149,9 +247,9 @@ class ManageCalendarEvents
      * @param  array<string, mixed>  $input
      * @return array<string, mixed>
      */
-    public function create(array $input): array
+    public function create(User $user, array $input): array
     {
-        $calendar = $this->writable((string) $input['calendar_id']);
+        $calendar = $this->writable($user, (string) $input['calendar_id']);
         $body = $this->clean($this->payload($input, null));
         $body['summary'] ??= '(بلا عنوان)';
         $item = $this->google->insert($calendar['id'], $body, $this->sendUpdates($input))
@@ -164,9 +262,9 @@ class ManageCalendarEvents
      * @param  array<string, mixed>  $input
      * @return array<string, mixed>
      */
-    public function update(string $calendarId, string $eventId, array $input, string $scope): array
+    public function update(User $user, string $calendarId, string $eventId, array $input, string $scope): array
     {
-        $calendar = $this->writable($calendarId);
+        $calendar = $this->writable($user, $calendarId);
         $item = $this->google->event($calendarId, $eventId) ?? $this->fail('event_id', $this->google->lastError() ?? 'الحدث غير موجود.');
         $this->guardBooking($calendar, $item);
         $send = $this->sendUpdates($input);
@@ -188,7 +286,7 @@ class ManageCalendarEvents
 
         $target = (string) ($input['target_calendar_id'] ?? '');
         if ($target !== '' && $target !== $calendarId) {
-            $destination = $this->writable($target);
+            $destination = $this->writable($user, $target);
             $moveId = ($scope === 'this' || $masterId === null) ? (string) $saved['id'] : (string) ($saved['recurringEventId'] ?? $saved['id']);
             $saved = $this->google->move($calendarId, $moveId, $destination['id'], $send)
                 ?? $this->fail('target_calendar_id', $this->google->lastError() ?? 'تعذر نقل الحدث إلى التقويم الآخر.');
@@ -198,9 +296,9 @@ class ManageCalendarEvents
         return $this->result($saved, $calendar);
     }
 
-    public function delete(string $calendarId, string $eventId, string $scope, bool $notify): void
+    public function delete(User $user, string $calendarId, string $eventId, string $scope, bool $notify): void
     {
-        $calendar = $this->writable($calendarId);
+        $calendar = $this->writable($user, $calendarId);
         $item = $this->google->event($calendarId, $eventId);
         if ($item === null) {
             return;
@@ -233,7 +331,7 @@ class ManageCalendarEvents
      * @param  array{id: string, writable: bool, main: bool}  $calendar
      * @return array<string, mixed>|null
      */
-    public function row(array $item, array $calendar, bool $canManage): ?array
+    public function row(array $item, array $calendar): ?array
     {
         $start = $item['start'] ?? null;
         $end = $item['end'] ?? null;
@@ -242,8 +340,7 @@ class ManageCalendarEvents
         }
         $allDay = isset($start['date']);
         $organizerSelf = (bool) ($item['organizer']['self'] ?? ! isset($item['organizer']));
-        $editable = $canManage
-            && $calendar['writable']
+        $editable = $calendar['writable']
             && ! ($item['locked'] ?? false)
             && ! ($item['privateCopy'] ?? false)
             && ($organizerSelf || (bool) ($item['guestsCanModify'] ?? false));
@@ -527,21 +624,53 @@ class ManageCalendarEvents
      */
     private function result(array $item, array $calendar): array
     {
-        $row = $this->row($item, $calendar, true) ?? ['id' => $item['id'] ?? null, 'calendar_id' => $calendar['id']];
+        $row = $this->row($item, $calendar) ?? ['id' => $item['id'] ?? null, 'calendar_id' => $calendar['id']];
         $row['conference_failed'] = isset($item['_conference_failed']);
 
         return $row;
     }
 
     /** @return array{id: string, summary: string, description: string|null, color: string|null, foreground: string|null, access_role: string, main: bool, writable: bool} */
-    private function writable(string $calendarId): array
+    private function writable(User $user, string $calendarId): array
     {
-        $calendar = $this->calendar($calendarId);
+        $calendar = $this->visible($user, $calendarId);
+        if (! $this->access($user, $calendarId)['edit']) {
+            throw new HttpException(403, 'دورك يقرأ هذا التقويم فقط.');
+        }
         if (! $calendar['writable']) {
             $this->fail('calendar_id', 'حساب الخدمة يقرأ هذا التقويم فقط. شاركه بصلاحية "إجراء تغييرات على الأحداث".');
         }
 
         return $calendar;
+    }
+
+    /**
+     * The calendar for a user who may see it, with `writable` narrowed to that user.
+     *
+     * @return array{id: string, summary: string, description: string|null, color: string|null, foreground: string|null, access_role: string, main: bool, writable: bool}
+     */
+    private function visible(User $user, string $calendarId): array
+    {
+        $calendar = $this->calendar($calendarId);
+        $access = $this->access($user, $calendarId);
+        if (! $access['view']) {
+            $this->fail('calendar_id', 'هذا التقويم ليس في قائمة التقاويم.');
+        }
+
+        return [...$calendar, 'writable' => $calendar['writable'] && $access['edit']];
+    }
+
+    /** @return array<string, array<int, bool>> */
+    private function rules(): array
+    {
+        if ($this->rules === null) {
+            $this->rules = [];
+            foreach (PhotographyCalendarRole::query()->get(['calendar_id', 'role_id', 'can_edit']) as $rule) {
+                $this->rules[(string) $rule->calendar_id][(int) $rule->role_id] = (bool) $rule->can_edit;
+            }
+        }
+
+        return $this->rules;
     }
 
     /**

@@ -69,7 +69,7 @@ class ComplaintTest extends TestCase
         $this->get('/api/admin/complaints/'.$row->id.'/image')->assertOk();
         $this->patchJson('/api/admin/complaints/'.$row->id, ['status' => 'reviewed'])
             ->assertOk()
-            ->assertJsonPath('data.status', 'reviewed');
+            ->assertJsonPath('data.status', 'resolved');
 
         $role = Role::query()->create(['name' => 'بدون شكاوى', 'abilities' => []]);
         Sanctum::actingAs(User::factory()->create(['role_id' => $role->id]));

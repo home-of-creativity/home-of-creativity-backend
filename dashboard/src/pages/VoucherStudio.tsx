@@ -474,6 +474,12 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
     return (
       <section className="report-start">
         <Link className="back-link" to="/vouchers"><BackIcon size={16} aria-hidden="true" />{t(copy.voucherBack)}</Link>
+        {voucherId ? (
+          <span className={canWrite ? "voucher-mode is-edit" : "voucher-mode"} role="status">
+            {canWrite ? t(copy.voucherEditing) : t(copy.voucherViewOnly)}
+            {serial ? <span dir="ltr"> · {serial}</span> : null}
+          </span>
+        ) : null}
         <header className="report-start-head">
           <h1>{t(copy.voucherTemplateTitle)}</h1>
           <p>{t(copy.voucherTemplateLede)}</p>
@@ -668,7 +674,7 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
           <SignaturePad label={draft.kind === "delivery" ? t(copy.voucherSignGiver) : t(copy.voucherCounterSigner)} clearLabel={t(copy.voucherClearSign)} value={draft.counter_signature} disabled={!canWrite} onChange={(counter_signature) => patch({ counter_signature })} />
           {canWrite ? (
             <>
-              <button className="btn btn-primary" type="submit" disabled={busy} aria-busy={busy}>{t(copy.voucherSave)}</button>
+              <button className="btn btn-primary" type="submit" disabled={busy} aria-busy={busy}>{voucherId ? t(copy.voucherSaveChanges) : t(copy.voucherSave)}</button>
               <label className="field-label">
                 {t(copy.voucherTemplateName)}
                 <input className="field" value={templateName} maxLength={120} disabled={busy} onChange={(event) => setTemplateName(event.target.value)} />

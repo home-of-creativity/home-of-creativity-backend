@@ -288,6 +288,12 @@ class HandleWhatsAppInbound
                 }
             }
 
+            if ($callback !== null && str_starts_with($callback, ComplaintTickets::REPLY_CALLBACK)) {
+                $complaints->turn($client, $chatId, $phone, $this->replyLang, $callback, null, null, false);
+
+                return;
+            }
+
             if ($callback !== null) {
                 $this->handleCallback($client, $chatId, $phone, $session, $callback);
 

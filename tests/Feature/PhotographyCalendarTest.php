@@ -275,6 +275,55 @@ class PhotographyCalendarTest extends TestCase
             ->assertJsonCount(2, 'data');
     }
 
+    public function test_roles_limit_who_sees_and_edits_a_calendar(): void
+    {
+        $team = 'team@group.calendar.google.com';
+        Http::fake([
+            self::API.'/users/me/calendarList*' => Http::response(['items' => [
+                ['id' => self::MAIN, 'summary' => 'التصوير', 'accessRole' => 'owner'],
+                ['id' => $team, 'summary' => 'الفريق', 'accessRole' => 'writer'],
+            ]]),
+            self::API.'/calendars/'.rawurlencode($team).'/events*' => fn (Request $request) => Http::response(
+                $request->method() === 'POST'
+                    ? $this->item('new', '2026-10-12T10:00:00+03:00', '2026-10-12T11:00:00+03:00')
+                    : ['items' => [$this->item('meeting', '2026-10-12T10:00:00+03:00', '2026-10-12T11:00:00+03:00')]],
+            ),
+        ]);
+        $editors = Role::query()->create(['name' => 'المحتوى', 'abilities' => [StaffAbility::OpsPhotography->value]]);
+        $viewers = Role::query()->create(['name' => 'المبيعات', 'abilities' => [StaffAbility::OpsPhotography->value]]);
+        $outside = Role::query()->create(['name' => 'التصميم', 'abilities' => [StaffAbility::OpsPhotography->value]]);
+
+        $this->actAs([StaffAbility::OpsPhotography->value, StaffAbility::OpsPhotographyAll->value]);
+        $this->putJson('/api/admin/photography/calendar/permissions', [
+            'calendar_id' => $team,
+            'roles' => [$editors->id => 'edit', $viewers->id => 'view', $outside->id => 'none'],
+        ])->assertOk()->assertJsonPath('data.restricted', true);
+        $this->getJson('/api/admin/photography/calendar/permissions?calendar_id='.rawurlencode($team))
+            ->assertOk()
+            ->assertJsonFragment(['id' => $editors->id, 'level' => 'edit'])
+            ->assertJsonFragment(['id' => $viewers->id, 'level' => 'view'])
+            ->assertJsonFragment(['id' => $outside->id, 'level' => 'none']);
+
+        $query = '/api/admin/photography/calendar/events?'.http_build_query(['from' => '2026-10-11', 'to' => '2026-10-18', 'calendars' => [$team]]);
+        $create = ['calendar_id' => $team, 'title' => 'اجتماع', 'start' => '2026-10-12T10:00'];
+
+        Sanctum::actingAs(User::factory()->create(['role_id' => $editors->id]));
+        $this->getJson('/api/admin/photography/calendar/calendars')->assertJsonFragment(['id' => $team, 'writable' => true, 'restricted' => true]);
+        $this->getJson($query)->assertJsonPath('data.0.editable', true);
+        $this->postJson('/api/admin/photography/calendar/events', $create)->assertCreated();
+        $this->getJson('/api/admin/photography/calendar/permissions?calendar_id='.rawurlencode($team))->assertForbidden();
+
+        Sanctum::actingAs(User::factory()->create(['role_id' => $viewers->id]));
+        $this->getJson($query)->assertJsonPath('data.0.editable', false);
+        $this->postJson('/api/admin/photography/calendar/events', $create)->assertForbidden();
+
+        Sanctum::actingAs(User::factory()->create(['role_id' => $outside->id]));
+        $calendars = collect($this->getJson('/api/admin/photography/calendar/calendars')->json('data.calendars'))->pluck('id')->all();
+        $this->assertSame([self::MAIN], $calendars);
+        $this->getJson($query)->assertJsonCount(0, 'data');
+        $this->postJson('/api/admin/photography/calendar/events', $create)->assertStatus(422);
+    }
+
     public function test_recurrence_rules_shift_and_end(): void
     {
         $this->assertSame(['RRULE:FREQ=WEEKLY;BYDAY=SU,TU'], RecurrenceRule::shiftDays(['RRULE:FREQ=WEEKLY;BYDAY=SA,MO'], 1));

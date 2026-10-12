@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { ArrowDown, ArrowUp, ExternalLink, RefreshCw, Search, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ExternalLink, Info, Pencil, RefreshCw, Search, X } from "lucide-react";
 import { toast } from "sonner";
+import { ConfirmAction } from "../components/ConfirmAction";
 import { LoadingLottie } from "../components/LoadingLottie";
 import { PageHeader } from "../components/PageHeader";
 import { Pagination } from "../components/Pagination";
@@ -93,6 +94,8 @@ export function Finance({ locale, t }: { locale: Locale; t: (c: { ar: string; en
   const [category, setCategory] = useState("");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState<{ id: number; amount: string; category: string; note: string; spent_at: string } | null>(null);
+  const [rowBusy, setRowBusy] = useState(0);
   const [refresh, setRefresh] = useState(0);
   const [query, setQuery] = useState(params.get("q") ?? "");
 
@@ -191,6 +194,45 @@ export function Finance({ locale, t }: { locale: Locale; t: (c: { ar: string; en
       setError(err instanceof Error ? err.message : t(copy.saveFailed));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function saveExpense() {
+    if (!editing) return;
+    const value = Number(editing.amount);
+    if (!Number.isFinite(value) || value <= 0 || !editing.category || !editing.spent_at) {
+      toast.error(t(copy.financeAmountInvalid));
+      return;
+    }
+    setRowBusy(editing.id);
+    try {
+      const res = await api.updateExpense(editing.id, {
+        amount: value,
+        category: editing.category,
+        note: editing.note.trim() || null,
+        spent_at: editing.spent_at,
+      });
+      setEditing(null);
+      setRefresh((current) => current + 1);
+      toast.success(res.message ?? t(copy.saveSuccess));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t(copy.saveFailed));
+    } finally {
+      setRowBusy(0);
+    }
+  }
+
+  async function removeExpense(id: number) {
+    setRowBusy(id);
+    try {
+      const res = await api.deleteExpense(id);
+      if (editing?.id === id) setEditing(null);
+      setRefresh((current) => current + 1);
+      toast.success(res.message ?? t(copy.saveSuccess));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t(copy.saveFailed));
+    } finally {
+      setRowBusy(0);
     }
   }
 
@@ -406,6 +448,10 @@ export function Finance({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                 </span>
               ) : null}
             </div>
+            <p className="finance-odoo-note" role="note">
+              <Info size={16} aria-hidden="true" />
+              <span>{t(copy.financeOdooNote)}</span>
+            </p>
             <div className="table-wrap table-flush" aria-busy={loading}>
               <table>
                 <thead>
@@ -483,22 +529,83 @@ export function Finance({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                       <th>{t(copy.financeCategory)}</th>
                       <th>{t(copy.financeNote)}</th>
                       <th>{t(copy.financeExpenseDate)}</th>
+                      <th aria-label={t(copy.financeExpenseActions)} />
                     </tr>
                   </thead>
                   <tbody>
                     {data.expense_rows.length === 0 ? (
                       <tr>
-                        <td colSpan={4}>{activeFilters > 0 ? t(copy.noSearchResults) : t(copy.empty)}</td>
+                        <td colSpan={5}>{activeFilters > 0 ? t(copy.noSearchResults) : t(copy.empty)}</td>
                       </tr>
                     ) : (
-                      data.expense_rows.map((row) => (
-                        <tr key={row.id}>
-                          <td dir="ltr" className="nowrap">{money(row.amount)}</td>
-                          <td>{row.category}</td>
-                          <td>{row.note ?? "—"}</td>
-                          <td className="nowrap">{row.spent_at ?? "—"}</td>
-                        </tr>
-                      ))
+                      data.expense_rows.map((row) =>
+                        editing?.id === row.id ? (
+                          <tr key={row.id} className="finance-expense-edit">
+                            <td>
+                              <input
+                                className="field"
+                                type="number"
+                                min="0.01"
+                                step="0.01"
+                                inputMode="decimal"
+                                dir="ltr"
+                                aria-label={t(copy.financeTotal)}
+                                value={editing.amount}
+                                onChange={(event) => setEditing({ ...editing, amount: event.target.value })}
+                              />
+                            </td>
+                            <td>
+                              <select className="field" aria-label={t(copy.financeCategory)} value={editing.category} onChange={(event) => setEditing({ ...editing, category: event.target.value })}>
+                                {data.categories.map((item) => (
+                                  <option key={item} value={item}>{item}</option>
+                                ))}
+                              </select>
+                            </td>
+                            <td>
+                              <input className="field" maxLength={500} aria-label={t(copy.financeNote)} value={editing.note} onChange={(event) => setEditing({ ...editing, note: event.target.value })} />
+                            </td>
+                            <td>
+                              <input className="field" type="date" dir="ltr" aria-label={t(copy.financeExpenseDate)} value={editing.spent_at} onChange={(event) => setEditing({ ...editing, spent_at: event.target.value })} />
+                            </td>
+                            <td className="row-actions nowrap">
+                              <button type="button" className="btn btn-primary btn-sm" disabled={rowBusy === row.id} onClick={() => void saveExpense()}>
+                                {t(copy.financeSaveChanges)}
+                              </button>
+                              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditing(null)}>
+                                {t(copy.cancel)}
+                              </button>
+                            </td>
+                          </tr>
+                        ) : (
+                          <tr key={row.id}>
+                            <td dir="ltr" className="nowrap">{money(row.amount)}</td>
+                            <td>{row.category}</td>
+                            <td>{row.note ?? "—"}</td>
+                            <td className="nowrap">{row.spent_at ?? "—"}</td>
+                            <td className="row-actions nowrap">
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-sm"
+                                disabled={rowBusy !== 0}
+                                aria-label={t(copy.financeEditExpense)}
+                                title={t(copy.financeEditExpense)}
+                                onClick={() => setEditing({ id: row.id, amount: String(row.amount), category: row.category, note: row.note ?? "", spent_at: row.spent_at ?? "" })}
+                              >
+                                <Pencil size={14} aria-hidden="true" />
+                              </button>
+                              <ConfirmAction
+                                label={t(copy.delete)}
+                                confirmLabel={t(copy.financeDeleteExpenseConfirm)}
+                                yesLabel={t(copy.delete)}
+                                noLabel={t(copy.cancel)}
+                                className="btn btn-ghost btn-sm btn-danger"
+                                disabled={rowBusy !== 0}
+                                onConfirm={() => void removeExpense(row.id)}
+                              />
+                            </td>
+                          </tr>
+                        ),
+                      )
                     )}
                   </tbody>
                 </table>

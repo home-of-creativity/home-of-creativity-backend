@@ -181,7 +181,7 @@ export function PhotographyPage({ locale, t }: { locale: Locale; t: (c: { ar: st
 
   const calendarById = useMemo(() => new Map((directory?.calendars ?? []).map((calendar) => [calendar.id, calendar])), [directory]);
   const writable = useMemo(() => (directory?.calendars ?? []).filter((calendar) => calendar.writable), [directory]);
-  const canEvent = directory?.can_manage === true && writable.length > 0;
+  const canEvent = writable.length > 0;
   const canShoot = board?.me.can_all === true || board?.me.is_photographer === true;
   const canCreate = canEvent || canShoot;
 
@@ -683,7 +683,7 @@ export function PhotographyPage({ locale, t }: { locale: Locale; t: (c: { ar: st
           state={dialog}
           calendars={directory?.calendars ?? []}
           board={board}
-          canManage={directory?.can_manage === true}
+          canManage={canEvent}
           onClose={() => setDialog(null)}
           onSaved={() => {
             setDialog(null);

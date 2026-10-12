@@ -1786,6 +1786,20 @@ async def _telegram_b64(file_obj) -> str:
     return base64.b64encode(bytes(content)).decode("ascii")
 
 
+async def ticket_reply_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """The client pressed «reply» under a complaint ticket. Laravel asks for the reply text."""
+    query = update.callback_query
+    if query is None or query.data is None or query.from_user is None:
+        return
+    try:
+        await query.answer()
+    except Exception:
+        pass
+    outcome = await complaint_chat(query.from_user.id, text=query.data)
+    if outcome != "handled" and query.message:
+        await query.message.reply_text("تعذر فتح الرد على التذكرة. أعد المحاولة.", reply_markup=main_keyboard())
+
+
 async def photography_decision(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if query is None or query.data is None or query.from_user is None:
@@ -2230,6 +2244,7 @@ def main() -> None:
         ),
         group=-1,
     )
+    application.add_handler(CallbackQueryHandler(ticket_reply_callback, pattern=r"^tkt:\d+$"), group=-2)
     application.add_handler(
         CallbackQueryHandler(
             photography_decision,

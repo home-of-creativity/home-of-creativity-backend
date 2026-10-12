@@ -9523,3 +9523,341 @@ details.gcal-side-section > summary h2 {
     border-radius: 12px;
   }
 }
+
+/* Finance: Odoo note and expense row actions */
+
+.finance-odoo-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 0 1.05rem 0.75rem;
+  padding: 0.6rem 0.85rem;
+  border-radius: 0.8rem;
+  background: color-mix(in srgb, var(--brand-teal) 12%, var(--brand-surface));
+  color: var(--brand-ink);
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.finance-odoo-note svg {
+  flex: none;
+  margin-top: 0.2rem;
+  color: var(--brand-teal);
+}
+
+.finance-expenses td.row-actions,
+.voucher-filters ~ .panel td.row-actions {
+  white-space: nowrap;
+  text-align: end;
+}
+
+.finance-expenses td.row-actions > *,
+.voucher-filters ~ .panel td.row-actions > * {
+  display: inline-flex;
+  vertical-align: middle;
+  margin-inline-start: 0.3rem;
+}
+
+.finance-expense-edit td {
+  padding: 0.45rem 0.5rem;
+  vertical-align: middle;
+}
+
+.finance-expense-edit .field {
+  min-width: 6.5rem;
+  padding: 0.45rem 0.6rem;
+}
+
+/* Voucher studio: edit or view-only mode */
+
+.voucher-mode {
+  padding: 0.35rem 0.8rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--brand-ink) 6%, transparent);
+  color: var(--brand-muted);
+  font-size: 0.85rem;
+}
+
+.voucher-mode.is-edit {
+  background: color-mix(in srgb, var(--brand-orange) 18%, var(--brand-surface));
+  color: var(--brand-ink);
+  font-weight: 600;
+}
+
+/* Photography: calendar access by role */
+
+.gcal-perm-sub {
+  margin: 0.15rem 0 0;
+}
+
+.gcal-perm-state {
+  margin: 0 0 0.9rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: 0.8rem;
+  background: color-mix(in srgb, var(--brand-ink) 5%, transparent);
+  font-size: 0.9rem;
+}
+
+.gcal-perm-state.is-limited {
+  background: color-mix(in srgb, var(--brand-orange) 14%, var(--brand-surface));
+}
+
+.gcal-perm-table th,
+.gcal-perm-table td {
+  padding: 0.55rem 0.6rem;
+  text-align: center;
+}
+
+.gcal-perm-table th:first-child,
+.gcal-perm-table td:first-child {
+  text-align: start;
+}
+
+.gcal-perm-table td:first-child small {
+  display: block;
+  margin-top: 0.15rem;
+}
+
+.gcal-perm-table input {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+/* Complaints: tickets and replies */
+
+.complaint-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.complaint-filters {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.complaint-filters button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.9rem;
+  border: 1px solid var(--brand-line);
+  border-radius: 999px;
+  background: var(--brand-surface);
+  color: var(--brand-ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.complaint-filters button span {
+  min-width: 1.4rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--brand-ink) 8%, transparent);
+  font-size: 0.78rem;
+  text-align: center;
+}
+
+.complaint-filters button.is-active {
+  border-color: var(--brand-orange);
+  background: color-mix(in srgb, var(--brand-orange) 18%, var(--brand-surface));
+  font-weight: 700;
+}
+
+.complaint-search {
+  min-width: min(20rem, 100%);
+  margin: 0;
+  padding-block: 0.35rem;
+}
+
+.complaint-search .field {
+  border: 0;
+  background: transparent;
+  padding-inline: 0;
+}
+
+.complaint-row {
+  cursor: pointer;
+}
+
+.complaint-snippet {
+  display: -webkit-box;
+  max-width: 36rem;
+  overflow: hidden;
+  font-size: 0.86rem;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.complaint-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  margin-inline-start: 0.4rem;
+}
+
+.complaint-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.35rem 0 0;
+  font-size: 0.88rem;
+}
+
+.complaint-ticket {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-weight: 700;
+}
+
+.complaint-body {
+  display: grid;
+  grid-template-columns: 14rem minmax(0, 1fr);
+  gap: 1.1rem;
+  align-items: start;
+}
+
+.complaint-side {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.complaint-card {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.8rem;
+  border-radius: 0.9rem;
+  background: var(--brand-surface);
+  overflow-wrap: anywhere;
+}
+
+.complaint-card a {
+  color: var(--link);
+  font-size: 0.88rem;
+}
+
+.complaint-actions {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.complaint-actions .btn {
+  justify-self: start;
+  gap: 0.35rem;
+}
+
+.complaint-main {
+  display: grid;
+  gap: 0.9rem;
+  min-width: 0;
+}
+
+.complaint-original {
+  padding: 0.8rem 0.95rem;
+  border: 1px solid var(--brand-line);
+  border-radius: 0.9rem;
+  background: var(--brand-surface);
+}
+
+.complaint-original p {
+  margin: 0.3rem 0 0.5rem;
+  white-space: pre-wrap;
+}
+
+.complaint-image {
+  display: block;
+  max-width: 100%;
+  max-height: 18rem;
+  margin-top: 0.5rem;
+  border-radius: 0.6rem;
+}
+
+.complaint-thread {
+  display: grid;
+  gap: 0.6rem;
+  max-height: 22rem;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.complaint-msg {
+  max-width: 85%;
+  padding: 0.6rem 0.85rem;
+  border-radius: 0.9rem;
+  background: var(--brand-surface);
+}
+
+.complaint-msg.is-staff {
+  justify-self: start;
+  background: color-mix(in srgb, var(--brand-teal) 14%, var(--brand-surface));
+}
+
+.complaint-msg.is-client {
+  justify-self: end;
+  border: 1px solid var(--brand-line);
+}
+
+.complaint-msg.is-note {
+  background: color-mix(in srgb, #f3de86 35%, var(--brand-surface));
+}
+
+.complaint-msg-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+}
+
+.complaint-msg p {
+  margin: 0.25rem 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.complaint-failed {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 0.3rem;
+  color: #b4540a;
+}
+
+.complaint-empty {
+  margin: 0;
+}
+
+.complaint-reply {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.complaint-channels button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.complaint-panel .form-dialog-actions {
+  align-items: center;
+}
+
+.complaint-panel .form-dialog-actions .checkbox-row svg {
+  color: var(--brand-teal);
+}
+
+@media (max-width: 760px) {
+  .complaint-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .complaint-msg {
+    max-width: 100%;
+  }
+}

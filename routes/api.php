@@ -249,6 +249,8 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
     Route::middleware('ability:ops.finance')->group(function () {
         Route::get('finance', [AdminFinanceController::class, 'index']);
         Route::post('finance/expenses', [AdminFinanceController::class, 'storeExpense']);
+        Route::put('finance/expenses/{expense}', [AdminFinanceController::class, 'updateExpense']);
+        Route::delete('finance/expenses/{expense}', [AdminFinanceController::class, 'destroyExpense']);
         Route::post('finance/sync', [AdminFinanceController::class, 'sync']);
     });
 
@@ -277,7 +279,10 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
 
     Route::middleware('ability:ops.complaints')->group(function () {
         Route::get('complaints', [AdminComplaintController::class, 'index']);
+        Route::get('complaints/{complaint}', [AdminComplaintController::class, 'show'])->whereNumber('complaint');
         Route::patch('complaints/{complaint}', [AdminComplaintController::class, 'update']);
+        Route::post('complaints/{complaint}/ticket', [AdminComplaintController::class, 'openTicket']);
+        Route::post('complaints/{complaint}/replies', [AdminComplaintController::class, 'reply']);
         Route::get('complaints/{complaint}/{kind}', [AdminComplaintController::class, 'file'])->whereIn('kind', ['image', 'audio']);
     });
 
@@ -288,6 +293,8 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::get('photography/calendar/calendars', [AdminPhotographyCalendarController::class, 'calendars']);
         Route::post('photography/calendar/calendars', [AdminPhotographyCalendarController::class, 'subscribe']);
         Route::delete('photography/calendar/calendars', [AdminPhotographyCalendarController::class, 'unsubscribe']);
+        Route::get('photography/calendar/permissions', [AdminPhotographyCalendarController::class, 'permissions']);
+        Route::put('photography/calendar/permissions', [AdminPhotographyCalendarController::class, 'savePermissions']);
         Route::get('photography/calendar/events', [AdminPhotographyCalendarController::class, 'index']);
         Route::get('photography/calendar/event', [AdminPhotographyCalendarController::class, 'show']);
         Route::post('photography/calendar/events', [AdminPhotographyCalendarController::class, 'store']);

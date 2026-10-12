@@ -62,4 +62,31 @@ class FinanceController extends Controller
 
         return response()->json(['data' => $saved['finance'], 'message' => 'تم تسجيل المصروف.'], 201);
     }
+
+    public function updateExpense(Request $request, OpsExpense $expense, AdminBotDesk $desk): JsonResponse
+    {
+        $validated = $request->validate([
+            'amount' => ['required', 'numeric', 'gt:0', 'max:10000000'],
+            'category' => ['required', 'string', Rule::in(OpsExpense::categories())],
+            'note' => ['nullable', 'string', 'max:500'],
+            'spent_at' => ['required', 'date_format:Y-m-d'],
+        ]);
+
+        $expense->forceFill([
+            'amount' => round((float) $validated['amount'], 2),
+            'category' => $validated['category'],
+            'note' => filled($validated['note'] ?? null) ? trim((string) $validated['note']) : null,
+            // Keep the time of day; only the date is edited.
+            'spent_at' => ($expense->spent_at ?? now())->copy()->setDateFrom($validated['spent_at']),
+        ])->save();
+
+        return response()->json(['data' => $desk->finance(), 'message' => 'تم تعديل المصروف.']);
+    }
+
+    public function destroyExpense(OpsExpense $expense, AdminBotDesk $desk): JsonResponse
+    {
+        $expense->delete();
+
+        return response()->json(['data' => $desk->finance(), 'message' => 'تم حذف المصروف.']);
+    }
 }
