@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { api } from "../api";
 import { copy } from "../i18n";
-import type { ImagePlacement } from "./report/ReportDocEditor";
+import type { ImagePlacement, PictureWrap } from "./report/ReportDocEditor";
 import type { TextBoxShape } from "./report/pageObjects";
 
 type Memory = { id: number; body: string };
@@ -167,6 +167,7 @@ export function ReportGemini({
   const [width, setWidth] = useState(55);
   // "wrap": the picture sits behind the text on every page except the cover. "place": it goes where the caret is.
   const [place, setPlace] = useState<"wrap" | "place">("place");
+  const [wrap, setWrap] = useState<PictureWrap>("square");
   const [imagePrompt, setImagePrompt] = useState("");
   const [boxKind, setBoxKind] = useState<TextBoxShape>("rect");
   const [draft, setDraft] = useState<{ reply: string; previous: string; next: string } | null>(null);
@@ -235,7 +236,7 @@ export function ReportGemini({
   }
 
   function placement(): ImagePlacement {
-    return place === "wrap" ? { mode: "background" } : { mode: "place", widthPercent: width };
+    return place === "wrap" ? { mode: "background" } : { mode: "place", widthPercent: width, wrap };
   }
 
   async function insertPicture(file: File | undefined) {
@@ -383,6 +384,18 @@ export function ReportGemini({
     }
   }
 
+  const wrapChoices: Array<[PictureWrap, { ar: string; en: string }]> = [
+    ["square", copy.reportWrapSquare],
+    ["tight", copy.reportWrapTight],
+    ["through", copy.reportWrapThrough],
+    ["topAndBottom", copy.reportWrapTopBottom],
+    ["squareRight", copy.reportWrapSquareRight],
+    ["squareLeft", copy.reportWrapSquareLeft],
+    ["behind", copy.reportWrapBehind],
+    ["inFront", copy.reportWrapInFront],
+    ["inline", copy.reportWrapInline],
+  ];
+
   const boxKinds: Array<[TextBoxShape, { ar: string; en: string }]> = [
     ["rect", copy.reportShapeRect],
     ["roundRect", copy.reportShapeRoundRect],
@@ -404,10 +417,18 @@ export function ReportGemini({
           <button type="button" role="radio" aria-checked={place === "place"} className={place === "place" ? "is-active" : ""} onClick={() => setPlace("place")}>{t(copy.reportImageInPage)}</button>
         </div>
         {place === "wrap" ? null : (
-          <label className="field-label">
-            {t(copy.reportImageWidth)} ({width}%)
-            <input className="field" type="range" min={20} max={100} step={5} value={width} onChange={(event) => setWidth(Number(event.target.value))} />
-          </label>
+          <>
+            <label className="field-label">
+              {t(copy.reportImageFlow)}
+              <select className="field" value={wrap} onChange={(event) => setWrap(event.target.value as PictureWrap)}>
+                {wrapChoices.map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}
+              </select>
+            </label>
+            <label className="field-label">
+              {t(copy.reportImageWidth)} ({width}%)
+              <input className="field" type="range" min={20} max={100} step={5} value={width} onChange={(event) => setWidth(Number(event.target.value))} />
+            </label>
+          </>
         )}
         <label className="btn btn-sm">
           {t(copy.reportImageInsert)}

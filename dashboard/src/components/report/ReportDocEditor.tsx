@@ -8,7 +8,7 @@ import type { Locale } from "../../i18n";
 import { editorArabic } from "./editorArabic";
 import { TableLayoutChrome } from "./TableLayoutChrome";
 import { addBlankPage, addCover, addTextBox, type TextBoxShape } from "./pageObjects";
-import { addBodyBackground, bodyDrawings, layoutNewDrawing } from "./pictureLayout";
+import { addBodyBackground } from "./pictureLayout";
 import { reportFontConfiguration, type ExtraFont } from "./fonts";
 
 // The text shaper is WebAssembly; point it at the copy Vite emits so dev and production both find it.
@@ -42,15 +42,26 @@ export type ReportDocHandle = {
   focus(): void;
 };
 
+/** How a picture sits against the words. Same targets Word's wrap menu writes. */
+export type PictureWrap =
+  | "inline"
+  | "square"
+  | "squareLeft"
+  | "squareRight"
+  | "tight"
+  | "through"
+  | "topAndBottom"
+  | "behind"
+  | "inFront";
+
 /**
  * `background`: the picture sits behind the text on every page except the cover. The cover
- * keeps its own header, so no page is chosen. `place`: the picture goes on its own centred
- * line after the paragraph the caret is in (before it when the caret is at its start), at
- * `widthPercent` of the page's text width, with the text above and below it.
+ * keeps its own header, so no page is chosen. `place`: the picture is inserted at the caret
+ * and wrapped with `wrap`, so the words stay beside it instead of being pushed onto their own line.
  */
 export type ImagePlacement =
   | { mode: "background" }
-  | { mode: "place"; widthPercent: number };
+  | { mode: "place"; widthPercent: number; wrap: PictureWrap };
 
 const PAGE_TEXT_WIDTH_PT = 460;
 const A4_WIDTH_PT = 595.3;
@@ -359,7 +370,6 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
         await reload(next, current.getCurrentPage("viewport"));
         return "ok";
       }
-      const before = bodyDrawings(new Uint8Array(saved));
       // A click on a picture selects it rather than placing the caret; use the page on screen then.
       if (current.getSelectedImage()) await placeCaret(current.getCurrentPage("viewport"));
       else current.focus();
@@ -377,15 +387,14 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
         result = await current.executeImageCommand(command);
       }
       if (!result.ok) return "refused";
-
-      const page = current.getCurrentPage("caret");
-      const inserted = await host.save();
-      const laidOut = inserted
-        ? layoutNewDrawing(before, new Uint8Array(inserted), { kind: "place" })
-        : null;
-      // If the XML could not be rewritten the picture stays inline where it was inserted.
-      if (!laidOut) return "ok";
-      await reload(laidOut, page);
+      if (placement.wrap !== "inline") {
+        const selected = current.getSelectedImage();
+        current.exec({
+          type: "setImageWrapType",
+          target: placement.wrap,
+          ...(selected ? { drawingNodeId: selected.id } : {}),
+        });
+      }
       return "ok";
     },
     insertTextBox({ kind, text }) {
