@@ -248,7 +248,7 @@ def welcome_text(user, *, missing: list[str]) -> str:
     name = escape(raw_name) if raw_name else "بك"
     lines = [
         f"أهلاً {name} في Home of Creativity.",
-        "هذا بوت العملاء: تطلب الخدمة، تستلم عرض السعر، وتتابع حالة طلبك من هنا.",
+        "أنا عمار. من هون بتطلب الخدمة، بتستلم عرض السعر، وبتتابع حالة طلبك.",
     ]
     reasons = [PROFILE_REASONS[field] for field in missing if field in PROFILE_REASONS]
     if reasons:

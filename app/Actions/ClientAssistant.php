@@ -10,6 +10,7 @@ use App\Services\GeminiService;
 use App\Services\SiteGuide;
 use App\Support\BillingPeriod;
 use App\Support\ClientChannelGate;
+use App\Support\ClientProfileValue;
 use App\Support\ClientReplyGuard;
 use App\Support\ResolveServiceRequest;
 use App\Support\WorkCalendar;
@@ -41,6 +42,20 @@ class ClientAssistant
     public function decide(Client $client, string $message, array $history, string $locale, string $step, string $channel): array
     {
         $locale = $locale === 'en' ? 'en' : 'ar';
+        if (ClientProfileValue::asksForBotName($message)) {
+            return [
+                'action' => 'answer',
+                'ref' => '',
+                'answer' => $locale === 'en' ? 'My name is Ammar.' : 'اسمي عمار.',
+                'reason' => '',
+            ];
+        }
+        $clarifying = $this->waitingForUnclearPart($history);
+        if (ClientProfileValue::saysReplyWasUnclear($message) && ClientProfileValue::namesTheUnclearPart($message)) {
+            $clarifying = true;
+        } elseif (ClientProfileValue::saysReplyWasUnclear($message)) {
+            return $this->unclearQuestion($locale);
+        }
         try {
             $brief = $this->siteGuide->brief();
         } catch (Throwable) {
@@ -55,7 +70,11 @@ class ClientAssistant
             $history,
             $locale,
             $step === '' ? 'idle' : $step,
+            $clarifying,
         );
+        if ($decision !== null && ($decision['action'] === 'clarify' || ($decision['action'] === 'escalate' && $this->reasonIsVague((string) $decision['reason'])))) {
+            return $this->unclearQuestion($locale);
+        }
         if ($decision === null) {
             $decision = [
                 'action' => 'escalate',
@@ -84,6 +103,42 @@ If it is urgent, call {$phone}."
         }
 
         return $decision;
+    }
+
+    /**
+     * @param  list<array{role: string, text: string}>  $history
+     */
+    private function waitingForUnclearPart(array $history): bool
+    {
+        for ($index = count($history) - 1; $index >= 0; $index--) {
+            $turn = $history[$index];
+            if (($turn['role'] ?? '') !== 'assistant') {
+                continue;
+            }
+            $text = trim((string) ($turn['text'] ?? ''));
+
+            return in_array($text, [ClientProfileValue::UNCLEAR_QUESTION_AR, ClientProfileValue::UNCLEAR_QUESTION_EN], true);
+        }
+
+        return false;
+    }
+
+    /**
+     * @return array{action: string, ref: string, answer: string, reason: string}
+     */
+    private function unclearQuestion(string $locale): array
+    {
+        return [
+            'action' => 'answer',
+            'ref' => '',
+            'answer' => $locale === 'en' ? ClientProfileValue::UNCLEAR_QUESTION_EN : ClientProfileValue::UNCLEAR_QUESTION_AR,
+            'reason' => '',
+        ];
+    }
+
+    private function reasonIsVague(string $reason): bool
+    {
+        return preg_match('/unclear|vague|not clear/i', $reason) === 1;
     }
 
     /**

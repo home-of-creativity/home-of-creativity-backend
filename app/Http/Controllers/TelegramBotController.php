@@ -135,6 +135,26 @@ class TelegramBotController extends Controller
     {
         $values = [];
 
+        foreach (['name', 'phone', 'company_name', 'email', 'company_activity'] as $field) {
+            if (! array_key_exists($field, $validated)) {
+                continue;
+            }
+            $raw = trim((string) $validated[$field]);
+            $pendingKey = 'client-unclear:'.$client->telegram_user_id;
+            if (ClientProfileValue::asksForBotName($raw)) {
+                throw ValidationException::withMessages([$field => 'اسمي عمار.']);
+            }
+            if (Cache::get($pendingKey) === $field) {
+                Cache::forget($pendingKey);
+                if (ClientProfileValue::namesTheUnclearPart($raw) || ClientProfileValue::saysReplyWasUnclear($raw)) {
+                    throw ValidationException::withMessages([$field => ClientProfileValue::explainUnclear($raw, $field)]);
+                }
+            } elseif (ClientProfileValue::saysReplyWasUnclear($raw)) {
+                Cache::put($pendingKey, $field, now()->addHour());
+                throw ValidationException::withMessages([$field => ClientProfileValue::UNCLEAR_QUESTION_AR]);
+            }
+        }
+
         if (array_key_exists('name', $validated)) {
             $values['name'] = ClientProfileValue::usableName(trim((string) $validated['name']))
                 ?? throw ValidationException::withMessages(['name' => 'أرسل اسمك الكامل، وليس رقماً أو زر قائمة.']);

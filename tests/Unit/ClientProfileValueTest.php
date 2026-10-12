@@ -18,6 +18,13 @@ class ClientProfileValueTest extends TestCase
     {
         $this->assertNull(ClientProfileValue::usableName('0957470371'));
         $this->assertSame('Ahmad Ali', ClientProfileValue::usableName('Ahmad Ali'));
+        $this->assertNull(ClientProfileValue::usableName('شو اسم البوت'));
+        $this->assertTrue(ClientProfileValue::asksForBotName('شو اسمك؟'));
+        $this->assertFalse(ClientProfileValue::asksForBotName('شو اسم الشركة'));
+        $this->assertTrue(ClientProfileValue::saysReplyWasUnclear('مو واضح'));
+        $this->assertFalse(ClientProfileValue::namesTheUnclearPart('مو واضح'));
+        $this->assertTrue(ClientProfileValue::namesTheUnclearPart('عرض السعر'));
+        $this->assertStringContainsString('المبلغ', ClientProfileValue::explainUnclear('عرض السعر', 'name'));
         $this->assertSame('0957470371', ClientProfileValue::usablePhone('0957470371'));
         $this->assertNull(ClientProfileValue::usablePhone('🆕 طلب جديد'));
     }

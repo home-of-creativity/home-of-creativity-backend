@@ -591,6 +591,38 @@ class HandleWhatsAppInbound
         return false;
     }
 
+    /**
+     * @param  array<string, mixed>  $session
+     * @return 'ask'|'explain'|null
+     */
+    private function answerUnclear(string $chatId, string $phone, array &$session, string $field, string $value): ?string
+    {
+        if (! empty($session['awaiting_unclear'])) {
+            unset($session['awaiting_unclear']);
+            $this->putSession($phone, $session);
+            if (! ClientProfileValue::namesTheUnclearPart($value)) {
+                return null;
+            }
+            $this->safeSend($chatId, $this->tx(
+                ClientProfileValue::explainUnclear($value, $field),
+                ClientProfileValue::explainUnclear($value, $field, 'en'),
+            ));
+
+            return 'explain';
+        }
+        if (! ClientProfileValue::saysReplyWasUnclear($value)) {
+            return null;
+        }
+        $session['awaiting_unclear'] = $field;
+        $this->putSession($phone, $session);
+        $this->safeSend($chatId, $this->tx(
+            ClientProfileValue::UNCLEAR_QUESTION_AR,
+            ClientProfileValue::UNCLEAR_QUESTION_EN,
+        ));
+
+        return 'ask';
+    }
+
     private function phonePrompt(): string
     {
         return $this->tx(
@@ -728,6 +760,21 @@ class HandleWhatsAppInbound
         if ($value === '' || ClientProfileValue::isKeyboardLabel($value)) {
             $this->gateProfile($client, $chatId, $session);
 
+            return;
+        }
+        if (ClientProfileValue::asksForBotName($value)) {
+            $this->safeSend($chatId, $this->tx('اسمي عمار.', 'My name is Ammar.'));
+            $this->gateProfile($client, $chatId, $session);
+
+            return;
+        }
+        $unclear = $this->answerUnclear($chatId, $phone, $session, $field, $value);
+        if ($unclear === 'explain') {
+            $this->gateProfile($client, $chatId, $session);
+
+            return;
+        }
+        if ($unclear === 'ask') {
             return;
         }
 
@@ -3619,6 +3666,14 @@ class HandleWhatsAppInbound
         if ($value === '' || ClientProfileValue::isKeyboardLabel($value) || ! in_array($field, ['name', 'phone', 'company_name'], true)) {
             $this->safeSend($chatId, $this->tx('اكتب القيمة الجديدة.', 'Type the new value.'));
 
+            return;
+        }
+        if (ClientProfileValue::asksForBotName($value)) {
+            $this->safeSend($chatId, $this->tx('اسمي عمار.', 'My name is Ammar.'));
+
+            return;
+        }
+        if ($this->answerUnclear($chatId, $phone, $session, $field, $value) !== null) {
             return;
         }
 

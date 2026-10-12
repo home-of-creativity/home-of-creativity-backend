@@ -38,11 +38,81 @@ class ClientProfileValue
 
     public static function usableName(?string $value): ?string
     {
-        if (! filled($value) || self::isKeyboardLabel($value) || self::looksLikePhone($value)) {
+        if (! filled($value) || self::isKeyboardLabel($value) || self::looksLikePhone($value) || self::asksForBotName($value)) {
             return null;
         }
 
         return $value;
+    }
+
+    /** The client is asking what to call this chat, not giving their own name. */
+    public static function asksForBotName(?string $value): bool
+    {
+        $text = trim((string) preg_replace('/\s+/u', ' ', (string) $value));
+        if ($text === '' || mb_strlen($text) > 80) {
+            return false;
+        }
+        if (preg_match('/شركة|باقة|طلب|عرض/u', $text) === 1) {
+            return false;
+        }
+
+        return preg_match('/اسمك|اسم\s*البوت|your name/iu', $text) === 1;
+    }
+
+    public const UNCLEAR_QUESTION_AR = 'شو الشي اللي مو واضح؟';
+
+    public const UNCLEAR_QUESTION_EN = 'What part is not clear?';
+
+    /** The client says the last reply did not make sense. */
+    public static function saysReplyWasUnclear(?string $value): bool
+    {
+        $text = trim((string) preg_replace('/\s+/u', ' ', (string) $value));
+        if ($text === '' || mb_strlen($text) > 80) {
+            return false;
+        }
+
+        return preg_match('/مو واضح|مش واضح|ما واضح|غير واضح|ما فهمت|مو مفهوم|ما توضح|لم يتوضح|ما وضح|not clear|didn.?t understand|don.?t understand/iu', $text) === 1;
+    }
+
+    /** The client is naming the part they did not understand, not giving a profile value. */
+    public static function namesTheUnclearPart(?string $value): bool
+    {
+        $text = trim((string) preg_replace('/\s+/u', ' ', (string) $value));
+        if ($text === '' || mb_strlen($text) > 80 || self::looksLikePhone($text)) {
+            return false;
+        }
+
+        return preg_match('/اسم|رقم|موبايل|شركة|سؤال|عرض|سعر|طلب/u', $text) === 1;
+    }
+
+    public static function explainUnclear(string $topic, string $field, string $locale = 'ar'): string
+    {
+        $english = $locale === 'en';
+        if (preg_match('/عرض|سعر|quotation|price/iu', $topic) === 1) {
+            return $english
+                ? 'The quotation is the page with the service and the amount. Open طلباتي to see it.'
+                : 'عرض السعر هو الورقة يلي فيها الخدمة والمبلغ. اكتب طلباتي إذا بدك تشوفه.';
+        }
+        if (preg_match('/اسمك|اسم البوت|your name/iu', $topic) === 1) {
+            return $english
+                ? 'My name is Ammar. We also need your full name, first and last.'
+                : 'اسمي عمار. وبدنا كمان اسمك الكامل، الاسم والكنية.';
+        }
+
+        return match ($field) {
+            'phone' => $english
+                ? 'We need your mobile number. With a country code it looks like +963944123456. Without one, send the number and then the country.'
+                : 'المقصود رقم موبايلك. إذا مع مفتاح البلد اكتبه متل +963944123456، وإذا بدون مفتاح اكتب الرقم وبعدين اسم البلد.',
+            'company_name' => $english
+                ? 'We need the company or shop name on its own, for example Al Nour Trading.'
+                : 'المقصود اسم الشركة أو المحل لحاله، متل: النور للتجارة.',
+            'name' => $english
+                ? 'We need your full name, first and last, not the shop name. Send it on its own.'
+                : 'المقصود اسمك الكامل، الاسم والكنية، مش اسم المحل. اكتبه لحاله.',
+            default => $english
+                ? 'Tell me the part that was not clear, in one sentence, and I will explain it.'
+                : 'احكيلي شو بدك نوضحه بجملة وحدة، وبشرحه إلك.',
+        };
     }
 
     public static function usablePhone(?string $value): ?string

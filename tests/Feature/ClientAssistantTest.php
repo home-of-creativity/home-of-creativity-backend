@@ -177,6 +177,40 @@ class ClientAssistantTest extends TestCase
         Mail::assertNothingSent();
     }
 
+    public function test_an_unclear_reply_asks_what_was_unclear_then_explains_it(): void
+    {
+        $this->client('963955555558', 'Hala');
+
+        $this->send('963955555558', 'ما فهمت', 'c1');
+
+        $this->assertSame([], $this->prompts);
+        $this->assertSentTo('963955555558', 'شو الشي اللي مو واضح');
+        Mail::assertNothingSent();
+
+        $this->reply = json_encode([
+            'action' => 'answer',
+            'ref' => '',
+            'answer' => 'عرض السعر هو الورقة يلي فيها الخدمة والمبلغ.',
+            'reason' => '',
+        ], JSON_UNESCAPED_UNICODE);
+        $this->send('963955555558', 'عرض السعر', 'c2');
+
+        $this->assertStringContainsString('naming the part that was not clear', $this->prompts[0]);
+        $this->assertSentTo('963955555558', 'الخدمة والمبلغ');
+        Mail::assertNothingSent();
+    }
+
+    public function test_asking_the_bot_name_answers_ammar_without_gemini(): void
+    {
+        $this->client('963955555557', 'Hala');
+
+        $this->send('963955555557', 'شو اسم البوت؟');
+
+        $this->assertSame([], $this->prompts);
+        $this->assertSentTo('963955555557', 'اسمي عمار');
+        $this->assertSame('Hala', Client::query()->where('telegram_user_id', 'wa:963955555557')->value('name'));
+    }
+
     public function test_a_greeting_gets_the_menu_without_asking_gemini(): void
     {
         $this->client('963955555556', 'Hala');
