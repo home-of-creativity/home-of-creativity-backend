@@ -172,6 +172,21 @@ export const copy = {
   inactive: { ar: "متوقف", en: "Inactive" },
   actions: { ar: "إجراءات", en: "Actions" },
   cancel: { ar: "إلغاء", en: "Cancel" },
+  editQuotation: { ar: "تعديل عرض السعر", en: "Edit quotation" },
+  editInvoice: { ar: "تعديل الفاتورة", en: "Edit invoice" },
+  paperSaveEdit: { ar: "حفظ التعديل", en: "Save changes" },
+  paperActions: { ar: "إجراءات", en: "Actions" },
+  paperCancel: { ar: "إلغاء", en: "Cancel" },
+  paperCancelQuotationConfirm: { ar: "إلغاء العرض في Odoo وإلغاء طلبه وإبلاغ العميل؟", en: "Cancel it in Odoo, cancel its request, and tell the client?" },
+  paperCancelInvoiceConfirm: { ar: "إلغاء الفاتورة في Odoo وإبلاغ العميل؟ يبقى الطلب بانتظار الدفع.", en: "Cancel it in Odoo and tell the client? The request keeps waiting for payment." },
+  paperQuotationEditFlow: {
+    ar: "يُحدَّث العرض في Odoo. إن كان مرسلاً يصل العميل كنسخة جديدة مع زرّي الموافقة والرفض، ويبقى الطلب بانتظار موافقته.",
+    en: "The quotation updates in Odoo. If it was sent, the client gets a new version with approve and reject buttons, and the request keeps waiting.",
+  },
+  paperInvoiceEditFlow: {
+    ar: "ترجع الفاتورة لمسودة في Odoo وتُعدَّل وتُرحَّل من جديد وتصل العميل مرة أخرى. الفاتورة المدفوعة لا تُعدَّل.",
+    en: "The invoice goes back to draft in Odoo, takes the change, is posted again, and reaches the client again. A paid invoice is not edited.",
+  },
   paperQuotationFlow: {
     ar: "عند الإرسال يُفتح طلب بانتظار موافقة العميل. العميل الذي يكلمنا على البوت يصله العرض مع زرّي الموافقة والرفض، وبموافقته يصبح العرض أمر بيع في Odoo وتصله تعليمات الدفع ويكمل الطلب. غيره يصله بالبريد أو واتساب، وتسجّل قراره من صفحة الطلب.",
     en: "Sending opens a request that waits for the client's answer. A client on the bot gets the quotation with approve and reject buttons; after approval the payment steps follow. Others get it by email or WhatsApp, and you record their answer on the request page.",

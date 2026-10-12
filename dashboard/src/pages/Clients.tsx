@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Search } from "lucide-react";
 import { toast } from "sonner";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { api, type Client, type OdooInvoice, type OdooQuotation, type PageMeta } from "../api";
+import { api, type Client, type OdooInvoice, type OdooQuotation, type PageMeta, type PaperRequest } from "../api";
+import { type PaperEditing } from "../components/OdooPaperForm";
 import { ConfirmAction } from "../components/ConfirmAction";
 import { useCan } from "../lib/useCan";
 import { DriveFolderPicker } from "../components/DriveFolderPicker";
@@ -112,7 +113,40 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
   const [invoiceState, setInvoiceState] = useState("");
   const [invoicePayment, setInvoicePayment] = useState("");
   const [folderClient, setFolderClient] = useState<Client | null>(null);
-  const [paper, setPaper] = useState<null | { kind: "quotation" | "invoice"; quotation?: OdooQuotation }>(null);
+  const [paper, setPaper] = useState<null | { kind: "quotation" | "invoice"; quotation?: OdooQuotation; editing?: PaperEditing }>(null);
+  const [paperBusy, setPaperBusy] = useState("");
+
+  /** Opens an Odoo quotation or invoice in the form with its current lines. */
+  async function editPaper(kind: "quotation" | "invoice", id: number) {
+    setPaperBusy(`${kind}:${id}`);
+    try {
+      const res = kind === "quotation" ? await api.odooQuotation(id) : await api.odooInvoice(id);
+      const reference = kind === "quotation" ? (res.data as OdooQuotation).client_order_ref : (res.data as OdooInvoice).ref;
+      const partner = res.data.partner_id ? String(res.data.partner_id) : null;
+      setPaper({ kind, editing: { id, name: res.data.name, reference: reference ?? null, partnerId: partner, lines: res.data.lines } });
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t(copy.saveFailed));
+    } finally {
+      setPaperBusy("");
+    }
+  }
+
+  async function removePaper(kind: "quotation" | "invoice", id: number) {
+    setPaperBusy(`${kind}:${id}`);
+    try {
+      const res = kind === "quotation" ? await api.deleteOdooQuotation(id) : await api.deleteOdooInvoice(id);
+      toast.success(res.message ?? t(copy.saved));
+      setRefresh((value) => value + 1);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t(copy.saveFailed));
+    } finally {
+      setPaperBusy("");
+    }
+  }
+
+  const requestCell = (linked?: PaperRequest | null) =>
+    linked ? <Link className="table-link" to={`/requests/${linked.id}`}>{linked.number}</Link> : <span className="muted">—</span>;
   const [refresh, setRefresh] = useState(0);
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedQuery(query.trim()), 300);
@@ -559,8 +593,10 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
         <>
         {paper?.kind === "quotation" ? (
           <OdooPaperForm
+            key={paper.editing ? `edit-${paper.editing.id}` : "new-quotation"}
             kind="quotation"
-            partnerId={partnerFilter || undefined}
+            partnerId={paper.editing?.partnerId || partnerFilter || undefined}
+            editing={paper.editing}
             t={t}
             onCancel={() => setPaper(null)}
             onCreated={(message, requestId) => {
@@ -607,19 +643,20 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                 <th>{t(copy.odooState)}</th>
                 <th>{t(copy.odooReference)}</th>
                 <th>{t(copy.odooDate)}</th>
+                <th>{t(copy.paperRequest)}</th>
                 <th>{t(copy.createInvoice)}</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <LoadingTableRow colSpan={7} label={t(copy.loading)} />
+                <LoadingTableRow colSpan={8} label={t(copy.loading)} />
               ) : !odooReady ? (
                 <tr>
-                  <td colSpan={7}>{t(copy.odooNotConfigured)}</td>
+                  <td colSpan={8}>{t(copy.odooNotConfigured)}</td>
                 </tr>
               ) : filteredQuotations.length === 0 ? (
                 <tr>
-                  <td colSpan={7}>{quoteQuery || quoteState ? t(copy.noSearchResults) : t(copy.empty)}</td>
+                  <td colSpan={8}>{quoteQuery || quoteState ? t(copy.noSearchResults) : t(copy.empty)}</td>
                 </tr>
               ) : (
                 filteredQuotations.map((item) => {
@@ -635,7 +672,24 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                     <td><span className={odooStatusClass(item.state)}>{t(quoteStateLabel[item.state] ?? { ar: item.state, en: item.state })}</span></td>
                     <td dir="ltr">{item.client_order_ref ?? item.origin ?? "—"}</td>
                     <td className="nowrap">{formatOdooWhen(item.date_order, locale)}</td>
-                    <td>
+                    <td>{requestCell(item.request)}</td>
+                    <td className="row-actions-cell">
+                      {can("ops.clients.odoo") && ["draft", "sent"].includes(item.state) ? (
+                        <>
+                          <button type="button" className="btn btn-ghost btn-sm" disabled={paperBusy !== ""} onClick={() => void editPaper("quotation", item.id)}>
+                            {t(copy.edit)}
+                          </button>
+                          <ConfirmAction
+                            label={item.state === "draft" ? t(copy.delete) : t(copy.paperCancel)}
+                            confirmLabel={item.request ? t(copy.paperCancelQuotationConfirm) : t(copy.confirmDelete)}
+                            yesLabel={item.state === "draft" ? t(copy.delete) : t(copy.paperCancel)}
+                            noLabel={t(copy.cancel)}
+                            className="btn btn-ghost btn-sm btn-danger"
+                            disabled={paperBusy !== ""}
+                            onConfirm={() => void removePaper("quotation", item.id)}
+                          />
+                        </>
+                      ) : null}
                       <button
                         type="button"
                         className="btn btn-ghost"
@@ -664,9 +718,11 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
         <>
         {paper?.kind === "invoice" ? (
           <OdooPaperForm
+            key={paper.editing ? `edit-${paper.editing.id}` : "new-invoice"}
             kind="invoice"
-            partnerId={partnerFilter || undefined}
+            partnerId={paper.editing?.partnerId || partnerFilter || undefined}
             quotation={paper.quotation}
+            editing={paper.editing}
             t={t}
             onCancel={() => setPaper(null)}
             onCreated={(message) => {
@@ -721,18 +777,20 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                 <th>{t(copy.filterPayment)}</th>
                 <th>{t(copy.odooReference)}</th>
                 <th>{t(copy.odooDate)}</th>
+                <th>{t(copy.paperRequest)}</th>
+                <th aria-label={t(copy.paperActions)} />
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <LoadingTableRow colSpan={7} label={t(copy.loading)} />
+                <LoadingTableRow colSpan={9} label={t(copy.loading)} />
               ) : !odooReady ? (
                 <tr>
-                  <td colSpan={7}>{t(copy.odooNotConfigured)}</td>
+                  <td colSpan={8}>{t(copy.odooNotConfigured)}</td>
                 </tr>
               ) : filteredInvoices.length === 0 ? (
                 <tr>
-                  <td colSpan={7}>{invoiceQuery || invoiceState || invoicePayment ? t(copy.noSearchResults) : t(copy.empty)}</td>
+                  <td colSpan={9}>{invoiceQuery || invoiceState || invoicePayment ? t(copy.noSearchResults) : t(copy.empty)}</td>
                 </tr>
               ) : (
                 filteredInvoices.map((item) => {
@@ -752,6 +810,25 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                     <td>{item.payment_state ? <span className={odooStatusClass(item.payment_state)}>{t(paymentLabel[item.payment_state] ?? { ar: item.payment_state, en: item.payment_state })}</span> : "—"}</td>
                     <td dir="ltr">{item.ref ?? item.invoice_origin ?? "—"}</td>
                     <td className="nowrap">{formatOdooWhen(item.invoice_date, locale)}</td>
+                    <td>{requestCell(item.request)}</td>
+                    <td className="row-actions-cell">
+                      {can("ops.clients.odoo") && item.state !== "cancel" && item.payment_state === "not_paid" ? (
+                        <>
+                          <button type="button" className="btn btn-ghost btn-sm" disabled={paperBusy !== ""} onClick={() => void editPaper("invoice", item.id)}>
+                            {t(copy.edit)}
+                          </button>
+                          <ConfirmAction
+                            label={t(copy.paperCancel)}
+                            confirmLabel={t(copy.paperCancelInvoiceConfirm)}
+                            yesLabel={t(copy.paperCancel)}
+                            noLabel={t(copy.cancel)}
+                            className="btn btn-ghost btn-sm btn-danger"
+                            disabled={paperBusy !== ""}
+                            onConfirm={() => void removePaper("invoice", item.id)}
+                          />
+                        </>
+                      ) : null}
+                    </td>
                   </tr>
                   );
                 })

@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Admin;
 use App\Actions\ImportOdooCrmClients;
 use App\Actions\ImportOdooCrmClientsFromExcel;
 use App\Actions\ApplyQuotationAcceptance;
+use App\Actions\DeliverClientDocument;
+use App\Actions\NotifyClientChannels;
 use App\Actions\ApproveQuotation;
 use App\Actions\OpenRequestFromStaffInvoice;
 use App\Actions\PublishOdooPaper;
@@ -24,6 +26,7 @@ use App\Services\TelegramNotifier;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 
 class OdooController extends Controller
 {
@@ -181,7 +184,7 @@ class OdooController extends Controller
             return response()->json(['message' => 'Odoo quotations failed: '.$exception->getMessage()], 502);
         }
 
-        return response()->json(['data' => $items, 'message' => 'ok']);
+        return response()->json(['data' => $this->withRequests($items, 'odoo_quotation_id'), 'message' => 'ok']);
     }
 
     public function invoices(Request $request, OdooClient $odoo): JsonResponse
@@ -201,7 +204,7 @@ class OdooController extends Controller
             return response()->json(['message' => 'Odoo invoices failed: '.$exception->getMessage()], 502);
         }
 
-        return response()->json(['data' => $items, 'message' => 'ok']);
+        return response()->json(['data' => $this->withRequests($items, 'odoo_invoice_id'), 'message' => 'ok']);
     }
 
     public function storeQuotation(
@@ -293,6 +296,229 @@ class OdooController extends Controller
             'request' => $opened === null ? null : ['id' => $opened->id, 'number' => $opened->number, 'status' => $opened->fresh()?->status->value],
             'message' => $message,
         ], 201);
+    }
+
+    public function showQuotation(int $id, OdooClient $odoo): JsonResponse
+    {
+        $snapshot = $this->paper($odoo, 'sale.order', $id);
+
+        return response()->json(['data' => [...$this->withRequests([$snapshot], 'odoo_quotation_id')[0], 'lines' => $odoo->paperLines('sale.order', $id)]]);
+    }
+
+    public function showInvoice(int $id, OdooClient $odoo): JsonResponse
+    {
+        $snapshot = $this->paper($odoo, 'account.move', $id);
+
+        return response()->json(['data' => [...$this->withRequests([$snapshot], 'odoo_invoice_id')[0], 'lines' => $odoo->paperLines('account.move', $id)]]);
+    }
+
+    /**
+     * A quotation the client has not approved yet. A sent one reaches the client again as
+     * a new version, with the approve and reject buttons on the bot.
+     */
+    public function updateQuotation(
+        Request $request,
+        int $id,
+        OdooClient $odoo,
+        PublishOdooPaper $publish,
+        SendQuotation $sendQuotation,
+        TelegramNotifier $telegram,
+    ): JsonResponse {
+        $validated = $request->validate($this->paperRules() + [
+            'notes' => ['nullable', 'string', 'max:5000'],
+            'deliver' => ['nullable', 'in:email,whatsapp,both,phone'],
+        ]);
+        $snapshot = $this->paper($odoo, 'sale.order', $id);
+        abort_unless(in_array($snapshot['state'] ?? '', ['draft', 'sent'], true), 422, 'عرض السعر أصبح أمر بيع أو ملغى، فلا يُعدَّل.');
+
+        try {
+            $updated = $odoo->updateStaffQuotation($id, $validated['lines'], $validated['notes'] ?? null, $validated['reference'] ?? null);
+        } catch (\Throwable $exception) {
+            return response()->json(['message' => 'تعذر تعديل عرض السعر في أودو: '.$exception->getMessage()], 502);
+        }
+
+        $linked = ServiceRequest::query()->with('client')->where('odoo_quotation_id', (string) $id)->latest('id')->first();
+        $message = 'عُدّل عرض السعر في أودو.';
+        if ($linked !== null && $linked->status === RequestStatus::QuotationSent && $linked->client !== null) {
+            $priced = $this->pricedLines($validated['lines']);
+            $amount = $this->linesTotal($priced);
+            ['snapshot' => $updated, 'pdf_path' => $pdfPath] = $publish->prepareQuotation($updated, null, null);
+            $chatId = $linked->client->telegram_user_id;
+            $onBot = filled($chatId) && $telegram->canReachClient($chatId);
+            $linked->forceFill(['amount_total' => $amount, 'amount_remaining' => $amount])->save();
+            $sendQuotation->handle(
+                $linked,
+                $amount,
+                $validated['notes'] ?? null,
+                'admin',
+                null,
+                $priced,
+                true,
+                null,
+                ['odoo_quotation_id' => $id, 'pdf_path' => $pdfPath],
+                $onBot ? null : (string) ($validated['deliver'] ?? $this->defaultChannel($linked->client)),
+            );
+            $message = $sendQuotation->deliveredToClient
+                ? "عُدّل عرض السعر وأُعيد إرساله للعميل. الطلب {$linked->number} ما زال بانتظار موافقته."
+                : "عُدّل عرض السعر وتعذر إعادة إرساله للعميل. الطلب {$linked->number} بانتظار موافقته.";
+        }
+
+        return response()->json(['data' => $updated, 'message' => $message]);
+    }
+
+    /** A quotation not approved yet: cancelled in Odoo (a draft is deleted) and its request closed. */
+    public function destroyQuotation(int $id, OdooClient $odoo, RequestStatusTransitionService $transitions, NotifyClientChannels $notify): JsonResponse
+    {
+        $snapshot = $this->paper($odoo, 'sale.order', $id);
+        abort_unless(in_array($snapshot['state'] ?? '', ['draft', 'sent', 'cancel'], true), 422, 'عرض السعر أصبح أمر بيع، فلا يُحذف من هنا.');
+
+        try {
+            $result = $odoo->removeQuotation($id);
+        } catch (\Throwable $exception) {
+            return response()->json(['message' => 'تعذر إلغاء عرض السعر في أودو: '.$exception->getMessage()], 502);
+        }
+
+        $message = $result === 'deleted' ? 'حُذف عرض السعر من أودو.' : 'أُلغي عرض السعر في أودو.';
+        $linked = ServiceRequest::query()->with('client')->where('odoo_quotation_id', (string) $id)->latest('id')->first();
+        if ($linked !== null && in_array($linked->status, [RequestStatus::Submitted, RequestStatus::QuotationSent, RequestStatus::QuotationRejected], true)) {
+            $transitions->transition($linked, RequestStatus::Cancelled, 'admin', 'Quotation cancelled from the dashboard.');
+            $name = (string) ($snapshot['name'] ?? '');
+            $notify->send($linked->fresh(['client']) ?? $linked, "أُلغي عرض السعر {$name} للطلب #{$linked->number}. إذا عندك أي سؤال تواصل معنا.");
+            $message .= " وأُلغي الطلب {$linked->number}.";
+        }
+
+        return response()->json(['data' => ['id' => $id, 'result' => $result], 'message' => $message]);
+    }
+
+    /** An unpaid invoice: corrected in Odoo, posted again, and sent to the client again. */
+    public function updateInvoice(
+        Request $request,
+        int $id,
+        OdooClient $odoo,
+        PublishOdooPaper $publish,
+        TelegramNotifier $telegram,
+    ): JsonResponse {
+        $validated = $request->validate($this->paperRules() + [
+            'deliver' => ['nullable', 'in:email,whatsapp,both,phone'],
+        ]);
+        $snapshot = $this->paper($odoo, 'account.move', $id);
+        abort_if(($snapshot['state'] ?? '') === 'cancel', 422, 'الفاتورة ملغاة.');
+        abort_unless(in_array($snapshot['payment_state'] ?? 'not_paid', ['not_paid'], true), 422, 'دُفعت الفاتورة كلها أو بعضها، فلا تُعدَّل.');
+
+        try {
+            $updated = $odoo->updateStaffInvoice($id, $validated['lines'], $validated['reference'] ?? null);
+        } catch (\Throwable $exception) {
+            return response()->json(['message' => 'تعذر تعديل الفاتورة في أودو: '.$exception->getMessage()], 502);
+        }
+
+        $linked = ServiceRequest::query()->with('client')->where('odoo_invoice_id', (string) $id)->latest('id')->first();
+        $message = 'عُدّلت الفاتورة في أودو.';
+        if ($linked !== null && $linked->client !== null && ($updated['state'] ?? '') === 'posted') {
+            $amount = (float) ($updated['amount_total'] ?? 0);
+            $linked->forceFill(['amount_total' => $amount, 'amount_remaining' => max(0, $amount - (float) $linked->amount_paid), 'quotation_amount' => $amount])->save();
+            $chatId = $linked->client->telegram_user_id;
+            $onBot = filled($chatId) && $telegram->canReachClient($chatId);
+            $updated = $publish->invoice($linked->client, $linked, $updated, (string) ($validated['deliver'] ?? $this->defaultChannel($linked->client)), false, null, null, deliver: ! $onBot);
+            $linked->invoices()->where('odoo_invoice_id', (string) $id)->update([
+                'amount' => $amount,
+                'pdf_path' => $publish->pdfPath !== '' ? $publish->pdfPath : null,
+                'status' => 'issued',
+            ]);
+            $delivered = $onBot ? $this->sendInvoiceOnBot($telegram, $linked, $updated, $publish->pdfPath) : $publish->delivered;
+            $message = $delivered
+                ? "عُدّلت الفاتورة وأُعيد إرسالها للعميل. الطلب {$linked->number} بانتظار الدفع."
+                : "عُدّلت الفاتورة وتعذر إعادة إرسالها للعميل. الطلب {$linked->number} بانتظار الدفع.";
+        }
+
+        return response()->json(['data' => $updated, 'message' => $message]);
+    }
+
+    /** An unpaid invoice is cancelled in Odoo; its request keeps waiting for payment until a correct one is issued. */
+    public function destroyInvoice(int $id, OdooClient $odoo, NotifyClientChannels $notify): JsonResponse
+    {
+        $snapshot = $this->paper($odoo, 'account.move', $id);
+        abort_unless(in_array($snapshot['payment_state'] ?? 'not_paid', ['not_paid'], true), 422, 'دُفعت الفاتورة كلها أو بعضها، فلا تُلغى من هنا.');
+
+        try {
+            $odoo->cancelInvoice($id);
+        } catch (\Throwable $exception) {
+            return response()->json(['message' => 'تعذر إلغاء الفاتورة في أودو: '.$exception->getMessage()], 502);
+        }
+
+        $message = 'أُلغيت الفاتورة في أودو.';
+        $linked = ServiceRequest::query()->with('client')->where('odoo_invoice_id', (string) $id)->latest('id')->first();
+        if ($linked !== null) {
+            $linked->invoices()->where('odoo_invoice_id', (string) $id)->update(['status' => 'cancelled']);
+            $linked->forceFill(['odoo_invoice_id' => null])->save();
+            if (($snapshot['state'] ?? '') === 'posted') {
+                $name = (string) ($snapshot['name'] ?? '');
+                $notify->send($linked, "أُلغيت الفاتورة {$name} للطلب #{$linked->number}، وستصلك فاتورة صحيحة بدلاً منها.");
+            }
+            $message .= " الطلب {$linked->number} ما زال بانتظار الدفع حتى تصدر فاتورة صحيحة.";
+        }
+
+        return response()->json(['data' => ['id' => $id], 'message' => $message]);
+    }
+
+    /**
+     * The Odoo quotation or invoice behind an edit, with a clear answer when Odoo is
+     * off, unreachable, or the paper is gone.
+     *
+     * @return array<string, mixed>
+     */
+    private function paper(OdooClient $odoo, string $model, int $id): array
+    {
+        abort_unless($odoo->configured(), 422, 'Odoo is not configured.');
+        try {
+            $snapshot = $model === 'sale.order' ? $odoo->quotationSnapshot($id) : $odoo->invoiceSnapshot($id);
+        } catch (\Throwable $exception) {
+            abort(502, 'تعذر الوصول إلى أودو: '.$exception->getMessage());
+        }
+
+        return $snapshot ?? abort(404, $model === 'sale.order' ? 'عرض السعر غير موجود في أودو.' : 'الفاتورة غير موجودة في أودو.');
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $items
+     * @return list<array<string, mixed>>
+     */
+    private function withRequests(array $items, string $column): array
+    {
+        $ids = array_values(array_filter(array_map(fn (array $item): string => (string) ($item['id'] ?? ''), $items)));
+        $requests = $ids === [] ? collect() : ServiceRequest::query()->whereIn($column, $ids)->latest('id')->get(['id', 'number', 'status', $column])->unique($column)->keyBy($column);
+
+        return array_map(function (array $item) use ($requests): array {
+            $linked = $requests->get((string) ($item['id'] ?? ''));
+
+            return [...$item, 'request' => $linked === null ? null : ['id' => $linked->id, 'number' => $linked->number, 'status' => $linked->status->value]];
+        }, $items);
+    }
+
+    /** @return array<string, list<mixed>> */
+    private function paperRules(): array
+    {
+        return [
+            'reference' => ['nullable', 'string', 'max:64'],
+            'lines' => ['required', 'array', 'min:1', 'max:20'],
+            'lines.*.title' => ['required', 'string', 'max:255'],
+            'lines.*.display_type' => ['nullable', 'in:line_section,line_note'],
+            'lines.*.amount' => ['nullable', 'numeric', 'min:0', 'required_unless:lines.*.display_type,line_section,line_note'],
+            'lines.*.units' => ['nullable', 'numeric', 'min:0.01'],
+            'lines.*.product_id' => ['nullable', 'integer', 'min:1'],
+            'lines.*.discount' => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'lines.*.notes' => ['nullable', 'string', 'max:2000'],
+        ];
+    }
+
+    private function defaultChannel(Client $client): string
+    {
+        return filled($client->email) ? (filled($client->phone) ? 'both' : 'email') : 'whatsapp';
+    }
+
+    /** @param  list<array{amount: float, units: float, discount: float}>  $lines */
+    private function linesTotal(array $lines): float
+    {
+        return (float) collect($lines)->sum(fn (array $line): float => $line['amount'] * $line['units'] * (1 - min(100, max(0, $line['discount'])) / 100));
     }
 
     /**

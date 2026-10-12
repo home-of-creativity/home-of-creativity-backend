@@ -14,6 +14,7 @@ import {
   Paperclip,
   Save,
   Sparkles,
+  LayoutTemplate,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, canAbility, type Client, type ClientReport, type ClientReportAttachment, type ReportTemplateFile } from "../api";
@@ -607,12 +608,13 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
         type="button"
         className="btn btn-sm"
         disabled={busy !== null}
+        title={t(copy.reportSaveTemplate)}
         onClick={() => {
           setTemplateName(title);
           setTemplateSaveOpen(true);
         }}
       >
-        <span className="btn-label">{t(copy.reportSaveTemplate)}</span>
+        <LayoutTemplate size={15} aria-hidden="true" /><span className="btn-label">{t(copy.reportSaveTemplate)}</span>
       </button>
       ) : null}
       <button type="button" className="btn btn-sm" disabled={busy !== null} onClick={() => void save("manual")} title="Ctrl+S">

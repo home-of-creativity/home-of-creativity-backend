@@ -578,7 +578,23 @@ export type OdooQuotation = {
   origin: string | null;
   date_order: string | null;
   odoo_url: string;
+  /** The dashboard request this quotation belongs to, when there is one. */
+  request?: PaperRequest | null;
 };
+
+export type PaperRequest = { id: number; number: string; status: string };
+
+export type OdooPaperLine = {
+  title: string;
+  notes: string | null;
+  amount: number;
+  units: number;
+  discount: number;
+  display_type: "line_section" | "line_note" | null;
+  product_id: number | null;
+};
+
+export type PaperLineInput = { title: string; notes?: string; amount?: number; units?: number; discount?: number; product_id?: number; display_type?: "line_section" | "line_note" };
 
 export type OdooInvoice = {
   id: number;
@@ -586,6 +602,7 @@ export type OdooInvoice = {
   partner_name: string | null;
   amount_total: number;
   amount_residual: number;
+  partner_id?: number | null;
   currency: string | null;
   state: string;
   payment_state: string;
@@ -593,6 +610,7 @@ export type OdooInvoice = {
   ref: string | null;
   invoice_date: string | null;
   odoo_url: string;
+  request?: PaperRequest | null;
 };
 
 export type Brief = {
@@ -1822,6 +1840,24 @@ export const api = {
   },
   odooProducts() {
     return request<{ data: OdooProduct[] }>("/admin/odoo/products");
+  },
+  odooQuotation(id: number) {
+    return request<Envelope<OdooQuotation & { lines: OdooPaperLine[] }>>(`/admin/odoo/quotations/${id}`);
+  },
+  odooInvoice(id: number) {
+    return request<Envelope<OdooInvoice & { lines: OdooPaperLine[] }>>(`/admin/odoo/invoices/${id}`);
+  },
+  updateOdooQuotation(id: number, payload: { lines: PaperLineInput[]; notes?: string; reference?: string; deliver?: "email" | "whatsapp" | "both" }) {
+    return request<Envelope<OdooQuotation>>(`/admin/odoo/quotations/${id}`, { method: "PUT", body: JSON.stringify(payload) });
+  },
+  deleteOdooQuotation(id: number) {
+    return request<Envelope<{ id: number; result: string }>>(`/admin/odoo/quotations/${id}`, { method: "DELETE" });
+  },
+  updateOdooInvoice(id: number, payload: { lines: PaperLineInput[]; reference?: string; deliver?: "email" | "whatsapp" | "both" }) {
+    return request<Envelope<OdooInvoice>>(`/admin/odoo/invoices/${id}`, { method: "PUT", body: JSON.stringify(payload) });
+  },
+  deleteOdooInvoice(id: number) {
+    return request<Envelope<{ id: number }>>(`/admin/odoo/invoices/${id}`, { method: "DELETE" });
   },
   odooQuotations(partner?: string) {
     const query = partner ? `?partner=${encodeURIComponent(partner)}` : "";

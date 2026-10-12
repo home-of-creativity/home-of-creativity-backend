@@ -1,9 +1,25 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { api, type Client, type OdooProduct, type OdooQuotation } from "../api";
+import { api, type Client, type OdooPaperLine, type OdooProduct, type OdooQuotation } from "../api";
 import { copy } from "../i18n";
 
 type LineKind = "product" | "section" | "note";
-type Line = { id: string; kind: LineKind; title: string; amount: string; units: string; discount: string; productId?: number };
+type Line = { id: string; kind: LineKind; title: string; amount: string; units: string; discount: string; productId?: number; notes?: string };
+
+/** An existing Odoo quotation or invoice opened for editing. */
+export type PaperEditing = { id: number; name: string; reference: string | null; partnerId: string | null; lines: OdooPaperLine[] };
+
+function fromOdoo(line: OdooPaperLine): Line {
+  return {
+    id: crypto.randomUUID(),
+    kind: line.display_type === "line_section" ? "section" : line.display_type === "line_note" ? "note" : "product",
+    title: line.title,
+    amount: line.display_type ? "" : String(line.amount),
+    units: String(line.units || 1),
+    discount: String(line.discount || 0),
+    productId: line.product_id ?? undefined,
+    notes: line.notes ?? undefined,
+  };
+}
 type SendMode = "draft" | "send";
 
 function blankLine(kind: LineKind = "product"): Line {
@@ -42,6 +58,7 @@ export function OdooPaperForm({
   t,
   onCancel,
   onCreated,
+  editing,
 }: {
   kind: "quotation" | "invoice";
   partnerId?: string;
@@ -50,6 +67,7 @@ export function OdooPaperForm({
   onCancel: () => void;
   /** `requestId` is the request a sent quotation opened. */
   onCreated: (message: string, requestId?: number) => void;
+  editing?: PaperEditing | null;
 }) {
   const clientListId = useId();
   const quoteListId = useId();
@@ -61,7 +79,7 @@ export function OdooPaperForm({
   const [clientId, setClientId] = useState("");
   const [clientOpen, setClientOpen] = useState(false);
   const [clientActive, setClientActive] = useState(0);
-  const [reference, setReference] = useState("");
+  const [reference, setReference] = useState(editing?.reference ?? "");
   const [notes, setNotes] = useState("");
   const [emailOn, setEmailOn] = useState(true);
   const [whatsappOn, setWhatsappOn] = useState(true);
@@ -76,7 +94,7 @@ export function OdooPaperForm({
   const [quoteOpen, setQuoteOpen] = useState(false);
   const [quoteActive, setQuoteActive] = useState(0);
   const [quotations, setQuotations] = useState<OdooQuotation[]>(quotation ? [quotation] : []);
-  const [lines, setLines] = useState<Line[]>([blankLine()]);
+  const [lines, setLines] = useState<Line[]>(() => (editing?.lines.length ? editing.lines.map(fromOdoo) : [blankLine()]));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const typedClient = useRef(false);
@@ -264,7 +282,7 @@ export function OdooPaperForm({
       return;
     }
     const deliver = emailOn && whatsappOn ? "both" : emailOn ? "email" : "whatsapp";
-    const filled: Array<{ title: string; amount?: number; units?: number; discount?: number; product_id?: number; display_type?: "line_section" | "line_note" }> = [];
+    const filled: Array<{ title: string; notes?: string; amount?: number; units?: number; discount?: number; product_id?: number; display_type?: "line_section" | "line_note" }> = [];
     for (const line of lines) {
       const title = line.title.trim();
       if (title === "") continue;
@@ -281,6 +299,7 @@ export function OdooPaperForm({
         units: Number(line.units || "1"),
         discount: Number.isFinite(discount) && discount > 0 ? discount : undefined,
         product_id: line.productId,
+        notes: line.notes || undefined,
       });
     }
     const products = filled.filter((line) => line.display_type === undefined);
@@ -295,6 +314,14 @@ export function OdooPaperForm({
     setBusy(true);
     setError("");
     try {
+      if (editing) {
+        // Editing: the server updates Odoo and sends the paper to the client again when it was already sent.
+        const res = kind === "quotation"
+          ? await api.updateOdooQuotation(editing.id, { lines: filled, notes: notes.trim() || undefined, reference: reference.trim() || undefined, deliver })
+          : await api.updateOdooInvoice(editing.id, { lines: filled, reference: reference.trim() || undefined, deliver });
+        onCreated(res.message || t(copy.saved));
+        return;
+      }
       if (kind === "quotation") {
         const res = await api.createOdooQuotation({
           client_id: selected.id,
@@ -341,7 +368,11 @@ export function OdooPaperForm({
             <span key={step.ar} className={index === 0 ? "is-current" : undefined}>{t(step)}</span>
           ))}
         </nav>
-        <h2 className="form-title">{t(kind === "quotation" ? copy.createQuotation : copy.createInvoice)}</h2>
+        <h2 className="form-title">
+          {editing
+            ? `${t(kind === "quotation" ? copy.editQuotation : copy.editInvoice)} ${editing.name}`
+            : t(kind === "quotation" ? copy.createQuotation : copy.createInvoice)}
+        </h2>
       </div>
       <form className="quotation-form" onSubmit={(event) => void onSubmit(event)}>
         <div className="odoo-paper-head">
@@ -351,6 +382,7 @@ export function OdooPaperForm({
               <input
                 className="field"
                 role="combobox"
+                disabled={Boolean(editing)}
                 aria-expanded={clientOpen}
                 aria-controls={clientListId}
                 aria-autocomplete="list"
@@ -422,7 +454,7 @@ export function OdooPaperForm({
             {t(copy.paperReference)}
             <input className="field" value={reference} onChange={(event) => setReference(event.target.value)} maxLength={64} />
           </label>
-          {kind === "invoice" ? (
+          {kind === "invoice" && !editing ? (
             <label className="field-label" ref={quoteBox}>
               {t(copy.paperQuotation)}
               <span className="paper-suggest">
@@ -483,7 +515,7 @@ export function OdooPaperForm({
             {t(copy.paperDeliverWhatsApp)}
             {selected?.phone ? <span dir="ltr">{selected.phone}</span> : null}
           </label>
-          <p className="muted odoo-flow-note">{kind === "quotation" ? t(copy.paperQuotationFlow) : t(copy.paperInvoiceFlow)}</p>
+          <p className="muted odoo-flow-note">{editing ? t(kind === "quotation" ? copy.paperQuotationEditFlow : copy.paperInvoiceEditFlow) : kind === "quotation" ? t(copy.paperQuotationFlow) : t(copy.paperInvoiceFlow)}</p>
         </fieldset>
 
         {showLines ? (
@@ -601,12 +633,20 @@ export function OdooPaperForm({
             <button type="button" className="btn btn-ghost" onClick={onCancel} disabled={busy}>
               {t(copy.cancel)}
             </button>
-            <button className="btn btn-ghost" type="submit" disabled={busy} onClick={() => { sendMode.current = "draft"; }}>
-              {busy ? t(copy.creatingPaper) : t(copy.paperSaveDraft)}
-            </button>
-            <button className="btn btn-primary" type="submit" disabled={busy} aria-busy={busy} onClick={() => { sendMode.current = "send"; }}>
-              {busy ? t(copy.creatingPaper) : t(kind === "quotation" ? copy.paperSend : copy.paperConfirm)}
-            </button>
+            {editing ? (
+              <button className="btn btn-primary" type="submit" disabled={busy} aria-busy={busy} onClick={() => { sendMode.current = "draft"; }}>
+                {busy ? t(copy.creatingPaper) : t(copy.paperSaveEdit)}
+              </button>
+            ) : (
+              <>
+                <button className="btn btn-ghost" type="submit" disabled={busy} onClick={() => { sendMode.current = "draft"; }}>
+                  {busy ? t(copy.creatingPaper) : t(copy.paperSaveDraft)}
+                </button>
+                <button className="btn btn-primary" type="submit" disabled={busy} aria-busy={busy} onClick={() => { sendMode.current = "send"; }}>
+                  {busy ? t(copy.creatingPaper) : t(kind === "quotation" ? copy.paperSend : copy.paperConfirm)}
+                </button>
+              </>
+            )}
           </div>
         </div>
       </form>

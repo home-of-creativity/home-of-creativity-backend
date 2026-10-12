@@ -162,6 +162,8 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::get('odoo/products', [AdminOdooController::class, 'products']);
         Route::get('odoo/quotations', [AdminOdooController::class, 'quotations']);
         Route::get('odoo/invoices', [AdminOdooController::class, 'invoices']);
+        Route::get('odoo/quotations/{id}', [AdminOdooController::class, 'showQuotation'])->whereNumber('id');
+        Route::get('odoo/invoices/{id}', [AdminOdooController::class, 'showInvoice'])->whereNumber('id');
     });
     Route::middleware('ability:ops.clients.odoo')->group(function () {
         Route::post('odoo/sync-partners', [AdminOdooController::class, 'syncPartners']);
@@ -169,6 +171,10 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::post('odoo/import-crm-clients/excel', [AdminOdooController::class, 'importCrmClientsExcel']);
         Route::post('odoo/quotations', [AdminOdooController::class, 'storeQuotation']);
         Route::post('odoo/invoices', [AdminOdooController::class, 'storeInvoice']);
+        Route::put('odoo/quotations/{id}', [AdminOdooController::class, 'updateQuotation'])->whereNumber('id');
+        Route::delete('odoo/quotations/{id}', [AdminOdooController::class, 'destroyQuotation'])->whereNumber('id');
+        Route::put('odoo/invoices/{id}', [AdminOdooController::class, 'updateInvoice'])->whereNumber('id');
+        Route::delete('odoo/invoices/{id}', [AdminOdooController::class, 'destroyInvoice'])->whereNumber('id');
     });
 
     Route::middleware('crud:ops.clients,ops.reports')->group(function () {

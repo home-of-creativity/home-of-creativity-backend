@@ -1427,6 +1427,128 @@ class OdooClient
         return true;
     }
 
+    /**
+     * New lines (and notes or reference) on a quotation that is not a sales order yet.
+     *
+     * @param  list<array<string, mixed>>  $lines
+     * @return array<string, mixed>
+     */
+    public function updateStaffQuotation(int $id, array $lines, ?string $notes, ?string $reference): array
+    {
+        $vals = [
+            // 5 clears the old lines, 0 adds each new one.
+            'order_line' => array_merge([[5, 0, 0]], array_map(fn (array $line): array => [0, 0, $this->staffSaleLine($line)], $lines)),
+        ];
+        if ($notes !== null) {
+            $vals['note'] = $notes;
+        }
+        if ($reference !== null && $reference !== '') {
+            $vals['client_order_ref'] = $reference;
+        }
+        $this->call('sale.order', 'write', ['ids' => [$id], 'vals' => $vals]);
+
+        return $this->quotationSnapshot($id) ?? ['id' => $id];
+    }
+
+    /**
+     * A draft that never left goes away; a sent quotation is cancelled so its history
+     * stays in Odoo. A confirmed sales order is not touched here.
+     */
+    public function removeQuotation(int $id): string
+    {
+        $state = (string) ($this->quotationSnapshot($id)['state'] ?? '');
+        if ($state === 'draft') {
+            $this->unlinkRecords('sale.order', [$id]);
+
+            return 'deleted';
+        }
+        if ($state === 'sent') {
+            // Without this context Odoo answers a sent quotation with a confirmation wizard.
+            $this->callWithContext('sale.order', 'action_cancel', [$id], ['disable_cancel_warning' => true]);
+
+            return 'cancelled';
+        }
+
+        return $state;
+    }
+
+    /**
+     * New lines on an unpaid invoice: a posted one goes back to draft, takes the lines,
+     * and is posted again.
+     *
+     * @param  list<array<string, mixed>>  $lines
+     * @return array<string, mixed>
+     */
+    public function updateStaffInvoice(int $id, array $lines, ?string $reference): array
+    {
+        $row = $this->invoiceSnapshot($id);
+        $posted = ($row['state'] ?? '') === 'posted';
+        if ($posted) {
+            $this->call('account.move', 'button_draft', ['ids' => [$id]]);
+        }
+        $vals = [
+            'invoice_line_ids' => array_merge([[5, 0, 0]], array_map(fn (array $line): array => [0, 0, $this->staffInvoiceLine($line)], $lines)),
+        ];
+        if ($reference !== null && $reference !== '') {
+            $vals['ref'] = $reference;
+        }
+        $this->call('account.move', 'write', ['ids' => [$id], 'vals' => $vals]);
+        if ($posted) {
+            $this->call('account.move', 'action_post', ['ids' => [$id]]);
+        }
+
+        return $this->invoiceSnapshot($id) ?? ['id' => $id];
+    }
+
+    /** An unpaid invoice is cancelled; a posted one goes through draft first, as in Odoo. */
+    public function cancelInvoice(int $id): void
+    {
+        $state = (string) ($this->invoiceSnapshot($id)['state'] ?? '');
+        if ($state === 'posted') {
+            $this->call('account.move', 'button_draft', ['ids' => [$id]]);
+        }
+        if ($state !== 'cancel') {
+            $this->call('account.move', 'button_cancel', ['ids' => [$id]]);
+        }
+    }
+
+    /**
+     * The lines of a quotation (`sale.order`) or an invoice (`account.move`), as the
+     * dashboard paper form edits them. Tax and payment-term lines are left out.
+     *
+     * @return list<array{title: string, notes: string|null, amount: float, units: float, discount: float, display_type: string|null, product_id: int|null}>
+     */
+    public function paperLines(string $model, int $id): array
+    {
+        if ($id <= 0 || ! $this->configured()) {
+            return [];
+        }
+        $sale = $model === 'sale.order';
+        $rows = $sale
+            ? $this->searchRead('sale.order.line', [['order_id', '=', $id]], ['name', 'product_uom_qty', 'price_unit', 'discount', 'display_type', 'product_id'], 200, 0, 'sequence asc, id asc')
+            : $this->searchRead('account.move.line', [['move_id', '=', $id], ['display_type', 'in', ['product', 'line_section', 'line_note']]], ['name', 'quantity', 'price_unit', 'discount', 'display_type', 'product_id'], 200, 0, 'sequence asc, id asc');
+
+        $lines = [];
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $type = is_string($row['display_type'] ?? null) && in_array($row['display_type'], ['line_section', 'line_note'], true) ? $row['display_type'] : null;
+            [$title, $notes] = array_pad(explode("\n", (string) ($row['name'] ?? ''), 2), 2, null);
+            $lines[] = [
+                'title' => trim((string) $title),
+                'notes' => $notes !== null && trim($notes) !== '' ? trim($notes) : null,
+                'amount' => (float) ($row['price_unit'] ?? 0),
+                'units' => (float) ($row[$sale ? 'product_uom_qty' : 'quantity'] ?? 1),
+                'discount' => (float) ($row['discount'] ?? 0),
+                'display_type' => $type,
+                'product_id' => $this->relationId($row['product_id'] ?? null),
+            ];
+        }
+
+        return $lines;
+    }
+
     /** An invoice that is posted and not yet fully paid, so a payment can go on it. */
     public function invoiceAwaitsPayment(int $id): bool
     {
@@ -2185,7 +2307,7 @@ class OdooClient
             ];
         }
 
-        if (in_array($method, ['action_post', 'action_create_payments', 'action_confirm', 'action_quotation_sent', 'create_invoices'], true)) {
+        if (in_array($method, ['action_post', 'action_create_payments', 'action_confirm', 'action_quotation_sent', 'create_invoices', 'button_draft', 'button_cancel'], true)) {
             return [
                 'ids' => $payload['ids'] ?? [],
             ];
@@ -2303,7 +2425,7 @@ class OdooClient
             ]);
         }
 
-        if (in_array($method, ['action_post', 'action_create_payments', 'action_confirm', 'action_quotation_sent', 'create_invoices'], true)) {
+        if (in_array($method, ['action_post', 'action_create_payments', 'action_confirm', 'action_quotation_sent', 'create_invoices', 'button_draft', 'button_cancel'], true)) {
             return $this->execute($uid, $model, $method, [
                 $payload['ids'] ?? [],
             ]);
@@ -2404,6 +2526,22 @@ class OdooClient
         }
 
         return $payload['result'] ?? null;
+    }
+
+    /**
+     * A button method that needs an Odoo context, such as cancelling a sent quotation
+     * without its wizard.
+     *
+     * @param  list<int>  $ids
+     * @param  array<string, mixed>  $context
+     */
+    private function callWithContext(string $model, string $method, array $ids, array $context): mixed
+    {
+        if ($this->useJson2()) {
+            return $this->json2($model, $method, ['ids' => $ids, 'context' => $context]);
+        }
+
+        return $this->executeKw($this->legacyUid(), $model, $method, [$ids], ['context' => $context]);
     }
 
     private function useJson2(): bool
