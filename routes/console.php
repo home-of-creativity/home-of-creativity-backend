@@ -31,6 +31,8 @@ Schedule::command('clickup:retry-tasks')->everyFiveMinutes()->withoutOverlapping
 Schedule::command('ops:photography-day-before')->hourly()->timezone('Asia/Damascus')->withoutOverlapping();
 // Unanswered photography requests, offers, and moves close after 48 hours, even with Telegram down.
 Schedule::command('ops:photography-expire')->everyTenMinutes()->timezone('Asia/Damascus')->withoutOverlapping();
+// Client email answers to complaint tickets land on the ticket within two minutes.
+Schedule::command('ops:complaint-email-replies')->everyTwoMinutes()->withoutOverlapping();
 Schedule::command('seo:submit-sitemap')->dailyAt('06:15')->timezone('Asia/Damascus')->withoutOverlapping();
 Schedule::command('ops:watch-health')->everyMinute()->withoutOverlapping();
 Schedule::command('ops:watch-signals')->everyFifteenMinutes()->withoutOverlapping();

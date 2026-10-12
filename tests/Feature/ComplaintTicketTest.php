@@ -2,11 +2,13 @@
 
 namespace Tests\Feature;
 
+use App\Actions\ComplaintTickets;
 use App\Enums\StaffAbility;
 use App\Models\Client;
 use App\Models\Complaint;
 use App\Models\Role;
 use App\Models\User;
+use App\Services\ComplaintMailbox;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Carbon;
@@ -83,8 +85,9 @@ class ComplaintTicketTest extends TestCase
         $this->assertSame('client', $fresh->messages()->latest('id')->first()->author);
         $this->assertSame('تمام شكراً، بس بدي الملفات كاملة', $fresh->messages()->latest('id')->first()->body);
 
-        // The next message is a normal chat again.
-        $this->send($phone, 'a7', 'شكراً');
+        // «إلغاء» ends the watch; the next message is a normal chat again.
+        $this->send($phone, 'a7', 'إلغاء');
+        $this->send($phone, 'a8', 'شكراً');
         $this->assertSame(2, $fresh->messages()->count());
     }
 
@@ -122,6 +125,82 @@ class ComplaintTicketTest extends TestCase
         $this->getJson('/api/admin/complaints')
             ->assertJsonPath('data.0.messages_count', 2)
             ->assertJsonPath('data.0.status', Complaint::RESOLVED);
+    }
+
+    public function test_outside_whatsapp_hours_a_complaint_is_filed_and_the_client_answers_without_the_button(): void
+    {
+        // Noon is outside the default WhatsApp window (21:00 to 09:00).
+        Carbon::setTestNow(Carbon::parse('2026-10-12 12:00:00', 'Asia/Damascus'));
+        $phone = '963944000066';
+        $this->send($phone, 'n1', 'شكوى');
+        $this->send($phone, 'n2', 'الفاتورة غلط');
+        $this->send($phone, 'n3', 'المبلغ أعلى من الباقة');
+        $this->send($phone, 'n4', 'تم');
+        $complaint = Complaint::query()->firstOrFail();
+
+        Sanctum::actingAs($this->complaintsStaff());
+        $this->postJson("/api/admin/complaints/{$complaint->id}/replies", ['body' => 'صححنا الفاتورة.', 'channel' => 'bot'])->assertCreated();
+
+        $this->send($phone, 'n5', 'تمام، وصلتني');
+        $this->send($phone, 'n6', 'بس بدي نسخة PDF');
+        $bodies = $complaint->messages()->where('author', 'client')->orderBy('id')->pluck('body')->all();
+        $this->assertSame(['تمام، وصلتني', 'بس بدي نسخة PDF'], $bodies);
+        $receipts = collect(Http::recorded())->filter(fn ($pair): bool => str_contains(json_encode($pair[0]->data(), JSON_UNESCAPED_UNICODE), 'وصل ردك على التذكرة'));
+        $this->assertCount(1, $receipts);
+
+        // Any other message outside the window still gets the closed notice and stays off the ticket.
+        $this->send($phone, 'n7', 'إلغاء');
+        $this->send($phone, 'n8', 'مرحبا');
+        $this->assertSame(2, $complaint->messages()->where('author', 'client')->count());
+        Http::assertSent(fn (Request $request): bool => str_contains(json_encode($request->data(), JSON_UNESCAPED_UNICODE), 'مو موجودين'));
+    }
+
+    public function test_an_email_answer_from_the_client_lands_on_the_ticket(): void
+    {
+        $client = Client::factory()->create(['email' => 'Owner@Example.com']);
+        $complaint = Complaint::query()->create([
+            'client_id' => $client->id,
+            'ticket_number' => 'T-00042',
+            'title' => 'جودة الصور',
+            'description' => 'الصور غير واضحة',
+            'status' => Complaint::RESOLVED,
+        ]);
+        $read = [];
+        $this->mock(ComplaintMailbox::class, function ($mock) use (&$read): void {
+            $mock->shouldReceive('ticketReplies')->once()->andReturn([
+                [
+                    'from' => 'owner@example.com',
+                    'subject' => 'Re: تذكرة T-00042 · Home of Creativity',
+                    'body' => "شكراً، الصور الجديدة ممتازة.\n\nOn Mon, Oct 12, 2026 at 10:00 Home of Creativity <reports@hoc.agency> wrote:\n> تذكرة T-00042 · جودة الصور",
+                    'read' => function () use (&$read): void {
+                        $read[] = 'ok';
+                    },
+                ],
+                [
+                    'from' => 'stranger@example.com',
+                    'subject' => 'Re: تذكرة T-00042',
+                    'body' => 'رسالة غريبة',
+                    'read' => function () use (&$read): void {
+                        $read[] = 'stranger';
+                    },
+                ],
+            ]);
+        });
+
+        $this->artisan('ops:complaint-email-replies')->assertSuccessful();
+
+        $messages = $complaint->messages()->get();
+        $this->assertCount(1, $messages);
+        $this->assertSame('email', $messages[0]->channel);
+        $this->assertSame('شكراً، الصور الجديدة ممتازة.', $messages[0]->body);
+        $this->assertSame(Complaint::IN_PROGRESS, $complaint->fresh()->status);
+        $this->assertSame(['ok'], $read);
+    }
+
+    public function test_quoted_mail_is_cut_from_an_answer(): void
+    {
+        $this->assertSame('تمام', ComplaintTickets::withoutQuote("تمام\n\nفي 12 أكتوبر 2026، كتب Home of Creativity:\n> قديم"));
+        $this->assertSame("سطر أول\nسطر ثاني", ComplaintTickets::withoutQuote("سطر أول\n> مقتبس\nسطر ثاني\n-----Original Message-----\nold"));
     }
 
     private function complaintsStaff(): User

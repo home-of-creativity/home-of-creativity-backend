@@ -352,6 +352,13 @@ class HandleClientComplaint
 
             return false;
         }
+        if ($this->isBare($text)) {
+            // «شكوى» alone starts a new complaint instead of answering the old ticket.
+            $this->tickets->forget($key);
+            $this->start($client, $chatId, $key, $lang);
+
+            return true;
+        }
         if (preg_match('/^(إلغاء|الغاء|cancel)$/ui', $text) === 1) {
             $this->tickets->forget($key);
             $this->say($chatId, $lang, 'تمام، ما انضاف رد.', 'OK, no reply was added.');

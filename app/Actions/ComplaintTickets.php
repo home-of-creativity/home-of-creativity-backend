@@ -16,12 +16,20 @@ use Throwable;
 
 /**
  * A complaint becomes a ticket when the team answers it. Replies go back on the chat the
- * complaint came from (WhatsApp or Telegram) or by email. A bot reply carries a button;
- * the client's next message after it lands on the same ticket.
+ * complaint came from (WhatsApp or Telegram) or by email.
+ *
+ * After a bot reply the chat watches the ticket for 24 hours: what the client writes next
+ * lands on it, and each answer keeps the watch open two more hours. A menu button or
+ * «إلغاء» ends the watch; the «reply» button reopens it later. An email answer is read
+ * from the inbox by its subject.
  */
 class ComplaintTickets
 {
     public const REPLY_CALLBACK = 'tkt:';
+
+    private const WATCH_HOURS = 24;
+
+    private const FOLLOW_HOURS = 2;
 
     public function __construct(
         private TelegramNotifier $telegram,
@@ -64,8 +72,11 @@ class ComplaintTickets
             if ($chatId === null) {
                 throw ValidationException::withMessages(['channel' => 'العميل لا يصله البوت الآن. أرسل الرد بالإيميل.']);
             }
-            $delivered = $this->sendBot($chatId, $complaint, $this->text($complaint, $body));
+            $delivered = $this->sendBot($chatId, $complaint, $this->text($complaint, $body)."\n\nاكتب ردك هون مباشرة ليوصل للتذكرة.");
             $recorded = Client::isWhatsAppKey($chatId) ? 'whatsapp' : 'telegram';
+            if ($delivered && $complaint->client !== null) {
+                Cache::put($this->awaitKey($this->chatKey($complaint->client, $chatId)), $complaint->id, now()->addHours(self::WATCH_HOURS));
+            }
         } elseif ($channel === 'email') {
             $email = $this->email($complaint);
             if ($email === null) {
@@ -112,7 +123,7 @@ class ComplaintTickets
 
             return true;
         }
-        Cache::put($this->awaitKey($key), $complaint->id, now()->addHours(24));
+        Cache::put($this->awaitKey($key), $complaint->id, now()->addHours(self::WATCH_HOURS));
         $this->say(
             $chatId,
             $lang,
@@ -133,31 +144,97 @@ class ComplaintTickets
         Cache::forget($this->awaitKey($key));
     }
 
-    /** Files the client's text on the ticket they chose to answer. */
+    /** Files the client's text on the ticket the chat is watching. */
     public function clientReply(Client $client, string $chatId, string $key, string $text, string $lang): bool
     {
-        $id = Cache::pull($this->awaitKey($key));
+        $id = Cache::get($this->awaitKey($key));
         $complaint = Complaint::query()->whereKey((int) $id)->where('client_id', $client->id)->first();
         if (! $complaint instanceof Complaint) {
+            $this->forget($key);
+
             return false;
         }
 
+        $this->file($complaint, $client, Client::isWhatsAppKey($chatId) ? 'whatsapp' : 'telegram', $text, $chatId);
+        Cache::put($this->awaitKey($key), $complaint->id, now()->addHours(self::FOLLOW_HOURS));
+        // One receipt per burst, so a client typing three lines gets one answer.
+        if (Cache::add('hoc:ticket-ack:'.$key, 1, now()->addMinutes(10))) {
+            $this->say(
+                $chatId,
+                $lang,
+                "وصل ردك على التذكرة {$complaint->ticket_number}. للرجوع للقائمة اضغط أي زر منها.",
+                "Your reply reached ticket {$complaint->ticket_number}. Tap any menu button to go back.",
+            );
+        }
+
+        return true;
+    }
+
+    /**
+     * An email answer to a ticket. The subject names the ticket and the sender must be
+     * the client's email, so a stranger cannot write on someone else's ticket.
+     */
+    public function emailReply(string $from, string $subject, string $body): bool
+    {
+        if (preg_match('/T-\d{5,}/', $subject, $match) !== 1) {
+            return false;
+        }
+        $complaint = Complaint::query()->with('client')->where('ticket_number', $match[0])->first();
+        $client = $complaint?->client;
+        if (! $complaint instanceof Complaint || $client === null || strcasecmp(trim((string) $client->email), trim($from)) !== 0) {
+            return false;
+        }
+        $text = self::withoutQuote($body);
+        if ($text === '') {
+            return false;
+        }
+        $this->file($complaint, $client, 'email', $text, null);
+
+        return true;
+    }
+
+    /** The new part of an email answer, without the quoted ticket under it. */
+    public static function withoutQuote(string $body): string
+    {
+        $kept = [];
+        foreach (preg_split('/\r\n|\r|\n/', $body) ?: [] as $line) {
+            $trimmed = trim($line);
+            if (preg_match('/^(On .+wrote:|في .+كتب:?|.+ كتب:$|-{2,}\s*(Original Message|الرسالة الأصلية)|From:\s|من:\s|_{5,})/ui', $trimmed) === 1) {
+                break;
+            }
+            if (str_starts_with($trimmed, '>')) {
+                continue;
+            }
+            $kept[] = rtrim($line);
+        }
+
+        return mb_substr(trim(implode("\n", $kept)), 0, 4000);
+    }
+
+    private function file(Complaint $complaint, Client $client, string $channel, string $text, ?string $chatId): void
+    {
         $complaint->messages()->create([
             'author' => ComplaintMessage::CLIENT,
-            'channel' => Client::isWhatsAppKey($chatId) ? 'whatsapp' : 'telegram',
+            'channel' => $channel,
             'body' => mb_substr(trim($text), 0, 4000),
             'delivered' => true,
         ]);
-        $complaint->forceFill(['status' => Complaint::IN_PROGRESS, 'reviewed_at' => null, 'chat_id' => $chatId])->save();
+        $complaint->forceFill(array_filter([
+            'status' => Complaint::IN_PROGRESS,
+            'chat_id' => $chatId,
+        ]) + ['reviewed_at' => null])->save();
 
         $who = filled($client->company_name) ? (string) $client->company_name : (string) ($client->name ?: $client->phone);
         $this->notifyEmployees->handlePlain(
             EmployeeProfession::Sales,
             "ردّ {$who} على التذكرة {$complaint->ticket_number}: ".mb_substr(trim($text), 0, 500),
         );
-        $this->say($chatId, $lang, "وصل ردك على التذكرة {$complaint->ticket_number}.", "Your reply reached ticket {$complaint->ticket_number}.");
+    }
 
-        return true;
+    /** The key the complaint conversation uses for this chat. */
+    private function chatKey(Client $client, string $chatId): string
+    {
+        return Client::isWhatsAppKey($chatId) ? Client::whatsappPhoneFromKey($chatId) : 'tg:'.$client->id;
     }
 
     /**

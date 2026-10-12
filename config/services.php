@@ -109,6 +109,16 @@ return [
         'binary' => env('LIBREOFFICE_BINARY', 'soffice'),
     ],
 
+    // Client answers to complaint tickets arrive in the reports@ inbox; read over IMAP.
+    'complaint_mail' => [
+        'host' => env('COMPLAINT_IMAP_HOST', env('REPORT_MAIL_HOST', 'premium319.web-hosting.com')),
+        'port' => (int) env('COMPLAINT_IMAP_PORT', 993),
+        'encryption' => env('COMPLAINT_IMAP_ENCRYPTION', 'ssl'),
+        'username' => env('COMPLAINT_IMAP_USERNAME', env('REPORT_MAIL_USERNAME', 'reports@hoc.agency')),
+        'password' => env('COMPLAINT_IMAP_PASSWORD', env('REPORT_MAIL_PASSWORD')),
+        'folder' => env('COMPLAINT_IMAP_FOLDER', 'INBOX'),
+    ],
+
     'google' => [
         'credentials_json' => env('GOOGLE_CREDENTIALS_JSON', env('GOOGLE_SERVICE_ACCOUNT_JSON', env('GOOGLE_APPLICATION_CREDENTIALS'))),
         'drive_parent_folder_id' => env('GOOGLE_DRIVE_PARENT_FOLDER_ID'),

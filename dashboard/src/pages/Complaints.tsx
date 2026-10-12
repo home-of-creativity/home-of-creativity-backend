@@ -374,7 +374,8 @@ function ComplaintTicket({
                     aria-label={ar ? "الرد" : "Reply"}
                     required
                   />
-                  {channel === "bot" ? <small className="muted">{ar ? "يصل الرد مع زر «رد على التذكرة»، وجواب العميل يظهر هنا." : "The reply carries a «reply» button; the client's answer appears here."}</small> : null}
+                  {channel === "bot" ? <small className="muted">{ar ? "ما يكتبه العميل على البوت خلال 24 ساعة يُضاف هنا تلقائياً، وبعدها بزر «رد على التذكرة»." : "What the client writes on the bot within 24 hours lands here; after that, through the «reply» button."}</small> : null}
+                  {channel === "email" ? <small className="muted">{ar ? "رد العميل على الإيميل يظهر هنا خلال دقيقتين." : "The client's email answer appears here within two minutes."}</small> : null}
                 </div>
               </div>
             </div>

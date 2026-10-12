@@ -125,6 +125,27 @@ class HandleWhatsAppInbound
     }
 
     /**
+     * Complaints and ticket answers are taken at any hour; the rest of the chat waits for
+     * the WhatsApp window.
+     *
+     * @param  array<string, mixed>  $message
+     */
+    private function complaintAnytime(string $phone, array $message): bool
+    {
+        $complaints = app(HandleClientComplaint::class);
+        if ($complaints->active($phone)) {
+            return true;
+        }
+        $callback = $this->callbackId($message);
+        if (is_string($callback) && $callback !== '') {
+            return str_starts_with($callback, ComplaintTickets::REPLY_CALLBACK) || $this->isNav($callback, self::NAV_COMPLAINT);
+        }
+        $text = $this->messageText($message);
+
+        return $this->isNav($text, self::NAV_COMPLAINT) || $complaints->wants($text);
+    }
+
+    /**
      * @return list<array{phone: string, profile_name: string, message: array<string, mixed>}>
      */
     private function messagesFrom(array $payload): array
@@ -195,7 +216,7 @@ class HandleWhatsAppInbound
         }
 
         $calendar = app(WorkCalendar::class);
-        if (! $calendar->isWhatsAppOpen()) {
+        if (! $calendar->isWhatsAppOpen() && ! $this->complaintAnytime($phone, $message)) {
             $this->whatsApp->markRead($wamid);
             $queued = trim($this->messageText($message));
             if ($queued !== '' && $this->photoRuleIntent($queued, true) !== null) {
