@@ -7,8 +7,12 @@ import { LoadingTableRow } from "../components/LoadingTableRow";
 import { PageHeader } from "../components/PageHeader";
 import { Pagination } from "../components/Pagination";
 import { copy, type Locale } from "../i18n";
+import { ReportHistory } from "./reports/ReportHistory";
+import { ReportTabs, useReportTab } from "./reports/ReportTabs";
+import { ReportsCalendar } from "./reports/ReportsCalendar";
 
-export function Reports({ t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
+export function Reports({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
+  const [tab, setTab] = useReportTab();
   const [items, setItems] = useState<Client[]>([]);
   const [meta, setMeta] = useState<PageMeta | null>(null);
   const [page, setPage] = useState(1);
@@ -47,6 +51,11 @@ export function Reports({ t }: { locale: Locale; t: (c: { ar: string; en: string
   return (
     <section>
       <PageHeader title={t(copy.reportsTitle)} lede={t(copy.reportsLede)} />
+      <ReportTabs locale={locale} tab={tab} onTab={setTab} first={{ ar: "الزبائن", en: "Clients" }} />
+      {tab === "calendar" ? <ReportsCalendar locale={locale} /> : null}
+      {tab === "history" ? <ReportHistory locale={locale} /> : null}
+      {tab === "list" ? (
+      <>
       {error ? <p className="error">{error}</p> : null}
       <div className="toolbar filter-bar filter-grid">
         <label className="field-label">
@@ -119,6 +128,8 @@ export function Reports({ t }: { locale: Locale; t: (c: { ar: string; en: string
         </table>
       </div>
       {meta ? <Pagination meta={meta} disabled={loading} onPage={setPage} t={t} /> : null}
+      </>
+      ) : null}
     </section>
   );
 }

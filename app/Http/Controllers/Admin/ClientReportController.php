@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Admin;
 
 use App\Actions\ConvertDocxToPdf;
 use App\Actions\PublishClientReport;
+use App\Actions\RecordReportHistory;
+use App\Actions\ReportDeadlines;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreClientReportRequest;
 use App\Http\Resources\ClientReportResource;
@@ -11,6 +13,7 @@ use App\Http\Resources\ClientResource;
 use App\Models\Client;
 use App\Models\ClientReport;
 use App\Models\ClientReportAttachment;
+use App\Models\ClientReportVersion;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -22,6 +25,11 @@ class ClientReportController extends Controller
 {
     /** Report Word and PDF files are private: only staff with ops.reports read them through the API. */
     private const DISK = 'local';
+
+    public function __construct(
+        private RecordReportHistory $history,
+        private ReportDeadlines $deadlines,
+    ) {}
 
     public function clients(Request $request)
     {
@@ -75,9 +83,11 @@ class ClientReportController extends Controller
             'title' => $request->validated('title'),
             'body' => (string) ($request->validated('body') ?? ''),
         ]);
-        $this->storeFiles($request, $report);
+        $added = $this->storeFiles($request, $report);
+        $this->history->saved($report, $request->user(), created: true);
+        $this->history->attachments($report, $request->user(), ClientReportVersion::ATTACHMENT_ADDED, $added);
 
-        [$report, $driveError] = $this->publish($publish, $report, $publishing);
+        [$report, $driveError] = $this->publish($publish, $report, $publishing, $request);
 
         return ClientReportResource::make($report)
             ->additional(['message' => 'Created.', 'drive_error' => $driveError])
@@ -92,17 +102,25 @@ class ClientReportController extends Controller
             'title' => $request->validated('title'),
             'body' => (string) ($request->validated('body') ?? $report->body ?? ''),
         ])->save();
-        $this->storeFiles($request, $report);
+        $textChanged = $report->wasChanged(['title', 'body']);
+        $added = $this->storeFiles($request, $report);
+        if ($textChanged || $request->hasFile('document')) {
+            $this->history->saved($report, $request->user());
+        }
+        $this->history->attachments($report, $request->user(), ClientReportVersion::ATTACHMENT_ADDED, $added);
 
         $remove = $request->input('remove_attachment_ids', []);
         if (is_array($remove) && $remove !== []) {
-            $report->attachments()->whereIn('id', $remove)->get()->each(function (ClientReportAttachment $file): void {
+            $removed = [];
+            $report->attachments()->whereIn('id', $remove)->get()->each(function (ClientReportAttachment $file) use (&$removed): void {
                 Storage::disk('public')->delete($file->path);
+                $removed[] = $file->original_name;
                 $file->delete();
             });
+            $this->history->attachments($report, $request->user(), ClientReportVersion::ATTACHMENT_REMOVED, $removed);
         }
 
-        [$report, $driveError] = $this->publish($publish, $report, $request->boolean('publish'));
+        [$report, $driveError] = $this->publish($publish, $report, $request->boolean('publish'), $request);
 
         return ClientReportResource::make($report)
             ->additional(['message' => 'Updated.', 'drive_error' => $driveError]);
@@ -147,10 +165,11 @@ class ClientReportController extends Controller
         return Storage::disk(self::DISK)->download($clientReport->pdf_path, $clientReport->title.'.pdf', ['Content-Type' => 'application/pdf']);
     }
 
-    public function destroy(ClientReport $clientReport): JsonResponse
+    public function destroy(Request $request, ClientReport $clientReport): JsonResponse
     {
         $report = $clientReport;
         $report->load('attachments');
+        $this->history->deleted($report, $request->user());
         foreach (['cover_path', 'watermark_path'] as $column) {
             if (filled($report->{$column})) {
                 Storage::disk('public')->delete($report->{$column});
@@ -168,7 +187,10 @@ class ClientReportController extends Controller
         ]);
     }
 
-    private function storeFiles(StoreClientReportRequest $request, ClientReport $report): void
+    /**
+     * @return list<string> names of the attachments added
+     */
+    private function storeFiles(StoreClientReportRequest $request, ClientReport $report): array
     {
         $paths = [];
         if ($request->hasFile('document')) {
@@ -184,13 +206,17 @@ class ClientReportController extends Controller
             $report->isDirty() ? $report->save() : $report->touch();
         }
 
+        $added = [];
         foreach ($request->file('attachments', []) as $file) {
             $report->attachments()->create([
                 'original_name' => $file->getClientOriginalName(),
                 'path' => $file->store('reports/'.$report->id, 'public'),
                 'size' => $file->getSize() ?: 0,
             ]);
+            $added[] = $file->getClientOriginalName();
         }
+
+        return $added;
     }
 
     /**
@@ -199,7 +225,7 @@ class ClientReportController extends Controller
      *
      * @return array{0: ClientReport, 1: ?string}
      */
-    private function publish(PublishClientReport $publish, ClientReport $report, bool $publishing): array
+    private function publish(PublishClientReport $publish, ClientReport $report, bool $publishing, Request $request): array
     {
         $report = $report->fresh(['attachments', 'client']) ?? $report;
         if (! $publishing) {
@@ -207,7 +233,11 @@ class ClientReportController extends Controller
         }
 
         try {
-            return [$publish->handle($report), null];
+            $report = $publish->handle($report);
+            $this->history->published($report, $request->user());
+            $this->deadlines->completeFor($report, $request->user());
+
+            return [$report, null];
         } catch (HttpException $exception) {
             return [$report->fresh(['attachments', 'client']) ?? $report, $exception->getMessage() ?: 'Could not upload the report.'];
         }

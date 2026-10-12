@@ -24,7 +24,9 @@ use App\Http\Controllers\Admin\PricingCategoryController as AdminPricingCategory
 use App\Http\Controllers\Admin\PricingPackageController as AdminPricingPackageController;
 use App\Http\Controllers\Admin\PricingSubcategoryController as AdminPricingSubcategoryController;
 use App\Http\Controllers\Admin\ProfilePdfController as AdminProfilePdfController;
+use App\Http\Controllers\Admin\ReportCalendarController;
 use App\Http\Controllers\Admin\ReportGeminiController;
+use App\Http\Controllers\Admin\ReportHistoryController;
 use App\Http\Controllers\Admin\ReportTemplateController;
 use App\Http\Controllers\Admin\RoleController;
 use App\Http\Controllers\Admin\ServiceRequestController as AdminServiceRequestController;
@@ -207,6 +209,14 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::get('reports/{client_report}', [AdminClientReportController::class, 'show']);
         Route::match(['put', 'post'], 'reports/{client_report}', [AdminClientReportController::class, 'update']);
         Route::delete('reports/{client_report}', [AdminClientReportController::class, 'destroy']);
+        Route::get('report-history', [ReportHistoryController::class, 'index']);
+        Route::get('report-versions/{client_report_version}/document', [ReportHistoryController::class, 'document']);
+        Route::put('report-versions/{client_report_version}/restore', [ReportHistoryController::class, 'restore']);
+        Route::get('report-calendar', [ReportCalendarController::class, 'index']);
+        Route::post('report-deadlines', [ReportCalendarController::class, 'store']);
+        Route::put('report-deadlines/{report_deadline}', [ReportCalendarController::class, 'update']);
+        Route::delete('report-deadlines/{report_deadline}', [ReportCalendarController::class, 'destroy']);
+        Route::put('report-deadlines/{report_deadline}/occurrences/{date}', [ReportCalendarController::class, 'occurrence']);
     });
 
     Route::middleware('crud:ops.employees')->group(function () {

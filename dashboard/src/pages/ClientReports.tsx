@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useCan } from "../lib/useCan";
 import { Search } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
-import { ExternalLink, FileText, FolderOpen, Plus } from "lucide-react";
+import { ExternalLink, FileClock, FileText, FolderOpen, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, type Client, type ClientReport } from "../api";
 import { ConfirmAction } from "../components/ConfirmAction";
@@ -10,6 +10,9 @@ import { DriveFolderPicker } from "../components/DriveFolderPicker";
 import { LoadingTableRow } from "../components/LoadingTableRow";
 import { PageHeader } from "../components/PageHeader";
 import { copy, type Locale } from "../i18n";
+import { ReportHistory } from "./reports/ReportHistory";
+import { ReportTabs, useReportTab } from "./reports/ReportTabs";
+import { ReportsCalendar } from "./reports/ReportsCalendar";
 
 function when(value: string | null | undefined, locale: Locale) {
   if (!value) return "—";
@@ -27,6 +30,8 @@ export function ClientReports({ locale, t }: { locale: Locale; t: (c: { ar: stri
   const [folderOpen, setFolderOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("");
+  const [tab, setTab] = useReportTab();
+  const [historyFor, setHistoryFor] = useState<ClientReport | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -48,8 +53,13 @@ export function ClientReports({ locale, t }: { locale: Locale; t: (c: { ar: stri
     }
   }
 
+  function restored(report: ClientReport) {
+    setReports((current) => current.map((item) => (item.id === report.id ? { ...item, ...report } : item)));
+  }
+
   const name = client?.company_name || client?.name || t(copy.clientReports);
   const newReport = `/reports/clients/${clientId}/new`;
+  const calendarClient = useMemo(() => (client ? { id: client.id, name: client.name, company_name: client.company_name ?? null } : undefined), [client]);
   const filteredReports = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return reports.filter((report) => {
@@ -78,7 +88,6 @@ export function ClientReports({ locale, t }: { locale: Locale; t: (c: { ar: stri
         )}
       />
       {error ? <p className="error" role="alert">{error}</p> : null}
-      {!loading && client && !client.google_drive_folder_id ? <p className="notice">{t(copy.reportNoFolderPublish)}</p> : null}
       {folderOpen && client ? (
         <DriveFolderPicker
           client={client}
@@ -90,6 +99,30 @@ export function ClientReports({ locale, t }: { locale: Locale; t: (c: { ar: stri
           }}
         />
       ) : null}
+      <ReportTabs locale={locale} tab={tab} onTab={setTab} first={{ ar: "التقارير", en: "Reports" }} />
+      {tab === "calendar" && calendarClient ? <ReportsCalendar locale={locale} client={calendarClient} /> : null}
+      {tab === "history" ? <ReportHistory locale={locale} clientId={clientId} onRestored={restored} /> : null}
+      {historyFor ? (
+        <div className="form-dialog report-history-dialog" role="dialog" aria-modal="true" aria-labelledby="report-history-title">
+          <div className="form-dialog-backdrop" onClick={() => setHistoryFor(null)} />
+          <div className="form-dialog-panel is-lg">
+            <div className="form-dialog-head">
+              <h2 className="form-dialog-title" id="report-history-title">
+                {locale === "ar" ? "سجل التعديلات: " : "Edit history: "}{historyFor.title}
+              </h2>
+              <button type="button" className="form-dialog-close" onClick={() => setHistoryFor(null)} aria-label={t(copy.cancel)}>
+                <X aria-hidden />
+              </button>
+            </div>
+            <div className="form-dialog-body">
+              <ReportHistory locale={locale} reportId={historyFor.id} onRestored={restored} />
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {tab === "list" ? (
+      <>
+      {!loading && client && !client.google_drive_folder_id ? <p className="notice">{t(copy.reportNoFolderPublish)}</p> : null}
 
       {!loading && reports.length === 0 && !error ? (
         <div className="empty-state card">
@@ -161,6 +194,9 @@ export function ClientReports({ locale, t }: { locale: Locale; t: (c: { ar: stri
                     </td>
                     <td className="row-actions-cell">
                       <Link className="btn btn-ghost btn-sm" to={`/reports/${report.id}/edit`}>{t(copy.reportOpen)}</Link>
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setHistoryFor(report)}>
+                        <FileClock size={14} aria-hidden="true" />{locale === "ar" ? "السجل" : "History"}
+                      </button>
                       {can("ops.reports.delete") ? (<ConfirmAction
                         label={t(copy.delete)}
                         confirmLabel={t(copy.confirmDelete)}
@@ -178,6 +214,8 @@ export function ClientReports({ locale, t }: { locale: Locale; t: (c: { ar: stri
         </div>
         </>
       )}
+      </>
+      ) : null}
     </section>
   );
 }

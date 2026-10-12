@@ -41,4 +41,9 @@ class ClientReport extends Model
     {
         return $this->hasMany(ClientReportAttachment::class);
     }
+
+    public function versions(): HasMany
+    {
+        return $this->hasMany(ClientReportVersion::class);
+    }
 }

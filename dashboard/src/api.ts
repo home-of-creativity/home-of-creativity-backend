@@ -486,6 +486,69 @@ export type ClientReport = {
   updated_at?: string | null;
 };
 
+export type ReportVersionEvent = "created" | "edited" | "published" | "restored" | "attachment_added" | "attachment_removed" | "deleted";
+
+export type ReportVersion = {
+  id: number;
+  event: ReportVersionEvent;
+  /** The report title when this version was saved. */
+  title: string;
+  report_id: number | null;
+  /** The current title, while the report still exists. */
+  report_title: string | null;
+  client: { id: number; name: string; company_name: string | null } | null;
+  user: { id: number; name: string } | null;
+  /** Autosaves folded into this editing session. */
+  saves: number;
+  has_document: boolean;
+  size: number | null;
+  detail: { files?: string[]; from_version?: number; from_event?: ReportVersionEvent; from_at?: string; drive_document_url?: string } | null;
+  started_at: string | null;
+  ended_at: string | null;
+};
+
+export type ReportRepeat = "none" | "weekly" | "monthly" | "quarterly" | "yearly";
+
+export type ReportDeadlineStatus = "upcoming" | "overdue" | "done" | "skipped";
+
+/** One date of a report deadline series. */
+export type ReportDeadlineRow = {
+  key: string;
+  deadline_id: number;
+  /** The date in the series; moving it keeps this as its key. */
+  occurs_on: string;
+  date: string;
+  time: string | null;
+  all_day: boolean;
+  start: string;
+  moved: boolean;
+  title: string;
+  notes: string | null;
+  color: string | null;
+  repeat: ReportRepeat;
+  repeat_until: string | null;
+  starts_on: string;
+  due_time: string | null;
+  status: ReportDeadlineStatus;
+  done_at: string | null;
+  done_by: string | null;
+  report: { id: number; title: string } | null;
+  client: { id: number; name: string; company_name: string | null } | null;
+};
+
+export type ReportDeadlinePayload = {
+  client_id: number;
+  title: string;
+  starts_on: string;
+  due_time: string | null;
+  repeat: ReportRepeat;
+  repeat_until: string | null;
+  color: string | null;
+  notes: string | null;
+};
+
+export type ReportOccurrenceAction = "done" | "undo" | "skip" | "unskip" | "move" | "reset";
+
 export type ReportTemplateFile = {
   id: number;
   name: string;
@@ -1571,6 +1634,42 @@ export const api = {
   },
   deleteClientReport(id: number) {
     return request<Envelope<null>>(`/admin/reports/${id}`, { method: "DELETE" });
+  },
+  reportHistory(filters: { page?: number; client_id?: number; report_id?: number; event?: string; search?: string; per_page?: number } = {}) {
+    return request<Paginated<ReportVersion>>(`/admin/report-history${queryString({
+      page: filters.page,
+      client_id: filters.client_id,
+      report_id: filters.report_id,
+      event: filters.event || undefined,
+      search: filters.search || undefined,
+      per_page: filters.per_page,
+    })}`);
+  },
+  async reportVersionFile(id: number) {
+    const headers = new Headers({ Accept: "application/octet-stream" });
+    const token = getToken();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    const response = await fetch(`${API_URL}/admin/report-versions/${id}/document`, { headers });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.blob();
+  },
+  restoreReportVersion(id: number) {
+    return request<Envelope<ClientReport>>(`/admin/report-versions/${id}/restore`, { method: "PUT" });
+  },
+  reportCalendar(from: string, to: string, clientId?: number) {
+    return request<Envelope<{ deadlines: ReportDeadlineRow[]; activity: ReportVersion[] }>>(`/admin/report-calendar${queryString({ from, to, client_id: clientId })}`);
+  },
+  createReportDeadline(payload: ReportDeadlinePayload) {
+    return request<Envelope<{ id: number }>>("/admin/report-deadlines", { method: "POST", body: JSON.stringify(payload) });
+  },
+  updateReportDeadline(id: number, payload: ReportDeadlinePayload) {
+    return request<Envelope<{ id: number }>>(`/admin/report-deadlines/${id}`, { method: "PUT", body: JSON.stringify(payload) });
+  },
+  deleteReportDeadline(id: number) {
+    return request<Envelope<null>>(`/admin/report-deadlines/${id}`, { method: "DELETE" });
+  },
+  reportOccurrence(id: number, date: string, payload: { action: ReportOccurrenceAction; date?: string; time?: string | null; client_report_id?: number | null }) {
+    return request<Envelope<null>>(`/admin/report-deadlines/${id}/occurrences/${date}`, { method: "PUT", body: JSON.stringify(payload) });
   },
   reportTemplates() {
     return request<Envelope<ReportTemplateCatalog>>("/admin/report-templates");
