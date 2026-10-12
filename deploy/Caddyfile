@@ -190,7 +190,7 @@
 	}
 
 	# Old project shell still receiving Search Console impressions.
-	@removedProjectDetail path /projects/detail /projects/detail/
+	@removedProjectDetail path /projects/detail /projects/detail/ /projects/view /projects/view/
 	handle @removedProjectDetail {
 		header Cache-Control "no-cache"
 		respond "Gone" 410
@@ -232,6 +232,13 @@
 			query slug=*
 		}
 		redir @legacyArticleDetail https://hoc.agency/articles/{query.slug}/ 301
+
+		# /articles/detail with no slug is the old shell. Send it to the articles index.
+		@legacyArticleBare {
+			path /articles/detail /articles/detail/
+			not query slug=*
+		}
+		redir @legacyArticleBare https://hoc.agency/articles/ 301
 
 		@legacyArticleQuery {
 			path /articles /articles/
