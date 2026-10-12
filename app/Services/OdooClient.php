@@ -1409,6 +1409,37 @@ class OdooClient
         $this->call('sale.order', 'action_quotation_sent', ['ids' => [$id]]);
     }
 
+    /**
+     * An approved quotation becomes a sales order. A quotation already confirmed or
+     * cancelled is left as it is.
+     */
+    public function confirmSaleOrder(int $id): bool
+    {
+        if ($id <= 0 || ! $this->configured()) {
+            return false;
+        }
+        $state = (string) ($this->quotationSnapshot($id)['state'] ?? '');
+        if (! in_array($state, ['draft', 'sent'], true)) {
+            return $state === 'sale';
+        }
+        $this->call('sale.order', 'action_confirm', ['ids' => [$id]]);
+
+        return true;
+    }
+
+    /** An invoice that is posted and not yet fully paid, so a payment can go on it. */
+    public function invoiceAwaitsPayment(int $id): bool
+    {
+        if ($id <= 0 || ! $this->configured()) {
+            return false;
+        }
+        $row = $this->invoiceSnapshot($id);
+
+        return $row !== null
+            && ($row['state'] ?? '') === 'posted'
+            && in_array((string) ($row['payment_state'] ?? ''), ['not_paid', 'partial'], true);
+    }
+
     public function postInvoice(int $id): void
     {
         if ($id <= 0 || ! $this->configured()) {

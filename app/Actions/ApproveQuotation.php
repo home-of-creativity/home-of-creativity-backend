@@ -7,9 +7,11 @@ use App\Enums\RequestStatus;
 use App\Models\Quotation;
 use App\Models\QuotationDecision;
 use App\Models\ServiceRequest;
+use App\Services\OdooClient;
 use App\Services\RequestStatusTransitionService;
 use App\Support\ResolveServiceRequest;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
 class ApproveQuotation
@@ -21,6 +23,7 @@ class ApproveQuotation
         private RequestStatusTransitionService $transitions,
         private ApplyQuotationAcceptance $applyQuotationAcceptance,
         private NotifyPaymentStage $notifyPaymentStage,
+        private OdooClient $odoo,
     ) {}
 
     public function handle(ServiceRequest $request, ?Quotation $quotation = null, string $actor = 'client'): ServiceRequest
@@ -49,6 +52,7 @@ class ApproveQuotation
             return $updated->fresh(['client', 'pricingPackage']) ?? $updated;
         });
 
+        $this->confirmSaleOrder($updated);
         $updated = $this->applyQuotationAcceptance->handle($updated->fresh(['client', 'pricingPackage']) ?? $updated);
         $this->clientPaymentNotice = $this->applyQuotationAcceptance->clientNotice;
         $fresh = $updated->fresh(['client', 'pricingPackage']) ?? $updated;
@@ -63,6 +67,24 @@ class ApproveQuotation
         );
 
         return $updated->fresh(['client', 'invoices', 'pricingPackage']) ?? $updated;
+    }
+
+    /** The approved Odoo quotation becomes a sales order; a failure leaves the approval standing. */
+    private function confirmSaleOrder(ServiceRequest $request): void
+    {
+        $id = (int) $request->odoo_quotation_id;
+        if ($id <= 0) {
+            return;
+        }
+        try {
+            $this->odoo->confirmSaleOrder($id);
+        } catch (\Throwable $exception) {
+            Log::warning('Odoo quotation was not confirmed as a sales order.', [
+                'request' => $request->number,
+                'odoo_quotation_id' => $id,
+                'error' => $exception->getMessage(),
+            ]);
+        }
     }
 
     private function salesDecisionMessage(ServiceRequest $request, string $body): string

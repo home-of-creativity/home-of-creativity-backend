@@ -172,6 +172,14 @@ export const copy = {
   inactive: { ar: "متوقف", en: "Inactive" },
   actions: { ar: "إجراءات", en: "Actions" },
   cancel: { ar: "إلغاء", en: "Cancel" },
+  paperQuotationFlow: {
+    ar: "عند الإرسال يُفتح طلب بانتظار موافقة العميل. العميل الذي يكلمنا على البوت يصله العرض مع زرّي الموافقة والرفض، وبموافقته يصبح العرض أمر بيع في Odoo وتصله تعليمات الدفع ويكمل الطلب. غيره يصله بالبريد أو واتساب، وتسجّل قراره من صفحة الطلب.",
+    en: "Sending opens a request that waits for the client's answer. A client on the bot gets the quotation with approve and reject buttons; after approval the payment steps follow. Others get it by email or WhatsApp, and you record their answer on the request page.",
+  },
+  paperInvoiceFlow: {
+    ar: "ترحيل الفاتورة يضع الطلب بانتظار الدفع. العميل على البوت تصله الفاتورة وتعليمات الدفع هناك، ويرسل صورة الإيصال ليتأكد الدفع ويكمل الطلب. إن صدرت من عرض سعر مرسل فهي تكمل طلبه نفسه، ويصبح العرض أمر بيع في Odoo.",
+    en: "Posting the invoice puts the request in payment. A client on the bot gets the invoice and payment steps there and sends the receipt to continue. From a sent quotation, it continues that same request and the quotation becomes a sales order in Odoo.",
+  },
   view: { ar: "عرض", en: "View" },
   close: { ar: "إغلاق", en: "Close" },
   openStaffBot: { ar: "فتح بوت الموظفين", en: "Open staff bot" },

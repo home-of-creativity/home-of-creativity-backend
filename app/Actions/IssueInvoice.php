@@ -142,12 +142,16 @@ class IssueInvoice
                 ]);
             }
 
-            $odooInvoiceId = $this->odoo->createInvoice(
-                (string) $partnerId,
-                $request->number,
-                $request->odoo_quotation_id,
-                $amount > 0 ? $amount : null,
-            );
+            // An invoice posted from the dashboard and still unpaid takes this payment,
+            // so the client is not billed twice.
+            $odooInvoiceId = filled($request->odoo_invoice_id) && $this->odoo->invoiceAwaitsPayment((int) $request->odoo_invoice_id)
+                ? (string) $request->odoo_invoice_id
+                : $this->odoo->createInvoice(
+                    (string) $partnerId,
+                    $request->number,
+                    $request->odoo_quotation_id,
+                    $amount > 0 ? $amount : null,
+                );
             $request->forceFill(['odoo_invoice_id' => $odooInvoiceId])->save();
 
             try {

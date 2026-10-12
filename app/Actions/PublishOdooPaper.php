@@ -16,6 +16,9 @@ class PublishOdooPaper
 
     public bool $delivered = false;
 
+    /** The stored PDF of the last invoice, for the bot to send. */
+    public string $pdfPath = '';
+
     /**
      * @param  array<string, mixed>  $created
      * @return array<string, mixed>
@@ -28,11 +31,7 @@ class PublishOdooPaper
         ?string $validity,
     ): array {
         $this->delivered = false;
-        $id = (int) ($created['id'] ?? 0);
-        $this->odoo->writeSaleDates($id, $dateOrder, $validity);
-        $this->odoo->markQuotationSent($id);
-        $snapshot = $this->odoo->quotationSnapshot($id) ?? $created;
-        $relative = $this->storePdf('sale.order', $id, "quotations/paper-{$id}.pdf");
+        ['snapshot' => $snapshot, 'pdf_path' => $relative] = $this->prepareQuotation($created, $dateOrder, $validity);
         $name = (string) ($snapshot['name'] ?? '');
         $absolute = $relative !== '' ? Storage::disk('local')->path($relative) : null;
         $this->delivered = $this->deliver->send(
@@ -47,6 +46,25 @@ class PublishOdooPaper
     }
 
     /**
+     * Marks the Odoo quotation sent and stores its PDF, without delivering it. The bot
+     * quotation flow sends it with the approve and reject buttons.
+     *
+     * @param  array<string, mixed>  $created
+     * @return array{snapshot: array<string, mixed>, pdf_path: string}
+     */
+    public function prepareQuotation(array $created, ?string $dateOrder, ?string $validity): array
+    {
+        $id = (int) ($created['id'] ?? 0);
+        $this->odoo->writeSaleDates($id, $dateOrder, $validity);
+        $this->odoo->markQuotationSent($id);
+
+        return [
+            'snapshot' => $this->odoo->quotationSnapshot($id) ?? $created,
+            'pdf_path' => $this->storePdf('sale.order', $id, "quotations/paper-{$id}.pdf"),
+        ];
+    }
+
+    /**
      * @param  array<string, mixed>  $created
      * @return array<string, mixed>
      */
@@ -58,8 +76,10 @@ class PublishOdooPaper
         bool $post,
         ?string $invoiceDate,
         ?string $dueDate,
+        bool $deliver = true,
     ): array {
         $this->delivered = false;
+        $this->pdfPath = '';
         $id = (int) ($created['id'] ?? 0);
         $this->odoo->writeInvoiceDates($id, $invoiceDate, $dueDate);
         if ($post) {
@@ -68,6 +88,10 @@ class PublishOdooPaper
         $snapshot = $this->odoo->invoiceSnapshot($id) ?? $created;
         $request->forceFill(['odoo_invoice_id' => (string) $id])->save();
         $relative = $this->storePdf('account.move', $id, "invoices/paper-{$id}.pdf");
+        $this->pdfPath = $relative;
+        if (! $deliver) {
+            return $snapshot;
+        }
         $name = (string) ($snapshot['name'] ?? '');
         $absolute = $relative !== '' ? Storage::disk('local')->path($relative) : null;
         $this->delivered = $this->deliver->send(

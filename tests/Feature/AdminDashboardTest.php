@@ -1004,9 +1004,13 @@ class AdminDashboardTest extends TestCase
         ])
             ->assertCreated()
             ->assertJsonPath('data.state', 'sent')
-            ->assertJsonPath('message', 'تم إرسال عرض السعر.');
+            ->assertJsonPath('request.status', RequestStatus::QuotationSent->value);
 
-        $this->assertSame(0, ServiceRequest::query()->count());
+        // A sent quotation opens a request that waits for the client's answer.
+        $opened = ServiceRequest::query()->sole();
+        $this->assertSame(RequestStatus::QuotationSent, $opened->status);
+        $this->assertSame('880', (string) $opened->odoo_quotation_id);
+        $this->assertSame(1, $opened->quotations()->count());
         Mail::assertSent(ClientDocumentMail::class, function (ClientDocumentMail $mail): bool {
             return $mail->mailer === 'reports'
                 && $mail->hasTo('client@example.com')
@@ -1084,7 +1088,8 @@ class AdminDashboardTest extends TestCase
         $opened = ServiceRequest::query()->first();
         $this->assertNotNull($opened);
         $this->assertSame($client->id, $opened->client_id);
-        $this->assertSame(RequestStatus::Submitted, $opened->status);
+        // The invoice is the agreement; the request waits for payment.
+        $this->assertSame(RequestStatus::AwaitingPayment, $opened->status);
         $this->assertSame('990', (string) $opened->odoo_invoice_id);
         $this->assertSame('تصميم', $opened->title);
         $this->assertTrue(
@@ -1161,6 +1166,109 @@ class AdminDashboardTest extends TestCase
             ->assertJsonPath('data.id', 990)
             ->assertJsonPath('data.invoice_origin', 'S00880')
             ->assertJsonPath('data.state', 'draft');
+    }
+
+    public function test_a_dashboard_quotation_follows_the_bot_flow_and_its_invoice_continues_the_request(): void
+    {
+        Http::preventStrayRequests();
+        config([
+            'services.telegram.bot_token' => 'test-token',
+            'services.odoo.enabled' => true,
+            'services.odoo.url' => 'https://odoo.test',
+            'services.odoo.db' => 'hoc',
+            'services.odoo.username' => 'admin',
+            'services.odoo.api_key' => 'secret-key',
+            'services.odoo.use_json2' => false,
+        ]);
+        Http::fake([
+            'https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 1, 'document' => ['file_id' => 'f1']]]),
+            'https://odoo.test/jsonrpc' => function (Request $request) {
+                $params = $request->data()['params'] ?? [];
+                if (($params['service'] ?? '') === 'common') {
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => 2], 200);
+                }
+                $args = $params['args'] ?? [];
+                if (($args[3] ?? null) === 'sale.order' && ($args[4] ?? null) === 'create') {
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => 880], 200);
+                }
+                if (($args[3] ?? null) === 'sale.order' && ($args[4] ?? null) === 'search_read') {
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => [[
+                        'id' => 880, 'name' => 'S00880', 'partner_id' => [44, 'Damastech'], 'amount_total' => 300,
+                        'currency_id' => [1, 'USD'], 'state' => 'sent', 'client_order_ref' => 'HOC-44',
+                    ]]], 200);
+                }
+                if (($args[3] ?? null) === 'account.move' && ($args[4] ?? null) === 'create') {
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => 990], 200);
+                }
+                if (($args[3] ?? null) === 'account.move' && ($args[4] ?? null) === 'search_read') {
+                    return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => [[
+                        'id' => 990, 'name' => 'INV/2026/0090', 'partner_id' => [44, 'Damastech'], 'amount_total' => 300,
+                        'amount_residual' => 300, 'currency_id' => [1, 'USD'], 'state' => 'posted', 'payment_state' => 'not_paid',
+                        'invoice_origin' => 'S00880', 'ref' => 'HOC-44', 'invoice_date' => '2026-10-08',
+                    ]]], 200);
+                }
+
+                return Http::response(['jsonrpc' => '2.0', 'id' => 1, 'result' => []], 200);
+            },
+        ]);
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+        $client = Client::factory()->create([
+            'company_name' => 'Damastech',
+            'email' => 'client@example.com',
+            'odoo_partner_id' => '44',
+            'telegram_user_id' => '777001',
+        ]);
+
+        $this->postJson('/api/admin/odoo/quotations', [
+            'client_id' => $client->id,
+            'action' => 'send',
+            'deliver' => 'email',
+            'lines' => [
+                ['title' => 'هوية بصرية', 'display_type' => 'line_section'],
+                ['title' => 'شعار', 'amount' => 200, 'units' => 1],
+                ['title' => 'بطاقات', 'amount' => 50, 'units' => 2],
+            ],
+        ])->assertCreated()->assertJsonPath('request.status', RequestStatus::QuotationSent->value);
+
+        $request = ServiceRequest::query()->sole();
+        $this->assertSame(RequestStatus::QuotationSent, $request->status);
+        $this->assertSame(300.0, (float) $request->quotation_amount);
+        // The client gets the bot quotation with the approve and reject buttons.
+        Http::assertSent(fn (Request $sent): bool => str_contains($sent->url(), 'api.telegram.org')
+            && str_contains(json_encode($sent->data(), JSON_UNESCAPED_UNICODE), 'approve:'));
+
+        // The invoice from that quotation continues the same request into payment.
+        $this->postJson('/api/admin/odoo/invoices', [
+            'client_id' => $client->id,
+            'quotation_id' => 880,
+            'action' => 'post',
+            'deliver' => 'email',
+        ])->assertCreated();
+
+        $this->assertSame(1, ServiceRequest::query()->count());
+        $request->refresh();
+        $this->assertSame(RequestStatus::AwaitingPayment, $request->status);
+        $this->assertSame('990', (string) $request->odoo_invoice_id);
+        $this->assertSame(1, $request->invoices()->where('odoo_invoice_id', '990')->count());
+
+        $odooCalls = fn (string $model, string $method): int => collect(Http::recorded())
+            ->filter(fn (array $pair): bool => str_contains($pair[0]->url(), 'odoo.test')
+                && (($pair[0]->data()['params']['args'][3] ?? null) === $model)
+                && (($pair[0]->data()['params']['args'][4] ?? null) === $method))
+            ->count();
+        // Approval turned the quotation into a sales order.
+        $this->assertSame(1, $odooCalls('sale.order', 'action_confirm'));
+        // The client got the invoice on the bot with the receipt step.
+        Http::assertSent(fn (Request $sent): bool => str_contains($sent->url(), 'api.telegram.org')
+            && str_contains(json_encode($sent->data(), JSON_UNESCAPED_UNICODE), 'ابعت صورة الإيصال'));
+
+        // Confirming the payment pays that invoice instead of billing again.
+        $this->postJson("/api/admin/requests/{$request->id}/confirm-payment", ['payment_method' => 'cash', 'amount' => 300])->assertOk();
+        $this->assertSame(1, $odooCalls('account.move', 'create'));
+        $this->assertSame(RequestStatus::PaymentConfirmed, $request->fresh()->status);
     }
 
     public function test_admin_refuses_an_odoo_quotation_when_the_client_has_no_partner(): void

@@ -48,7 +48,8 @@ export function OdooPaperForm({
   quotation?: OdooQuotation | null;
   t: (c: { ar: string; en: string }) => string;
   onCancel: () => void;
-  onCreated: (message: string) => void;
+  /** `requestId` is the request a sent quotation opened. */
+  onCreated: (message: string, requestId?: number) => void;
 }) {
   const clientListId = useId();
   const quoteListId = useId();
@@ -305,7 +306,7 @@ export function OdooPaperForm({
           validity_date: validityDate || undefined,
           lines: filled,
         });
-        onCreated(res.message || t(copy.quotationCreated));
+        onCreated(res.message || t(copy.quotationCreated), res.request?.id);
         return;
       }
       const res = await api.createOdooInvoice({
@@ -482,6 +483,7 @@ export function OdooPaperForm({
             {t(copy.paperDeliverWhatsApp)}
             {selected?.phone ? <span dir="ltr">{selected.phone}</span> : null}
           </label>
+          <p className="muted odoo-flow-note">{kind === "quotation" ? t(copy.paperQuotationFlow) : t(copy.paperInvoiceFlow)}</p>
         </fieldset>
 
         {showLines ? (

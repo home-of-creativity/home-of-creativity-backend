@@ -1842,7 +1842,7 @@ export const api = {
     validity_date?: string;
     lines: { title: string; amount?: number; units?: number; notes?: string; discount?: number; product_id?: number; display_type?: "line_section" | "line_note" }[];
   }) {
-    return request<{ data: OdooQuotation; message?: string }>("/admin/odoo/quotations", {
+    return request<{ data: OdooQuotation; request?: { id: number; number: string; status: string } | null; message?: string }>("/admin/odoo/quotations", {
       method: "POST",
       body: JSON.stringify(payload),
     });

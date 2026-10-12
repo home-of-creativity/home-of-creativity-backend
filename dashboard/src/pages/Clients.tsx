@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Search } from "lucide-react";
 import { toast } from "sonner";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, type Client, type OdooInvoice, type OdooQuotation, type PageMeta } from "../api";
 import { ConfirmAction } from "../components/ConfirmAction";
 import { useCan } from "../lib/useCan";
@@ -72,6 +72,7 @@ function tabLabel(tab: Tab, t: (c: { ar: string; en: string }) => string) {
 
 export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
   const can = useCan();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = readTab(searchParams.get("tab"));
   const partnerFilter = searchParams.get("partner") ?? "";
@@ -562,11 +563,13 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
             partnerId={partnerFilter || undefined}
             t={t}
             onCancel={() => setPaper(null)}
-            onCreated={(message) => {
+            onCreated={(message, requestId) => {
               setNotice(message);
               toast.success(message);
               setPaper(null);
               setRefresh((value) => value + 1);
+              // A sent quotation opened a request; follow it from its page.
+              if (requestId) navigate(`/requests/${requestId}`);
             }}
           />
         ) : null}

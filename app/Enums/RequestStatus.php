@@ -19,7 +19,8 @@ enum RequestStatus: string
     public function allowedTransitions(): array
     {
         return match ($this) {
-            self::Submitted => [self::QuotationSent, self::Cancelled],
+            // A dashboard invoice skips the quotation: the request waits for payment.
+            self::Submitted => [self::QuotationSent, self::AwaitingPayment, self::Cancelled],
             self::QuotationSent => [self::QuotationRejected, self::AwaitingPayment, self::Cancelled],
             self::QuotationRejected => [self::QuotationSent, self::Cancelled],
             self::AwaitingPayment => [self::PaymentConfirmed, self::Cancelled],

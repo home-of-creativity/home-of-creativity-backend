@@ -97,7 +97,7 @@ class SendQuotation
 
             try {
                 $caption = $this->quotationCaption($request, $amount, $notes, $version);
-                if ($channel === 'email' || $channel === 'phone') {
+                if (in_array($channel, ['email', 'phone', 'whatsapp', 'both'], true)) {
                     $absolute = $pdfPath !== '' ? Storage::disk('local')->path($pdfPath) : null;
                     $this->deliveredToClient = $request->client !== null && app(DeliverClientDocument::class)->send(
                         $request->client,

@@ -10062,3 +10062,11 @@ fieldset.form-page-fieldset {
   align-items: center;
   gap: 0.4rem;
 }
+/* Odoo paper form: what sending a quotation or posting an invoice does next */
+.odoo-deliver .odoo-flow-note {
+  flex-basis: 100%;
+  width: 100%;
+  margin: 0.4rem 0 0;
+  font-size: 0.85rem;
+  line-height: 1.6;
+}

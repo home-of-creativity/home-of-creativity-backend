@@ -20,21 +20,24 @@ class OpenRequestFromStaffInvoice
      * @param  array<string, mixed>  $created
      * @param  list<array{title?: string|null, amount?: float|int|string|null, units?: float|int|string|null, discount?: float|int|string|null, display_type?: string|null}>  $lines
      */
-    public function handle(Client $client, array $created, array $lines, ?string $reference): ServiceRequest
+    public function handle(Client $client, array $created, array $lines, ?string $reference, string $origin = 'invoice'): ServiceRequest
     {
-        $title = $this->title($created, $lines, $reference);
+        $quotation = $origin === 'quotation';
+        $title = $this->title($created, $lines, $reference, $quotation ? 'عرض سعر' : 'فاتورة');
         $amount = $this->amount($created, $lines);
-        $invoiceId = (int) ($created['id'] ?? 0);
+        $odooId = (int) ($created['id'] ?? 0);
+        $label = $quotation ? 'عرض سعر' : 'فاتورة';
 
         $request = $client->requests()->create([
             'number' => $this->numbers->handle(),
             'title' => $title,
             'description' => filled($reference)
-                ? 'فاتورة من لوحة التحكم: '.$reference
-                : 'فاتورة من لوحة التحكم.',
+                ? "{$label} من لوحة التحكم: {$reference}"
+                : "{$label} من لوحة التحكم.",
             'status' => RequestStatus::Submitted,
             'source' => $client->requestSource(),
-            'odoo_invoice_id' => $invoiceId > 0 ? (string) $invoiceId : null,
+            'odoo_invoice_id' => ! $quotation && $odooId > 0 ? (string) $odooId : null,
+            'odoo_quotation_id' => $quotation && $odooId > 0 ? (string) $odooId : null,
             'amount_total' => $amount,
             'amount_remaining' => $amount,
         ]);
@@ -44,7 +47,7 @@ class OpenRequestFromStaffInvoice
             'from_status' => null,
             'to_status' => RequestStatus::Submitted->value,
             'actor' => 'admin',
-            'note' => 'Opened from a staff invoice.',
+            'note' => $quotation ? 'Opened from a staff quotation.' : 'Opened from a staff invoice.',
         ]);
 
         $request = $this->salesTask->handle($request->fresh(['client']) ?? $request);
@@ -56,7 +59,7 @@ class OpenRequestFromStaffInvoice
      * @param  array<string, mixed>  $created
      * @param  list<array{title?: string|null, display_type?: string|null}>  $lines
      */
-    private function title(array $created, array $lines, ?string $reference): string
+    private function title(array $created, array $lines, ?string $reference, string $fallback = 'فاتورة'): string
     {
         $titles = collect($lines)
             ->filter(fn (array $line): bool => ! in_array($line['display_type'] ?? null, ['line_section', 'line_note'], true))
@@ -67,7 +70,7 @@ class OpenRequestFromStaffInvoice
 
         $title = $titles !== ''
             ? $titles
-            : (is_string($created['name'] ?? null) && $created['name'] !== '' ? (string) $created['name'] : (filled($reference) ? $reference : 'فاتورة'));
+            : (is_string($created['name'] ?? null) && $created['name'] !== '' ? (string) $created['name'] : (filled($reference) ? $reference : $fallback));
 
         return Str::limit($title, 180, '');
     }
