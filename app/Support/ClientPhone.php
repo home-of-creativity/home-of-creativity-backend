@@ -118,6 +118,23 @@ class ClientPhone
         return ['status' => 'country', 'national' => $national];
     }
 
+    /**
+     * International digits of a stored phone, as WhatsApp sends and receives them. A local
+     * number without a country code is Syrian. Empty when the phone cannot be read.
+     */
+    public static function whatsappDigits(?string $stored): string
+    {
+        $read = self::interpret($stored);
+        if (($read['status'] ?? '') === 'ready') {
+            return preg_replace('/\D+/', '', (string) $read['phone']) ?? '';
+        }
+        if (($read['status'] ?? '') === 'country') {
+            return '963'.$read['national'];
+        }
+
+        return '';
+    }
+
     public static function fromCallerDigits(?string $digits): ?string
     {
         $digits = preg_replace('/\D+/', '', (string) $digits) ?? '';

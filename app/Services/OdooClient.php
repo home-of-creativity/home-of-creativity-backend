@@ -1680,6 +1680,53 @@ class OdooClient
         return $this->downloadPortalReportPdf('account.move', (int) $invoiceId);
     }
 
+    /**
+     * The customer portal link of a quotation or invoice, with its access token, where
+     * the client can read, accept, or decline it in Odoo.
+     */
+    public function portalUrl(string $model, int $recordId): ?string
+    {
+        if (! $this->configured() || $recordId <= 0) {
+            return null;
+        }
+
+        try {
+            $path = $this->call($model, 'get_portal_url', ['ids' => [$recordId], 'context' => []]);
+        } catch (Throwable $exception) {
+            Log::warning('Odoo portal URL failed.', ['model' => $model, 'record_id' => $recordId, 'error' => $exception->getMessage()]);
+
+            return null;
+        }
+        if (! is_string($path) || $path === '') {
+            return null;
+        }
+
+        return rtrim((string) config('services.odoo.url'), '/').(str_starts_with($path, '/') ? $path : '/'.$path);
+    }
+
+    /**
+     * Current states of several sales orders, by id.
+     *
+     * @param  list<int>  $ids
+     * @return array<int, string>
+     */
+    public function saleOrderStates(array $ids): array
+    {
+        $ids = array_values(array_filter(array_map('intval', $ids), fn (int $id): bool => $id > 0));
+        if ($ids === [] || ! $this->configured()) {
+            return [];
+        }
+
+        $states = [];
+        foreach ($this->searchRead('sale.order', [['id', 'in', $ids]], ['id', 'state'], count($ids)) as $row) {
+            if (is_array($row) && isset($row['id'])) {
+                $states[(int) $row['id']] = (string) ($row['state'] ?? '');
+            }
+        }
+
+        return $states;
+    }
+
     public function downloadPortalReportPdf(string $model, int $recordId): ?string
     {
         if (! $this->configured() || $recordId <= 0) {

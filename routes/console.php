@@ -21,6 +21,7 @@ Schedule::command('integration:process-outbox')->everyMinute()->withoutOverlappi
 Schedule::command('odoo:reconcile', ['--limit' => 500])->everyMinute()->withoutOverlapping();
 // Finance follows Odoo: invoices changed in Odoo every minute, a full walk hourly for deletions.
 Schedule::command('odoo:sync-invoices')->everyMinute()->withoutOverlapping();
+Schedule::command('odoo:sync-quotations')->everyMinute()->withoutOverlapping();
 Schedule::command('odoo:sync-invoices', ['--full'])->hourly()->withoutOverlapping();
 Schedule::command('ops:process-reminders')->everyMinute()->timezone('Asia/Damascus')->withoutOverlapping();
 Schedule::command('ops:process-bot-sla')->everyMinute()->timezone('Asia/Damascus')->withoutOverlapping();

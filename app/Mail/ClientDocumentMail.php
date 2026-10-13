@@ -28,7 +28,10 @@ class ClientDocumentMail extends Mailable
 
     public function content(): Content
     {
-        return new Content(htmlString: nl2br(e($this->body)));
+        // Links stay clickable, such as the Odoo portal link of a quotation.
+        $html = preg_replace('#https?://[^\s<]+#', '<a href="$0">$0</a>', e($this->body)) ?? e($this->body);
+
+        return new Content(htmlString: nl2br($html));
     }
 
     /**

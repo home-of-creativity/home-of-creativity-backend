@@ -4,6 +4,7 @@ namespace App\Actions;
 
 use App\Enums\ClickUpSyncEvent;
 use App\Enums\RequestStatus;
+use App\Models\Client;
 use App\Models\Employee;
 use App\Models\Quotation;
 use App\Models\ServiceRequest;
@@ -102,10 +103,14 @@ class SendQuotation
                     $this->deliveredToClient = $request->client !== null && app(DeliverClientDocument::class)->send(
                         $request->client,
                         $channel,
-                        $caption,
+                        $caption.$this->portalLine($request),
                         $absolute,
                         $request->number.'.pdf',
                     );
+                    if ($this->deliveredToClient && $channel !== 'email') {
+                        // The WhatsApp chat now waits for 1 (approve) or 2 (reject).
+                        app(HandleWhatsAppInbound::class)->awaitQuotationDecision($request->fresh(['client']) ?? $request);
+                    }
 
                     return $quotation->fresh() ?? $quotation;
                 }
@@ -121,6 +126,10 @@ class SendQuotation
                     if ($fileId) {
                         $quotation->forceFill(['telegram_file_id' => $fileId])->save();
                         $this->deliveredToClient = true;
+                        if (Client::isWhatsAppKey($chatId)) {
+                            // The buttons came with the file; the chat still takes a typed 1 or 2.
+                            app(HandleWhatsAppInbound::class)->awaitQuotationDecision($request->fresh(['client']) ?? $request, false);
+                        }
                     }
                 } elseif ($chatId && $this->telegram->canReachClient($chatId)) {
                     $this->telegram->sendInlineKeyboard(
@@ -303,6 +312,17 @@ class SendQuotation
 
             return '';
         }
+    }
+
+    /**
+     * The Odoo portal link, so the client can open the quotation and accept or decline it
+     * there; `odoo:sync-quotations` brings that answer back to the request.
+     */
+    private function portalLine(ServiceRequest $request): string
+    {
+        $url = $this->odoo->portalUrl('sale.order', (int) ($request->odoo_quotation_id ?? 0));
+
+        return $url === null ? '' : "\n\nلمراجعة العرض والموافقة عليه أو رفضه أونلاين:\n{$url}";
     }
 
     /**

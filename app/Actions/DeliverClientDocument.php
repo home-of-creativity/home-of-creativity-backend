@@ -5,6 +5,7 @@ namespace App\Actions;
 use App\Mail\ClientDocumentMail;
 use App\Models\Client;
 use App\Services\WhatsAppWebClient;
+use App\Support\ClientPhone;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Throwable;
@@ -42,14 +43,16 @@ class DeliverClientDocument
                 return true;
             }
 
-            if (! filled($client->phone) || ! $this->whatsapp->configured()) {
+            // WhatsApp needs the international number; «0944…» alone does not arrive.
+            $phone = ClientPhone::whatsappDigits((string) $client->phone);
+            if ($phone === '' || ! $this->whatsapp->configured()) {
                 return false;
             }
 
             if (is_string($absolutePath) && is_file($absolutePath)) {
-                $this->whatsapp->sendDocument((string) $client->phone, $absolutePath, $text, $filename ?: 'document.pdf');
+                $this->whatsapp->sendDocument($phone, $absolutePath, $text, $filename ?: 'document.pdf');
             } else {
-                $this->whatsapp->sendText((string) $client->phone, $text);
+                $this->whatsapp->sendText($phone, $text);
             }
 
             return true;

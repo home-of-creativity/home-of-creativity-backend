@@ -129,6 +129,19 @@ class HandleWhatsAppInbound
      *
      * @param  array<string, mixed>  $message
      */
+    /**
+     * A quotation the team sent waits for 1 or 2 in this chat, then the rejection reason;
+     * those answers pass at any hour.
+     */
+    private function quoteAnytime(string $phone): bool
+    {
+        $session = $this->session($phone);
+        $step = (string) ($session['step'] ?? '');
+
+        return ($step === 'quote' && filled($session['quote_ref'] ?? null))
+            || (in_array($step, ['reject_pick', 'reject_reason'], true) && filled($session['reject_ref'] ?? null));
+    }
+
     private function complaintAnytime(string $phone, array $message): bool
     {
         $complaints = app(HandleClientComplaint::class);
@@ -215,7 +228,7 @@ class HandleWhatsAppInbound
         }
 
         $calendar = app(WorkCalendar::class);
-        if (! $calendar->isWhatsAppOpen() && ! $this->complaintAnytime($phone, $message)) {
+        if (! $calendar->isWhatsAppOpen() && ! $this->complaintAnytime($phone, $message) && ! $this->quoteAnytime($phone)) {
             $this->whatsApp->markRead($wamid);
             $queued = trim($this->messageText($message));
             if ($queued !== '' && $this->photoRuleIntent($queued, true) !== null) {
@@ -530,7 +543,7 @@ class HandleWhatsAppInbound
 
     private function ensureClient(string $chatId, string $phone, string $profileName): Client
     {
-        $existing = Client::findForTelegram($chatId);
+        $existing = Client::findForTelegram($chatId) ?? $this->adoptByPhone($chatId, $phone);
         if ($existing !== null) {
             return $this->resolveTelegramClient->handle($chatId);
         }
@@ -542,6 +555,64 @@ class HandleWhatsAppInbound
             'phone' => '+'.$phone,
             'locale' => 'ar',
         ]);
+    }
+
+    /**
+     * A client the team added (dashboard or Odoo) writes from the phone on their record:
+     * this chat becomes theirs, so their quotations and requests answer here instead of a
+     * second, empty client. A client already on Telegram keeps that chat.
+     */
+    private function adoptByPhone(string $chatId, string $phone): ?Client
+    {
+        $tail = substr($phone, -9);
+        if (strlen($tail) < 9) {
+            return null;
+        }
+
+        $match = Client::query()
+            ->where(fn ($query) => $query->whereNull('telegram_user_id')->orWhere('telegram_user_id', ''))
+            ->whereNotNull('phone')
+            ->where('phone', 'like', '%'.substr($tail, -3))
+            ->withCount(['requests as open_quotes' => fn ($query) => $query->where('status', RequestStatus::QuotationSent)])
+            ->orderByDesc('open_quotes')
+            ->latest('updated_at')
+            ->get()
+            ->first(fn (Client $client): bool => substr(Client::normalizeWhatsAppPhone((string) $client->phone), -9) === $tail);
+        if (! $match instanceof Client) {
+            return null;
+        }
+
+        $match->forceFill(['telegram_user_id' => $chatId])->save();
+
+        return $match;
+    }
+
+    /**
+     * A quotation sent from the dashboard over WhatsApp waits for the client's answer in
+     * this chat, as a catalog quotation does: 1 approves, 2 rejects. `$prompt` false when
+     * the quotation already carried the buttons.
+     */
+    public function awaitQuotationDecision(ServiceRequest $request, bool $prompt = true): void
+    {
+        $chatId = (string) $request->client?->telegram_user_id;
+        $phone = Client::isWhatsAppKey($chatId)
+            ? Client::whatsappPhoneFromKey($chatId)
+            : ClientPhone::whatsappDigits((string) $request->client?->phone);
+        if ($phone === '') {
+            return;
+        }
+
+        $this->replyLang = $request->client?->locale === 'en' ? 'en' : 'ar';
+        $session = $this->session($phone);
+        $this->resetCompose($session);
+        $session['step'] = 'quote';
+        $session['quote_ref'] = ResolveServiceRequest::displayNumber($request);
+        if (! $prompt) {
+            $this->putSession($phone, $session);
+
+            return;
+        }
+        $this->showQuoteDecision(Client::whatsappKey($phone), $phone, $session);
     }
 
     /**
