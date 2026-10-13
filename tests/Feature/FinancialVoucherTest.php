@@ -166,6 +166,59 @@ class FinancialVoucherTest extends TestCase
         ])->assertUnprocessable()->assertJsonValidationErrors('background');
     }
 
+    public function test_a_voucher_takes_its_own_title_signature_words_and_negative_amounts(): void
+    {
+        Sanctum::actingAs(User::factory()->admin()->create());
+
+        $saved = $this->postJson('/api/admin/vouchers', [
+            'kind' => 'payment',
+            'title' => 'سند تسوية حساب',
+            'party_name' => 'مورّد',
+            'amount' => -150.5,
+            'currency' => 'USD',
+            'issued_on' => '2026-10-13',
+            'signer_title' => 'المحاسب',
+            'counter_signer_title' => 'HOC',
+        ])->assertCreated()
+            ->assertJsonPath('data.title', 'سند تسوية حساب')
+            ->assertJsonPath('data.signer_title', 'المحاسب')
+            ->assertJsonPath('data.counter_signer_title', 'HOC')
+            ->json('data');
+        $this->assertEquals(-150.5, $saved['amount']);
+        $this->assertSame('سند تسوية حساب', $this->getJson('/api/admin/vouchers')->json('data.0.title'));
+
+        // A deduction line counts in the delivery total; zero is still refused.
+        $delivery = $this->postJson('/api/admin/vouchers', [
+            'kind' => 'delivery',
+            'party_name' => 'موظف',
+            'currency' => 'USD',
+            'issued_on' => '2026-10-13',
+            'lines' => [['memo' => 'راتب', 'debit' => 100], ['memo' => 'خصم سلفة', 'debit' => -30]],
+        ])->assertCreated()->json('data');
+        $this->assertEquals(70, $delivery['amount']);
+        $this->assertCount(2, $delivery['lines']);
+
+        $this->postJson('/api/admin/vouchers', [
+            'kind' => 'receipt',
+            'party_name' => 'عميل',
+            'amount' => 0,
+            'currency' => 'USD',
+            'issued_on' => '2026-10-13',
+        ])->assertUnprocessable()->assertJsonValidationErrors('amount');
+
+        $this->postJson('/api/admin/voucher-templates', [
+            'name' => 'تسوية',
+            'kind' => 'payment',
+            'title' => 'سند تسوية حساب',
+            'currency' => 'USD',
+            'amount' => -20,
+            'counter_signer_title' => 'HOC',
+        ])->assertCreated()
+            ->assertJsonPath('data.data.title', 'سند تسوية حساب')
+            ->assertJsonPath('data.data.counter_signer_title', 'HOC')
+            ->assertJsonPath('data.data.amount', -20);
+    }
+
     public function test_a_template_keeps_the_voucher_data(): void
     {
         Sanctum::actingAs(User::factory()->admin()->create());

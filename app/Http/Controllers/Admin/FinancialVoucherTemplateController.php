@@ -35,18 +35,21 @@ class FinancialVoucherTemplateController extends Controller
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:120'],
             'kind' => ['required', 'string', Rule::in(FinancialVoucher::KINDS)],
+            'title' => ['nullable', 'string', 'max:120'],
             'party_name' => ['nullable', 'string', 'max:160'],
-            'amount' => ['nullable', 'numeric', 'min:0', 'max:100000000'],
+            'amount' => ['nullable', 'numeric', 'min:-100000000', 'max:100000000'],
             'currency' => ['required', 'string', Rule::in(FinancialVoucher::CURRENCIES)],
             'amount_words' => ['nullable', 'string', 'max:240'],
             'purpose' => ['nullable', 'string', 'max:2000'],
             'reference' => ['nullable', 'string', 'max:120'],
             'lines' => ['nullable', 'array', 'max:12'],
             'lines.*.memo' => ['nullable', 'string', 'max:180'],
-            'lines.*.debit' => ['nullable', 'numeric', 'min:0', 'max:100000000'],
-            'lines.*.credit' => ['nullable', 'numeric', 'min:0', 'max:100000000'],
+            'lines.*.debit' => ['nullable', 'numeric', 'min:-100000000', 'max:100000000'],
+            'lines.*.credit' => ['nullable', 'numeric', 'min:-100000000', 'max:100000000'],
             'signer_name' => ['nullable', 'string', 'max:120'],
+            'signer_title' => ['nullable', 'string', 'max:60'],
             'counter_signer_name' => ['nullable', 'string', 'max:120'],
+            'counter_signer_title' => ['nullable', 'string', 'max:60'],
             'background' => ['nullable', 'string', 'max:900000'],
         ]);
 
@@ -56,19 +59,20 @@ class FinancialVoucherTemplateController extends Controller
                 'debit' => round((float) ($line['debit'] ?? 0), 2),
                 'credit' => round((float) ($line['credit'] ?? 0), 2),
             ])
-            ->filter(fn (array $line): bool => $line['memo'] !== '' || $line['debit'] > 0 || $line['credit'] > 0)
+            ->filter(fn (array $line): bool => $line['memo'] !== '' || $line['debit'] != 0 || $line['credit'] != 0)
             ->values()
             ->all();
 
         $amount = round((float) ($validated['amount'] ?? 0), 2);
         if ($validated['kind'] === 'delivery') {
-            $sum = round(array_sum(array_column($lines, 'debit')), 2);
-            if ($sum > 0) {
-                $amount = $sum;
+            $priced = array_filter($lines, fn (array $line): bool => $line['debit'] != 0);
+            if ($priced !== []) {
+                $amount = round(array_sum(array_column($priced, 'debit')), 2);
             }
         }
 
         $data = [
+            'title' => $this->blank($validated['title'] ?? null),
             'party_name' => trim((string) ($validated['party_name'] ?? '')),
             'amount' => $amount,
             'currency' => $validated['currency'],
@@ -77,7 +81,9 @@ class FinancialVoucherTemplateController extends Controller
             'reference' => $this->blank($validated['reference'] ?? null),
             'lines' => $lines,
             'signer_name' => $this->blank($validated['signer_name'] ?? null),
+            'signer_title' => $this->blank($validated['signer_title'] ?? null),
             'counter_signer_name' => $this->blank($validated['counter_signer_name'] ?? null),
+            'counter_signer_title' => $this->blank($validated['counter_signer_title'] ?? null),
             'background' => $this->image($validated['background'] ?? null),
         ];
 

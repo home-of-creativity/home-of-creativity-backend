@@ -18,10 +18,27 @@ export const voucherKindCopy: Record<VoucherKind, { name: { ar: string; en: stri
 
 const KINDS: VoucherKind[] = ["delivery", "receipt", "payment", "journal", "settlement"];
 
+/** The default word in each signature label; a voucher can replace it, e.g. «الطرف الآخر» with «HOC». */
+function signWord(kind: VoucherKind, side: "signer" | "counter") {
+  if (kind === "delivery") return side === "signer" ? copy.voucherWordRecipient : copy.voucherWordGiver;
+  return side === "signer" ? copy.voucherWordStaff : copy.voucherWordOther;
+}
+
+function signLabel(kind: VoucherKind, word: string, t: (c: { ar: string; en: string }) => string) {
+  return t(kind === "delivery" ? copy.voucherNameSignAs : copy.voucherSignAs).replace("{word}", word);
+}
+
+/** Sum of the lines that carry an amount, negative ones included; null when none does. */
+function pricedSum(lines: { debit: string }[]) {
+  const priced = lines.filter((line) => Number(line.debit));
+  return priced.length > 0 ? priced.reduce((sum, line) => sum + Number(line.debit), 0) : null;
+}
+
 type LineDraft = { memo: string; debit: string; credit: string };
 
 type Draft = {
   kind: VoucherKind;
+  title: string;
   party_name: string;
   amount: string;
   currency: "USD" | "SYP";
@@ -31,7 +48,9 @@ type Draft = {
   reference: string;
   lines: LineDraft[];
   signer_name: string;
+  signer_title: string;
   counter_signer_name: string;
+  counter_signer_title: string;
   signature: string;
   counter_signature: string;
   background: string;
@@ -50,6 +69,7 @@ function blankLines(): LineDraft[] {
 function emptyDraft(kind: VoucherKind): Draft {
   return {
     kind,
+    title: "",
     party_name: "",
     amount: "",
     currency: "USD",
@@ -59,7 +79,9 @@ function emptyDraft(kind: VoucherKind): Draft {
     reference: "",
     lines: blankLines(),
     signer_name: "",
+    signer_title: "",
     counter_signer_name: "",
+    counter_signer_title: "",
     signature: "",
     counter_signature: "",
     background: "",
@@ -77,6 +99,7 @@ function fromTemplate(template: VoucherTemplate): Draft {
     : blankLines();
   return {
     kind: template.kind,
+    title: data.title ?? "",
     party_name: data.party_name ?? "",
     amount: data.amount ? String(data.amount) : "",
     currency: data.currency === "SYP" ? "SYP" : "USD",
@@ -86,7 +109,9 @@ function fromTemplate(template: VoucherTemplate): Draft {
     reference: data.reference ?? "",
     lines,
     signer_name: data.signer_name ?? "",
+    signer_title: data.signer_title ?? "",
     counter_signer_name: data.counter_signer_name ?? "",
+    counter_signer_title: data.counter_signer_title ?? "",
     signature: "",
     counter_signature: "",
     background: data.background ?? "",
@@ -130,6 +155,7 @@ function fromVoucher(voucher: FinancialVoucher): Draft {
     : blankLines();
   return {
     kind: voucher.kind,
+    title: voucher.title ?? "",
     party_name: voucher.party_name,
     amount: voucher.amount ? String(voucher.amount) : "",
     currency: voucher.currency,
@@ -139,7 +165,9 @@ function fromVoucher(voucher: FinancialVoucher): Draft {
     reference: voucher.reference ?? "",
     lines,
     signer_name: voucher.signer_name ?? "",
+    signer_title: voucher.signer_title ?? "",
     counter_signer_name: voucher.counter_signer_name ?? "",
+    counter_signer_title: voucher.counter_signer_title ?? "",
     signature: voucher.signature ?? "",
     counter_signature: voucher.counter_signature ?? "",
     background: voucher.background ?? "",
@@ -363,8 +391,8 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
       return;
     }
     const amount = Number(draft.amount) || 0;
-    const deliveryAmount = totals.debit > 0 ? totals.debit : amount;
-    if ((draft.kind === "receipt" || draft.kind === "payment" || draft.kind === "delivery") && (draft.kind === "delivery" ? deliveryAmount : amount) <= 0) {
+    const deliveryAmount = pricedSum(draft.lines) ?? amount;
+    if ((draft.kind === "receipt" || draft.kind === "payment" || draft.kind === "delivery") && (draft.kind === "delivery" ? deliveryAmount : amount) === 0) {
       setError(t(copy.voucherAmountRequired));
       return;
     }
@@ -384,6 +412,7 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
     try {
       const res = await api.saveVoucher({
         kind: draft.kind,
+        title: draft.title.trim() || undefined,
         party_name: draft.party_name.trim(),
         amount: draft.kind === "journal" ? totals.debit : draft.kind === "delivery" ? deliveryAmount : amount,
         currency: draft.currency,
@@ -393,7 +422,9 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
         reference: draft.reference.trim() || undefined,
         lines,
         signer_name: (draft.signer_name.trim() || (draft.kind === "delivery" ? draft.party_name.trim() : "")) || undefined,
+        signer_title: draft.signer_title.trim() || undefined,
         counter_signer_name: draft.counter_signer_name.trim() || undefined,
+        counter_signer_title: draft.counter_signer_title.trim() || undefined,
         signature: draft.signature || undefined,
         counter_signature: draft.counter_signature || undefined,
         background: draft.background || undefined,
@@ -422,16 +453,17 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
         credit: Number(line.credit) || 0,
       }))
       .filter((line) => line.memo || line.debit || line.credit);
-    const lineSum = totals.debit;
+    const lineSum = draft.kind === "delivery" ? pricedSum(draft.lines) : totals.debit;
     setError("");
     setBusy(true);
     try {
       await api.saveVoucherTemplate({
         name,
         kind: draft.kind,
+        title: draft.title.trim() || undefined,
         party_name: draft.party_name.trim(),
         amount: draft.kind === "journal" || draft.kind === "delivery"
-          ? (lineSum > 0 ? lineSum : Number(draft.amount) || 0)
+          ? (lineSum ? lineSum : Number(draft.amount) || 0)
           : Number(draft.amount) || 0,
         currency: draft.currency,
         amount_words: draft.amount_words.trim() || undefined,
@@ -439,7 +471,9 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
         reference: draft.reference.trim() || undefined,
         lines,
         signer_name: draft.signer_name.trim() || undefined,
+        signer_title: draft.signer_title.trim() || undefined,
         counter_signer_name: draft.counter_signer_name.trim() || undefined,
+        counter_signer_title: draft.counter_signer_title.trim() || undefined,
         background: draft.background || undefined,
       });
       toast.success(t(copy.voucherTemplateSaved));
@@ -523,8 +557,11 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
   const shownAmount = draft.kind === "journal"
     ? totals.debit
     : draft.kind === "delivery"
-      ? (totals.debit > 0 ? totals.debit : Number(draft.amount) || 0)
+      ? (pricedSum(draft.lines) ?? (Number(draft.amount) || 0))
       : Number(draft.amount) || 0;
+  const docTitle = draft.title.trim() || t(voucherKindCopy[draft.kind].name);
+  const signerWord = draft.signer_title.trim() || t(signWord(draft.kind, "signer"));
+  const counterWord = draft.counter_signer_title.trim() || t(signWord(draft.kind, "counter"));
   const partyLabel = draft.kind === "payment" ? t(copy.voucherPaidTo) : t(copy.voucherReceivedFrom);
 
   return (
@@ -540,6 +577,10 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
       <div className="voucher-studio">
         <form className="card voucher-editor" onSubmit={(event) => void save(event)}>
           <h2 className="form-title">{t(voucherKindCopy[draft.kind].name)}</h2>
+          <label className="field-label">
+            {t(copy.voucherTitle)}
+            <input className="field" value={draft.title} disabled={!canWrite} maxLength={120} placeholder={t(voucherKindCopy[draft.kind].name)} onChange={(event) => patch({ title: event.target.value })} />
+          </label>
           <label className="field-label">
             {draft.kind === "delivery" ? t(copy.voucherRecipient) : t(copy.voucherParty)}
             <input className="field" value={draft.party_name} disabled={!canWrite} required maxLength={160} placeholder={t(copy.voucherPartyPh)} onChange={(event) => patch({ party_name: event.target.value })} />
@@ -602,9 +643,10 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
           ) : (
             <label className="field-label">
               {t(copy.voucherAmount)}
-              <input className="field" dir="ltr" inputMode="decimal" min="0" step="0.01" value={draft.amount} disabled={!canWrite} required onChange={(event) => patch({ amount: event.target.value })} />
+              <input className="field" dir="ltr" inputMode="decimal" value={draft.amount} disabled={!canWrite} required onChange={(event) => patch({ amount: event.target.value })} />
             </label>
           )}
+          <p className="muted">{t(copy.voucherNegativeHint)}</p>
           <label className="field-label">
             {t(copy.voucherAmountWords)}
             <input className="field" value={draft.amount_words} disabled={!canWrite} maxLength={240} onChange={(event) => patch({ amount_words: event.target.value })} />
@@ -664,14 +706,22 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
               <input className="field" value={draft.signer_name} disabled={!canWrite} maxLength={120} onChange={(event) => patch({ signer_name: event.target.value })} />
             </label>
           )}
-          <SignaturePad label={draft.kind === "delivery" ? t(copy.voucherSignRecipient) : t(copy.voucherSigner)} clearLabel={t(copy.voucherClearSign)} value={draft.signature} disabled={!canWrite} onChange={(signature) => patch({ signature })} />
+          <label className="field-label">
+            {t(copy.voucherSignWord)}
+            <input className="field" value={draft.signer_title} disabled={!canWrite} maxLength={60} placeholder={t(signWord(draft.kind, "signer"))} onChange={(event) => patch({ signer_title: event.target.value })} />
+          </label>
+          <SignaturePad label={signLabel(draft.kind, signerWord, t)} clearLabel={t(copy.voucherClearSign)} value={draft.signature} disabled={!canWrite} onChange={(signature) => patch({ signature })} />
           {draft.kind === "delivery" ? null : (
             <label className="field-label">
               {t(copy.voucherSignerName)}
               <input className="field" value={draft.counter_signer_name} disabled={!canWrite} maxLength={120} onChange={(event) => patch({ counter_signer_name: event.target.value })} />
             </label>
           )}
-          <SignaturePad label={draft.kind === "delivery" ? t(copy.voucherSignGiver) : t(copy.voucherCounterSigner)} clearLabel={t(copy.voucherClearSign)} value={draft.counter_signature} disabled={!canWrite} onChange={(counter_signature) => patch({ counter_signature })} />
+          <label className="field-label">
+            {t(copy.voucherSignWord)}
+            <input className="field" value={draft.counter_signer_title} disabled={!canWrite} maxLength={60} placeholder={t(signWord(draft.kind, "counter"))} onChange={(event) => patch({ counter_signer_title: event.target.value })} />
+          </label>
+          <SignaturePad label={signLabel(draft.kind, counterWord, t)} clearLabel={t(copy.voucherClearSign)} value={draft.counter_signature} disabled={!canWrite} onChange={(counter_signature) => patch({ counter_signature })} />
           {canWrite ? (
             <>
               <button className="btn btn-primary" type="submit" disabled={busy} aria-busy={busy}>{voucherId ? t(copy.voucherSaveChanges) : t(copy.voucherSave)}</button>
@@ -692,7 +742,7 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
             <img src={`${import.meta.env.BASE_URL}hummingbird.svg`} alt="" width={72} height={52} />
             <span>Home of Creativity</span>
           </header>
-          <h1 className="voucher-doc-title">{t(voucherKindCopy[draft.kind].name)}</h1>
+          <h1 className="voucher-doc-title">{docTitle}</h1>
           <div className="voucher-meta">
             <p><span>{t(copy.voucherDate)}</span><strong dir="ltr">{showDate(draft.issued_on)}</strong></p>
             <p><span>{t(copy.voucherCompany)}</span><strong>{t(copy.voucherCompanyValue)}</strong></p>
@@ -746,12 +796,12 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
           </div>
           <footer className="voucher-signs">
             <div>
-              <span>{draft.kind === "delivery" ? t(copy.voucherSignRecipient) : t(copy.voucherStaffSign)}</span>
+              <span>{signLabel(draft.kind, signerWord, t)}</span>
               <strong>{draft.signer_name || draft.party_name || "………………"}</strong>
               {draft.signature ? <img src={draft.signature} alt="" /> : <i />}
             </div>
             <div>
-              <span>{draft.kind === "delivery" ? t(copy.voucherSignGiver) : t(copy.voucherOtherSign)}</span>
+              <span>{signLabel(draft.kind, counterWord, t)}</span>
               <strong>{draft.counter_signer_name || "………………"}</strong>
               {draft.counter_signature ? <img src={draft.counter_signature} alt="" /> : <i />}
             </div>

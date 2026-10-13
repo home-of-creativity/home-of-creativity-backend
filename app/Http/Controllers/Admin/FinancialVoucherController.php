@@ -21,6 +21,7 @@ class FinancialVoucherController extends Controller
                 'id',
                 'serial',
                 'kind',
+                'title',
                 'party_name',
                 'amount',
                 'currency',
@@ -85,8 +86,9 @@ class FinancialVoucherController extends Controller
     {
         $validated = $request->validate([
             'kind' => ['required', 'string', Rule::in(FinancialVoucher::KINDS)],
+            'title' => ['nullable', 'string', 'max:120'],
             'party_name' => ['required', 'string', 'max:160'],
-            'amount' => ['nullable', 'numeric', 'min:0', 'max:100000000'],
+            'amount' => ['nullable', 'numeric', 'min:-100000000', 'max:100000000'],
             'currency' => ['required', 'string', Rule::in(FinancialVoucher::CURRENCIES)],
             'amount_words' => ['nullable', 'string', 'max:240'],
             'issued_on' => ['required', 'date'],
@@ -94,10 +96,12 @@ class FinancialVoucherController extends Controller
             'reference' => ['nullable', 'string', 'max:120'],
             'lines' => ['nullable', 'array', 'max:12'],
             'lines.*.memo' => ['nullable', 'string', 'max:180'],
-            'lines.*.debit' => ['nullable', 'numeric', 'min:0', 'max:100000000'],
-            'lines.*.credit' => ['nullable', 'numeric', 'min:0', 'max:100000000'],
+            'lines.*.debit' => ['nullable', 'numeric', 'min:-100000000', 'max:100000000'],
+            'lines.*.credit' => ['nullable', 'numeric', 'min:-100000000', 'max:100000000'],
             'signer_name' => ['nullable', 'string', 'max:120'],
+            'signer_title' => ['nullable', 'string', 'max:60'],
             'counter_signer_name' => ['nullable', 'string', 'max:120'],
+            'counter_signer_title' => ['nullable', 'string', 'max:60'],
             'signature' => ['nullable', 'string', 'max:700000'],
             'counter_signature' => ['nullable', 'string', 'max:700000'],
             'background' => ['nullable', 'string', 'max:900000'],
@@ -109,7 +113,7 @@ class FinancialVoucherController extends Controller
                 'debit' => round((float) ($line['debit'] ?? 0), 2),
                 'credit' => round((float) ($line['credit'] ?? 0), 2),
             ])
-            ->filter(fn (array $line): bool => $line['memo'] !== '' || $line['debit'] > 0 || $line['credit'] > 0)
+            ->filter(fn (array $line): bool => $line['memo'] !== '' || $line['debit'] != 0 || $line['credit'] != 0)
             ->values()
             ->all();
 
@@ -125,18 +129,19 @@ class FinancialVoucherController extends Controller
             }
             $amount = $debit;
         } elseif ($kind === 'delivery') {
-            $sum = round(array_sum(array_column($lines, 'debit')), 2);
-            if ($sum > 0) {
-                $amount = $sum;
+            // A negative line is a deduction the other party sees as such.
+            $priced = array_filter($lines, fn (array $line): bool => $line['debit'] != 0);
+            if ($priced !== []) {
+                $amount = round(array_sum(array_column($priced, 'debit')), 2);
             }
-            if ($amount <= 0) {
+            if ($amount == 0) {
                 throw ValidationException::withMessages([
-                    'amount' => 'اكتب مبلغاً أكبر من صفر.',
+                    'amount' => 'اكتب مبلغاً غير الصفر.',
                 ]);
             }
-        } elseif (in_array($kind, ['receipt', 'payment'], true) && $amount <= 0) {
+        } elseif (in_array($kind, ['receipt', 'payment'], true) && $amount == 0) {
             throw ValidationException::withMessages([
-                'amount' => 'اكتب مبلغاً أكبر من صفر.',
+                'amount' => 'اكتب مبلغاً غير الصفر.',
             ]);
         }
 
@@ -151,6 +156,7 @@ class FinancialVoucherController extends Controller
 
         return [
             'kind' => $kind,
+            'title' => $this->blank($validated['title'] ?? null),
             'party_name' => trim($validated['party_name']),
             'amount' => $amount,
             'currency' => $validated['currency'],
@@ -160,7 +166,9 @@ class FinancialVoucherController extends Controller
             'reference' => $this->blank($validated['reference'] ?? null),
             'lines' => $lines,
             'signer_name' => $this->blank($validated['signer_name'] ?? null),
+            'signer_title' => $this->blank($validated['signer_title'] ?? null),
             'counter_signer_name' => $this->blank($validated['counter_signer_name'] ?? null),
+            'counter_signer_title' => $this->blank($validated['counter_signer_title'] ?? null),
             'signature' => $signature,
             'counter_signature' => $counter,
             'background' => $this->image($validated['background'] ?? null),
@@ -216,6 +224,7 @@ class FinancialVoucherController extends Controller
             'id' => $voucher->id,
             'serial' => $voucher->serial,
             'kind' => $voucher->kind,
+            'title' => $voucher->title,
             'party_name' => $voucher->party_name,
             'amount' => (float) $voucher->amount,
             'currency' => $voucher->currency,
@@ -237,7 +246,9 @@ class FinancialVoucherController extends Controller
             'reference' => $voucher->reference,
             'lines' => $voucher->lines ?? [],
             'signer_name' => $voucher->signer_name,
+            'signer_title' => $voucher->signer_title,
             'counter_signer_name' => $voucher->counter_signer_name,
+            'counter_signer_title' => $voucher->counter_signer_title,
             'signature' => $voucher->signature,
             'counter_signature' => $voucher->counter_signature,
             'background' => $voucher->background,

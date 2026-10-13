@@ -153,6 +153,7 @@ export type FinancialVoucherSummary = {
   id: number;
   serial: string;
   kind: VoucherKind;
+  title: string | null;
   party_name: string;
   amount: number;
   currency: "USD" | "SYP";
@@ -167,7 +168,9 @@ export type FinancialVoucher = FinancialVoucherSummary & {
   reference: string | null;
   lines: VoucherLine[];
   signer_name: string | null;
+  signer_title: string | null;
   counter_signer_name: string | null;
+  counter_signer_title: string | null;
   signature: string | null;
   counter_signature: string | null;
   background: string | null;
@@ -180,6 +183,7 @@ export type VoucherTemplateSummary = {
 };
 
 export type VoucherTemplateData = {
+  title?: string | null;
   party_name?: string | null;
   amount?: number | null;
   currency?: "USD" | "SYP";
@@ -188,7 +192,9 @@ export type VoucherTemplateData = {
   reference?: string | null;
   lines?: VoucherLine[];
   signer_name?: string | null;
+  signer_title?: string | null;
   counter_signer_name?: string | null;
+  counter_signer_title?: string | null;
   background?: string | null;
 };
 
@@ -198,6 +204,7 @@ export type VoucherTemplate = VoucherTemplateSummary & {
 
 export type VoucherDraft = {
   kind: VoucherKind;
+  title?: string;
   party_name: string;
   amount: number;
   currency: "USD" | "SYP";
@@ -207,7 +214,9 @@ export type VoucherDraft = {
   reference?: string;
   lines: VoucherLine[];
   signer_name?: string;
+  signer_title?: string;
   counter_signer_name?: string;
+  counter_signer_title?: string;
   signature?: string;
   counter_signature?: string;
   background?: string;
@@ -216,6 +225,7 @@ export type VoucherDraft = {
 export type VoucherTemplateDraft = {
   name: string;
   kind: VoucherKind;
+  title?: string;
   party_name?: string;
   amount?: number;
   currency: "USD" | "SYP";
@@ -224,7 +234,9 @@ export type VoucherTemplateDraft = {
   reference?: string;
   lines: VoucherLine[];
   signer_name?: string;
+  signer_title?: string;
   counter_signer_name?: string;
+  counter_signer_title?: string;
   background?: string;
 };
 

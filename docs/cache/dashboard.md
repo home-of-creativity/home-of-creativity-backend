@@ -1,6 +1,8 @@
 # Staff dashboard (Vite SPA)
 
-Last updated: 12 October 2026 (Report editor is responsive to its own width (container `report-doc`): under 1040 px the title-bar buttons are icons and the client name hides; under 560 px the title and menus take a row above the buttons. The template save button has an icon. The side panel is 19.5 rem on 1101–1440 px screens and a bottom sheet with a grab line below 1100 px. Report templates show two per row on phones. Clients › quotations and invoices list the linked request and offer edit and cancel; the paper form edits an existing paper with its client locked.)
+Last updated: 13 October 2026 (Vouchers: «اسم السند» replaces the kind name on the sheet and in the list, for every kind. Each signature has «الصفة في التوقيع», the word after «توقيع» («الموظف», «الطرف الآخر», or «المستلم» / «المُسلّم» on delivery), e.g. «توقيع HOC». The amount and lines accept negative numbers; zero is still refused. Templates keep the title and both words.)
+
+Previous: 12 October 2026 (Report editor is responsive to its own width (container `report-doc`): under 1040 px the title-bar buttons are icons and the client name hides; under 560 px the title and menus take a row above the buttons. The template save button has an icon. The side panel is 19.5 rem on 1101–1440 px screens and a bottom sheet with a grab line below 1100 px. Report templates show two per row on phones. Clients › quotations and invoices list the linked request and offer edit and cancel; the paper form edits an existing paper with its client locked.)
 
 Previous: 12 October 2026 (Reports: a picture placed in the page uses the editor's Word wrap, square by default, without reloading. Behind every page still covers the header. Table, wrap, and rotate chrome is Arabic.)
 

@@ -16,6 +16,7 @@ class FinancialVoucher extends Model
     protected $fillable = [
         'serial',
         'kind',
+        'title',
         'party_name',
         'amount',
         'currency',
@@ -25,7 +26,9 @@ class FinancialVoucher extends Model
         'reference',
         'lines',
         'signer_name',
+        'signer_title',
         'counter_signer_name',
+        'counter_signer_title',
         'signature',
         'counter_signature',
         'background',

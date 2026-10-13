@@ -114,7 +114,7 @@ export function Vouchers({ locale, t }: { locale: Locale; t: (c: { ar: string; e
                 ) : visible.map((row) => (
                   <tr key={row.id}>
                     <td dir="ltr">{row.serial}</td>
-                    <td>{t(voucherKindCopy[row.kind].name)}</td>
+                    <td>{row.title || t(voucherKindCopy[row.kind].name)}</td>
                     <td>{row.party_name}</td>
                     <td dir="ltr">{money(row.amount, row.currency)}</td>
                     <td>{row.issued_on ? new Date(row.issued_on).toLocaleDateString(locale === "ar" ? "ar-SY" : "en-GB") : "—"}</td>
