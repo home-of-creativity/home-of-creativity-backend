@@ -131,6 +131,7 @@ export function ReportGemini({
   onApplyDocument,
   onInsertImage,
   onInsertCover,
+  onInsertClosingPage,
   onInsertTextBox,
   fonts = [],
   onInstallFont,
@@ -150,6 +151,7 @@ export function ReportGemini({
   onApplyDocument: (text: string) => boolean | Promise<boolean>;
   onInsertImage: (bytes: Uint8Array, placement: ImagePlacement) => Promise<"ok" | "unsupported" | "refused">;
   onInsertCover: (bytes: Uint8Array) => Promise<"ok" | "unsupported" | "refused">;
+  onInsertClosingPage: (bytes: Uint8Array) => Promise<"ok" | "unsupported" | "refused">;
   onInsertTextBox: (options: { kind: TextBoxShape; text: string }) => Promise<boolean>;
   fonts: Array<{ family: string }>;
   onInstallFont: (family: string, file: File) => Promise<void>;
@@ -271,6 +273,19 @@ export function ReportGemini({
       if (result === "ok") toast.success(t(copy.reportCoverAdded));
       else if (result === "unsupported") toast.error(t(copy.reportImageUnsupported));
       else toast.error(t(copy.reportCoverFailed));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function addClosingPage(file: File | undefined) {
+    if (!file) return;
+    setBusy(true);
+    try {
+      const result = await onInsertClosingPage(new Uint8Array(await file.arrayBuffer()));
+      if (result === "ok") toast.success(t(copy.reportClosingPageAdded));
+      else if (result === "unsupported") toast.error(t(copy.reportImageUnsupported));
+      else toast.error(t(copy.reportClosingPageFailed));
     } finally {
       setBusy(false);
     }
@@ -471,6 +486,14 @@ export function ReportGemini({
         <label className="btn btn-sm">
           {t(copy.reportCoverAdd)}
           <input type="file" accept="image/png,image/jpeg,image/gif" hidden disabled={busy} onChange={(event) => { void addCover(event.target.files?.[0]); event.target.value = ""; }} />
+        </label>
+      </fieldset>
+      <fieldset className="report-picture">
+        <legend>{t(copy.reportClosingPage)}</legend>
+        <p className="muted">{t(copy.reportClosingPageHint)}</p>
+        <label className="btn btn-sm">
+          {t(copy.reportClosingPageAdd)}
+          <input type="file" accept="image/png,image/jpeg,image/gif" hidden disabled={busy} onChange={(event) => { void addClosingPage(event.target.files?.[0]); event.target.value = ""; }} />
         </label>
       </fieldset>
       <fieldset className="report-picture">

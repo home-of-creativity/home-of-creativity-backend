@@ -726,6 +726,11 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
                     if (result === "ok") markChanged();
                     return result;
                   }}
+                  onInsertClosingPage={async (bytes) => {
+                    const result = await editor.current?.insertClosingPage(bytes) ?? "refused";
+                    if (result === "ok") markChanged();
+                    return result;
+                  }}
                   onInsertTextBox={async (options) => {
                     const done = await editor.current?.insertTextBox(options) ?? false;
                     if (done) markChanged();

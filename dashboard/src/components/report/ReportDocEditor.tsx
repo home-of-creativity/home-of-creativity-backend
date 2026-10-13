@@ -7,7 +7,8 @@ import { api } from "../../api";
 import type { Locale } from "../../i18n";
 import { editorArabic } from "./editorArabic";
 import { TableLayoutChrome } from "./TableLayoutChrome";
-import { addBlankPage, addCover, addTextBox, type TextBoxShape } from "./pageObjects";
+import { TextBoxChrome } from "./TextBoxChrome";
+import { addBlankPage, addClosingPage, addCover, addTextBox, type TextBoxShape } from "./pageObjects";
 import { addBodyBackground } from "./pictureLayout";
 import { reportFontConfiguration, type ExtraFont } from "./fonts";
 
@@ -39,6 +40,8 @@ export type ReportDocHandle = {
   insertTextBox(options: { kind: TextBoxShape; text: string }): Promise<boolean>;
   /** A new first page with the picture behind it, one text box per line and no header or footer. */
   insertCover(bytes: Uint8Array, lines: string[]): Promise<"ok" | "unsupported" | "refused">;
+  /** A last page covered by the picture; a second call replaces that picture. */
+  insertClosingPage(bytes: Uint8Array): Promise<"ok" | "unsupported" | "refused">;
   focus(): void;
 };
 
@@ -431,6 +434,30 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
       await reload(next, 1);
       return "ok";
     },
+    async insertClosingPage(bytes) {
+      const host = editor.current;
+      const current = host?.getEditor();
+      if (!host || !current) return "refused";
+      const normalized = normalizeImageBytes(bytes);
+      if (!normalized.ok) return "unsupported";
+      const mime = normalized.mime;
+      if (mime !== "image/png" && mime !== "image/jpeg" && mime !== "image/gif") return "unsupported";
+      const setup = current.getPageSetup();
+      const pageWidth = setup ? setup.pageWidthTwips / 20 : A4_WIDTH_PT;
+      const pageHeight = setup ? setup.pageHeightTwips / 20 : A4_HEIGHT_PT;
+      const saved = await host.save();
+      const next = saved
+        ? addClosingPage(new Uint8Array(saved), {
+            image: { bytes: normalized.bytes, mime, crop: coverCrop(normalized.widthPoints, normalized.heightPoints, pageWidth, pageHeight) },
+            pageWidthPt: pageWidth,
+            pageHeightPt: pageHeight,
+          })
+        : null;
+      if (!next) return "refused";
+      await reload(next, 1);
+      host.getEditor()?.scrollToPage(host.getEditor()?.getTotalPages() ?? 1);
+      return "ok";
+    },
     focus() {
       editor.current?.focus();
     },
@@ -460,6 +487,18 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
         renderTitleBarRight={titleBarEnd}
       />
       <TableLayoutChrome editor={editor} host={root} locale={locale} />
+      <TextBoxChrome
+        host={root}
+        locale={locale}
+        save={async () => {
+          const buffer = await editor.current?.save();
+          return buffer ? new Uint8Array(buffer) : null;
+        }}
+        apply={async (next) => {
+          await reload(next, editor.current?.getEditor()?.getCurrentPage("viewport") ?? 1);
+          onChange();
+        }}
+      />
     </div>
   );
 });

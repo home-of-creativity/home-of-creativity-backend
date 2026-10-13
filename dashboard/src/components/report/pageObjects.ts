@@ -1,9 +1,10 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 
 // A text box and the cover page. The text box is a floating Word shape (rectangle, rounded
-// rectangle, or ellipse) anchored to the page, so the editor can drag it and resize it from its
-// handles. It is written into the .docx and the document is reloaded. The cover is a new first
-// page: the picture behind it, ordinary lines of text, no header or footer.
+// rectangle, or ellipse) anchored to the page; `TextBoxChrome` moves, resizes, edits and deletes
+// it. It is written into the .docx and the document is reloaded. The cover is a new first
+// page: the picture behind it, ordinary lines of text, no header or footer. The closing page is
+// a last page the picture covers.
 
 const EMU_PER_POINT = 12700;
 const NS = [
@@ -139,8 +140,8 @@ function roundRectGeometry(cx: number, cy: number) {
 }
 
 /**
- * A floating text box after the caret's paragraph, positioned on the page. Staff drag it and
- * pull its handles in the editor; the shape is a rectangle, a rounded rectangle, or an ellipse.
+ * A floating text box after the caret's paragraph, positioned on the page. The shape is a
+ * rectangle, a rounded rectangle, or an ellipse.
  */
 export function addTextBox(docx: Uint8Array, paraId: string, options: TextBoxOptions): Uint8Array | null {
   const doc = unpack(docx);
@@ -194,6 +195,61 @@ function coverLine(text: string, sizePt: number, bold: boolean, beforePt: number
     + `<w:t xml:space="preserve">${escapeXml(text)}</w:t></w:r></w:p>`;
 }
 
+/** Store the picture in the package and return its relationship id; null when a part is missing. */
+function addPicturePart(files: Record<string, Uint8Array>, image: CoverInput["image"], prefix: "cover" | "closing") {
+  const relsPath = "word/_rels/document.xml.rels";
+  const rels = files[relsPath] ? strFromU8(files[relsPath]) : null;
+  const types = files["[Content_Types].xml"] ? strFromU8(files["[Content_Types].xml"]) : null;
+  if (!rels || !types) return null;
+  const extension = mediaExtension(image.mime);
+  const relationPrefix = prefix === "cover" ? "rIdHocCover" : "rIdHocClosing";
+  let n = 1;
+  while (files[`word/media/hoc-${prefix}-${n}.${extension}`] || rels.includes(`${relationPrefix}${n}"`)) n += 1;
+  const relationshipId = `${relationPrefix}${n}`;
+  // A copy on a plain ArrayBuffer, the type fflate's file map expects.
+  files[`word/media/hoc-${prefix}-${n}.${extension}`] = new Uint8Array(image.bytes);
+  files[relsPath] = strToU8(rels.replace("</Relationships>",
+    `<Relationship Id="${relationshipId}" Type="${IMAGE_REL}" Target="media/hoc-${prefix}-${n}.${extension}"/></Relationships>`));
+  if (!new RegExp(`<Default Extension="${extension}"`, "i").test(types)) {
+    files["[Content_Types].xml"] = strToU8(types.replace("<Default ", `<Default Extension="${extension}" ContentType="${image.mime}"/><Default `));
+  }
+  return relationshipId;
+}
+
+/** Remove a picture relationship and its media file once nothing points at it. */
+function dropPicturePart(files: Record<string, Uint8Array>, relationshipId: string) {
+  const relsPath = "word/_rels/document.xml.rels";
+  const rels = files[relsPath] ? strFromU8(files[relsPath]) : null;
+  if (!rels) return;
+  const relation = new RegExp(`<Relationship\\b[^>]*\\bId="${relationshipId}"[^>]*/>`).exec(rels);
+  if (!relation) return;
+  const target = /\bTarget="([^"]+)"/.exec(relation[0])?.[1];
+  const remaining = rels.replace(relation[0], "");
+  files[relsPath] = strToU8(remaining);
+  if (target && !remaining.includes(`Target="${target}"`)) delete files[`word/${target}`];
+}
+
+function srcRect(crop: CropPercent) {
+  const value = (percent: number) => Math.round(Math.max(0, percent) * 1000);
+  return `<a:srcRect l="${value(crop.left)}" t="${value(crop.top)}" r="${value(crop.right)}" b="${value(crop.bottom)}"/>`;
+}
+
+/** A picture anchored at the page's top-left corner and as large as the page. */
+function fullPagePicture(options: { id: number; name: string; relationshipId: string; crop: CropPercent; widthPt: number; heightPt: number; behind: boolean }) {
+  const cx = emu(options.widthPt);
+  const cy = emu(options.heightPt);
+  return `<w:drawing ${NS}><wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="${options.behind ? 251658240 : 251660288}"`
+    + ` behindDoc="${options.behind ? 1 : 0}" locked="0" layoutInCell="0" allowOverlap="1"><wp:simplePos x="0" y="0"/>`
+    + '<wp:positionH relativeFrom="page"><wp:posOffset>0</wp:posOffset></wp:positionH>'
+    + '<wp:positionV relativeFrom="page"><wp:posOffset>0</wp:posOffset></wp:positionV>'
+    + `<wp:extent cx="${cx}" cy="${cy}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:wrapNone/>`
+    + `<wp:docPr id="${options.id}" name="${options.name}"/><wp:cNvGraphicFramePr/>`
+    + `<a:graphic><a:graphicData uri="${PIC_URI}"><pic:pic><pic:nvPicPr><pic:cNvPr id="0" name="${options.name}"/><pic:cNvPicPr/></pic:nvPicPr>`
+    + `<pic:blipFill><a:blip r:embed="${options.relationshipId}"/>${srcRect(options.crop)}`
+    + `<a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>`
+    + '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:anchor></w:drawing>';
+}
+
 /**
  * A new first page: the picture covers it behind the text, then the lines as ordinary text
  * (title first) around the middle of the page, and no header or footer. The rest of the
@@ -201,40 +257,19 @@ function coverLine(text: string, sizePt: number, bold: boolean, beforePt: number
  */
 export function addCover(docx: Uint8Array, input: CoverInput): Uint8Array | null {
   const doc = unpack(docx);
-  if (!doc) return null;
+  if (!doc || !doc.xml.includes("<w:body>")) return null;
   const { files } = doc;
-  const relsPath = "word/_rels/document.xml.rels";
-  const rels = files[relsPath] ? strFromU8(files[relsPath]) : null;
-  const types = files["[Content_Types].xml"] ? strFromU8(files["[Content_Types].xml"]) : null;
-  if (!rels || !types || !doc.xml.includes("<w:body>")) return null;
-
-  const extension = mediaExtension(input.image.mime);
-  let n = 1;
-  while (files[`word/media/hoc-cover-${n}.${extension}`] || rels.includes(`rIdHocCover${n}"`)) n += 1;
-  const relationshipId = `rIdHocCover${n}`;
-  // A copy on a plain ArrayBuffer, the type fflate's file map expects.
-  files[`word/media/hoc-cover-${n}.${extension}`] = new Uint8Array(input.image.bytes);
-  files[relsPath] = strToU8(rels.replace("</Relationships>",
-    `<Relationship Id="${relationshipId}" Type="${IMAGE_REL}" Target="media/hoc-cover-${n}.${extension}"/></Relationships>`));
-  if (!new RegExp(`<Default Extension="${extension}"`, "i").test(types)) {
-    files["[Content_Types].xml"] = strToU8(types.replace("<Default ", `<Default Extension="${extension}" ContentType="${input.image.mime}"/><Default `));
-  }
-
-  const id = nextDrawingId(doc.xml);
-  const cx = emu(input.pageWidthPt);
-  const cy = emu(input.pageHeightPt);
-  const crop = (percent: number) => Math.round(Math.max(0, percent) * 1000);
-  const { left, top, right, bottom } = input.image.crop;
-  const background = `<w:drawing ${NS}><wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="251658240"`
-    + ' behindDoc="1" locked="0" layoutInCell="0" allowOverlap="1"><wp:simplePos x="0" y="0"/>'
-    + '<wp:positionH relativeFrom="page"><wp:posOffset>0</wp:posOffset></wp:positionH>'
-    + '<wp:positionV relativeFrom="page"><wp:posOffset>0</wp:posOffset></wp:positionV>'
-    + `<wp:extent cx="${cx}" cy="${cy}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:wrapNone/>`
-    + `<wp:docPr id="${id}" name="Cover picture"/><wp:cNvGraphicFramePr/>`
-    + `<a:graphic><a:graphicData uri="${PIC_URI}"><pic:pic><pic:nvPicPr><pic:cNvPr id="0" name="cover"/><pic:cNvPicPr/></pic:nvPicPr>`
-    + `<pic:blipFill><a:blip r:embed="${relationshipId}"/><a:srcRect l="${crop(left)}" t="${crop(top)}" r="${crop(right)}" b="${crop(bottom)}"/>`
-    + `<a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>`
-    + '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:anchor></w:drawing>';
+  const relationshipId = addPicturePart(files, input.image, "cover");
+  if (!relationshipId) return null;
+  const background = fullPagePicture({
+    id: nextDrawingId(doc.xml),
+    name: "Cover picture",
+    relationshipId,
+    crop: input.image.crop,
+    widthPt: input.pageWidthPt,
+    heightPt: input.pageHeightPt,
+    behind: true,
+  });
 
   const lines = input.lines.map((line) => line.trim()).filter(Boolean);
   const text = lines.map((line, index) => (index === 0
@@ -243,4 +278,55 @@ export function addCover(docx: Uint8Array, input: CoverInput): Uint8Array | null
   const cover = holder(`<w:r>${background}</w:r>`) + text + holder('<w:r><w:br w:type="page"/></w:r>');
   const xml = withTitlePage(doc.xml.replace("<w:body>", `<w:body>${cover}`));
   return pack(files, xml);
+}
+
+const CLOSING_NAME = "Closing page picture";
+
+export type ClosingPageInput = Omit<CoverInput, "lines">;
+
+/**
+ * A last page covered by the picture, in front of the header and footer. When the report
+ * already has one, its picture is replaced and no second page is added.
+ */
+export function addClosingPage(docx: Uint8Array, input: ClosingPageInput): Uint8Array | null {
+  const doc = unpack(docx);
+  if (!doc || !doc.xml.includes("</w:body>")) return null;
+  const { files } = doc;
+  const relationshipId = addPicturePart(files, input.image, "closing");
+  if (!relationshipId) return null;
+
+  const named = doc.xml.indexOf(`name="${CLOSING_NAME}"`);
+  if (named >= 0) {
+    const start = doc.xml.lastIndexOf("<wp:anchor", named);
+    const end = doc.xml.indexOf("</wp:anchor>", named);
+    if (start >= 0 && end > start) {
+      const old = doc.xml.slice(start, end);
+      const previous = /<a:blip\b[^>]*\br:embed="([^"]*)"/.exec(old)?.[1];
+      const anchor = old
+        .replace(/(<a:blip\b[^>]*\br:embed=")[^"]*"/, `$1${relationshipId}"`)
+        .replace(/<a:srcRect\b[^>]*\/>/, srcRect(input.image.crop));
+      const xml = doc.xml.slice(0, start) + anchor + doc.xml.slice(end);
+      if (previous && !xml.includes(`r:embed="${previous}"`)) dropPicturePart(files, previous);
+      return pack(files, xml);
+    }
+  }
+
+  const picture = fullPagePicture({
+    id: nextDrawingId(doc.xml),
+    name: CLOSING_NAME,
+    relationshipId,
+    crop: input.image.crop,
+    widthPt: input.pageWidthPt,
+    heightPt: input.pageHeightPt,
+    behind: false,
+  });
+  // The editor starts no page for a break followed only by a floating picture in one paragraph.
+  const page = `<w:p><w:pPr><w:bidi/></w:pPr><w:r><w:br w:type="page"/></w:r></w:p>${holder(`<w:r>${picture}</w:r>`)}`;
+  // The last section's properties close the body; the page goes right before them.
+  const bodyEnd = doc.xml.lastIndexOf("</w:body>");
+  const section = doc.xml.lastIndexOf("<w:sectPr", bodyEnd);
+  const sectionClose = section >= 0 ? doc.xml.indexOf("</w:sectPr>", section) : -1;
+  const closesBody = sectionClose >= 0 && /^<\/w:sectPr>\s*<\/w:body>/.test(doc.xml.slice(sectionClose));
+  const at = closesBody ? section : bodyEnd;
+  return pack(files, doc.xml.slice(0, at) + page + doc.xml.slice(at));
 }
