@@ -19,8 +19,6 @@ class OdooClient
 
     private ?int $paymentJournalId = null;
 
-    private bool $letterheadPaged = false;
-
     /** @var array<string, int|null> */
     private array $tagIdCache = [];
 
@@ -1843,31 +1841,74 @@ class OdooClient
     }
 
     /**
-     * Force quotation and invoice PDFs onto A4. Each page keeps its own letterhead.
-     * A taller paperformat stretches the first cover onto the following sheets.
+     * Writes the quotation and invoice print layout into Odoo: A4 paper with the cover
+     * margins, the cover bands, lines that flow across pages, and the opening letter.
+     * Run on purpose with `php artisan odoo:report-layout`; nothing else writes it, so the
+     * layout stays as set until the command runs again.
+     *
+     * @return array<string, string|null> each step and its error, null when it worked
      */
-    public function ensureA4PagedLetterhead(): void
+    public function installReportLayout(): array
     {
-        if ($this->letterheadPaged || ! $this->configured()) {
+        $steps = [
+            'paper' => fn () => $this->lockSaleInvoicePaperToA4(),
+            'cover' => fn () => $this->installPagedLetterheadCss(),
+            'lines' => fn () => $this->installSplitLineViews(),
+            'letter' => fn () => $this->installQuotationLetterView(),
+        ];
+        $result = [];
+        foreach ($steps as $name => $step) {
+            try {
+                $step();
+                $result[$name] = null;
+            } catch (Throwable $exception) {
+                $result[$name] = $exception->getMessage();
+            }
+        }
+
+        return $result;
+    }
+
+    /** «إلى: الشركة، تحية طيبة وبعد.» and the opening sentence above the quotation details. */
+    private function installQuotationLetterView(): void
+    {
+        $arch = <<<'XML'
+<data>
+    <xpath expr="//div[@class='page']" position="attributes">
+        <attribute name="dir">rtl</attribute>
+    </xpath>
+    <xpath expr="//t[@t-set='address']" position="replace">
+        <t t-set="address" t-value="False"/>
+    </xpath>
+    <xpath expr="//div[@id='informations']" position="before">
+        <div dir="rtl" style="text-align: right; width: 100%; margin-bottom: 6mm;">
+            <p style="margin: 0 0 4mm;">إلى: <t t-out="doc.partner_id.commercial_company_name or doc.partner_id.name"/>، تحية طيبة وبعد.</p>
+            <p style="margin: 0;">يسعدنا في <a href="https://hoc.agency" target="_blank" style="color: #241752; text-decoration: underline;">hoc.agency</a> أن نضع بين أيديكم هذا العرض، ونأمل أن ينال رضاكم.</p>
+        </div>
+    </xpath>
+</data>
+XML;
+        $this->upsertInheritedView('HOC quotation letter', 'sale.report_saleorder_document', $arch);
+    }
+
+    private function upsertInheritedView(string $name, string $parentKey, string $arch): void
+    {
+        $parent = $this->firstRecord($this->searchRead('ir.ui.view', [
+            ['key', '=', $parentKey],
+            ['inherit_id', '=', false],
+        ], ['id'], 1));
+        $parentId = (int) ($parent['id'] ?? 0);
+        if ($parentId <= 0) {
+            throw new RuntimeException("Odoo view {$parentKey} was not found.");
+        }
+        $vals = ['name' => $name, 'type' => 'qweb', 'inherit_id' => $parentId, 'arch' => $arch, 'active' => true];
+        $existing = $this->firstRecord($this->searchRead('ir.ui.view', [['name', '=', $name]], ['id'], 1));
+        if ($existing !== null) {
+            $this->writeRecord('ir.ui.view', (int) $existing['id'], $vals);
+
             return;
         }
-        $this->letterheadPaged = true;
-
-        try {
-            $this->lockSaleInvoicePaperToA4();
-        } catch (Throwable $exception) {
-            Log::warning('Odoo A4 paperformat lock failed.', ['error' => $exception->getMessage()]);
-        }
-        try {
-            $this->installPagedLetterheadCss();
-        } catch (Throwable $exception) {
-            Log::warning('Odoo paged letterhead CSS failed.', ['error' => $exception->getMessage()]);
-        }
-        try {
-            $this->installSplitLineViews();
-        } catch (Throwable $exception) {
-            Log::warning('Odoo split line views failed.', ['error' => $exception->getMessage()]);
-        }
+        $this->call('ir.ui.view', 'create', ['vals' => $vals]);
     }
 
     /**
@@ -1925,22 +1966,7 @@ XML,
         ];
 
         foreach ($views as $key => $spec) {
-            $parent = $this->firstRecord($this->searchRead('ir.ui.view', [
-                ['key', '=', $key],
-                ['inherit_id', '=', false],
-            ], ['id'], 1));
-            $parentId = (int) ($parent['id'] ?? 0);
-            if ($parentId <= 0) {
-                continue;
-            }
-            $vals = ['name' => $spec['name'], 'type' => 'qweb', 'inherit_id' => $parentId, 'arch' => $spec['arch'], 'active' => true];
-            $existing = $this->firstRecord($this->searchRead('ir.ui.view', [['name', '=', $spec['name']]], ['id'], 1));
-            if ($existing !== null) {
-                $this->writeRecord('ir.ui.view', (int) $existing['id'], $vals);
-
-                continue;
-            }
-            $this->call('ir.ui.view', 'create', ['vals' => $vals]);
+            $this->upsertInheritedView($spec['name'], $key, $spec['arch']);
         }
     }
 
@@ -1949,8 +1975,6 @@ XML,
         if (! $this->configured() || $recordId <= 0) {
             return null;
         }
-
-        $this->ensureA4PagedLetterhead();
 
         try {
             $portalPath = $this->call($model, 'get_portal_url', [
