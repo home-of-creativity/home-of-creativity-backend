@@ -7,6 +7,8 @@ enum RequestStatus: string
     case Submitted = 'submitted';
     case QuotationSent = 'quotation_sent';
     case QuotationRejected = 'quotation_rejected';
+    /** The client accepted the quotation; an admin confirms before the sales order and payment. */
+    case AwaitingAdminApproval = 'awaiting_admin_approval';
     case AwaitingPayment = 'awaiting_payment';
     case PaymentConfirmed = 'payment_confirmed';
     case InProgress = 'in_progress';
@@ -21,8 +23,9 @@ enum RequestStatus: string
         return match ($this) {
             // A dashboard invoice skips the quotation: the request waits for payment.
             self::Submitted => [self::QuotationSent, self::AwaitingPayment, self::Cancelled],
-            self::QuotationSent => [self::QuotationRejected, self::AwaitingPayment, self::Cancelled],
+            self::QuotationSent => [self::QuotationRejected, self::AwaitingAdminApproval, self::AwaitingPayment, self::Cancelled],
             self::QuotationRejected => [self::QuotationSent, self::Cancelled],
+            self::AwaitingAdminApproval => [self::AwaitingPayment, self::QuotationRejected, self::Cancelled],
             self::AwaitingPayment => [self::PaymentConfirmed, self::Cancelled],
             self::PaymentConfirmed => [self::InProgress, self::RevisionRequested, self::Cancelled],
             self::InProgress => [self::ReadyForReview, self::RevisionRequested, self::Cancelled],
@@ -58,6 +61,7 @@ enum RequestStatus: string
             self::Submitted => 'تم الاستلام',
             self::QuotationSent => 'عرض سعر مرسل',
             self::QuotationRejected => 'عرض مرفوض',
+            self::AwaitingAdminApproval => 'بانتظار اعتماد الإدارة',
             self::AwaitingPayment => 'بانتظار الدفع',
             self::PaymentConfirmed => 'تم تأكيد الدفع',
             self::InProgress => 'قيد التنفيذ',
@@ -74,6 +78,7 @@ enum RequestStatus: string
             self::Submitted => 'Received',
             self::QuotationSent => 'Quotation sent',
             self::QuotationRejected => 'Quotation rejected',
+            self::AwaitingAdminApproval => 'Awaiting admin approval',
             self::AwaitingPayment => 'Awaiting payment',
             self::PaymentConfirmed => 'Payment confirmed',
             self::InProgress => 'In progress',

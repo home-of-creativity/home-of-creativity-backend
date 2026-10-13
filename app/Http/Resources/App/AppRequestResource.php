@@ -126,7 +126,7 @@ class AppRequestResource extends JsonResource
     {
         return match ($status) {
             RequestStatus::Submitted => 0,
-            RequestStatus::QuotationSent, RequestStatus::QuotationRejected => 1,
+            RequestStatus::QuotationSent, RequestStatus::QuotationRejected, RequestStatus::AwaitingAdminApproval => 1,
             RequestStatus::AwaitingPayment => 2,
             RequestStatus::PaymentConfirmed,
             RequestStatus::InProgress,

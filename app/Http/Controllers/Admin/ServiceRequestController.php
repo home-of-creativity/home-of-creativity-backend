@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Actions\ApproveQuotation;
 use App\Actions\CancelClientRequest;
 use App\Actions\CompleteRequest;
 use App\Actions\ConfirmRequestPayment;
@@ -257,6 +258,25 @@ class ServiceRequestController extends Controller
 
         return ServiceRequestResource::make($updated->fresh(['client', 'statusHistory', 'quotationDecisions.quotation', 'clickupTasks']) ?? $updated)
             ->additional(['message' => 'سُجّل قرار الزبون يدوياً.']);
+    }
+
+    /** The admin confirms or turns down a client's approval that is waiting on them. */
+    public function clientApproval(Request $request, ServiceRequest $serviceRequest, ApproveQuotation $approve): ServiceRequestResource
+    {
+        $validated = $request->validate([
+            'decision' => ['required', 'in:confirm,decline'],
+            'reason' => ['required_if:decision,decline', 'nullable', 'string', 'max:2000'],
+        ]);
+        $actor = 'admin:'.$request->user()?->id;
+
+        $updated = $validated['decision'] === 'confirm'
+            ? $approve->confirm($serviceRequest, $actor)
+            : $approve->decline($serviceRequest, trim((string) $validated['reason']), $actor);
+
+        return ServiceRequestResource::make($updated->fresh(['client', 'statusHistory', 'quotationDecisions.quotation', 'clickupTasks']) ?? $updated)
+            ->additional(['message' => $validated['decision'] === 'confirm'
+                ? 'اعتُمدت الموافقة: تحول العرض إلى أمر بيع ووصل الزبون طلب الدفع.'
+                : 'لم تُعتمد الموافقة، وأُبلغ الزبون بأن عرضاً محدّثاً سيصله.']);
     }
 
     public function provisionClickUp(ServiceRequest $serviceRequest, ProvisionClickUpTasks $provision, ClickUpClient $clickUp): ServiceRequestResource

@@ -17,13 +17,25 @@ final class OdooPaperLimits
     public const NOTES = 20000;
 
     /** Space under the hummingbird and logo so the table starts in the same band on every page. */
-    public const LETTERHEAD_MARGIN_TOP = 50;
+    public const LETTERHEAD_MARGIN_TOP = 58;
 
     /** Space above the contact bar so lines never print over the cover footer. */
-    public const LETTERHEAD_MARGIN_BOTTOM = 42;
+    public const LETTERHEAD_MARGIN_BOTTOM = 48;
 
     /** Inset so the RTL description column is not clipped on the right edge. */
     public const LETTERHEAD_MARGIN_SIDE = 12;
+
+    /** The paper format's dpi. wkhtmltopdf without smart shrinking prints CSS mm 96/dpi larger. */
+    public const LETTERHEAD_DPI = 90;
+
+    /**
+     * CSS height that prints as $mm on paper: Odoo's header and footer documents are drawn
+     * 96/90 larger, so a 58mm band would print 62mm and cover the first lines.
+     */
+    public static function printedMm(int $mm): float
+    {
+        return round($mm * self::LETTERHEAD_DPI / 96, 2);
+    }
 
     /**
      * @return list<mixed>

@@ -43,7 +43,10 @@ class NotifyEmployees
         return $this->deliver((string) $employee->telegram_user_id, $text, 'employee:'.$employee->id, $inlineButtons);
     }
 
-    public function handleAdmins(string $text): int
+    /**
+     * @param  list<array{text: string, callback_data: string}>|null  $inlineButtons
+     */
+    public function handleAdmins(string $text, ?array $inlineButtons = null): int
     {
         $ids = array_values(array_filter(array_map(
             strval(...),
@@ -56,7 +59,11 @@ class NotifyEmployees
         $sent = 0;
         foreach ($ids as $id) {
             try {
-                $this->telegram->send($id, $text, 'admin');
+                if ($inlineButtons !== null && $inlineButtons !== []) {
+                    $this->telegram->sendInlineActions($id, $text, $inlineButtons, 'admin');
+                } else {
+                    $this->telegram->send($id, $text, 'admin');
+                }
                 $sent++;
             } catch (\Throwable $exception) {
                 Log::warning('Admin Telegram notify failed.', [

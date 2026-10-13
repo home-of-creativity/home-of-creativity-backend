@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Actions\AdminBotDesk;
+use App\Actions\ApproveQuotation;
 use App\Actions\GenerateEmployeeCode;
 use App\Actions\PushEmployeeToOdoo;
 use App\Actions\ResolveWorkPlan;
@@ -232,6 +233,27 @@ class AdminBotController extends Controller
         return response()->json([
             'data' => $desk->operation($serviceRequest->fresh(['client', 'pricingPackage']) ?? $serviceRequest),
             'message' => 'Plan rebuilt.',
+        ]);
+    }
+
+    /** «✅ اعتماد» under a client approval: the quotation becomes a sales order and the client gets the payment steps. */
+    public function confirmClientApproval(
+        Request $request,
+        ApproveQuotation $approve,
+        ResolveServiceRequest $resolveServiceRequest,
+    ): JsonResponse {
+        $telegramId = $this->assertAdmin($request);
+        $validated = $request->validate([
+            'telegram_user_id' => ['required', 'string'],
+            'request_number' => ['required', 'string'],
+        ]);
+
+        $serviceRequest = $resolveServiceRequest->byReference($validated['request_number']);
+        $updated = $approve->confirm($serviceRequest, 'admin:telegram:'.$telegramId);
+
+        return response()->json([
+            'data' => ['number' => ResolveServiceRequest::displayNumber($updated), 'status' => $updated->status->value],
+            'message' => 'Approval confirmed.',
         ]);
     }
 

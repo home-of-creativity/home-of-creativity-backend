@@ -1391,6 +1391,7 @@ export const statuses: Record<string, Copy> = {
   submitted: { ar: "مُرسل", en: "Submitted" },
   quotation_sent: { ar: "عرض سعر", en: "Quotation sent" },
   quotation_rejected: { ar: "عرض مرفوض", en: "Quotation rejected" },
+  awaiting_admin_approval: { ar: "بانتظار اعتماد الإدارة", en: "Awaiting admin approval" },
   awaiting_payment: { ar: "بانتظار الدفع", en: "Awaiting payment" },
   payment_confirmed: { ar: "مدفوع", en: "Paid" },
   in_progress: { ar: "قيد التنفيذ", en: "In progress" },

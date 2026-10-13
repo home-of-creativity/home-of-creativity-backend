@@ -38,7 +38,7 @@ class RecordClientDecision
         $reason = trim((string) $reason);
 
         return match ($decision) {
-            'approve' => $this->approve($request, $actor),
+            'approve' => $this->approve($request, $actor, $user),
             'reject' => $this->reject($request, $reason, $actor),
             'revision' => $this->revision($request, $reason, $actor),
             'complete' => $this->complete($request, $actor),
@@ -46,11 +46,17 @@ class RecordClientDecision
         };
     }
 
-    private function approve(ServiceRequest $request, string $actor): ServiceRequest
+    private function approve(ServiceRequest $request, string $actor, User $user): ServiceRequest
     {
         $this->requireStatus($request, [RequestStatus::QuotationSent], 'الموافقة متاحة بعد إرسال عرض السعر.');
 
-        return $this->approveQuotation->handle($request, null, $actor);
+        $updated = $this->approveQuotation->handle($request, null, $actor);
+        // Staff who may confirm approvals do not have to confirm their own entry a second time.
+        if ($this->approveQuotation->heldForAdmin && $user->canAbility('ops.requests.approve_quotation')) {
+            return $this->approveQuotation->confirm($updated, 'admin:'.$user->id);
+        }
+
+        return $updated;
     }
 
     private function reject(ServiceRequest $request, string $reason, string $actor): ServiceRequest

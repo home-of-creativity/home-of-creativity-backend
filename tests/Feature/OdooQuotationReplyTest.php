@@ -68,6 +68,9 @@ class OdooQuotationReplyTest extends TestCase
 
         $this->whatsApp('1');
 
+        $this->assertSame(RequestStatus::AwaitingAdminApproval, $request->fresh()->status);
+        $this->assertNotSame('sale', $this->order);
+        $this->confirmClientApproval($request);
         $this->assertSame(RequestStatus::AwaitingPayment, $request->fresh()->status);
         $this->assertSame('sale', $this->order);
         $this->assertSame(1, Client::query()->count());
@@ -92,7 +95,7 @@ class OdooQuotationReplyTest extends TestCase
         $request = ServiceRequest::query()->sole();
         $this->postJson("/api/admin/requests/{$request->id}/quotation", ['lines' => [['title' => 'شعار', 'amount' => 150]]])->assertOk();
         $this->whatsApp('موافقة');
-        $this->assertSame(RequestStatus::AwaitingPayment, $request->fresh()->status);
+        $this->assertSame(RequestStatus::AwaitingAdminApproval, $request->fresh()->status);
     }
 
     public function test_the_email_carries_the_odoo_link_and_an_answer_on_odoo_reaches_the_request(): void
@@ -107,10 +110,10 @@ class OdooQuotationReplyTest extends TestCase
         $this->artisan('odoo:sync-quotations')->assertSuccessful();
         $this->assertSame(RequestStatus::QuotationSent, $request->fresh()->status);
 
-        // Accepted on the portal: the request moves as if the client pressed approve.
+        // Accepted on the portal: the request moves as if the client pressed approve, and waits for an admin.
         $this->order = 'sale';
         $this->artisan('odoo:sync-quotations')->expectsOutputToContain('approved=1')->assertSuccessful();
-        $this->assertSame(RequestStatus::AwaitingPayment, $request->fresh()->status);
+        $this->assertSame(RequestStatus::AwaitingAdminApproval, $request->fresh()->status);
     }
 
     public function test_a_decline_on_the_odoo_portal_rejects_the_request(): void

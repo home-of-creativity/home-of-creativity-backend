@@ -44,13 +44,19 @@ class ClientFallbackTest extends TestCase
         $this->postJson("/api/admin/requests/{$request->number}/client-decision", ['decision' => 'approve'])
             ->assertOk()
             ->assertJsonPath('data.status', 'awaiting_payment')
-            ->assertJsonPath('data.manual_decisions.0.to_status', 'awaiting_payment')
+            ->assertJsonPath('data.manual_decisions.0.to_status', 'awaiting_admin_approval')
             ->assertJsonPath('message', 'سُجّل قرار الزبون يدوياً.');
 
+        // The call is recorded on the client's behalf, then the admin's own approval rights confirm it.
+        $this->assertDatabaseHas('request_status_history', [
+            'request_id' => $request->id,
+            'to_status' => 'awaiting_admin_approval',
+            'actor' => 'manual:'.$this->admin->id,
+        ]);
         $this->assertDatabaseHas('request_status_history', [
             'request_id' => $request->id,
             'to_status' => 'awaiting_payment',
-            'actor' => 'manual:'.$this->admin->id,
+            'actor' => 'admin:'.$this->admin->id,
         ]);
         $this->assertTrue(OdooLeadNote::query()->get()->contains(
             fn (OdooLeadNote $note): bool => str_contains($note->body, 'بواسطة: اللوحة نيابة عن الزبون'),

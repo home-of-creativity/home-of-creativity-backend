@@ -53,6 +53,7 @@ class ClickUpStatusMapper
             RequestStatus::Submitted,
             RequestStatus::QuotationSent,
             RequestStatus::QuotationRejected,
+            RequestStatus::AwaitingAdminApproval,
             RequestStatus::AwaitingPayment,
             RequestStatus::PaymentConfirmed => ExecutionStatus::NotStarted,
             RequestStatus::InProgress,

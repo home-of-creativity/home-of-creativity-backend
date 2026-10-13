@@ -284,6 +284,28 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
     }
   }
 
+  async function settleClientApproval(decision: "confirm" | "decline") {
+    if (!item || recordingDecision) return;
+    if (decision === "decline" && !decisionReason.trim()) {
+      setError("اكتب سبب عدم الاعتماد، فهو يُحفظ في سجل الطلب.");
+      return;
+    }
+    setError("");
+    setNotice("");
+    setRecordingDecision(true);
+    try {
+      const res = await api.clientApproval(item.id, decision, decisionReason.trim());
+      setItem(res.data);
+      setStatus(res.data.status);
+      setDecisionReason("");
+      setNotice(res.message ?? "");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t(copy.saveFailed));
+    } finally {
+      setRecordingDecision(false);
+    }
+  }
+
   async function provisionClickUp() {
     if (!item) return;
     setError("");
@@ -335,6 +357,7 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
   const canWorkPlan = can("ops.requests.work_plan");
   const canEdit = can("ops.requests.edit");
   const canConfirmPayment = item.status === "awaiting_payment" && canPayments;
+  const canApproveQuotation = can("ops.requests.approve_quotation");
   const canConfirmRemaining = remaining > 0.009 && Boolean(item.paid_at) && canPayments;
   const showReceipts = item.status === "awaiting_payment";
   const receipts = item.files?.filter((file) => file.kind === "payment_receipt") ?? [];
@@ -827,6 +850,33 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
           </p>
         ) : null}
       </section>
+      {item.status === "awaiting_admin_approval" ? (
+        <section className="card action-card approval-gate" aria-labelledby="approval-gate-title">
+          <h2 className="form-title" id="approval-gate-title">وافق الزبون على عرض السعر وينتظر الاعتماد</h2>
+          <p className="muted">
+            {canApproveQuotation
+              ? "بعد الاعتماد يتحول العرض إلى أمر بيع في أودو ويصل الزبون المبلغ وخطوات الدفع. عدم الاعتماد يُرجع العرض مرفوضاً ويُبلغ الزبون بأن عرضاً محدّثاً سيصله."
+              : "ينتظر هذا الطلب اعتماد الإدارة قبل أمر البيع وطلب الدفع."}
+          </p>
+          {canApproveQuotation ? (
+            <div className="toolbar">
+              <button className="btn btn-teal" type="button" disabled={recordingDecision} onClick={() => void settleClientApproval("confirm")}>
+                اعتماد الموافقة
+              </button>
+              <input
+                className="field"
+                value={decisionReason}
+                onChange={(e) => setDecisionReason(e.target.value)}
+                placeholder="سبب عدم الاعتماد"
+                aria-label="سبب عدم الاعتماد"
+              />
+              <button className="btn" type="button" disabled={recordingDecision} onClick={() => void settleClientApproval("decline")}>
+                عدم الاعتماد
+              </button>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
       {showClientFallback ? (
         <section className="card action-card">
           <h2 className="form-title">{t(copy.clientDecisionTitle)}</h2>

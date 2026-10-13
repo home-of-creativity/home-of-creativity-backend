@@ -120,8 +120,10 @@ class AppClientTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.state', 'approved');
 
-        $this->assertSame(RequestStatus::AwaitingPayment, $request->fresh()->status);
+        // The order and the payment wait for an admin to confirm the client's yes.
+        $this->assertSame(RequestStatus::AwaitingAdminApproval, $request->fresh()->status);
         $this->postJson("/api/app/client/quotations/{$quotation->id}/approve")->assertStatus(422);
+        $this->assertSame(RequestStatus::AwaitingPayment, $this->confirmClientApproval($request)->status);
     }
 
     public function test_client_rejects_with_a_reason_and_old_versions_are_closed(): void

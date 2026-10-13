@@ -244,10 +244,17 @@ class WhatsAppWebBotTest extends TestCase
             ])
             ->assertOk();
 
+        // The client hears that the team confirms first; the payment steps come after that.
+        $this->assertSame(RequestStatus::AwaitingAdminApproval, $serviceRequest->fresh()->status);
+        Http::assertSent(fn (Request $request): bool => $request->url() === 'http://wa-web.test/send'
+            && str_contains((string) data_get($request->data(), 'text'), 'بانتظار تأكيد الفريق')
+            && ! str_contains((string) data_get($request->data(), 'text'), 'اختر الفئة'));
+        $this->assertSame('idle', Cache::get('hoc:wa-session:963955555555')['step'] ?? null);
+
+        $this->confirmClientApproval($serviceRequest);
         $this->assertSame(RequestStatus::AwaitingPayment, $serviceRequest->fresh()->status);
         Http::assertSent(fn (Request $request): bool => $request->url() === 'http://wa-web.test/send'
-            && str_contains((string) data_get($request->data(), 'text'), 'وصل')
-            && ! str_contains((string) data_get($request->data(), 'text'), 'اختر الفئة'));
+            && str_contains((string) data_get($request->data(), 'text'), 'تعليمات الدفع'));
     }
 
     public function test_asking_for_a_bigger_package_sends_a_larger_quotation_with_the_ad_budget(): void
@@ -516,7 +523,7 @@ class WhatsAppWebBotTest extends TestCase
             ])
             ->assertOk();
 
-        $this->assertSame(RequestStatus::AwaitingPayment, $serviceRequest->fresh()->status);
+        $this->assertSame(RequestStatus::AwaitingAdminApproval, $serviceRequest->fresh()->status);
 
         Cache::put('hoc:wa-session:963999999998', ['step' => 'idle'], now()->addHour());
         Client::query()->create([

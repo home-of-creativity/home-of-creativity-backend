@@ -59,6 +59,7 @@ enum StaffAbility: string
                 'view' => $view,
                 'edit' => ['ar' => 'تعديل الطلب', 'en' => 'Edit request'],
                 'quotation' => ['ar' => 'عرض السعر وقرار العميل', 'en' => 'Quotation and client decision'],
+                'approve_quotation' => ['ar' => 'اعتماد موافقة العميل على العرض', 'en' => 'Confirm a client approval'],
                 'payments' => ['ar' => 'تأكيد الدفع وطلب الإيصال', 'en' => 'Confirm payment and ask for receipt'],
                 'work_plan' => ['ar' => 'خطة العمل والتمديد', 'en' => 'Work plan and extension'],
                 'integrations' => ['ar' => 'ClickUp وDrive والذكاء وإعادة المحاولة', 'en' => 'ClickUp, Drive, AI and retries'],

@@ -74,6 +74,32 @@ class OdooPaperPdfTest extends TestCase
         @unlink($cover);
     }
 
+    public function test_letterhead_bands_keep_the_top_and_bottom_of_the_cover(): void
+    {
+        $image = imagecreatetruecolor(210, 297);
+        imagefilledrectangle($image, 0, 0, 209, 296, imagecolorallocate($image, 255, 255, 255));
+        imagefilledrectangle($image, 0, 0, 209, 57, imagecolorallocate($image, 10, 20, 80));
+        imagefilledrectangle($image, 0, 249, 209, 296, imagecolorallocate($image, 200, 100, 20));
+        ob_start();
+        imagepng($image);
+        $binary = (string) ob_get_clean();
+        imagedestroy($image);
+
+        $uris = app(OdooPaperPdf::class)->letterheadBandDataUris($binary);
+
+        $this->assertIsArray($uris);
+        $header = imagecreatefromstring((string) base64_decode(substr($uris['header'], strlen('data:image/png;base64,'))));
+        $footer = imagecreatefromstring((string) base64_decode(substr($uris['footer'], strlen('data:image/png;base64,'))));
+        $this->assertNotFalse($header);
+        $this->assertNotFalse($footer);
+        $this->assertSame(58, imagesy($header));
+        $this->assertSame(48, imagesy($footer));
+        $this->assertSame(10, imagecolorsforindex($header, imagecolorat($header, 4, 4))['red']);
+        $this->assertSame(200, imagecolorsforindex($footer, imagecolorat($footer, 4, 4))['red']);
+        imagedestroy($header);
+        imagedestroy($footer);
+    }
+
     public function test_stamp_keeps_the_source_page_full_width(): void
     {
         $dir = storage_path('framework/cache/mpdf');

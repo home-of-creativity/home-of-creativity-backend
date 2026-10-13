@@ -176,7 +176,8 @@ class ServiceRequestTest extends TestCase
             ->postJson("/api/bot/telegram/requests/{$request->number}/approve", [
                 'telegram_user_id' => 'tg-1',
             ])->assertOk()
-            ->assertJsonPath('data.status', 'awaiting_payment');
+            ->assertJsonPath('data.status', 'awaiting_admin_approval')
+            ->assertJsonPath('awaiting_admin', true);
 
         $this->assertSame(0, $request->fresh()?->invoices()->count());
 
@@ -184,7 +185,9 @@ class ServiceRequestTest extends TestCase
             ->postJson("/api/bot/telegram/requests/{$request->number}/approve", [
                 'telegram_user_id' => 'tg-1',
             ])->assertOk()
-            ->assertJsonPath('data.status', 'awaiting_payment');
+            ->assertJsonPath('data.status', 'awaiting_admin_approval');
+
+        $this->assertSame(RequestStatus::AwaitingPayment, $this->confirmClientApproval($request)->status);
     }
 
     public function test_confirm_payment_queues_gemini_without_manual_status(): void

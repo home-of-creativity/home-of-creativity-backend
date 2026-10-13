@@ -257,6 +257,9 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::post('requests/{service_request}/quotation', [AdminServiceRequestController::class, 'sendQuotation']);
         Route::post('requests/{service_request}/client-decision', [AdminServiceRequestController::class, 'clientDecision']);
     });
+    Route::middleware('ability:ops.requests.approve_quotation')->group(function () {
+        Route::post('requests/{service_request}/client-approval', [AdminServiceRequestController::class, 'clientApproval']);
+    });
     Route::middleware('ability:ops.requests.payments')->group(function () {
         Route::post('requests/{service_request}/confirm-payment', [AdminServiceRequestController::class, 'confirmPayment']);
         Route::post('requests/{service_request}/re-request-receipt', [AdminServiceRequestController::class, 'reRequestReceipt']);
@@ -564,6 +567,7 @@ Route::prefix('bot/admin')->middleware('shared.secret:services.telegram.admin_bo
     Route::get('clients/{client}', [AdminBotController::class, 'client']);
     Route::get('operations', [AdminBotController::class, 'operations']);
     Route::post('operations/rebuild', [AdminBotController::class, 'rebuildPlan']);
+    Route::post('client-approvals/confirm', [AdminBotController::class, 'confirmClientApproval']);
     Route::get('finance', [AdminBotController::class, 'finance']);
     Route::post('expenses', [AdminBotController::class, 'storeExpense']);
 });

@@ -140,8 +140,7 @@ class OdooClientDecisionTest extends TestCase
         $this->assertSame(RequestStatus::Cancelled, $request->status);
         $this->assertNull($request->odoo_invoice_id);
 
-        $paid = $this->invoicedRequest(second: true);
-        $this->postJson("/api/admin/requests/{$paid->id}/confirm-payment", ['payment_method' => 'cash', 'amount' => 200])->assertOk();
+        $paid = $this->invoicedRequest(second: true);        $this->postJson("/api/admin/requests/{$paid->id}/confirm-payment", ['payment_method' => 'cash', 'amount' => 200])->assertOk();
         $this->deleteJson("/api/admin/odoo/quotations/{$paid->odoo_quotation_id}")->assertStatus(422);
         $this->assertSame('sale', $this->orders[(int) $paid->odoo_quotation_id]);
     }
@@ -165,6 +164,7 @@ class OdooClientDecisionTest extends TestCase
     {
         $request = $this->sentQuotation();
         $this->bot($request, 'approve')->assertOk();
+        $this->confirmClientApproval($request);
         if ($second) {
             $this->move = null;
         }

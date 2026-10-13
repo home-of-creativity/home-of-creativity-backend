@@ -1405,6 +1405,13 @@ export const api = {
       body: JSON.stringify({ decision, reason: reason || undefined }),
     });
   },
+  /** An admin confirms or turns down a client's approval that waits for them. */
+  clientApproval(id: number, decision: "confirm" | "decline", reason?: string) {
+    return request<Envelope<ServiceRequest>>(`/admin/requests/${id}/client-approval`, {
+      method: "POST",
+      body: JSON.stringify({ decision, reason: reason || undefined }),
+    });
+  },
   finance(filters: FinanceFilters = {}) {
     return request<Envelope<FinanceSummary>>(`/admin/finance${queryString({ ...filters })}`);
   },

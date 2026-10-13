@@ -3,7 +3,9 @@
 namespace App\Services;
 
 use App\Support\OdooPaperLimits;
+use App\Support\OdooNoteHtml;
 use App\Support\OdooPaperPdf;
+use App\Support\PaymentTermLabel;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
@@ -1331,6 +1333,7 @@ class OdooClient
         int|string|null $opportunityId = null,
     ): array {
         $partnerId = $this->createOrReusePartner($partnerName, $email, $phone, $requestNumber, $existingPartnerId);
+        $notes = $notes !== null ? OdooNoteHtml::trimEmptyTail($notes) : null;
         $lineName = filled($notes) ? "{$title}\n{$notes}" : $title;
         $orderValues = [
             'partner_id' => (int) $partnerId,
@@ -1460,7 +1463,7 @@ class OdooClient
             'order_line' => array_merge([[5, 0, 0]], array_map(fn (array $line): array => [0, 0, $this->staffSaleLine($line)], $lines)),
         ];
         if ($notes !== null) {
-            $vals['note'] = $notes;
+            $vals['note'] = OdooNoteHtml::trimEmptyTail($notes);
         }
         if ($reference !== null && $reference !== '') {
             $vals['client_order_ref'] = $reference;
@@ -1636,11 +1639,25 @@ class OdooClient
      */
     public function listPaymentTerms(): array
     {
-        $rows = $this->searchRead('account.payment.term', [['active', '=', true]], ['id', 'name'], 100, 0, 'sequence asc, id asc');
+        $domain = [['active', '=', true]];
+        $fields = ['id', 'name'];
+        $order = 'sequence asc, id asc';
+        // Odoo's own Arabic translation first; terms without one are translated by PaymentTermLabel.
+        try {
+            $context = ['lang' => 'ar_001'];
+            $rows = $this->useJson2()
+                ? $this->json2('account.payment.term', 'search_read', ['domain' => $domain, 'fields' => $fields, 'limit' => 100, 'order' => $order, 'context' => $context])
+                : $this->executeKw($this->legacyUid(), 'account.payment.term', 'search_read', [$domain], ['fields' => $fields, 'limit' => 100, 'order' => $order, 'context' => $context]);
+            if (! is_array($rows) || ! array_is_list($rows)) {
+                throw new RuntimeException('Odoo did not return a record list.');
+            }
+        } catch (\Throwable) {
+            $rows = $this->searchRead('account.payment.term', $domain, $fields, 100, 0, $order);
+        }
 
         return array_values(array_map(fn (array $row): array => [
             'id' => (int) $row['id'],
-            'name' => (string) ($row['name'] ?? ''),
+            'name' => PaymentTermLabel::arabic((string) ($row['name'] ?? '')),
         ], array_filter($rows, fn (mixed $row): bool => is_array($row) && isset($row['id']))));
     }
 
@@ -1846,6 +1863,85 @@ class OdooClient
         } catch (Throwable $exception) {
             Log::warning('Odoo paged letterhead CSS failed.', ['error' => $exception->getMessage()]);
         }
+        try {
+            $this->installSplitLineViews();
+        } catch (Throwable $exception) {
+            Log::warning('Odoo split line views failed.', ['error' => $exception->getMessage()]);
+        }
+    }
+
+    /**
+     * wkhtmltopdf never splits a table row shorter than a page: a line with a long description
+     * jumps whole to the next page and leaves the first page empty under the column titles.
+     * Each description line after the first becomes its own row, so a long line flows across
+     * pages. Rows of one line share its stripe so it still reads as one line.
+     */
+    private function installSplitLineViews(): void
+    {
+        // \\n stays a two-character escape for Odoo's expression parser.
+        $more = <<<'XML'
+    <t t-set="hoc_more" t-value="(line.name or '').split('\n')[1:]"/>
+    <tr t-foreach="hoc_more" t-as="hoc_text" t-attf-class="hoc-line-more hoc-stripe-{{ line_index % 2 }}{{ ' hoc-line-end' if hoc_text_last else '' }}">
+        <td colspan="99" t-att-class="padding_class"><span dir="auto" t-out="hoc_text"/></td>
+    </tr>
+XML;
+        $views = [
+            'sale.report_saleorder_document' => [
+                'name' => 'HOC split long lines (quotation)',
+                'arch' => <<<XML
+<data>
+    <xpath expr="//tr[@name='tr_product']" position="attributes">
+        <attribute name="t-attf-class">hoc-stripe-{{ line_index % 2 }}{{ ' hoc-has-more' if '\\n' in (line.name or '') else '' }}</attribute>
+    </xpath>
+    <xpath expr="//tr[@name='tr_product']/td[@name='td_product_name']/span[@t-field='line.name']" position="replace">
+        <span dir="auto" t-out="(line.name or '').split('\\n')[0]"/>
+    </xpath>
+    <xpath expr="//tr[@name='tr_product']" position="after">
+        <t t-if="not (is_section or is_subsection or is_note)">
+{$more}
+        </t>
+    </xpath>
+</data>
+XML,
+            ],
+            'account.report_invoice_document' => [
+                'name' => 'HOC split long lines (invoice)',
+                'arch' => <<<XML
+<data>
+    <xpath expr="//t[@name='account_invoice_line_accountable']/.." position="attributes">
+        <attribute name="t-att-class">('fw-bolder o_line_section' if is_section else 'fw-bold o_line_subsection' if is_subsection else 'fst-italic o_line_note' if is_note else '') + ' hoc-stripe-%s' % (line_index % 2) + (' hoc-has-more' if is_product and '\\n' in (line.name or '') else '')</attribute>
+    </xpath>
+    <xpath expr="//td[@name='account_invoice_line_name']/span[@t-field='line.name']" position="replace">
+        <span t-if="line.name" dir="auto" t-out="line.name.split('\\n')[0]"/>
+    </xpath>
+    <xpath expr="//t[@name='account_invoice_line_accountable']/.." position="after">
+        <t t-if="is_product">
+{$more}
+        </t>
+    </xpath>
+</data>
+XML,
+            ],
+        ];
+
+        foreach ($views as $key => $spec) {
+            $parent = $this->firstRecord($this->searchRead('ir.ui.view', [
+                ['key', '=', $key],
+                ['inherit_id', '=', false],
+            ], ['id'], 1));
+            $parentId = (int) ($parent['id'] ?? 0);
+            if ($parentId <= 0) {
+                continue;
+            }
+            $vals = ['name' => $spec['name'], 'type' => 'qweb', 'inherit_id' => $parentId, 'arch' => $spec['arch'], 'active' => true];
+            $existing = $this->firstRecord($this->searchRead('ir.ui.view', [['name', '=', $spec['name']]], ['id'], 1));
+            if ($existing !== null) {
+                $this->writeRecord('ir.ui.view', (int) $existing['id'], $vals);
+
+                continue;
+            }
+            $this->call('ir.ui.view', 'create', ['vals' => $vals]);
+        }
     }
 
     public function downloadPortalReportPdf(string $model, int $recordId): ?string
@@ -1918,8 +2014,10 @@ class OdooClient
             'margin_left' => 0,
             'margin_right' => 0,
             'header_line' => false,
-            'header_spacing' => 0,
-            'dpi' => 90,
+            // wkhtmltopdf measures the cover header as 0mm tall and puts its top at
+            // margin_top - spacing; spacing equal to the margin puts the cover at the page top.
+            'header_spacing' => OdooPaperLimits::LETTERHEAD_MARGIN_TOP,
+            'dpi' => OdooPaperLimits::LETTERHEAD_DPI,
             'disable_shrinking' => true,
         ];
 
@@ -2003,6 +2101,31 @@ class OdooClient
         $side = OdooPaperLimits::LETTERHEAD_MARGIN_SIDE;
         $top = OdooPaperLimits::LETTERHEAD_MARGIN_TOP;
         $bottom = OdooPaperLimits::LETTERHEAD_MARGIN_BOTTOM;
+        $cover = $this->companyLetterheadPng();
+        $bands = is_string($cover)
+            ? app(OdooPaperPdf::class)->letterheadBandDataUris((string) file_get_contents($cover))
+            : null;
+        // Bands are 100% wide (210mm would overflow at dpi 90) and sized to print exactly at the margins.
+        $band = fn (string $uri, int $mm): string => '<div class="hoc-cover-band" dir="ltr" style="direction: ltr; margin: 0; padding: 0; line-height: 0; height: '.OdooPaperLimits::printedMm($mm).'mm; overflow: hidden;"><img src="'.$uri.'" alt="" style="width: 100%; height: '.OdooPaperLimits::printedMm($mm).'mm; display: block; margin: 0; padding: 0; border: 0;"/></div>';
+        // The header and footer are their own pages on a Bootstrap .container body, whose side padding
+        // left white strips beside the cover; the cover runs edge to edge on both sides.
+        $edgeCss = '<style>html,body,body.container,body.container-fluid,.o_body_pdf{margin-left:0 !important;margin-right:0 !important;padding-left:0 !important;padding-right:0 !important;max-width:none !important;width:100% !important;}.header,.footer{margin-left:0 !important;margin-right:0 !important;padding-left:0 !important;padding-right:0 !important;}</style>';
+        // Odoo's HTML preview pads the page and the header by 11mm; the cover runs edge to edge there too.
+        $previewCss = '<style>.o_body_html{padding:0 !important;}.o_body_html .header{padding-top:0 !important;}.o_body_html .hoc-cover-band,.o_body_html .hoc-cover-band img{height:auto !important;}</style>';
+        // A line with a long description continues on the next page instead of leaving the first
+        // page empty, and the column titles repeat above it there.
+        // Rows of one line (installSplitLineViews) share its stripe and read as one block.
+        $contentCss = '<style>'
+            .'.o_main_table thead{display:table-header-group !important;}.o_main_table td{vertical-align:top;}'
+            .'.o_table_striped table.o_main_table tbody tr td{background-color:transparent !important;}'
+            .'.o_table_striped table.o_main_table tbody tr.hoc-stripe-0 td{background-color:rgba(231,233,237,0.5) !important;}'
+            .'.o_main_table tbody tr.hoc-line-more{border-top:none !important;}'
+            .'.o_main_table tbody tr.hoc-has-more td,.o_main_table tbody tr.hoc-line-more td{padding-bottom:0 !important;}'
+            .'.o_main_table tbody tr.hoc-line-more td{padding-top:0 !important;}'
+            .'.o_main_table tbody tr.hoc-line-end td{padding-bottom:0.5rem !important;}'
+            .'</style>';
+        $headerImg = is_array($bands) ? $edgeCss.$previewCss.$band($bands['header'], $top) : '';
+        $footerImg = is_array($bands) ? $edgeCss.$band($bands['footer'], $bottom) : '';
         $arch = <<<XML
 <data>
     <xpath expr="//div[@t-if='layout_background_url'][1]" position="replace">
@@ -2014,17 +2137,20 @@ class OdooClient
     <xpath expr="//div[contains(@t-attf-class, 'article')]" position="attributes">
         <attribute name="t-attf-style">background: transparent !important; padding: 0 {$side}mm 0 {$side}mm !important;</attribute>
     </xpath>
+    <xpath expr="//div[contains(@t-attf-class, 'article')]" position="inside">
+        {$contentCss}
+    </xpath>
     <xpath expr="//div[contains(@t-attf-class, 'header')]" position="attributes">
-        <attribute name="style">background: transparent !important; padding: 0; margin: 0;</attribute>
+        <attribute name="t-attf-style">background: transparent !important; padding: 0; margin: 0; direction: ltr; line-height: 0;</attribute>
     </xpath>
     <xpath expr="//div[contains(@t-attf-class, 'header')]" position="inside">
-        <div t-if="layout_background_url" t-attf-style="width: 210mm; height: {$top}mm; background-image: url('{{ layout_background_url }}'); background-size: 210mm 297mm; background-position: top left; background-repeat: no-repeat;"/>
+        {$headerImg}
     </xpath>
     <xpath expr="//div[contains(@t-attf-class, 'footer')]" position="attributes">
-        <attribute name="style">background: transparent !important; padding: 0; margin: 0;</attribute>
+        <attribute name="t-attf-style">background: transparent !important; padding: 0; margin: 0; direction: ltr; line-height: 0;</attribute>
     </xpath>
     <xpath expr="//div[contains(@t-attf-class, 'footer')]" position="inside">
-        <div t-if="layout_background_url" t-attf-style="width: 210mm; height: {$bottom}mm; background-image: url('{{ layout_background_url }}'); background-size: 210mm 297mm; background-position: bottom left; background-repeat: no-repeat;"/>
+        {$footerImg}
     </xpath>
 </data>
 XML;

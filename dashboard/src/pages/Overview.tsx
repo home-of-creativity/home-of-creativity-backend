@@ -9,7 +9,7 @@ import { api, type ServiceRequest } from "../api";
 import { copy, statuses, type Locale } from "../i18n";
 import { useLive, useLiveStamp } from "../live";
 
-const ORANGE_STATUSES = new Set(["quotation_sent", "ai_analyzing", "revision_requested"]);
+const ORANGE_STATUSES = new Set(["quotation_sent", "awaiting_admin_approval", "ai_analyzing", "revision_requested"]);
 const TEAL_STATUSES = new Set(["payment_confirmed", "completed", "approved", "in_progress"]);
 const DANGER_STATUSES = new Set(["quotation_rejected", "cancelled"]);
 

@@ -1080,15 +1080,27 @@ class HandleWhatsAppInbound
         }
         if (str_starts_with($data, 'approve:')) {
             $ref = substr($data, 8);
-            $this->runOwned($client, $ref, function (ServiceRequest $request) use ($chatId): void {
+            $held = false;
+            $this->runOwned($client, $ref, function (ServiceRequest $request) use ($chatId, &$held): void {
                 $this->approveQuotation->handle($request);
-                $this->safeSend($chatId, $this->tx(
-                    "تمام، سجلنا موافقتك.\nحوّل المبلغ عبر شام كاش، وبعدين ابعت صورة الوصل أو PDF هون.",
-                    "Your approval is recorded.\nTransfer the amount with Sham Cash, then send the receipt photo or PDF here.",
-                ));
+                $held = $this->approveQuotation->heldForAdmin;
+                $this->safeSend($chatId, $held
+                    ? $this->tx(
+                        "تمام، سجلنا موافقتك ✅\nبانتظار تأكيد الفريق، وبعدها بيوصلك المبلغ وخطوات الدفع هون.",
+                        "Your approval is recorded.\nThe team will confirm it, then the amount and payment steps arrive here.",
+                    )
+                    : $this->tx(
+                        "تمام، سجلنا موافقتك.\nحوّل المبلغ عبر شام كاش، وبعدين ابعت صورة الوصل أو PDF هون.",
+                        "Your approval is recorded.\nTransfer the amount with Sham Cash, then send the receipt photo or PDF here.",
+                    ));
             });
-            $session['step'] = 'receipt';
-            $session['receipt_ref'] = $ref;
+            // While the team confirms there is nothing to pay yet; a receipt sent later is still matched.
+            $session['step'] = $held ? 'idle' : 'receipt';
+            if ($held) {
+                unset($session['receipt_ref']);
+            } else {
+                $session['receipt_ref'] = $ref;
+            }
             unset($session['quote_ref']);
             $this->putSession($phone, $session);
 

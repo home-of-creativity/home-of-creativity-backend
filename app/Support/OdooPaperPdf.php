@@ -145,6 +145,40 @@ class OdooPaperPdf
     }
 
     /**
+     * Header and footer slices of the cover, as PNG data URIs the report can print
+     * at the paper margins. A full-page image inside the header paints over the lines.
+     *
+     * @return array{header: string, footer: string}|null
+     */
+    public function letterheadBandDataUris(string $binary): ?array
+    {
+        if ($binary === '') {
+            return null;
+        }
+
+        $path = tempnam($this->tempDir(), 'hoc-cover-');
+        if (! is_string($path) || $path === '') {
+            return null;
+        }
+        file_put_contents($path, $binary);
+        $bands = $this->letterheadBands($path);
+        @unlink($path);
+        if ($bands === null) {
+            return null;
+        }
+
+        [$header, $footer] = $bands;
+        $uris = [
+            'header' => 'data:image/png;base64,'.base64_encode((string) file_get_contents($header)),
+            'footer' => 'data:image/png;base64,'.base64_encode((string) file_get_contents($footer)),
+        ];
+        @unlink($header);
+        @unlink($footer);
+
+        return $uris;
+    }
+
+    /**
      * @return array{0: string, 1: string}|null
      */
     private function letterheadBands(string $letterheadPng): ?array

@@ -315,7 +315,8 @@ class TelegramBotController extends Controller
     {
         $this->assertClientOwns($request, $serviceRequest);
         $updated = $approveQuotation->handle($serviceRequest);
-        $additional = ['message' => 'Approved.'];
+        // The payment steps reach the client only after an admin confirms.
+        $additional = ['message' => 'Approved.', 'awaiting_admin' => $approveQuotation->heldForAdmin];
         if (is_array($approveQuotation->clientPaymentNotice)) {
             $additional['sham_cash_qr'] = ShamCashQr::toBotPayload($approveQuotation->clientPaymentNotice);
         }

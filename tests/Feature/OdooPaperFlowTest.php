@@ -72,10 +72,13 @@ class OdooPaperFlowTest extends TestCase
         $this->assertSame(300.0, (float) $request->quotation_amount);
         $this->assertSame(1, $this->calls('sale.order', 'write'));
 
-        // The client approves on the bot: the quotation becomes a sales order.
+        // The client approves on the bot; the quotation becomes a sales order once an admin confirms.
         $this->withHeaders(['X-Webhook-Secret' => (string) config('services.telegram.bot_secret')])
             ->postJson("/api/bot/telegram/requests/{$request->number}/approve", ['telegram_user_id' => '777001'])
             ->assertOk();
+        $this->assertSame(RequestStatus::AwaitingAdminApproval, $request->fresh()->status);
+        $this->assertNotSame('sale', $this->odoo['order']);
+        $this->postJson("/api/admin/requests/{$request->id}/client-approval", ['decision' => 'confirm'])->assertOk();
         $this->assertSame(RequestStatus::AwaitingPayment, $request->fresh()->status);
         $this->assertSame('sale', $this->odoo['order']);
         $this->putJson('/api/admin/odoo/quotations/880', ['lines' => [['title' => 'x', 'amount' => 1]]])->assertStatus(422);
@@ -152,7 +155,8 @@ class OdooPaperFlowTest extends TestCase
     public function test_quotation_lines_carry_odoo_taxes_and_payment_terms(): void
     {
         $this->getJson('/api/admin/odoo/taxes')->assertOk()->assertJsonPath('data.0.id', 7)->assertJsonPath('data.0.amount', 5);
-        $this->getJson('/api/admin/odoo/payment-terms')->assertOk()->assertJsonPath('data.0.name', '30 Days');
+        // Terms Odoo has only in English arrive in Arabic.
+        $this->getJson('/api/admin/odoo/payment-terms')->assertOk()->assertJsonPath('data.0.name', 'خلال 30 يوماً');
 
         $client = $this->botClient();
         $this->postJson('/api/admin/odoo/quotations', [

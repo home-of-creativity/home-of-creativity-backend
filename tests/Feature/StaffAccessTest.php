@@ -199,7 +199,7 @@ class StaffAccessTest extends TestCase
         $this->assertSame(['view', 'expense_create', 'expense_update', 'expense_delete', 'sync'], $finance['actions']);
         $this->assertSame('إضافة مصروف', $finance['action_labels']['expense_create']['ar']);
         $requests = $catalog->firstWhere('key', StaffAbility::OpsRequests->value);
-        $this->assertSame(['view', 'edit', 'quotation', 'payments', 'work_plan', 'integrations', 'renew'], $requests['actions']);
+        $this->assertSame(['view', 'edit', 'quotation', 'approve_quotation', 'payments', 'work_plan', 'integrations', 'renew'], $requests['actions']);
     }
 
     public function test_each_operation_is_its_own_permission(): void

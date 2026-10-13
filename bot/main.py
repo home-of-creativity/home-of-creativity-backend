@@ -1853,8 +1853,20 @@ async def quotation_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             )
             if response.status_code < 400:
                 await query.answer()
-                context.user_data["receipt_number"] = number
                 await query.edit_message_reply_markup(reply_markup=None)
+                try:
+                    awaiting_admin = bool(response.json().get("awaiting_admin"))
+                except Exception:
+                    awaiting_admin = False
+                if awaiting_admin:
+                    # The payment steps arrive from the server once the team confirms.
+                    await query.message.reply_text(
+                        f"تم تسجيل موافقتك على عرض السعر للطلب #{escape(number)} ✅\n"
+                        "بانتظار تأكيد الفريق، وبعدها يصلك المبلغ وخطوات الدفع هنا.",
+                        reply_markup=main_keyboard(),
+                    )
+                    return
+                context.user_data["receipt_number"] = number
                 await send_sham_cash_qr(query, number, response)
             else:
                 await api_error_alert(query, response)

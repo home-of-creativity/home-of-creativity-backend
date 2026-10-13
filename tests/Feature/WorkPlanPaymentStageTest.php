@@ -246,9 +246,11 @@ class WorkPlanPaymentStageTest extends TestCase
             ->postJson("/api/bot/telegram/requests/{$serviceRequest->number}/approve", [
                 'telegram_user_id' => '213309826',
             ])->assertOk();
+        // The payment-stage message with the payok button follows the admin's confirmation.
+        $this->confirmClientApproval($serviceRequest);
 
         Http::assertSent(fn (Request $request): bool => str_contains($request->url(), 'botstaff-token/sendMessage')
-            && str_contains((string) $request['text'], 'وافق الزبون على عرض السعر')
+            && str_contains((string) $request['text'], 'اعتمدت الإدارة موافقة الزبون')
             && str_contains((string) $request['text'], 'تُؤكد بعد الدفع')
             && str_contains(json_encode($request['reply_markup'], JSON_UNESCAPED_UNICODE) ?: '', 'payok:'));
     }

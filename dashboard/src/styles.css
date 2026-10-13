@@ -1049,6 +1049,7 @@ td[colspan] {
 }
 
 .status-quotation_sent,
+.status-awaiting_admin_approval,
 .status-ai_analyzing {
   background: color-mix(in srgb, var(--brand-orange) 22%, var(--tint-base));
   color: color-mix(in srgb, var(--brand-orange) 65%, var(--brand-ink));

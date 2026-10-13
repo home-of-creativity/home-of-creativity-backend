@@ -418,7 +418,7 @@ class OdooController extends Controller
 
         $message = $result === 'deleted' ? 'حُذف عرض السعر من أودو.' : 'أُلغي عرض السعر في أودو.';
         $linked = ServiceRequest::query()->with('client')->where('odoo_quotation_id', (string) $id)->latest('id')->first();
-        if ($linked !== null && in_array($linked->status, [RequestStatus::Submitted, RequestStatus::QuotationSent, RequestStatus::QuotationRejected], true)) {
+        if ($linked !== null && in_array($linked->status, [RequestStatus::Submitted, RequestStatus::QuotationSent, RequestStatus::QuotationRejected, RequestStatus::AwaitingAdminApproval], true)) {
             $transitions->transition($linked, RequestStatus::Cancelled, 'admin', 'Quotation cancelled from the dashboard.');
             $name = (string) ($snapshot['name'] ?? '');
             $notify->send($linked->fresh(['client']) ?? $linked, "أُلغي عرض السعر {$name} للطلب #{$linked->number}. إذا عندك أي سؤال تواصل معنا.");
@@ -447,7 +447,7 @@ class OdooController extends Controller
         abort_if($cancelled === null, 422, 'على أمر البيع فاتورة مدفوعة، فلا يُلغى.');
 
         $message = $cancelled === [] ? 'أُلغي أمر البيع في أودو.' : 'أُلغي أمر البيع في أودو مع فواتيره غير المدفوعة.';
-        $open = [RequestStatus::Submitted, RequestStatus::QuotationSent, RequestStatus::QuotationRejected, RequestStatus::AwaitingPayment];
+        $open = [RequestStatus::Submitted, RequestStatus::QuotationSent, RequestStatus::QuotationRejected, RequestStatus::AwaitingAdminApproval, RequestStatus::AwaitingPayment];
         if ($linked !== null && in_array($linked->status, $open, true)) {
             $invoiceIds = array_map('strval', $cancelled);
             $linked->invoices()->whereIn('odoo_invoice_id', $invoiceIds)->update(['status' => 'cancelled']);
@@ -833,8 +833,7 @@ class OdooController extends Controller
                 ? 'تم ترحيل الفاتورة، والطلب '.$opened->number.' بانتظار الدفع'.$clickup
                 : 'رُحّلت الفاتورة والطلب '.$opened->number.' بانتظار الدفع، وتعذر إيصالها إلى البريد أو واتساب.';
         } catch (\Throwable $exception) {
-            Log::warning('Odoo invoice post failed.', ['error' => $exception->getMessage()]);
-            $message = 'أُنشئت الفاتورة وفُتح الطلب '.$opened->number.' وتعذر ترحيلها أو إرسالها.';
+            Log::warning('Odoo invoice post failed.', ['error' => $exception->getMessage()]);            $message = 'أُنشئت الفاتورة وفُتح الطلب '.$opened->number.' وتعذر ترحيلها أو إرسالها.';
         }
 
         return [$created, $message];
@@ -911,8 +910,7 @@ class OdooController extends Controller
                 return $acceptance->handle($request->fresh(['client', 'pricingPackage']) ?? $request);
             }
         } catch (\Throwable $exception) {
-            Log::warning('Invoice could not move the request to payment.', ['request' => $request->number, 'error' => $exception->getMessage()]);
-        }
+            Log::warning('Invoice could not move the request to payment.', ['request' => $request->number, 'error' => $exception->getMessage()]);        }
 
         return $request->fresh() ?? $request;
     }

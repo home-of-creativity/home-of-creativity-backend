@@ -177,8 +177,7 @@ class AdminDashboardTest extends TestCase
             ->assertJsonPath('data.requires_full_payment', false)
             ->assertJsonPath('data.payment_plan', 'partial');
 
-        $approved = $serviceRequest->fresh();
-        $this->assertNotNull($approved);
+        $approved = $this->confirmClientApproval($serviceRequest);
         $this->assertEqualsWithDelta(400, (float) $approved->amount_total, 0.01);
         $this->assertEqualsWithDelta(200, $approved->expectedDue(), 0.01);
     }

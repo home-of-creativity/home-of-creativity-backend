@@ -701,6 +701,34 @@ async def on_rebuild_plan(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await query.message.reply_text(format_operation(response.json().get("data") or {}), reply_markup=admin_keyboard())
 
 
+async def on_confirm_client_approval(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """«✅ اعتماد» under a client approval: the quotation becomes a sales order and the client gets the payment steps."""
+    query = update.callback_query
+    user = update.effective_user
+    if query is None or query.data is None or user is None or query.message is None:
+        return
+    if not await ensure_admin(update):
+        return
+    ref = query.data.split(":", 1)[1]
+    response = await request_json(
+        "POST",
+        "/bot/admin/client-approvals/confirm",
+        json={"telegram_user_id": str(user.id), "request_number": ref},
+    )
+    if response.status_code >= 400:
+        await api_error_alert(query, response)
+        return
+    await query.answer("تم الاعتماد.")
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    await query.message.reply_text(
+        f"✅ اعتُمدت موافقة الزبون للطلب #{escape(ref)}: تحول العرض إلى أمر بيع ووصل الزبون طلب الدفع.",
+        reply_markup=admin_keyboard(),
+    )
+
+
 def format_operation(item: dict[str, Any]) -> str:
     lines = [
         f"#{item.get('display_number')} — {item.get('title')}",
@@ -901,6 +929,7 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(on_open_client, pattern=r"^copen:"))
     application.add_handler(CallbackQueryHandler(on_open_operation, pattern=r"^oopen:"))
     application.add_handler(CallbackQueryHandler(on_rebuild_plan, pattern=r"^oplan:"))
+    application.add_handler(CallbackQueryHandler(on_confirm_client_approval, pattern=r"^qok:"))
     application.add_handler(
         ConversationHandler(
             entry_points=[
