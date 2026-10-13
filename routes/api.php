@@ -160,6 +160,8 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::delete('clients/{client}', [AdminClientController::class, 'destroy']);
         Route::get('odoo/status', [AdminOdooController::class, 'status']);
         Route::get('odoo/products', [AdminOdooController::class, 'products']);
+        Route::get('odoo/taxes', [AdminOdooController::class, 'taxes']);
+        Route::get('odoo/payment-terms', [AdminOdooController::class, 'paymentTerms']);
         Route::get('odoo/quotations', [AdminOdooController::class, 'quotations']);
         Route::get('odoo/invoices', [AdminOdooController::class, 'invoices']);
         Route::get('odoo/quotations/{id}', [AdminOdooController::class, 'showQuotation'])->whereNumber('id');

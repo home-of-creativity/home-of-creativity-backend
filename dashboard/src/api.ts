@@ -578,6 +578,11 @@ export type OdooProduct = {
   price: number;
 };
 
+/** A sales tax from Odoo; `amount` is a percent unless `amount_type` is `fixed`. */
+export type OdooTax = { id: number; name: string; amount: number; amount_type: string; price_include: boolean };
+
+export type OdooPaymentTerm = { id: number; name: string };
+
 export type OdooQuotation = {
   id: number;
   name: string;
@@ -589,6 +594,8 @@ export type OdooQuotation = {
   client_order_ref: string | null;
   origin: string | null;
   date_order: string | null;
+  payment_term_id?: number | null;
+  payment_term_name?: string | null;
   odoo_url: string;
   /** The dashboard request this quotation belongs to, when there is one. */
   request?: PaperRequest | null;
@@ -604,9 +611,10 @@ export type OdooPaperLine = {
   discount: number;
   display_type: "line_section" | "line_note" | null;
   product_id: number | null;
+  tax_ids?: number[];
 };
 
-export type PaperLineInput = { title: string; notes?: string; amount?: number; units?: number; discount?: number; product_id?: number; display_type?: "line_section" | "line_note" };
+export type PaperLineInput = { title: string; notes?: string; amount?: number; units?: number; discount?: number; product_id?: number; tax_ids?: number[]; display_type?: "line_section" | "line_note" };
 
 export type OdooInvoice = {
   id: number;
@@ -621,6 +629,8 @@ export type OdooInvoice = {
   invoice_origin: string | null;
   ref: string | null;
   invoice_date: string | null;
+  payment_term_id?: number | null;
+  payment_term_name?: string | null;
   odoo_url: string;
   request?: PaperRequest | null;
 };
@@ -1853,19 +1863,25 @@ export const api = {
   odooProducts() {
     return request<{ data: OdooProduct[] }>("/admin/odoo/products");
   },
+  odooTaxes() {
+    return request<{ data: OdooTax[] }>("/admin/odoo/taxes");
+  },
+  odooPaymentTerms() {
+    return request<{ data: OdooPaymentTerm[] }>("/admin/odoo/payment-terms");
+  },
   odooQuotation(id: number) {
     return request<Envelope<OdooQuotation & { lines: OdooPaperLine[] }>>(`/admin/odoo/quotations/${id}`);
   },
   odooInvoice(id: number) {
     return request<Envelope<OdooInvoice & { lines: OdooPaperLine[] }>>(`/admin/odoo/invoices/${id}`);
   },
-  updateOdooQuotation(id: number, payload: { lines: PaperLineInput[]; notes?: string; reference?: string; deliver?: "email" | "whatsapp" | "both" }) {
+  updateOdooQuotation(id: number, payload: { lines: PaperLineInput[]; notes?: string; reference?: string; payment_term_id?: number; deliver?: "email" | "whatsapp" | "both" }) {
     return request<Envelope<OdooQuotation>>(`/admin/odoo/quotations/${id}`, { method: "PUT", body: JSON.stringify(payload) });
   },
   deleteOdooQuotation(id: number) {
     return request<Envelope<{ id: number; result: string }>>(`/admin/odoo/quotations/${id}`, { method: "DELETE" });
   },
-  updateOdooInvoice(id: number, payload: { lines: PaperLineInput[]; reference?: string; deliver?: "email" | "whatsapp" | "both" }) {
+  updateOdooInvoice(id: number, payload: { lines: PaperLineInput[]; reference?: string; payment_term_id?: number; deliver?: "email" | "whatsapp" | "both" }) {
     return request<Envelope<OdooInvoice>>(`/admin/odoo/invoices/${id}`, { method: "PUT", body: JSON.stringify(payload) });
   },
   deleteOdooInvoice(id: number) {
@@ -1888,7 +1904,8 @@ export const api = {
     notes?: string;
     date_order?: string;
     validity_date?: string;
-    lines: { title: string; amount?: number; units?: number; notes?: string; discount?: number; product_id?: number; display_type?: "line_section" | "line_note" }[];
+    payment_term_id?: number;
+    lines: PaperLineInput[];
   }) {
     return request<{ data: OdooQuotation; request?: { id: number; number: string; status: string } | null; message?: string }>("/admin/odoo/quotations", {
       method: "POST",
@@ -1904,7 +1921,8 @@ export const api = {
     reference?: string;
     invoice_date?: string;
     due_date?: string;
-    lines?: { title: string; amount?: number; units?: number; notes?: string; discount?: number; product_id?: number; display_type?: "line_section" | "line_note" }[];
+    payment_term_id?: number;
+    lines?: PaperLineInput[];
   }) {
     return request<{ data: OdooInvoice; message?: string }>("/admin/odoo/invoices", {
       method: "POST",

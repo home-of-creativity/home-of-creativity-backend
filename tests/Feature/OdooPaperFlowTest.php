@@ -6,6 +6,7 @@ use App\Enums\RequestStatus;
 use App\Models\Client;
 use App\Models\ServiceRequest;
 use App\Models\User;
+use GuzzleHttp\Promise\PromiseInterface;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
@@ -127,6 +128,43 @@ class OdooPaperFlowTest extends TestCase
         $this->assertSame('cancelled', $second->invoices()->first()->status);
     }
 
+    public function test_quotation_lines_carry_odoo_taxes_and_payment_terms(): void
+    {
+        $this->getJson('/api/admin/odoo/taxes')->assertOk()->assertJsonPath('data.0.id', 7)->assertJsonPath('data.0.amount', 5);
+        $this->getJson('/api/admin/odoo/payment-terms')->assertOk()->assertJsonPath('data.0.name', '30 Days');
+
+        $client = $this->botClient();
+        $this->postJson('/api/admin/odoo/quotations', [
+            'client_id' => $client->id, 'action' => 'send', 'deliver' => 'email', 'payment_term_id' => 3,
+            'lines' => [['title' => 'شعار', 'amount' => 200, 'units' => 1, 'tax_ids' => [7]]],
+        ])->assertCreated();
+
+        $create = $this->payload('sale.order', 'create');
+        $this->assertSame([[6, 0, [7]]], $create[0][0]['order_line'][0][2]['tax_ids']);
+        $this->assertTrue(collect($this->odoo['payloads'])->contains(
+            fn (array $call): bool => $call[0] === 'sale.order' && $call[1] === 'write' && ($call[2][1]['payment_term_id'] ?? null) === 3,
+        ));
+        // Odoo's total (300 in this fake) is what the client is asked to pay, tax included.
+        $request = ServiceRequest::query()->sole();
+        $this->assertSame(300.0, (float) $request->quotation_amount);
+        $this->assertStringContainsString('الضرائب', (string) $request->quotation_notes);
+
+        // Editing keeps the tax and can clear the term.
+        $this->putJson('/api/admin/odoo/quotations/880', [
+            'payment_term_id' => 0,
+            'lines' => [['title' => 'شعار', 'amount' => 200, 'units' => 1, 'tax_ids' => [7]]],
+        ])->assertOk();
+        $write = collect($this->odoo['payloads'])->last(fn (array $call): bool => $call[0] === 'sale.order' && $call[1] === 'write');
+        $this->assertFalse($write[2][1]['payment_term_id']);
+        $this->assertSame([[6, 0, [7]]], $write[2][1]['order_line'][1][2]['tax_ids']);
+    }
+
+    /** @return array<int, mixed> */
+    private function payload(string $model, string $method): array
+    {
+        return collect($this->odoo['payloads'])->first(fn (array $call): bool => $call[0] === $model && $call[1] === $method)[2];
+    }
+
     private function botClient(): Client
     {
         return Client::factory()->create([
@@ -142,7 +180,7 @@ class OdooPaperFlowTest extends TestCase
         return count(array_filter($this->odoo['calls'], fn (array $call): bool => $call === [$model, $method]));
     }
 
-    private function odooAnswer(Request $request): \GuzzleHttp\Promise\PromiseInterface
+    private function odooAnswer(Request $request): PromiseInterface
     {
         $params = $request->data()['params'] ?? [];
         if (($params['service'] ?? '') === 'common') {
@@ -151,6 +189,7 @@ class OdooPaperFlowTest extends TestCase
         $args = $params['args'] ?? [];
         [$model, $method, $payload] = [$args[3] ?? '', $args[4] ?? '', $args[5] ?? []];
         $this->odoo['calls'][] = [$model, $method];
+        $this->odoo['payloads'][] = [$model, $method, $payload];
         $result = match (true) {
             $model === 'sale.order' && $method === 'create' => 880,
             $model === 'sale.order' && $method === 'action_quotation_sent' => $this->setOrder($this->odoo['order'] === 'draft' ? 'sent' : $this->odoo['order']),
@@ -161,6 +200,8 @@ class OdooPaperFlowTest extends TestCase
                 'id' => 880, 'name' => 'S00880', 'partner_id' => [44, 'Damastech'], 'amount_total' => 300,
                 'currency_id' => [1, 'USD'], 'state' => $this->odoo['order'], 'client_order_ref' => 'DASH',
             ]],
+            $model === 'account.tax' && $method === 'search_read' => [['id' => 7, 'name' => 'VAT 5%', 'amount' => 5, 'amount_type' => 'percent', 'price_include' => false]],
+            $model === 'account.payment.term' && $method === 'search_read' => [['id' => 3, 'name' => '30 Days']],
             $model === 'sale.order.line' && $method === 'search_read' => $this->odoo['order_lines'] ?: [['name' => 'شعار', 'product_uom_qty' => 1, 'price_unit' => 200, 'discount' => 0, 'display_type' => false, 'product_id' => false]],
             $model === 'account.move' && $method === 'create' => $this->setMove('draft', 990),
             $model === 'account.move' && $method === 'action_post' => $this->setMove('posted'),

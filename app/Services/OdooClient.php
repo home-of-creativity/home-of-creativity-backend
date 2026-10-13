@@ -65,7 +65,7 @@ class OdooClient
      */
     private function quotationFields(): array
     {
-        return ['id', 'name', 'partner_id', 'amount_total', 'currency_id', 'state', 'client_order_ref', 'origin', 'date_order'];
+        return ['id', 'name', 'partner_id', 'amount_total', 'amount_untaxed', 'currency_id', 'state', 'client_order_ref', 'origin', 'date_order', 'payment_term_id'];
     }
 
     /**
@@ -73,7 +73,7 @@ class OdooClient
      */
     private function invoiceFields(): array
     {
-        return ['id', 'name', 'partner_id', 'amount_total', 'amount_residual', 'currency_id', 'state', 'payment_state', 'invoice_origin', 'ref', 'invoice_date', 'invoice_date_due', 'write_date'];
+        return ['id', 'name', 'partner_id', 'amount_total', 'amount_untaxed', 'amount_residual', 'currency_id', 'state', 'payment_state', 'invoice_origin', 'ref', 'invoice_date', 'invoice_date_due', 'write_date', 'invoice_payment_term_id'];
     }
 
     /**
@@ -93,6 +93,8 @@ class OdooClient
             'client_order_ref' => $this->optionalString($row['client_order_ref'] ?? null),
             'origin' => $this->optionalString($row['origin'] ?? null),
             'date_order' => $this->optionalString($row['date_order'] ?? null),
+            'payment_term_id' => $this->relationId($row['payment_term_id'] ?? null),
+            'payment_term_name' => $this->relationName($row['payment_term_id'] ?? null),
             'odoo_url' => $this->recordUrl('sale.order', (int) $row['id']),
         ];
     }
@@ -118,6 +120,8 @@ class OdooClient
             'invoice_date' => $this->optionalString($row['invoice_date'] ?? null),
             'invoice_date_due' => $this->optionalString($row['invoice_date_due'] ?? null),
             'write_date' => $this->optionalString($row['write_date'] ?? null),
+            'payment_term_id' => $this->relationId($row['invoice_payment_term_id'] ?? null),
+            'payment_term_name' => $this->relationName($row['invoice_payment_term_id'] ?? null),
             'odoo_url' => $this->recordUrl('account.move', (int) $row['id']),
         ];
     }
@@ -1119,6 +1123,7 @@ class OdooClient
         ?string $notes,
         ?string $reference,
         int|string|null $opportunityId,
+        ?int $paymentTermId = null,
     ): array {
         $created = $this->createQuotation(
             $partnerName,
@@ -1133,6 +1138,9 @@ class OdooClient
             $opportunityId,
         );
         $id = (int) $created['odoo_quotation_id'];
+        if ($paymentTermId !== null && $paymentTermId > 0) {
+            $this->call('sale.order', 'write', ['ids' => [$id], 'vals' => ['payment_term_id' => $paymentTermId]]);
+        }
         $snapshot = $this->quotationSnapshot($id);
 
         return $snapshot ?? [
@@ -1154,7 +1162,7 @@ class OdooClient
         }
 
         $row = $this->firstRecord($this->searchRead('sale.order', [['id', '=', $id]], [
-            'id', 'name', 'partner_id', 'amount_total', 'client_order_ref', 'state',
+            'id', 'name', 'partner_id', 'amount_total', 'client_order_ref', 'state', 'payment_term_id',
         ], 1, 0, 'id desc'));
 
         if ($row === null) {
@@ -1173,6 +1181,7 @@ class OdooClient
             'amount_total' => (float) ($row['amount_total'] ?? 0),
             'client_order_ref' => $this->optionalString($row['client_order_ref'] ?? null),
             'state' => (string) ($row['state'] ?? ''),
+            'payment_term_id' => $this->relationId($row['payment_term_id'] ?? null),
         ];
     }
 
@@ -1189,6 +1198,7 @@ class OdooClient
             $this->quotationLines((int) $order['id']),
             $order['client_order_ref'] ?? null,
             $order['name'],
+            $order['payment_term_id'] ?? null,
         );
     }
 
@@ -1231,7 +1241,7 @@ class OdooClient
 
         $rows = $this->searchRead('sale.order.line', [
             ['order_id', '=', $orderId],
-        ], ['name', 'price_unit', 'product_uom_qty', 'discount', 'display_type'], 40, 0, 'id asc');
+        ], ['name', 'price_unit', 'product_uom_qty', 'discount', 'display_type', 'tax_ids'], 40, 0, 'id asc');
 
         $lines = [];
         foreach ($rows as $row) {
@@ -1252,6 +1262,7 @@ class OdooClient
                 'amount' => (float) ($row['price_unit'] ?? 0),
                 'units' => (float) ($row['product_uom_qty'] ?? 1),
                 'discount' => (float) ($row['discount'] ?? 0),
+                'tax_ids' => $this->idList($row['tax_ids'] ?? []),
             ];
         }
 
@@ -1267,6 +1278,7 @@ class OdooClient
         array $lines,
         ?string $reference = null,
         ?string $origin = null,
+        ?int $paymentTermId = null,
     ): array {
         $values = [
             'move_type' => 'out_invoice',
@@ -1275,6 +1287,9 @@ class OdooClient
             'ref' => filled($reference) ? $reference : null,
             'invoice_date' => now()->toDateString(),
         ];
+        if ($paymentTermId !== null && $paymentTermId > 0) {
+            $values['invoice_payment_term_id'] = $paymentTermId;
+        }
 
         if ($currencyId = $this->resolveCurrencyId()) {
             $values['currency_id'] = $currencyId;
@@ -1434,7 +1449,7 @@ class OdooClient
      * @param  list<array<string, mixed>>  $lines
      * @return array<string, mixed>
      */
-    public function updateStaffQuotation(int $id, array $lines, ?string $notes, ?string $reference): array
+    public function updateStaffQuotation(int $id, array $lines, ?string $notes, ?string $reference, ?int $paymentTermId = null): array
     {
         $vals = [
             // 5 clears the old lines, 0 adds each new one.
@@ -1445,6 +1460,9 @@ class OdooClient
         }
         if ($reference !== null && $reference !== '') {
             $vals['client_order_ref'] = $reference;
+        }
+        if ($paymentTermId !== null) {
+            $vals['payment_term_id'] = $paymentTermId > 0 ? $paymentTermId : false;
         }
         $this->call('sale.order', 'write', ['ids' => [$id], 'vals' => $vals]);
 
@@ -1480,7 +1498,7 @@ class OdooClient
      * @param  list<array<string, mixed>>  $lines
      * @return array<string, mixed>
      */
-    public function updateStaffInvoice(int $id, array $lines, ?string $reference): array
+    public function updateStaffInvoice(int $id, array $lines, ?string $reference, ?int $paymentTermId = null): array
     {
         $row = $this->invoiceSnapshot($id);
         $posted = ($row['state'] ?? '') === 'posted';
@@ -1492,6 +1510,9 @@ class OdooClient
         ];
         if ($reference !== null && $reference !== '') {
             $vals['ref'] = $reference;
+        }
+        if ($paymentTermId !== null) {
+            $vals['invoice_payment_term_id'] = $paymentTermId > 0 ? $paymentTermId : false;
         }
         $this->call('account.move', 'write', ['ids' => [$id], 'vals' => $vals]);
         if ($posted) {
@@ -1546,7 +1567,7 @@ class OdooClient
      * The lines of a quotation (`sale.order`) or an invoice (`account.move`), as the
      * dashboard paper form edits them. Tax and payment-term lines are left out.
      *
-     * @return list<array{title: string, notes: string|null, amount: float, units: float, discount: float, display_type: string|null, product_id: int|null}>
+     * @return list<array{title: string, notes: string|null, amount: float, units: float, discount: float, display_type: string|null, product_id: int|null, tax_ids: list<int>}>
      */
     public function paperLines(string $model, int $id): array
     {
@@ -1555,8 +1576,8 @@ class OdooClient
         }
         $sale = $model === 'sale.order';
         $rows = $sale
-            ? $this->searchRead('sale.order.line', [['order_id', '=', $id]], ['name', 'product_uom_qty', 'price_unit', 'discount', 'display_type', 'product_id'], 200, 0, 'sequence asc, id asc')
-            : $this->searchRead('account.move.line', [['move_id', '=', $id], ['display_type', 'in', ['product', 'line_section', 'line_note']]], ['name', 'quantity', 'price_unit', 'discount', 'display_type', 'product_id'], 200, 0, 'sequence asc, id asc');
+            ? $this->searchRead('sale.order.line', [['order_id', '=', $id]], ['name', 'product_uom_qty', 'price_unit', 'discount', 'display_type', 'product_id', 'tax_ids'], 200, 0, 'sequence asc, id asc')
+            : $this->searchRead('account.move.line', [['move_id', '=', $id], ['display_type', 'in', ['product', 'line_section', 'line_note']]], ['name', 'quantity', 'price_unit', 'discount', 'display_type', 'product_id', 'tax_ids'], 200, 0, 'sequence asc, id asc');
 
         $lines = [];
         foreach ($rows as $row) {
@@ -1573,10 +1594,58 @@ class OdooClient
                 'discount' => (float) ($row['discount'] ?? 0),
                 'display_type' => $type,
                 'product_id' => $this->relationId($row['product_id'] ?? null),
+                'tax_ids' => $type === null ? $this->idList($row['tax_ids'] ?? []) : [],
             ];
         }
 
         return $lines;
+    }
+
+    /**
+     * Sales taxes the dashboard offers on each paper line.
+     *
+     * @return list<array{id: int, name: string, amount: float, amount_type: string, price_include: bool}>
+     */
+    public function listSaleTaxes(): array
+    {
+        $domain = [['type_tax_use', '=', 'sale'], ['active', '=', true]];
+        try {
+            $rows = $this->searchRead('account.tax', $domain, ['id', 'name', 'amount', 'amount_type', 'price_include'], 100, 0, 'sequence asc, id asc');
+        } catch (Throwable) {
+            // Odoo versions without a readable price_include: taxes count as excluded.
+            $rows = $this->searchRead('account.tax', $domain, ['id', 'name', 'amount', 'amount_type'], 100, 0, 'sequence asc, id asc');
+        }
+
+        return array_values(array_map(fn (array $row): array => [
+            'id' => (int) $row['id'],
+            'name' => (string) ($row['name'] ?? ''),
+            'amount' => (float) ($row['amount'] ?? 0),
+            'amount_type' => (string) ($row['amount_type'] ?? 'percent'),
+            'price_include' => (bool) ($row['price_include'] ?? false),
+        ], array_filter($rows, fn (mixed $row): bool => is_array($row) && isset($row['id']))));
+    }
+
+    /**
+     * Payment terms (immediate, 15 days, 30 days, …) for quotations and invoices.
+     *
+     * @return list<array{id: int, name: string}>
+     */
+    public function listPaymentTerms(): array
+    {
+        $rows = $this->searchRead('account.payment.term', [['active', '=', true]], ['id', 'name'], 100, 0, 'sequence asc, id asc');
+
+        return array_values(array_map(fn (array $row): array => [
+            'id' => (int) $row['id'],
+            'name' => (string) ($row['name'] ?? ''),
+        ], array_filter($rows, fn (mixed $row): bool => is_array($row) && isset($row['id']))));
+    }
+
+    /**
+     * @return list<int>
+     */
+    private function idList(mixed $value): array
+    {
+        return array_values(array_filter(array_map('intval', is_array($value) ? $value : []), fn (int $id): bool => $id > 0));
     }
 
     /** An invoice that is posted and not yet fully paid, so a payment can go on it. */
@@ -2243,7 +2312,7 @@ class OdooClient
             $values['discount'] = $discount;
         }
 
-        return $this->saleOrderLine($values);
+        return $this->saleOrderLine($values, $this->idList($line['tax_ids'] ?? []));
     }
 
     /**
@@ -2275,24 +2344,26 @@ class OdooClient
             $values['discount'] = $discount;
         }
 
-        return $this->invoiceLine($values);
+        return $this->invoiceLine($values, $this->idList($line['tax_ids'] ?? []));
     }
 
-    private function saleOrderLine(array $values): array
+    /** @param  list<int>  $taxIds */
+    private function saleOrderLine(array $values, array $taxIds = []): array
     {
         return array_merge($values, [
-            'tax_ids' => [[6, 0, []]],
+            'tax_ids' => [[6, 0, $taxIds]],
         ]);
     }
 
     /**
      * @param  array<string, mixed>  $values
+     * @param  list<int>  $taxIds
      * @return array<string, mixed>
      */
-    private function invoiceLine(array $values): array
+    private function invoiceLine(array $values, array $taxIds = []): array
     {
         return array_merge($values, [
-            'tax_ids' => [[6, 0, []]],
+            'tax_ids' => [[6, 0, $taxIds]],
         ]);
     }
 

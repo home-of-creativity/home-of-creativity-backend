@@ -33,6 +33,9 @@ class StoreOdooQuotationRequest extends FormRequest
             'lines.*.product_id' => ['nullable', 'integer', 'min:1'],
             'lines.*.discount' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'lines.*.notes' => ['nullable', 'string', 'max:2000'],
+            'lines.*.tax_ids' => ['nullable', 'array', 'max:5'],
+            'lines.*.tax_ids.*' => ['integer', 'min:1'],
+            'payment_term_id' => ['nullable', 'integer', 'min:0'],
         ];
     }
 }

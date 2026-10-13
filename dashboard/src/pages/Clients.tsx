@@ -123,7 +123,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
       const res = kind === "quotation" ? await api.odooQuotation(id) : await api.odooInvoice(id);
       const reference = kind === "quotation" ? (res.data as OdooQuotation).client_order_ref : (res.data as OdooInvoice).ref;
       const partner = res.data.partner_id ? String(res.data.partner_id) : null;
-      setPaper({ kind, editing: { id, name: res.data.name, reference: reference ?? null, partnerId: partner, lines: res.data.lines } });
+      setPaper({ kind, editing: { id, name: res.data.name, reference: reference ?? null, partnerId: partner, paymentTermId: res.data.payment_term_id ?? null, lines: res.data.lines } });
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t(copy.saveFailed));

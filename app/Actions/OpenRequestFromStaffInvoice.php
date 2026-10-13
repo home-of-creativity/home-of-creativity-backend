@@ -85,6 +85,10 @@ class OpenRequestFromStaffInvoice
             $lines,
             fn (array $line): bool => ! in_array($line['display_type'] ?? null, ['line_section', 'line_note'], true),
         ));
+        // Odoo adds the taxes; its total is what the client pays.
+        if (collect($priced)->contains(fn (array $line): bool => ! empty($line['tax_ids'])) && (float) ($created['amount_total'] ?? 0) > 0) {
+            return (float) $created['amount_total'];
+        }
         if ($priced !== []) {
             return (float) collect($priced)->sum(function (array $line): float {
                 $discount = min(100, max(0, (float) ($line['discount'] ?? 0)));

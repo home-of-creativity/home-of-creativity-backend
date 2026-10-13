@@ -166,6 +166,36 @@ class OdooController extends Controller
         }
     }
 
+    public function taxes(OdooClient $odoo): JsonResponse
+    {
+        if (! $odoo->configured()) {
+            return response()->json(['message' => 'Odoo is not configured.'], 422);
+        }
+
+        try {
+            return response()->json(['data' => $odoo->listSaleTaxes(), 'message' => 'ok']);
+        } catch (\Throwable $exception) {
+            Log::warning('Odoo taxes failed.', ['error' => $exception->getMessage()]);
+
+            return response()->json(['message' => 'تعذر قراءة ضرائب أودو.'], 502);
+        }
+    }
+
+    public function paymentTerms(OdooClient $odoo): JsonResponse
+    {
+        if (! $odoo->configured()) {
+            return response()->json(['message' => 'Odoo is not configured.'], 422);
+        }
+
+        try {
+            return response()->json(['data' => $odoo->listPaymentTerms(), 'message' => 'ok']);
+        } catch (\Throwable $exception) {
+            Log::warning('Odoo payment terms failed.', ['error' => $exception->getMessage()]);
+
+            return response()->json(['message' => 'تعذر قراءة شروط السداد من أودو.'], 502);
+        }
+    }
+
     public function quotations(Request $request, OdooClient $odoo): JsonResponse
     {
         if (! $odoo->configured()) {
@@ -243,6 +273,7 @@ class OdooController extends Controller
                 $request->validated('notes'),
                 $reference,
                 filled($client->odoo_lead_id) ? $client->odoo_lead_id : null,
+                $this->paymentTerm($request->validated()),
             );
         } catch (\Throwable $exception) {
             Log::warning('Odoo quotation create failed.', ['error' => $exception->getMessage()]);
@@ -265,7 +296,7 @@ class OdooController extends Controller
                     $request->validated('date_order'),
                     $request->validated('validity_date'),
                 );
-                $priced = $this->pricedLines($lines);
+                $priced = $this->pricedLines($lines, $created);
                 $chatId = $client->telegram_user_id;
                 $onBot = filled($chatId) && $telegram->canReachClient($chatId);
                 $sendQuotation->handle(
@@ -331,7 +362,7 @@ class OdooController extends Controller
         abort_unless(in_array($snapshot['state'] ?? '', ['draft', 'sent'], true), 422, 'عرض السعر أصبح أمر بيع أو ملغى، فلا يُعدَّل.');
 
         try {
-            $updated = $odoo->updateStaffQuotation($id, $validated['lines'], $validated['notes'] ?? null, $validated['reference'] ?? null);
+            $updated = $odoo->updateStaffQuotation($id, $validated['lines'], $validated['notes'] ?? null, $validated['reference'] ?? null, $this->paymentTerm($validated));
         } catch (\Throwable $exception) {
             return response()->json(['message' => 'تعذر تعديل عرض السعر في أودو: '.$exception->getMessage()], 502);
         }
@@ -339,7 +370,7 @@ class OdooController extends Controller
         $linked = ServiceRequest::query()->with('client')->where('odoo_quotation_id', (string) $id)->latest('id')->first();
         $message = 'عُدّل عرض السعر في أودو.';
         if ($linked !== null && $linked->status === RequestStatus::QuotationSent && $linked->client !== null) {
-            $priced = $this->pricedLines($validated['lines']);
+            $priced = $this->pricedLines($validated['lines'], $updated);
             $amount = $this->linesTotal($priced);
             ['snapshot' => $updated, 'pdf_path' => $pdfPath] = $publish->prepareQuotation($updated, null, null);
             $chatId = $linked->client->telegram_user_id;
@@ -443,7 +474,7 @@ class OdooController extends Controller
         abort_unless(in_array($snapshot['payment_state'] ?? 'not_paid', ['not_paid'], true), 422, 'دُفعت الفاتورة كلها أو بعضها، فلا تُعدَّل.');
 
         try {
-            $updated = $odoo->updateStaffInvoice($id, $validated['lines'], $validated['reference'] ?? null);
+            $updated = $odoo->updateStaffInvoice($id, $validated['lines'], $validated['reference'] ?? null, $this->paymentTerm($validated));
         } catch (\Throwable $exception) {
             return response()->json(['message' => 'تعذر تعديل الفاتورة في أودو: '.$exception->getMessage()], 502);
         }
@@ -544,7 +575,16 @@ class OdooController extends Controller
             'lines.*.product_id' => ['nullable', 'integer', 'min:1'],
             'lines.*.discount' => ['nullable', 'numeric', 'min:0', 'max:100'],
             'lines.*.notes' => ['nullable', 'string', 'max:2000'],
+            'lines.*.tax_ids' => ['nullable', 'array', 'max:5'],
+            'lines.*.tax_ids.*' => ['integer', 'min:1'],
+            'payment_term_id' => ['nullable', 'integer', 'min:0'],
         ];
+    }
+
+    /** The term the form sent: null leaves the paper's term, 0 clears it. */
+    private function paymentTerm(array $validated): ?int
+    {
+        return array_key_exists('payment_term_id', $validated) ? (int) $validated['payment_term_id'] : null;
     }
 
     private function defaultChannel(Client $client): string
@@ -560,18 +600,27 @@ class OdooController extends Controller
 
     /**
      * Section and note rows are layout in Odoo; the request quotation keeps priced lines.
+     * When a line carries Odoo taxes, a tax line brings the amount to the Odoo total.
      *
      * @param  list<array<string, mixed>>  $lines
+     * @param  array<string, mixed>|null  $snapshot
      * @return list<array{title: string, amount: float, units: float, discount: float}>
      */
-    private function pricedLines(array $lines): array
+    private function pricedLines(array $lines, ?array $snapshot = null): array
     {
-        return array_values(array_map(fn (array $line): array => [
+        $priced = array_values(array_map(fn (array $line): array => [
             'title' => (string) $line['title'],
             'amount' => (float) ($line['amount'] ?? 0),
             'units' => (float) ($line['units'] ?? 1),
             'discount' => (float) ($line['discount'] ?? 0),
         ], array_filter($lines, fn (array $line): bool => ! in_array($line['display_type'] ?? null, ['line_section', 'line_note'], true))));
+        $taxed = collect($lines)->contains(fn (array $line): bool => ! empty($line['tax_ids']));
+        $tax = round((float) ($snapshot['amount_total'] ?? 0) - $this->linesTotal($priced), 2);
+        if ($taxed && $tax > 0.009) {
+            $priced[] = ['title' => 'الضرائب', 'amount' => $tax, 'units' => 1.0, 'discount' => 0.0];
+        }
+
+        return $priced;
     }
 
     public function storeInvoice(
@@ -617,6 +666,10 @@ class OdooController extends Controller
                     return response()->json(['message' => 'عرض السعر ملغى في أودو.'], 422);
                 }
 
+                $term = $this->paymentTerm($request->validated());
+                if ($term !== null) {
+                    $link['payment_term_id'] = $term > 0 ? $term : null;
+                }
                 $created = $odoo->invoiceFromSaleOrder($link);
             } else {
                 $created = $odoo->createStaffInvoice(
@@ -624,6 +677,7 @@ class OdooController extends Controller
                     $lines,
                     $reference,
                     null,
+                    $this->paymentTerm($request->validated()),
                 );
             }
         } catch (\Throwable $exception) {

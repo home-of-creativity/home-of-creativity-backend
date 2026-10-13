@@ -1452,6 +1452,94 @@ td[colspan] {
   min-width: 4.5rem;
 }
 
+/* The product name takes the room left; quantity and the numbers stay narrow. */
+.odoo-table.odoo-line-table {
+  table-layout: fixed;
+  min-width: 58rem;
+}
+
+.odoo-table.odoo-line-table .odoo-col-product {
+  width: auto;
+  white-space: normal;
+}
+
+.odoo-line-table .odoo-col-product .field {
+  width: 100%;
+  min-width: 0;
+}
+
+.odoo-line-table .odoo-col-account {
+  width: 8rem;
+}
+
+.odoo-line-table .odoo-col-qty {
+  width: 6.5rem;
+}
+
+.odoo-line-table .odoo-col-price {
+  width: 9rem;
+}
+
+.odoo-line-table .odoo-col-tax {
+  width: 11rem;
+}
+
+.odoo-line-table .odoo-col-discount {
+  width: 6.5rem;
+}
+
+.odoo-line-table th.money {
+  width: 8rem;
+}
+
+.odoo-table.odoo-line-table th:last-child {
+  width: 6rem;
+}
+
+.tax-picker-trigger {
+  display: block;
+  width: 100%;
+  min-width: 8rem;
+  text-align: start;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.tax-popover {
+  z-index: 60;
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.4rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--brand-line);
+  background: var(--brand-surface);
+  box-shadow: var(--shadow);
+  min-width: 14rem;
+  max-width: min(20rem, calc(100vw - 1.5rem));
+  max-height: 18rem;
+  overflow-y: auto;
+}
+
+.tax-popover > .muted {
+  margin: 0.35rem 0.5rem;
+}
+
+.tax-option {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.5rem;
+  border-radius: calc(var(--radius) - 4px);
+  cursor: pointer;
+}
+
+.tax-option:hover {
+  background: color-mix(in srgb, var(--brand-orange) 10%, transparent);
+}
+
 .odoo-paper-foot {
   display: grid;
   grid-template-columns: minmax(0, 1.4fr) minmax(12rem, 0.7fr);
