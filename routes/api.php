@@ -293,6 +293,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::put('vouchers/{voucher}', [AdminFinancialVoucherController::class, 'update']);
         Route::delete('vouchers/{voucher}', [AdminFinancialVoucherController::class, 'destroy']);
     });
+    Route::post('vouchers/{voucher}/send', [AdminFinancialVoucherController::class, 'send'])->middleware(['ability:ops.vouchers.send', 'throttle:20,1']);
 
     Route::get('ops-settings/profile-pdf', [AdminProfilePdfController::class, 'show'])->middleware('ability:site.profile_pdf.view');
     Route::middleware('ability:site.profile_pdf.update')->group(function () {

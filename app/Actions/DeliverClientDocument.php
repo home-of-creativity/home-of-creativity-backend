@@ -23,28 +23,31 @@ class DeliverClientDocument
         };
         $delivered = true;
         foreach ($channels as $one) {
-            $delivered = $this->sendOne($client, $one, $text, $absolutePath, $filename) && $delivered;
+            $delivered = $this->deliver($client->email, $client->phone, $one, $text, $absolutePath, $filename, "client {$client->id}") && $delivered;
         }
 
         return $delivered;
     }
 
-    private function sendOne(Client $client, string $channel, string $text, ?string $absolutePath, ?string $filename): bool
+    /**
+     * One channel to any recipient: `email` to the address, `whatsapp` to the phone.
+     */
+    public function deliver(?string $email, ?string $phone, string $channel, string $text, ?string $absolutePath, ?string $filename, string $for = ''): bool
     {
         try {
             if ($channel === 'email') {
-                if (! filled($client->email)) {
+                if (! filled($email)) {
                     return false;
                 }
 
                 $mailer = filled(config('mail.mailers.reports.password')) ? 'reports' : (string) config('mail.default');
-                Mail::mailer($mailer)->to((string) $client->email)->send(new ClientDocumentMail($text, $absolutePath, $filename));
+                Mail::mailer($mailer)->to((string) $email)->send(new ClientDocumentMail($text, $absolutePath, $filename));
 
                 return true;
             }
 
             // WhatsApp needs the international number; «0944…» alone does not arrive.
-            $phone = ClientPhone::whatsappDigits((string) $client->phone);
+            $phone = ClientPhone::whatsappDigits((string) $phone);
             if ($phone === '' || ! $this->whatsapp->configured()) {
                 return false;
             }
@@ -58,7 +61,7 @@ class DeliverClientDocument
             return true;
         } catch (Throwable $exception) {
             Log::warning('Client document delivery failed.', [
-                'client' => $client->id,
+                'for' => $for,
                 'channel' => $channel,
                 'error' => $exception->getMessage(),
             ]);

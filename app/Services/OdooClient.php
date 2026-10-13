@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Support\OdooPaperLimits;
+use App\Support\OdooPaperPdf;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
@@ -14,6 +16,8 @@ class OdooClient
     private ?int $currencyId = null;
 
     private ?int $paymentJournalId = null;
+
+    private bool $letterheadPaged = false;
 
     /** @var array<string, int|null> */
     private array $tagIdCache = [];
@@ -1727,11 +1731,36 @@ class OdooClient
         return $states;
     }
 
+    /**
+     * Force quotation and invoice PDFs onto A4. Each page keeps its own letterhead.
+     * A taller paperformat stretches the first cover onto the following sheets.
+     */
+    public function ensureA4PagedLetterhead(): void
+    {
+        if ($this->letterheadPaged || ! $this->configured()) {
+            return;
+        }
+        $this->letterheadPaged = true;
+
+        try {
+            $this->lockSaleInvoicePaperToA4();
+        } catch (Throwable $exception) {
+            Log::warning('Odoo A4 paperformat lock failed.', ['error' => $exception->getMessage()]);
+        }
+        try {
+            $this->installPagedLetterheadCss();
+        } catch (Throwable $exception) {
+            Log::warning('Odoo paged letterhead CSS failed.', ['error' => $exception->getMessage()]);
+        }
+    }
+
     public function downloadPortalReportPdf(string $model, int $recordId): ?string
     {
         if (! $this->configured() || $recordId <= 0) {
             return null;
         }
+
+        $this->ensureA4PagedLetterhead();
 
         try {
             $portalPath = $this->call($model, 'get_portal_url', [
@@ -1752,14 +1781,18 @@ class OdooClient
             $separator = str_contains($path, '?') ? '&' : '?';
             $url = rtrim((string) config('services.odoo.url'), '/').$path.$separator.'report_type=pdf';
 
-            $response = Http::timeout(30)
-                ->connectTimeout(3)
+            $response = Http::timeout(90)
+                ->connectTimeout(10)
                 ->retry(2, 200)
                 ->get($url);
 
             $body = $response->body();
             if ($response->successful() && str_starts_with($body, '%PDF')) {
-                return $body;
+                $pages = app(OdooPaperPdf::class);
+                $paged = $pages->paginate($body);
+                $cover = $this->companyLetterheadPng();
+
+                return $cover === null ? $paged : $pages->stampContinuationCovers($paged, $cover);
             }
 
             Log::warning('Odoo portal PDF response was not a PDF.', [
@@ -1777,6 +1810,148 @@ class OdooClient
         }
 
         return null;
+    }
+
+    private function lockSaleInvoicePaperToA4(): void
+    {
+        $vals = [
+            'format' => 'A4',
+            'orientation' => 'Portrait',
+            'page_height' => 0,
+            'page_width' => 0,
+            'margin_top' => OdooPaperLimits::LETTERHEAD_MARGIN_TOP,
+            'margin_bottom' => OdooPaperLimits::LETTERHEAD_MARGIN_BOTTOM,
+            'margin_left' => 0,
+            'margin_right' => 0,
+            'header_line' => false,
+            'header_spacing' => 0,
+            'dpi' => 90,
+            'disable_shrinking' => true,
+        ];
+
+        $reports = $this->searchRead('ir.actions.report', [
+            ['model', 'in', ['sale.order', 'account.move']],
+            ['report_type', '=', 'qweb-pdf'],
+        ], ['id', 'paperformat_id'], 20);
+        if ($reports === []) {
+            return;
+        }
+
+        $named = $this->firstRecord($this->searchRead('report.paperformat', [
+            ['name', '=', 'HOC A4 paged letterhead'],
+        ], ['id'], 1));
+        $formatId = is_array($named) ? (int) $named['id'] : (int) $this->call('report.paperformat', 'create', ['vals' => array_merge(['name' => 'HOC A4 paged letterhead'], $vals)]);
+        if ($formatId <= 0) {
+            return;
+        }
+
+        $core = $vals;
+        unset($core['disable_shrinking']);
+        try {
+            $this->writeRecord('report.paperformat', $formatId, $core);
+        } catch (Throwable) {
+            unset($core['page_height'], $core['page_width']);
+            $this->writeRecord('report.paperformat', $formatId, $core);
+        }
+        try {
+            $this->writeRecord('report.paperformat', $formatId, [
+                'disable_shrinking' => true,
+            ]);
+        } catch (Throwable) {
+        }
+
+        foreach ($reports as $report) {
+            if ($this->relationId($report['paperformat_id'] ?? null) === $formatId) {
+                continue;
+            }
+            $this->writeRecord('ir.actions.report', (int) $report['id'], ['paperformat_id' => $formatId]);
+        }
+    }
+
+    private function companyLetterheadPng(): ?string
+    {
+        try {
+            $row = $this->firstRecord($this->searchRead('res.company', [], ['id', 'layout_background_image'], 1));
+            $raw = $row['layout_background_image'] ?? null;
+            if (! is_string($raw) || $raw === '') {
+                return null;
+            }
+            $bytes = base64_decode($raw, true);
+            if (! is_string($bytes) || strlen($bytes) < 32) {
+                return null;
+            }
+            $path = storage_path('framework/cache/mpdf/hoc-letterhead.png');
+            file_put_contents($path, $bytes);
+
+            return is_file($path) ? $path : null;
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    private function installPagedLetterheadCss(): void
+    {
+        $parent = $this->firstRecord($this->searchRead('ir.model.data', [
+            ['module', '=', 'web'],
+            ['name', '=', 'external_layout_bubble'],
+        ], ['res_id'], 1));
+        $parentId = (int) ($parent['res_id'] ?? 0);
+        if ($parentId <= 0) {
+            $view = $this->firstRecord($this->searchRead('ir.ui.view', [
+                ['key', '=', 'web.external_layout_bubble'],
+            ], ['id'], 1));
+            $parentId = (int) ($view['id'] ?? 0);
+        }
+        if ($parentId <= 0) {
+            return;
+        }
+
+        $side = OdooPaperLimits::LETTERHEAD_MARGIN_SIDE;
+        $top = OdooPaperLimits::LETTERHEAD_MARGIN_TOP;
+        $bottom = OdooPaperLimits::LETTERHEAD_MARGIN_BOTTOM;
+        $arch = <<<XML
+<data>
+    <xpath expr="//div[@t-if='layout_background_url'][1]" position="replace">
+        <t/>
+    </xpath>
+    <xpath expr="//img[contains(@style, '206mm')]" position="replace">
+        <span/>
+    </xpath>
+    <xpath expr="//div[contains(@t-attf-class, 'article')]" position="attributes">
+        <attribute name="t-attf-style">background: transparent !important; padding: 0 {$side}mm 0 {$side}mm !important;</attribute>
+    </xpath>
+    <xpath expr="//div[contains(@t-attf-class, 'header')]" position="attributes">
+        <attribute name="style">background: transparent !important; padding: 0; margin: 0;</attribute>
+    </xpath>
+    <xpath expr="//div[contains(@t-attf-class, 'header')]" position="inside">
+        <div t-if="layout_background_url" t-attf-style="width: 210mm; height: {$top}mm; background-image: url('{{ layout_background_url }}'); background-size: 210mm 297mm; background-position: top left; background-repeat: no-repeat;"/>
+    </xpath>
+    <xpath expr="//div[contains(@t-attf-class, 'footer')]" position="attributes">
+        <attribute name="style">background: transparent !important; padding: 0; margin: 0;</attribute>
+    </xpath>
+    <xpath expr="//div[contains(@t-attf-class, 'footer')]" position="inside">
+        <div t-if="layout_background_url" t-attf-style="width: 210mm; height: {$bottom}mm; background-image: url('{{ layout_background_url }}'); background-size: 210mm 297mm; background-position: bottom left; background-repeat: no-repeat;"/>
+    </xpath>
+</data>
+XML;
+
+        $existing = $this->firstRecord($this->searchRead('ir.ui.view', [
+            ['name', '=', 'HOC paged letterhead'],
+        ], ['id'], 1));
+        $vals = [
+            'name' => 'HOC paged letterhead',
+            'type' => 'qweb',
+            'inherit_id' => $parentId,
+            'arch' => $arch,
+            'active' => true,
+        ];
+        if ($existing !== null) {
+            $this->writeRecord('ir.ui.view', (int) $existing['id'], $vals);
+
+            return;
+        }
+
+        $this->call('ir.ui.view', 'create', ['vals' => $vals]);
     }
 
     public function createOrReusePartner(string $partnerName, ?string $email, ?string $phone, ?string $requestNumber = null, ?string $existingPartnerId = null): string

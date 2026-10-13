@@ -3,7 +3,14 @@
 <head>
     <meta charset="utf-8">
     <style>
-        @page { margin: 0; }
+        @page {
+            margin-top: 42mm;
+            margin-bottom: 16mm;
+            margin-left: 0;
+            margin-right: 0;
+            header: html_letterhead;
+            footer: html_letterfoot;
+        }
         body { margin: 0; font-family: ibmplexarabic, sans-serif; color: #1a0838; font-size: 12px; direction: rtl; }
         .band { background: #2e0e5c; color: #fff; padding: 18px 28px 16px; }
         .brand { font-size: 18px; letter-spacing: 0; }
@@ -23,16 +30,24 @@
         .total { margin-top: 16px; background: #f7f1ea; border-right: 4px solid #e07020; padding: 10px 12px; }
         .total span { float: left; }
         .aside { color: #6b6178; font-size: 11px; margin-top: 6px; }
-        .foot { position: fixed; left: 0; right: 0; bottom: 0; background: #2e0e5c; color: #fff; padding: 10px 28px; font-size: 10px; }
+        .foot { background: #2e0e5c; color: #fff; padding: 10px 28px; font-size: 10px; }
     </style>
 </head>
 <body>
-    <div class="band">
-        <div class="brand">دار الإبداع</div>
-        <div class="brand-en" dir="ltr">Home of Creativity</div>
-        <div class="kicker">{{ $kicker }}</div>
-    </div>
-    <div class="rule"></div>
+    {{-- A fresh A4 cover on every sheet. The first page must not stretch onto the next. --}}
+    <htmlpageheader name="letterhead">
+        <div class="band">
+            <div class="brand">دار الإبداع</div>
+            <div class="brand-en" dir="ltr">Home of Creativity</div>
+            <div class="kicker">{{ $kicker }}</div>
+        </div>
+        <div class="rule"></div>
+    </htmlpageheader>
+    <htmlpagefooter name="letterfoot">
+        <div class="foot" dir="ltr">hoc.agency · {{ \App\Support\ClientChannelGate::SUPPORT_PHONE }}</div>
+    </htmlpagefooter>
+    <sethtmlpageheader name="letterhead" page="ALL" value="on" show-this-page="1" />
+    <sethtmlpagefooter name="letterfoot" page="ALL" value="on" show-this-page="1" />
     <div class="sheet">
         <table class="meta">
             <tr>
@@ -86,6 +101,5 @@
             <div class="aside">{{ $aside }}</div>
         @endif
     </div>
-    <div class="foot" dir="ltr">hoc.agency · {{ \App\Support\ClientChannelGate::SUPPORT_PHONE }}</div>
 </body>
 </html>

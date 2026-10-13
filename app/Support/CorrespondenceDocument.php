@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Storage;
 
 /**
  * Stationery for the file the client receives when Odoo does not return a PDF.
- * The letterhead stays fixed; the request data is printed in the body.
+ * Each A4 sheet reprints the letterhead. The first page does not stretch.
  */
 class CorrespondenceDocument
 {

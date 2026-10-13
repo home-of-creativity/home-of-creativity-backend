@@ -3,11 +3,15 @@
 namespace Tests\Feature;
 
 use App\Enums\StaffAbility;
+use App\Mail\ClientDocumentMail;
 use App\Models\FinancialVoucher;
 use App\Models\FinancialVoucherTemplate;
 use App\Models\Role;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Mail;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -117,7 +121,93 @@ class FinancialVoucherTest extends TestCase
 
         $this->assertNotNull($row);
         $this->assertSame('المسندات المالية', $row['label_ar']);
-        $this->assertSame(StaffAbility::crudActions(), $row['actions']);
+        $this->assertSame([...StaffAbility::crudActions(), 'send'], $row['actions']);
+    }
+
+    public function test_a_notes_record_keeps_the_numbered_notes_of_a_conversation(): void
+    {
+        Sanctum::actingAs(User::factory()->admin()->create());
+        $long = str_repeat('نقطة تفصيلية ', 60);
+
+        $this->postJson('/api/admin/vouchers', [
+            'kind' => 'notes',
+            'party_name' => 'شركة النور',
+            'currency' => 'USD',
+            'issued_on' => '2026-10-13',
+            'lines' => [],
+        ])->assertUnprocessable()->assertJsonValidationErrors('lines');
+
+        $saved = $this->postJson('/api/admin/vouchers', [
+            'kind' => 'notes',
+            'party_name' => 'شركة النور',
+            'signer_name' => 'فايز',
+            'currency' => 'USD',
+            'issued_on' => '2026-10-13',
+            'purpose' => 'مراجعة هوية الحملة',
+            'reference' => 'اجتماع في مكتب دمشق',
+            'lines' => array_map(fn (int $index): array => ['memo' => $index === 0 ? $long : "ملاحظة {$index}"], range(0, 24)),
+        ])->assertCreated()->json('data');
+
+        $this->assertSame('notes', $saved['kind']);
+        $this->assertEquals(0, $saved['amount']);
+        $this->assertCount(25, $saved['lines']);
+        $this->assertSame(trim($long), $saved['lines'][0]['memo']);
+    }
+
+    public function test_a_voucher_is_sent_as_a_pdf_by_email_and_whatsapp(): void
+    {
+        Mail::fake();
+        config([
+            'services.whatsapp.transport' => 'web',
+            'services.whatsapp.web_url' => 'http://wa-web.test',
+            'services.whatsapp.web_secret' => 'web-secret',
+        ]);
+        Http::fake(['http://wa-web.test/*' => Http::response(['id' => 'wa-1'])]);
+        Sanctum::actingAs(User::factory()->admin()->create());
+        $voucher = $this->postJson('/api/admin/vouchers', [
+            'kind' => 'notes',
+            'party_name' => 'شركة النور',
+            'currency' => 'USD',
+            'issued_on' => '2026-10-13',
+            'lines' => [['memo' => 'تسليم الشعار يوم الأحد']],
+        ])->assertCreated()->json('data');
+        $pdf = UploadedFile::fake()->createWithContent('notes.pdf', "%PDF-1.4\n%fake\n");
+
+        $this->post("/api/admin/vouchers/{$voucher['id']}/send", [
+            'pdf' => $pdf,
+            'channel' => 'both',
+            'name' => 'سامر',
+            'email' => 'samer@example.com',
+            'phone' => '0944 000 123',
+            'message' => 'هذا محضر اجتماع اليوم.',
+        ], ['Accept' => 'application/json'])
+            ->assertOk()
+            ->assertJsonPath('data.sent.email', true)
+            ->assertJsonPath('data.sent.whatsapp', true);
+
+        Mail::assertSent(ClientDocumentMail::class, fn ($mail): bool => $mail->hasTo('samer@example.com')
+            && str_contains($mail->body, 'محضر الملاحظات') && str_contains($mail->body, 'هذا محضر اجتماع اليوم.'));
+        Http::assertSent(fn ($request): bool => str_contains($request->url(), 'wa-web.test') && ($request['to'] ?? null) === '963944000123');
+        $this->assertNotNull(FinancialVoucher::query()->find($voucher['id'])->sent_at);
+
+        // Email needs an address.
+        $this->post("/api/admin/vouchers/{$voucher['id']}/send", ['pdf' => $pdf, 'channel' => 'email', 'name' => 'سامر'], ['Accept' => 'application/json'])
+            ->assertUnprocessable()->assertJsonValidationErrors('email');
+    }
+
+    public function test_sending_needs_its_own_permission(): void
+    {
+        $voucher = FinancialVoucher::query()->create([
+            'serial' => 'HOC-V-2026-0099', 'kind' => 'notes', 'party_name' => 'x', 'amount' => 0,
+            'currency' => 'USD', 'issued_on' => '2026-10-13', 'lines' => [['memo' => 'x']],
+        ]);
+        $editor = User::factory()->create(['role_id' => Role::query()->create([
+            'name' => 'محرر مستندات',
+            'abilities' => ['ops.vouchers.view', 'ops.vouchers.update'],
+        ])->id]);
+        Sanctum::actingAs($editor);
+
+        $this->post("/api/admin/vouchers/{$voucher->id}/send", ['channel' => 'email'], ['Accept' => 'application/json'])->assertForbidden();
     }
 
     public function test_delivery_total_is_the_sum_of_the_lines(): void

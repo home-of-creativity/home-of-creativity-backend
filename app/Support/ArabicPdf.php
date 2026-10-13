@@ -30,10 +30,12 @@ class ArabicPdf
             'format' => 'A4',
             'margin_left' => 0,
             'margin_right' => 0,
-            'margin_top' => 0,
-            'margin_bottom' => 0,
+            'margin_top' => 42,
+            'margin_bottom' => 16,
             'margin_header' => 0,
             'margin_footer' => 0,
+            'setAutoTopMargin' => 'stretch',
+            'setAutoBottomMargin' => 'stretch',
             'fontDir' => array_merge($defaults['fontDir'], [resource_path('fonts')]),
             'fontdata' => $fontData['fontdata'] + [
                 'ibmplexarabic' => [

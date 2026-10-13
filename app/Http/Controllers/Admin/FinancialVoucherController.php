@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Actions\DeliverClientDocument;
 use App\Http\Controllers\Controller;
 use App\Models\FinancialVoucher;
 use Illuminate\Http\JsonResponse;
@@ -72,6 +73,73 @@ class FinancialVoucherController extends Controller
         ]);
     }
 
+    /**
+     * Sends the voucher as the PDF the dashboard rendered, by email, WhatsApp or both, to
+     * anyone (not only a client).
+     */
+    public function send(Request $request, FinancialVoucher $voucher, DeliverClientDocument $deliver): JsonResponse
+    {
+        $validated = $request->validate([
+            'pdf' => ['required', 'file', 'mimes:pdf', 'max:15360'],
+            'channel' => ['required', Rule::in(['email', 'whatsapp', 'both'])],
+            'name' => ['required', 'string', 'max:120'],
+            'email' => ['nullable', 'required_if:channel,email,both', 'email', 'max:190'],
+            'phone' => ['nullable', 'required_if:channel,whatsapp,both', 'string', 'max:40'],
+            'message' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        $title = $voucher->title ?: $this->kindName($voucher->kind);
+        $text = trim(implode("\n\n", array_filter([
+            "مرحباً {$validated['name']}،",
+            $validated['message'] ?? null,
+            "مرفق {$title} رقم {$voucher->serial} بتاريخ ".$voucher->issued_on?->format('Y/m/d').'.',
+            'Home of Creativity — بيت الإبداع',
+        ])));
+        $path = $request->file('pdf')->getRealPath();
+        $filename = "{$voucher->serial}.pdf";
+
+        $sent = [];
+        foreach ($validated['channel'] === 'both' ? ['email', 'whatsapp'] : [$validated['channel']] as $channel) {
+            $sent[$channel] = $deliver->deliver(
+                $channel === 'email' ? $validated['email'] : null,
+                $channel === 'whatsapp' ? $validated['phone'] : null,
+                $channel,
+                $text,
+                $path,
+                $filename,
+                "voucher {$voucher->serial}",
+            );
+        }
+
+        if (! in_array(true, $sent, true)) {
+            return response()->json(['data' => ['sent' => $sent], 'message' => 'تعذر إرسال المستند. تأكد من البريد أو رقم واتساب.'], 422);
+        }
+
+        $to = array_filter([$validated['name'], $sent['email'] ?? false ? $validated['email'] : null, $sent['whatsapp'] ?? false ? $validated['phone'] : null]);
+        $voucher->forceFill(['sent_at' => now(), 'sent_to' => mb_substr(implode(' · ', $to), 0, 255)])->save();
+        $failed = array_keys(array_filter($sent, fn (bool $ok): bool => ! $ok));
+
+        return response()->json([
+            'data' => ['sent' => $sent, 'voucher' => $this->payload($voucher->fresh())],
+            'message' => $failed === []
+                ? 'أُرسل المستند.'
+                : 'أُرسل المستند، وتعذر الإرسال عبر '.($failed[0] === 'email' ? 'البريد' : 'واتساب').'.',
+        ]);
+    }
+
+    private function kindName(string $kind): string
+    {
+        return match ($kind) {
+            'delivery' => 'سند التسليم',
+            'receipt' => 'سند القبض',
+            'payment' => 'سند الصرف',
+            'journal' => 'سند القيد',
+            'settlement' => 'المخالصة المالية',
+            'notes' => 'محضر الملاحظات',
+            default => 'المستند',
+        };
+    }
+
     public function destroy(FinancialVoucher $voucher): JsonResponse
     {
         $voucher->delete();
@@ -94,8 +162,8 @@ class FinancialVoucherController extends Controller
             'issued_on' => ['required', 'date'],
             'purpose' => ['nullable', 'string', 'max:2000'],
             'reference' => ['nullable', 'string', 'max:120'],
-            'lines' => ['nullable', 'array', 'max:12'],
-            'lines.*.memo' => ['nullable', 'string', 'max:180'],
+            'lines' => ['nullable', 'array', 'max:'.FinancialVoucher::lineLimits($request->input('kind'))[0]],
+            'lines.*.memo' => ['nullable', 'string', 'max:'.FinancialVoucher::lineLimits($request->input('kind'))[1]],
             'lines.*.debit' => ['nullable', 'numeric', 'min:-100000000', 'max:100000000'],
             'lines.*.credit' => ['nullable', 'numeric', 'min:-100000000', 'max:100000000'],
             'signer_name' => ['nullable', 'string', 'max:120'],
@@ -119,7 +187,15 @@ class FinancialVoucherController extends Controller
 
         $kind = $validated['kind'];
         $amount = round((float) ($validated['amount'] ?? 0), 2);
-        if ($kind === 'journal') {
+        if ($kind === 'notes') {
+            // Minutes of a conversation: numbered notes, no money.
+            if ($lines === []) {
+                throw ValidationException::withMessages([
+                    'lines' => 'اكتب ملاحظة واحدة على الأقل.',
+                ]);
+            }
+            $amount = 0.0;
+        } elseif ($kind === 'journal') {
             $debit = round(array_sum(array_column($lines, 'debit')), 2);
             $credit = round(array_sum(array_column($lines, 'credit')), 2);
             if ($lines === [] || abs($debit - $credit) > 0.009) {
@@ -252,6 +328,8 @@ class FinancialVoucherController extends Controller
             'signature' => $voucher->signature,
             'counter_signature' => $voucher->counter_signature,
             'background' => $voucher->background,
+            'sent_at' => $voucher->sent_at?->toIso8601String(),
+            'sent_to' => $voucher->sent_to,
         ];
     }
 }

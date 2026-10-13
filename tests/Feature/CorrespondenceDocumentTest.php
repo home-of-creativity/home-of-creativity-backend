@@ -8,7 +8,9 @@ use App\Enums\RequestStatus;
 use App\Models\Client;
 use App\Models\Quotation;
 use App\Models\ServiceRequest;
+use App\Support\ArabicPdf;
 use App\Support\CorrespondenceDocument;
+use App\Support\OdooPaperPdf;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
@@ -48,6 +50,8 @@ class CorrespondenceDocumentTest extends TestCase
             'aside' => null,
         ])->render();
         $this->assertStringContainsString('دار الإبداع', $html);
+        $this->assertStringContainsString('htmlpageheader', $html);
+        $this->assertStringContainsString('htmlpagefooter', $html);
         $this->assertStringContainsString('مطعم الشام', $html);
         $this->assertStringContainsString('هوية المطعم', $html);
         $this->assertStringContainsString('400.00 USD', $html);
@@ -94,5 +98,47 @@ class CorrespondenceDocumentTest extends TestCase
 
         $this->assertSame('quotations/sample-local.pdf', $path);
         $this->assertStringStartsWith('%PDF', Storage::disk('local')->get($path));
+    }
+
+    public function test_a_long_product_list_fills_two_pages_with_a_header_on_each(): void
+    {
+        $rows = [];
+        for ($index = 1; $index <= 32; $index++) {
+            $rows[] = ['label' => 'منتج '.$index.' · وصف البند حتى يطول السطر', 'value' => '100.00 USD'];
+        }
+
+        $html = view('correspondence.letter', [
+            'kicker' => 'عرض سعر',
+            'number' => 'QN-DEMO-2P',
+            'date' => '2026-10-13',
+            'clientName' => 'ليان',
+            'company' => 'محمصة عبيد',
+            'phone' => '0947000000',
+            'email' => 'layan@example.com',
+            'subject' => 'باقة المنتجات',
+            'rows' => $rows,
+            'notes' => 'يمتد على صفحتين',
+            'total' => '3,200.00 USD',
+            'aside' => null,
+        ])->render();
+        $this->assertStringContainsString('page="ALL"', $html);
+        $this->assertStringContainsString('header: html_letterhead', $html);
+
+        $binary = app(ArabicPdf::class)->render('correspondence.letter', [
+            'kicker' => 'عرض سعر',
+            'number' => 'QN-DEMO-2P',
+            'date' => '2026-10-13',
+            'clientName' => 'ليان',
+            'company' => 'محمصة عبيد',
+            'phone' => '0947000000',
+            'email' => 'layan@example.com',
+            'subject' => 'باقة المنتجات',
+            'rows' => $rows,
+            'notes' => 'يمتد على صفحتين',
+            'total' => '3,200.00 USD',
+            'aside' => null,
+        ]);
+
+        $this->assertSame(2, app(OdooPaperPdf::class)->pageCount($binary));
     }
 }

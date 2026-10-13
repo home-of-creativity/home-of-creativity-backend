@@ -128,6 +128,27 @@ class OdooPaperFlowTest extends TestCase
         $this->assertSame('cancelled', $second->invoices()->first()->status);
     }
 
+    public function test_a_quotation_may_carry_enough_lines_for_more_than_two_pages(): void
+    {
+        $client = $this->botClient();
+        $lines = [];
+        for ($index = 1; $index <= 21; $index++) {
+            $lines[] = ['title' => 'بند '.$index, 'amount' => 10, 'units' => 1];
+        }
+
+        $this->postJson('/api/admin/odoo/quotations', [
+            'client_id' => $client->id, 'action' => 'draft', 'lines' => $lines,
+        ])->assertCreated();
+
+        $tooMany = $lines;
+        for ($index = 22; $index <= 81; $index++) {
+            $tooMany[] = ['title' => 'بند '.$index, 'amount' => 10, 'units' => 1];
+        }
+        $this->postJson('/api/admin/odoo/quotations', [
+            'client_id' => $client->id, 'action' => 'draft', 'lines' => $tooMany,
+        ])->assertStatus(422)->assertJsonValidationErrors('lines');
+    }
+
     public function test_quotation_lines_carry_odoo_taxes_and_payment_terms(): void
     {
         $this->getJson('/api/admin/odoo/taxes')->assertOk()->assertJsonPath('data.0.id', 7)->assertJsonPath('data.0.amount', 5);

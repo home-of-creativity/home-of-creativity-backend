@@ -83,7 +83,9 @@ enum StaffAbility: string
                 'expense_delete' => ['ar' => 'حذف مصروف', 'en' => 'Delete expense'],
                 'sync' => ['ar' => 'المزامنة مع Odoo', 'en' => 'Odoo sync'],
             ],
-            self::OpsVouchers->value => $crud,
+            self::OpsVouchers->value => $crud + [
+                'send' => ['ar' => 'إرسال المستند بالبريد أو واتساب', 'en' => 'Send by email or WhatsApp'],
+            ],
             self::OpsChannels->value => [
                 'view' => $view,
                 'update' => ['ar' => 'تعديل الإعدادات والساعات', 'en' => 'Edit settings and hours'],

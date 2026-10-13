@@ -23,6 +23,7 @@ use App\Services\OdooClient;
 use App\Services\RequestStatusTransitionService;
 use App\Services\TelegramNotifier;
 use App\Support\Money;
+use App\Support\OdooPaperLimits;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -567,18 +568,8 @@ class OdooController extends Controller
     {
         return [
             'reference' => ['nullable', 'string', 'max:64'],
-            'lines' => ['required', 'array', 'min:1', 'max:20'],
-            'lines.*.title' => ['required', 'string', 'max:255'],
-            'lines.*.display_type' => ['nullable', 'in:line_section,line_note'],
-            'lines.*.amount' => ['nullable', 'numeric', 'min:0', 'required_unless:lines.*.display_type,line_section,line_note'],
-            'lines.*.units' => ['nullable', 'numeric', 'min:0.01'],
-            'lines.*.product_id' => ['nullable', 'integer', 'min:1'],
-            'lines.*.discount' => ['nullable', 'numeric', 'min:0', 'max:100'],
-            'lines.*.notes' => ['nullable', 'string', 'max:2000'],
-            'lines.*.tax_ids' => ['nullable', 'array', 'max:5'],
-            'lines.*.tax_ids.*' => ['integer', 'min:1'],
             'payment_term_id' => ['nullable', 'integer', 'min:0'],
-        ];
+        ] + OdooPaperLimits::lineRules();
     }
 
     /** The term the form sent: null leaves the paper's term, 0 clears it. */

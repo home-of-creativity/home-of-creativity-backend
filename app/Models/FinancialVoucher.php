@@ -8,7 +8,18 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class FinancialVoucher extends Model
 {
     /** @var list<string> */
-    public const KINDS = ['delivery', 'receipt', 'payment', 'journal', 'settlement'];
+    public const KINDS = ['delivery', 'receipt', 'payment', 'journal', 'settlement', 'notes'];
+
+    /**
+     * Lines a kind may hold and the length of each line's text. A notes record (minutes of a
+     * conversation) holds longer and more lines than a money voucher.
+     *
+     * @return array{0: int, 1: int}
+     */
+    public static function lineLimits(?string $kind): array
+    {
+        return $kind === 'notes' ? [40, 1000] : [12, 180];
+    }
 
     /** @var list<string> */
     public const CURRENCIES = ['USD', 'SYP'];
@@ -33,6 +44,8 @@ class FinancialVoucher extends Model
         'counter_signature',
         'background',
         'signed_at',
+        'sent_at',
+        'sent_to',
         'user_id',
     ];
 
@@ -43,6 +56,7 @@ class FinancialVoucher extends Model
             'issued_on' => 'date:Y-m-d',
             'lines' => 'array',
             'signed_at' => 'datetime',
+            'sent_at' => 'datetime',
         ];
     }
 
