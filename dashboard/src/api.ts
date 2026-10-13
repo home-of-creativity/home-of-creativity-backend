@@ -145,7 +145,7 @@ export type FinanceSummary = {
   sync?: { configured: boolean; synced_at: string | null; error: string | null };
 };
 
-export type VoucherKind = "delivery" | "receipt" | "payment" | "journal" | "settlement";
+export type VoucherKind = "delivery" | "receipt" | "payment" | "journal" | "settlement" | "notes";
 
 export type VoucherLine = { memo: string; debit: number; credit: number };
 
@@ -174,6 +174,8 @@ export type FinancialVoucher = FinancialVoucherSummary & {
   signature: string | null;
   counter_signature: string | null;
   background: string | null;
+  sent_at?: string | null;
+  sent_to?: string | null;
 };
 
 export type VoucherTemplateSummary = {
@@ -1437,6 +1439,10 @@ export const api = {
       method: id ? "PUT" : "POST",
       body: JSON.stringify(payload),
     });
+  },
+  /** Sends the voucher PDF (rendered from the sheet) by email, WhatsApp, or both. */
+  sendVoucher(id: number, form: FormData) {
+    return request<Envelope<{ sent: Partial<Record<"email" | "whatsapp", boolean>>; voucher: FinancialVoucher }>>(`/admin/vouchers/${id}/send`, { method: "POST", body: form });
   },
   deleteVoucher(id: number) {
     return request<Envelope<null>>(`/admin/vouchers/${id}`, { method: "DELETE" });

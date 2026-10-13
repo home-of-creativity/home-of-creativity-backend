@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { api, canAbility, type FinancialVoucher, type VoucherKind, type VoucherLine, type VoucherTemplate, type VoucherTemplateSummary } from "../api";
 import { useAuth } from "../auth";
 import { ConfirmAction } from "../components/ConfirmAction";
+import { sheetToPdf } from "../components/voucherPdf";
 import { LoadingLottie } from "../components/LoadingLottie";
 import { copy, type Locale } from "../i18n";
 
@@ -14,13 +15,16 @@ export const voucherKindCopy: Record<VoucherKind, { name: { ar: string; en: stri
   payment: { name: copy.voucherPayment, hint: copy.voucherPaymentHint },
   journal: { name: copy.voucherJournal, hint: copy.voucherJournalHint },
   settlement: { name: copy.voucherSettlement, hint: copy.voucherSettlementHint },
+  notes: { name: copy.voucherNotes, hint: copy.voucherNotesHint },
 };
 
-const KINDS: VoucherKind[] = ["delivery", "receipt", "payment", "journal", "settlement"];
+const KINDS: VoucherKind[] = ["delivery", "receipt", "payment", "journal", "settlement", "notes"];
+const MAX_NOTES = 40;
 
 /** The default word in each signature label; a voucher can replace it, e.g. «الطرف الآخر» with «HOC». */
 function signWord(kind: VoucherKind, side: "signer" | "counter") {
   if (kind === "delivery") return side === "signer" ? copy.voucherWordRecipient : copy.voucherWordGiver;
+  if (kind === "notes") return side === "signer" ? copy.voucherWordFirst : copy.voucherWordSecond;
   return side === "signer" ? copy.voucherWordStaff : copy.voucherWordOther;
 }
 
@@ -297,6 +301,11 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
   const canWrite = voucherId ? canAbility(user, "ops.vouchers.update") : canAbility(user, "ops.vouchers.create");
   const [phase, setPhase] = useState<"loading" | "template" | "edit" | "error">(voucherId ? "loading" : "template");
   const [serial, setSerial] = useState("");
+  const [sent, setSent] = useState<{ at: string | null; to: string | null }>({ at: null, to: null });
+  const [sendForm, setSendForm] = useState({ name: "", email: "", phone: "", message: "", byEmail: true, byWhatsApp: true });
+  const [sending, setSending] = useState(false);
+  const sheetRef = useRef<HTMLElement>(null);
+  const canSend = canAbility(user, "ops.vouchers.send");
   const [draft, setDraft] = useState<Draft | null>(null);
   const [templates, setTemplates] = useState<VoucherTemplateSummary[]>([]);
   const [templateName, setTemplateName] = useState("");
@@ -351,6 +360,7 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
       .then((res) => {
         if (cancelled) return;
         setSerial(res.data.serial);
+        setSent({ at: res.data.sent_at ?? null, to: res.data.sent_to ?? null });
         setDraft(fromVoucher(res.data));
         setPhase("edit");
       })
@@ -383,6 +393,57 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
     });
   }
 
+  function moveNote(index: number, step: -1 | 1) {
+    setDraft((current) => {
+      if (!current) return current;
+      const target = index + step;
+      if (target < 0 || target >= current.lines.length) return current;
+      const lines = [...current.lines];
+      [lines[index], lines[target]] = [lines[target], lines[index]];
+      return { ...current, lines };
+    });
+  }
+
+  function removeNote(index: number) {
+    setDraft((current) => {
+      if (!current) return current;
+      const lines = current.lines.filter((_, i) => i !== index);
+      return { ...current, lines: lines.length > 0 ? lines : [{ memo: "", debit: "", credit: "" }] };
+    });
+  }
+
+  /** The sheet as a PDF, sent to anyone by email and/or WhatsApp. */
+  async function send() {
+    if (!voucherId || !sheetRef.current) return;
+    const channel = sendForm.byEmail && sendForm.byWhatsApp ? "both" : sendForm.byEmail ? "email" : sendForm.byWhatsApp ? "whatsapp" : "";
+    if (!channel) {
+      toast.error(t(copy.voucherSendPickChannel));
+      return;
+    }
+    if (!sendForm.name.trim()) {
+      toast.error(t(copy.voucherSendNeedName));
+      return;
+    }
+    setSending(true);
+    try {
+      const pdf = await sheetToPdf(sheetRef.current);
+      const form = new FormData();
+      form.append("pdf", pdf, `${serial || "voucher"}.pdf`);
+      form.append("channel", channel);
+      form.append("name", sendForm.name.trim());
+      if (sendForm.byEmail) form.append("email", sendForm.email.trim());
+      if (sendForm.byWhatsApp) form.append("phone", sendForm.phone.trim());
+      if (sendForm.message.trim()) form.append("message", sendForm.message.trim());
+      const res = await api.sendVoucher(voucherId, form);
+      setSent({ at: res.data.voucher.sent_at ?? null, to: res.data.voucher.sent_to ?? null });
+      toast.success(res.message ?? t(copy.saved));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t(copy.saveFailed));
+    } finally {
+      setSending(false);
+    }
+  }
+
   async function save(event: FormEvent) {
     event.preventDefault();
     if (!draft || !canWrite) return;
@@ -390,7 +451,11 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
       setError(t(copy.voucherPartyRequired));
       return;
     }
-    const amount = Number(draft.amount) || 0;
+    if (draft.kind === "notes" && !draft.lines.some((line) => line.memo.trim())) {
+      setError(t(copy.voucherNotesRequired));
+      return;
+    }
+    const amount = draft.kind === "notes" ? 0 : Number(draft.amount) || 0;
     const deliveryAmount = pricedSum(draft.lines) ?? amount;
     if ((draft.kind === "receipt" || draft.kind === "payment" || draft.kind === "delivery") && (draft.kind === "delivery" ? deliveryAmount : amount) === 0) {
       setError(t(copy.voucherAmountRequired));
@@ -581,8 +646,14 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
             {t(copy.voucherTitle)}
             <input className="field" value={draft.title} disabled={!canWrite} maxLength={120} placeholder={t(voucherKindCopy[draft.kind].name)} onChange={(event) => patch({ title: event.target.value })} />
           </label>
+          {draft.kind === "notes" ? (
+            <label className="field-label">
+              {t(copy.voucherNotesFirst)}
+              <input className="field" value={draft.signer_name} disabled={!canWrite} maxLength={120} placeholder={t(copy.voucherNotesFirstPh)} onChange={(event) => patch({ signer_name: event.target.value })} />
+            </label>
+          ) : null}
           <label className="field-label">
-            {draft.kind === "delivery" ? t(copy.voucherRecipient) : t(copy.voucherParty)}
+            {draft.kind === "delivery" ? t(copy.voucherRecipient) : draft.kind === "notes" ? t(copy.voucherNotesSecond) : t(copy.voucherParty)}
             <input className="field" value={draft.party_name} disabled={!canWrite} required maxLength={160} placeholder={t(copy.voucherPartyPh)} onChange={(event) => patch({ party_name: event.target.value })} />
           </label>
           <div className="voucher-split">
@@ -590,6 +661,7 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
               {t(copy.voucherDate)}
               <input className="field" type="date" value={draft.issued_on} disabled={!canWrite} required onChange={(event) => patch({ issued_on: event.target.value })} />
             </label>
+            {draft.kind === "notes" ? null : (
             <label className="field-label">
               {t(copy.voucherCurrency)}
               <select className="field" value={draft.currency} disabled={!canWrite} onChange={(event) => patch({ currency: event.target.value as Draft["currency"] })}>
@@ -597,8 +669,52 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
                 <option value="SYP">SYP</option>
               </select>
             </label>
+            )}
           </div>
-          {draft.kind === "journal" ? (
+          {draft.kind === "notes" ? (
+            <>
+              <label className="field-label">
+                {t(copy.voucherNotesSubject)}
+                <textarea className="field" rows={2} value={draft.purpose} disabled={!canWrite} maxLength={2000} onChange={(event) => patch({ purpose: event.target.value })} />
+              </label>
+              <label className="field-label">
+                {t(copy.voucherNotesWhere)}
+                <input className="field" value={draft.reference} disabled={!canWrite} maxLength={120} placeholder={t(copy.voucherNotesWherePh)} onChange={(event) => patch({ reference: event.target.value })} />
+              </label>
+              <div className="voucher-notes-edit">
+                <span className="field-label">{t(copy.voucherNotesList)}</span>
+                <ol>
+                  {draft.lines.map((line, index) => (
+                    <li key={index}>
+                      <span className="voucher-note-number" aria-hidden="true">{index + 1}</span>
+                      <textarea
+                        className="field"
+                        rows={2}
+                        value={line.memo}
+                        disabled={!canWrite}
+                        maxLength={1000}
+                        placeholder={t(copy.voucherNotesNotePh)}
+                        aria-label={`${t(copy.voucherNotesList)} ${index + 1}`}
+                        onChange={(event) => patchLine(index, { memo: event.target.value })}
+                      />
+                      {canWrite ? (
+                        <span className="voucher-note-tools">
+                          <button type="button" className="btn btn-ghost btn-sm" disabled={index === 0} aria-label={t(copy.voucherNotesUp)} title={t(copy.voucherNotesUp)} onClick={() => moveNote(index, -1)}>↑</button>
+                          <button type="button" className="btn btn-ghost btn-sm" disabled={index === draft.lines.length - 1} aria-label={t(copy.voucherNotesDown)} title={t(copy.voucherNotesDown)} onClick={() => moveNote(index, 1)}>↓</button>
+                          <button type="button" className="btn btn-ghost btn-sm btn-danger" aria-label={t(copy.voucherNotesRemove)} title={t(copy.voucherNotesRemove)} onClick={() => removeNote(index)}>×</button>
+                        </span>
+                      ) : null}
+                    </li>
+                  ))}
+                </ol>
+                {draft.lines.length < MAX_NOTES && canWrite ? (
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => patch({ lines: [...draft.lines, { memo: "", debit: "", credit: "" }] })}>
+                    {t(copy.voucherNotesAdd)}
+                  </button>
+                ) : null}
+              </div>
+            </>
+          ) : draft.kind === "journal" ? (
             <div className="voucher-lines">
               <div className="voucher-line voucher-line-head" aria-hidden="true">
                 <span>{t(copy.voucherMemo)}</span>
@@ -646,12 +762,16 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
               <input className="field" dir="ltr" inputMode="decimal" value={draft.amount} disabled={!canWrite} required onChange={(event) => patch({ amount: event.target.value })} />
             </label>
           )}
-          <p className="muted">{t(copy.voucherNegativeHint)}</p>
-          <label className="field-label">
-            {t(copy.voucherAmountWords)}
-            <input className="field" value={draft.amount_words} disabled={!canWrite} maxLength={240} onChange={(event) => patch({ amount_words: event.target.value })} />
-          </label>
-          {draft.kind === "delivery" ? (
+          {draft.kind === "notes" ? null : (
+            <>
+              <p className="muted">{t(copy.voucherNegativeHint)}</p>
+              <label className="field-label">
+                {t(copy.voucherAmountWords)}
+                <input className="field" value={draft.amount_words} disabled={!canWrite} maxLength={240} onChange={(event) => patch({ amount_words: event.target.value })} />
+              </label>
+            </>
+          )}
+          {draft.kind === "notes" ? null : draft.kind === "delivery" ? (
             <>
               <label className="field-label">
                 {t(copy.voucherRecipientTitle)}
@@ -700,7 +820,7 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
             <button type="button" className="btn btn-ghost btn-sm" disabled={!canWrite} onClick={() => patch({ background: "" })}>{t(copy.voucherBackgroundClear)}</button>
           ) : null}
           <p className="muted">{t(copy.voucherSignHint)}</p>
-          {draft.kind === "delivery" ? null : (
+          {draft.kind === "delivery" || draft.kind === "notes" ? null : (
             <label className="field-label">
               {t(copy.voucherSignerName)}
               <input className="field" value={draft.signer_name} disabled={!canWrite} maxLength={120} onChange={(event) => patch({ signer_name: event.target.value })} />
@@ -732,9 +852,53 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
               <button className="btn" type="button" disabled={busy} onClick={() => void saveTemplate()}>{t(copy.voucherSaveTemplate)}</button>
             </>
           ) : null}
+          {canSend ? (
+            // Not a <form>: it sits inside the voucher form.
+            <div className="voucher-send">
+              <h3 className="section-title">{t(copy.voucherSend)}</h3>
+              {sent.at ? (
+                <p className="muted" role="status">
+                  {t(copy.voucherSentTo)} <bdi>{sent.to}</bdi> · <span dir="ltr">{new Date(sent.at).toLocaleString(locale === "ar" ? "ar-SA-u-nu-latn" : "en-GB", { dateStyle: "medium", timeStyle: "short" })}</span>
+                </p>
+              ) : null}
+              {voucherId ? (
+                <>
+                  <label className="field-label">
+                    {t(copy.voucherSendName)}
+                    <input className="field" value={sendForm.name} maxLength={120} placeholder={draft.counter_signer_name || draft.party_name} onChange={(event) => setSendForm((current) => ({ ...current, name: event.target.value }))} />
+                  </label>
+                  <div className="voucher-send-channels">
+                    <label><input type="checkbox" checked={sendForm.byEmail} onChange={(event) => setSendForm((current) => ({ ...current, byEmail: event.target.checked }))} />{t(copy.voucherSendByEmail)}</label>
+                    <label><input type="checkbox" checked={sendForm.byWhatsApp} onChange={(event) => setSendForm((current) => ({ ...current, byWhatsApp: event.target.checked }))} />{t(copy.voucherSendByWhatsApp)}</label>
+                  </div>
+                  {sendForm.byEmail ? (
+                    <label className="field-label">
+                      {t(copy.voucherSendEmail)}
+                      <input className="field" type="email" dir="ltr" value={sendForm.email} maxLength={190} onChange={(event) => setSendForm((current) => ({ ...current, email: event.target.value }))} />
+                    </label>
+                  ) : null}
+                  {sendForm.byWhatsApp ? (
+                    <label className="field-label">
+                      {t(copy.voucherSendPhone)}
+                      <input className="field" type="tel" dir="ltr" value={sendForm.phone} maxLength={40} placeholder="+963 9xx xxx xxx" onChange={(event) => setSendForm((current) => ({ ...current, phone: event.target.value }))} />
+                    </label>
+                  ) : null}
+                  <label className="field-label">
+                    {t(copy.voucherSendMessage)}
+                    <textarea className="field" rows={2} value={sendForm.message} maxLength={2000} onChange={(event) => setSendForm((current) => ({ ...current, message: event.target.value }))} />
+                  </label>
+                  <button type="button" className="btn btn-primary" disabled={sending} aria-busy={sending} onClick={() => void send()}>
+                    {sending ? t(copy.voucherSendBuilding) : t(copy.voucherSendGo)}
+                  </button>
+                </>
+              ) : (
+                <p className="muted">{t(copy.voucherSendSaveFirst)}</p>
+              )}
+            </div>
+          ) : null}
         </form>
 
-        <article className="voucher-sheet is-letter" dir="rtl">
+        <article ref={sheetRef} className="voucher-sheet is-letter" dir="rtl">
           {draft.background ? <img className="voucher-page-bg" src={draft.background} alt="" /> : <img className="voucher-watermark" src={`${import.meta.env.BASE_URL}hummingbird.svg`} alt="" />}
           <span className="voucher-corner is-top" aria-hidden="true" />
           <span className="voucher-corner is-bottom" aria-hidden="true" />
@@ -749,7 +913,21 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
             <p><span>{t(copy.voucherSerial)}</span><strong dir="ltr">{shortSerial(serial)}</strong></p>
           </div>
           <div className="voucher-text">
-          {draft.kind === "delivery" ? (
+          {draft.kind === "notes" ? (
+            <div className="voucher-copy">
+              <p><span>{t(copy.voucherNotesFirst)}</span><strong>{draft.signer_name || t(copy.voucherCompanyValue)}</strong></p>
+              <p><span>{t(copy.voucherNotesSecond)}</span><strong>{draft.party_name || "………………"}</strong></p>
+              {draft.purpose ? <p><span>{t(copy.voucherNotesSubject)}</span><strong>{draft.purpose}</strong></p> : null}
+              {draft.reference ? <p><span>{t(copy.voucherNotesWhere)}</span><strong>{draft.reference}</strong></p> : null}
+              <p className="voucher-statement-label">{t(copy.voucherNotesList)}</p>
+              <ol className="voucher-notes">
+                {draft.lines.filter((line) => line.memo.trim()).map((line, index) => (
+                  <li key={index}>{line.memo}</li>
+                ))}
+              </ol>
+              <p className="voucher-ack">{t(copy.voucherNotesAck)}</p>
+            </div>
+          ) : draft.kind === "delivery" ? (
             <div className="voucher-copy">
               <p><span>{t(copy.voucherRecipient)}</span><strong>{[draft.party_name, draft.reference].filter(Boolean).join(" / ") || "………………"}</strong></p>
               <p><span>{t(copy.voucherGiver)}</span><strong>{[draft.counter_signer_name, draft.purpose].filter(Boolean).join(" / ") || "………………"}</strong></p>
@@ -797,12 +975,12 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
           <footer className="voucher-signs">
             <div>
               <span>{signLabel(draft.kind, signerWord, t)}</span>
-              <strong>{draft.signer_name || draft.party_name || "………………"}</strong>
+              <strong>{draft.signer_name || (draft.kind === "notes" ? t(copy.voucherCompanyValue) : draft.party_name) || "………………"}</strong>
               {draft.signature ? <img src={draft.signature} alt="" /> : <i />}
             </div>
             <div>
               <span>{signLabel(draft.kind, counterWord, t)}</span>
-              <strong>{draft.counter_signer_name || "………………"}</strong>
+              <strong>{draft.counter_signer_name || (draft.kind === "notes" ? draft.party_name : "") || "………………"}</strong>
               {draft.counter_signature ? <img src={draft.counter_signature} alt="" /> : <i />}
             </div>
           </footer>

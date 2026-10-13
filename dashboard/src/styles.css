@@ -10472,3 +10472,93 @@ div:has(> .report-bar) {
     gap: 0.4rem;
   }
 }
+
+/* Vouchers: notes record and sending */
+.voucher-notes-edit {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.voucher-notes-edit ol {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.voucher-notes-edit li {
+  display: grid;
+  grid-template-columns: 1.8rem minmax(0, 1fr);
+  align-items: start;
+  gap: 0.3rem 0.45rem;
+}
+
+.voucher-note-number {
+  display: grid;
+  place-items: center;
+  width: 1.8rem;
+  height: 1.8rem;
+  margin-top: 0.35rem;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--brand-orange) 20%, var(--brand-surface));
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.voucher-note-tools {
+  grid-column: 2;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.15rem;
+}
+
+.voucher-notes {
+  margin: 0.2rem 0 0.4rem;
+  padding-inline-start: 1.4rem;
+  display: grid;
+  gap: 0.4rem;
+  line-height: 1.7;
+}
+
+/* Numbered: the voucher list style lays items out as flex rows, which hides the number. */
+.voucher-copy .voucher-notes {
+  list-style: decimal;
+}
+
+.voucher-copy .voucher-notes li {
+  display: list-item;
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.voucher-copy .voucher-notes li::marker {
+  font-weight: 700;
+  color: #e7993a;
+}
+
+.voucher-send {
+  display: grid;
+  gap: 0.6rem;
+  margin-top: 0.6rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--brand-line);
+}
+
+.voucher-send .section-title {
+  margin: 0;
+}
+
+.voucher-send-channels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.voucher-send-channels label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+

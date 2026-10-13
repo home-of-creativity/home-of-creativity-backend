@@ -1,6 +1,8 @@
 # Staff dashboard (Vite SPA)
 
-Last updated: 13 October 2026 (Clients › quotations «إنشاء فاتورة» opens Odoo's invoice dialog: regular invoice, down payment by percentage or fixed amount, and «مفوتر بالفعل». Picking a quotation in the invoice form opens the same dialog. The draft opens in the invoice form as «مسودة فاتورة» with «حفظ» and «تأكيد»; unchanged lines are not rewritten, so a down payment stays linked to its order.)
+Last updated: 13 October 2026 (Vouchers: «محضر ملاحظات» (`notes`) records a conversation between two parties: first and second party, subject, where or how, up to 40 numbered notes that move up and down, both signatures, and a closing statement; no currency or amount. Every saved voucher has «إرسال المستند»: the sheet becomes an A4 PDF in the browser (`components/voucherPdf.ts`, several pages when long) and goes to any name by email and/or WhatsApp (`ops.vouchers.send`); the last send shows under the title.)
+
+Previous: 13 October 2026 (Clients › quotations «إنشاء فاتورة» opens Odoo's invoice dialog: regular invoice, down payment by percentage or fixed amount, and «مفوتر بالفعل». Picking a quotation in the invoice form opens the same dialog. The draft opens in the invoice form as «مسودة فاتورة» with «حفظ» and «تأكيد»; unchanged lines are not rewritten, so a down payment stays linked to its order.)
 
 Previous: 13 October 2026 (Comments (`CommentsPanel`): a «التعليقات» tab in the report editor panel once the report is saved, a comments card under the post editor, and a folded «التعليقات (n)» section in calendar event and photography booking popovers. Threads with one level of replies, edit and delete for the author, Ctrl+Enter sends, refresh every 30 s while the page is visible. Without the permission the panel says so.)
 
