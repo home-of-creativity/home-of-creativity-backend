@@ -1909,7 +1909,15 @@ export const api = {
     return request<{ data: OdooPaymentTerm[] }>("/admin/odoo/payment-terms");
   },
   odooQuotation(id: number) {
-    return request<Envelope<OdooQuotation & { lines: OdooPaperLine[] }>>(`/admin/odoo/quotations/${id}`);
+    return request<Envelope<OdooQuotation & { lines: OdooPaperLine[]; invoiced?: number }>>(`/admin/odoo/quotations/${id}`);
+  },
+  /** Odoo's "Create invoice" wizard on a quotation: a draft invoice comes back. */
+  invoiceOdooQuotation(id: number, payload: { method: "delivered" | "percentage" | "fixed"; amount?: number }) {
+    return request<Envelope<OdooInvoice & { lines: OdooPaperLine[]; quotation_id: number }>>(`/admin/odoo/quotations/${id}/invoice`, { method: "POST", body: JSON.stringify(payload) });
+  },
+  /** «تأكيد» on a draft invoice: posted, sent, and the request waits for payment. */
+  postOdooInvoice(id: number, payload: { deliver: "email" | "whatsapp" | "both"; quotation_id?: number }) {
+    return request<Envelope<OdooInvoice>>(`/admin/odoo/invoices/${id}/post`, { method: "POST", body: JSON.stringify(payload) });
   },
   odooInvoice(id: number) {
     return request<Envelope<OdooInvoice & { lines: OdooPaperLine[] }>>(`/admin/odoo/invoices/${id}`);

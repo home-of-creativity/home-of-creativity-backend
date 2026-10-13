@@ -9,6 +9,7 @@ import { useCan } from "../lib/useCan";
 import { DriveFolderPicker } from "../components/DriveFolderPicker";
 import { LoadingTableRow } from "../components/LoadingTableRow";
 import { OdooPaperForm } from "../components/OdooPaperForm";
+import { InvoiceWizardDialog, type InvoiceDraft } from "../components/InvoiceWizardDialog";
 import { PageHeader } from "../components/PageHeader";
 import { Pagination } from "../components/Pagination";
 import { Tabs } from "../components/Tabs";
@@ -123,13 +124,41 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
       const res = kind === "quotation" ? await api.odooQuotation(id) : await api.odooInvoice(id);
       const reference = kind === "quotation" ? (res.data as OdooQuotation).client_order_ref : (res.data as OdooInvoice).ref;
       const partner = res.data.partner_id ? String(res.data.partner_id) : null;
-      setPaper({ kind, editing: { id, name: res.data.name, reference: reference ?? null, partnerId: partner, paymentTermId: res.data.payment_term_id ?? null, lines: res.data.lines } });
+      setPaper({ kind, editing: { id, name: res.data.name, reference: reference ?? null, partnerId: partner, paymentTermId: res.data.payment_term_id ?? null, lines: res.data.lines, state: res.data.state } });
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t(copy.saveFailed));
     } finally {
       setPaperBusy("");
     }
+  }
+
+  const [wizardQuote, setWizardQuote] = useState<OdooQuotation | null>(null);
+
+  /** A draft from Odoo's invoice wizard opens in the invoice form for review and «تأكيد». */
+  function openDraft(draft: InvoiceDraft, message: string) {
+    setWizardQuote(null);
+    toast.success(message);
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set("tab", "invoices");
+      return next;
+    });
+    setPaper({
+      kind: "invoice",
+      editing: {
+        id: draft.id,
+        name: draft.name,
+        reference: draft.ref ?? null,
+        partnerId: draft.partner_id ? String(draft.partner_id) : null,
+        paymentTermId: draft.payment_term_id ?? null,
+        lines: draft.lines,
+        state: draft.state,
+        quotationId: draft.quotation_id,
+      },
+    });
+    setRefresh((value) => value + 1);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   async function removePaper(kind: "quotation" | "invoice", id: number) {
@@ -709,8 +738,9 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                           if (item.partner_id) params.partner = String(item.partner_id);
                           if (item.partner_name) params.client = item.partner_name;
                           setSearchParams(params);
-                          setPaper({ kind: "invoice", quotation: item });
+                          setWizardQuote(item);
                         }}
+                        hidden={item.state === "cancel"}
                       >
                         {t(copy.invoiceFromQuote)}
                       </button>
@@ -742,6 +772,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
               setPaper(null);
               setRefresh((value) => value + 1);
             }}
+            onDraft={openDraft}
           />
         ) : null}
         <div className="toolbar filter-bar filter-grid">
@@ -848,6 +879,9 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
           </table>
         </div>
         </>
+      ) : null}
+      {wizardQuote ? (
+        <InvoiceWizardDialog quotation={wizardQuote} t={t} onClose={() => setWizardQuote(null)} onDraft={openDraft} />
       ) : null}
     </>
   );

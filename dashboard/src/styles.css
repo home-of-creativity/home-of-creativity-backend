@@ -1477,11 +1477,11 @@ td[colspan] {
 }
 
 .odoo-line-table .odoo-col-price {
-  width: 9rem;
+  width: 8rem;
 }
 
 .odoo-line-table .odoo-col-tax {
-  width: 11rem;
+  width: 9.5rem;
 }
 
 .odoo-line-table .odoo-col-discount {
@@ -1489,7 +1489,7 @@ td[colspan] {
 }
 
 .odoo-line-table th.money {
-  width: 8rem;
+  width: 7.5rem;
 }
 
 .odoo-table.odoo-line-table th:last-child {
@@ -10394,4 +10394,81 @@ div:has(> .report-bar) {
 .comments-toggle {
   justify-self: start;
   gap: 0.35rem;
+}
+
+/* Odoo's "Create invoice" wizard */
+.form-dialog-panel.invoice-wizard {
+  width: min(38rem, 100%);
+}
+
+.invoice-wizard-body {
+  display: grid;
+  gap: 1rem;
+}
+
+.invoice-wizard-row {
+  display: grid;
+  grid-template-columns: 9rem minmax(0, 1fr);
+  align-items: center;
+  gap: 1rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.invoice-wizard-row > legend {
+  float: inline-start;
+  width: 9rem;
+  padding: 0;
+  font-weight: 700;
+}
+
+.invoice-wizard-row > span:first-child {
+  font-weight: 700;
+}
+
+.invoice-wizard-row.is-muted > span:first-child {
+  font-weight: 500;
+  color: var(--brand-muted);
+}
+
+.invoice-wizard-options {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.invoice-wizard-options label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.invoice-wizard-options input {
+  accent-color: var(--brand-teal);
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+.invoice-wizard-amount {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  max-width: 12rem;
+}
+
+.invoice-wizard-amount .field {
+  text-align: end;
+}
+
+.invoice-wizard-note {
+  margin: 0;
+}
+
+@media (max-width: 640px) {
+  .invoice-wizard-row {
+    grid-template-columns: 1fr;
+    gap: 0.4rem;
+  }
 }

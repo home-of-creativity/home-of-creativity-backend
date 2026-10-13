@@ -184,6 +184,8 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::put('odoo/quotations/{id}', [AdminOdooController::class, 'updateQuotation'])->whereNumber('id');
         Route::delete('odoo/quotations/{id}', [AdminOdooController::class, 'destroyQuotation'])->whereNumber('id');
         Route::put('odoo/invoices/{id}', [AdminOdooController::class, 'updateInvoice'])->whereNumber('id');
+        Route::post('odoo/quotations/{id}/invoice', [AdminOdooController::class, 'invoiceQuotation'])->whereNumber('id');
+        Route::post('odoo/invoices/{id}/post', [AdminOdooController::class, 'postInvoice'])->whereNumber('id');
         Route::delete('odoo/invoices/{id}', [AdminOdooController::class, 'destroyInvoice'])->whereNumber('id');
     });
 

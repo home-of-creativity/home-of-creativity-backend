@@ -1,6 +1,8 @@
 # Staff dashboard (Vite SPA)
 
-Last updated: 13 October 2026 (Comments (`CommentsPanel`): a «التعليقات» tab in the report editor panel once the report is saved, a comments card under the post editor, and a folded «التعليقات (n)» section in calendar event and photography booking popovers. Threads with one level of replies, edit and delete for the author, Ctrl+Enter sends, refresh every 30 s while the page is visible. Without the permission the panel says so.)
+Last updated: 13 October 2026 (Clients › quotations «إنشاء فاتورة» opens Odoo's invoice dialog: regular invoice, down payment by percentage or fixed amount, and «مفوتر بالفعل». Picking a quotation in the invoice form opens the same dialog. The draft opens in the invoice form as «مسودة فاتورة» with «حفظ» and «تأكيد»; unchanged lines are not rewritten, so a down payment stays linked to its order.)
+
+Previous: 13 October 2026 (Comments (`CommentsPanel`): a «التعليقات» tab in the report editor panel once the report is saved, a comments card under the post editor, and a folded «التعليقات (n)» section in calendar event and photography booking popovers. Threads with one level of replies, edit and delete for the author, Ctrl+Enter sends, refresh every 30 s while the page is visible. Without the permission the panel says so.)
 
 Previous: 13 October 2026 (Clients › quotation and invoice form: the product column takes the room and quantity is narrow. Each line picks one or more Odoo sales taxes (a popover with checkboxes; a new line starts with the last line's taxes), and the totals show untaxed, taxes, and total. Payment terms is a list from Odoo; on an invoice a chosen term hides the due date, which Odoo computes.)
 

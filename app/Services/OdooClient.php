@@ -1652,6 +1652,100 @@ class OdooClient
         return array_values(array_filter(array_map('intval', is_array($value) ? $value : []), fn (int $id): bool => $id > 0));
     }
 
+    /**
+     * What a sales order has invoiced so far: the total of its invoices that are not
+     * cancelled, credit notes taken off. The "already invoiced" line of Odoo's wizard.
+     */
+    public function saleOrderInvoiced(int $orderId): float
+    {
+        $order = $this->firstRecord($this->searchRead('sale.order', [['id', '=', $orderId]], ['invoice_ids'], 1));
+        $ids = $this->idList($order['invoice_ids'] ?? []);
+        if ($ids === []) {
+            return 0.0;
+        }
+
+        $total = 0.0;
+        foreach ($this->searchRead('account.move', [['id', 'in', $ids], ['state', '!=', 'cancel']], ['amount_total', 'move_type'], 100) as $row) {
+            $total += ($row['move_type'] ?? '') === 'out_refund' ? -(float) $row['amount_total'] : (float) ($row['amount_total'] ?? 0);
+        }
+
+        return round($total, 2);
+    }
+
+    /**
+     * Odoo's "Create invoice" wizard on a sales order: `delivered` is the regular invoice of
+     * what is left to invoice, `percentage` and `fixed` are a down payment. A draft quotation
+     * is confirmed first, as only a sales order is invoiced. A down payment line is named after
+     * the ordered products instead of Odoo's "Down payment of 50%".
+     *
+     * @return int the new draft invoice
+     */
+    public function invoiceSaleOrderWizard(int $orderId, string $method, ?float $value): int
+    {
+        $this->confirmSaleOrder($orderId);
+        $before = $this->idList($this->firstRecord($this->searchRead('sale.order', [['id', '=', $orderId]], ['invoice_ids'], 1))['invoice_ids'] ?? []);
+
+        $context = ['active_model' => 'sale.order', 'active_ids' => [$orderId], 'active_id' => $orderId];
+        $values = ['advance_payment_method' => $method, 'sale_order_ids' => [[6, 0, [$orderId]]]];
+        if ($method === 'percentage') {
+            $values['amount'] = (float) $value;
+        } elseif ($method === 'fixed') {
+            $values['fixed_amount'] = (float) $value;
+        }
+        $created = $this->createWithContext('sale.advance.payment.inv', $values, $context);
+        $wizard = (int) (is_array($created) ? ($created[0] ?? 0) : $created);
+        $this->callWithContext('sale.advance.payment.inv', 'create_invoices', [$wizard], $context);
+
+        $after = $this->idList($this->firstRecord($this->searchRead('sale.order', [['id', '=', $orderId]], ['invoice_ids'], 1))['invoice_ids'] ?? []);
+        $new = array_values(array_diff($after, $before));
+        if ($new === []) {
+            throw new RuntimeException('Odoo created no invoice: nothing is left to invoice on this order.');
+        }
+        $invoiceId = max($new);
+
+        if ($method !== 'delivered') {
+            $this->nameDownPayment($orderId, $invoiceId, $method, (float) $value);
+        }
+
+        return $invoiceId;
+    }
+
+    /** The sales order an invoice came from, by the name in its origin («S00028»). */
+    public function saleOrderIdByName(?string $origin): ?int
+    {
+        $name = trim(explode(',', (string) $origin)[0]);
+        if ($name === '' || ! $this->configured()) {
+            return null;
+        }
+        $row = $this->firstRecord($this->searchRead('sale.order', [['name', '=', $name]], ['id'], 1));
+
+        return $row === null ? null : (int) $row['id'];
+    }
+
+    /** «باقة إنستغرام — دفعة مقدّمة 50%» on the down payment line of a draft invoice. */
+    private function nameDownPayment(int $orderId, int $invoiceId, string $method, float $value): void
+    {
+        // The ordered lines only: earlier down payments are lines of the order too.
+        $ordered = $this->searchRead('sale.order.line', [['order_id', '=', $orderId], ['display_type', '=', false], ['is_downpayment', '=', false]], ['name'], 40, 0, 'sequence asc, id asc');
+        $products = collect($ordered)
+            ->map(fn (array $line): string => trim(explode("\n", (string) ($line['name'] ?? ''))[0]))
+            ->filter()
+            ->unique()
+            ->take(3)
+            ->implode('، ');
+        if ($products === '') {
+            return;
+        }
+        $share = $method === 'percentage'
+            ? rtrim(rtrim(number_format($value, 2, '.', ''), '0'), '.').'%'
+            : rtrim(rtrim(number_format($value, 2, '.', ''), '0'), '.').'$';
+        $lines = $this->searchRead('account.move.line', [['move_id', '=', $invoiceId], ['display_type', '=', 'product']], ['id'], 20);
+        $updates = array_map(fn (array $row): array => [1, (int) $row['id'], ['name' => "{$products} — دفعة مقدّمة {$share}"]], $lines);
+        if ($updates !== []) {
+            $this->call('account.move', 'write', ['ids' => [$invoiceId], 'vals' => ['invoice_line_ids' => $updates]]);
+        }
+    }
+
     /** An invoice that is posted and not yet fully paid, so a payment can go on it. */
     public function invoiceAwaitsPayment(int $id): bool
     {

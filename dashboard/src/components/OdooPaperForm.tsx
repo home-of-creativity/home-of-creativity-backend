@@ -2,12 +2,24 @@ import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent 
 import * as Popover from "@radix-ui/react-popover";
 import { api, type Client, type OdooPaperLine, type OdooPaymentTerm, type OdooProduct, type OdooQuotation, type OdooTax, type PaperLineInput } from "../api";
 import { copy } from "../i18n";
+import { InvoiceWizardDialog, type InvoiceDraft } from "./InvoiceWizardDialog";
 
 type LineKind = "product" | "section" | "note";
 type Line = { id: string; kind: LineKind; title: string; amount: string; units: string; discount: string; taxIds: number[]; productId?: number; notes?: string };
 
 /** An existing Odoo quotation or invoice opened for editing. */
-export type PaperEditing = { id: number; name: string; reference: string | null; partnerId: string | null; paymentTermId?: number | null; lines: OdooPaperLine[] };
+export type PaperEditing = {
+  id: number;
+  name: string;
+  reference: string | null;
+  partnerId: string | null;
+  paymentTermId?: number | null;
+  lines: OdooPaperLine[];
+  /** Odoo state; a draft invoice gets «تأكيد». */
+  state?: string;
+  /** The sales order a wizard invoice came from, so «تأكيد» continues its request. */
+  quotationId?: number | null;
+};
 
 function fromOdoo(line: OdooPaperLine): Line {
   return {
@@ -122,6 +134,7 @@ export function OdooPaperForm({
   onCancel,
   onCreated,
   editing,
+  onDraft,
 }: {
   kind: "quotation" | "invoice";
   partnerId?: string;
@@ -131,12 +144,18 @@ export function OdooPaperForm({
   /** `requestId` is the request a sent quotation opened. */
   onCreated: (message: string, requestId?: number) => void;
   editing?: PaperEditing | null;
+  /** A draft from Odoo's invoice wizard, opened for review. */
+  onDraft?: (draft: InvoiceDraft, message: string) => void;
 }) {
   const clientListId = useId();
   const quoteListId = useId();
   const clientBox = useRef<HTMLLabelElement>(null);
   const quoteBox = useRef<HTMLLabelElement>(null);
   const sendMode = useRef<SendMode>("draft");
+  // A wizard draft keeps Odoo's lines (linked to the order) unless they are edited here.
+  const linesTouched = useRef(false);
+  const [wizardFor, setWizardFor] = useState<OdooQuotation | null>(null);
+  const draftInvoice = kind === "invoice" && editing?.state === "draft";
   const [clients, setClients] = useState<Client[]>([]);
   const [clientQuery, setClientQuery] = useState("");
   const [clientId, setClientId] = useState("");
@@ -322,6 +341,7 @@ export function OdooPaperForm({
   }
 
   function updateLine(id: string, patch: Partial<Line>) {
+    linesTouched.current = true;
     setLines((current) => current.map((line) => (line.id === id ? { ...line, ...patch } : line)));
   }
 
@@ -393,6 +413,11 @@ export function OdooPaperForm({
       setError(t(copy.fieldRequired));
       return;
     }
+    // An invoice from a quotation goes through Odoo's wizard: regular or down payment.
+    if (kind === "invoice" && !editing && quotationId) {
+      setWizardFor(quotations.find((item) => String(item.id) === quotationId) ?? quotation ?? null);
+      return;
+    }
     if (kind === "invoice" && products.length === 0 && !quotationId) {
       setError(t(copy.fieldRequired));
       return;
@@ -401,6 +426,19 @@ export function OdooPaperForm({
     setBusy(true);
     setError("");
     try {
+      if (draftInvoice && mode === "draft" && !linesTouched.current) {
+        // Nothing changed: the wizard's lines stay linked to the order.
+        onCreated(t(copy.saved));
+        return;
+      }
+      if (draftInvoice && mode === "send") {
+        if (linesTouched.current) {
+          await api.updateOdooInvoice(editing.id, { lines: filled, reference: reference.trim() || undefined, payment_term_id: termId, deliver });
+        }
+        const res = await api.postOdooInvoice(editing.id, { deliver, quotation_id: editing.quotationId ?? undefined });
+        onCreated(res.message || t(copy.saved));
+        return;
+      }
       if (editing) {
         // Editing: the server updates Odoo and sends the paper to the client again when it was already sent.
         const res = kind === "quotation"
@@ -462,7 +500,9 @@ export function OdooPaperForm({
           ))}
         </nav>
         <h2 className="form-title">
-          {editing
+          {draftInvoice
+            ? `${t(copy.paperDraftInvoice)}${editing?.name && editing.name !== "/" ? ` ${editing.name}` : ""}`
+            : editing
             ? `${t(kind === "quotation" ? copy.editQuotation : copy.editInvoice)} ${editing.name}`
             : t(kind === "quotation" ? copy.createQuotation : copy.createInvoice)}
         </h2>
@@ -619,7 +659,7 @@ export function OdooPaperForm({
             {t(copy.paperDeliverWhatsApp)}
             {selected?.phone ? <span dir="ltr">{selected.phone}</span> : null}
           </label>
-          <p className="muted odoo-flow-note">{editing ? t(kind === "quotation" ? copy.paperQuotationEditFlow : copy.paperInvoiceEditFlow) : kind === "quotation" ? t(copy.paperQuotationFlow) : t(copy.paperInvoiceFlow)}</p>
+          <p className="muted odoo-flow-note">{draftInvoice ? t(copy.paperInvoiceDraftFlow) : editing ? t(kind === "quotation" ? copy.paperQuotationEditFlow : copy.paperInvoiceEditFlow) : kind === "quotation" ? t(copy.paperQuotationFlow) : t(copy.paperInvoiceFlow)}</p>
         </fieldset>
 
         {showLines ? (
@@ -700,7 +740,7 @@ export function OdooPaperForm({
                     <td className="money" dir="ltr">{line.kind === "product" ? money(taxed[index].base) : ""}</td>
                     <td>
                       {lines.length > 1 ? (
-                        <button type="button" className="btn btn-ghost" aria-label={t(copy.removeQuotationLine)} onClick={() => setLines((current) => current.filter((item) => item.id !== line.id))}>×</button>
+                        <button type="button" className="btn btn-ghost" aria-label={t(copy.removeQuotationLine)} onClick={() => { linesTouched.current = true; setLines((current) => current.filter((item) => item.id !== line.id)); }}>×</button>
                       ) : null}
                     </td>
                   </tr>
@@ -727,13 +767,13 @@ export function OdooPaperForm({
         <div className="quotation-form-actions">
           {showLines ? (
             <div className="odoo-line-adds">
-              <button type="button" className="btn btn-ghost" onClick={() => setLines((current) => [...current, blankLine("product", lastTaxes(current))])} disabled={busy}>
+              <button type="button" className="btn btn-ghost" onClick={() => { linesTouched.current = true; setLines((current) => [...current, blankLine("product", lastTaxes(current))]); }} disabled={busy}>
                 {t(copy.paperAddProduct)}
               </button>
-              <button type="button" className="btn btn-ghost" onClick={() => setLines((current) => [...current, blankLine("section")])} disabled={busy}>
+              <button type="button" className="btn btn-ghost" onClick={() => { linesTouched.current = true; setLines((current) => [...current, blankLine("section")]); }} disabled={busy}>
                 {t(copy.paperAddSection)}
               </button>
-              <button type="button" className="btn btn-ghost" onClick={() => setLines((current) => [...current, blankLine("note")])} disabled={busy}>
+              <button type="button" className="btn btn-ghost" onClick={() => { linesTouched.current = true; setLines((current) => [...current, blankLine("note")]); }} disabled={busy}>
                 {t(copy.paperAddNote)}
               </button>
             </div>
@@ -742,7 +782,16 @@ export function OdooPaperForm({
             <button type="button" className="btn btn-ghost" onClick={onCancel} disabled={busy}>
               {t(copy.cancel)}
             </button>
-            {editing ? (
+            {draftInvoice ? (
+              <>
+                <button className="btn btn-ghost" type="submit" disabled={busy} onClick={() => { sendMode.current = "draft"; }}>
+                  {busy ? t(copy.creatingPaper) : t(copy.paperSaveDraft)}
+                </button>
+                <button className="btn btn-primary" type="submit" disabled={busy} aria-busy={busy} onClick={() => { sendMode.current = "send"; }}>
+                  {busy ? t(copy.creatingPaper) : t(copy.paperConfirm)}
+                </button>
+              </>
+            ) : editing ? (
               <button className="btn btn-primary" type="submit" disabled={busy} aria-busy={busy} onClick={() => { sendMode.current = "draft"; }}>
                 {busy ? t(copy.creatingPaper) : t(copy.paperSaveEdit)}
               </button>
@@ -759,6 +808,17 @@ export function OdooPaperForm({
           </div>
         </div>
       </form>
+      {wizardFor ? (
+        <InvoiceWizardDialog
+          quotation={wizardFor}
+          t={t}
+          onClose={() => setWizardFor(null)}
+          onDraft={(draft, message) => {
+            setWizardFor(null);
+            onDraft?.(draft, message);
+          }}
+        />
+      ) : null}
     </section>
   );
 }

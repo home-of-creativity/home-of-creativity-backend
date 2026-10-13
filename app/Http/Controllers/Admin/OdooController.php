@@ -333,7 +333,11 @@ class OdooController extends Controller
     {
         $snapshot = $this->paper($odoo, 'sale.order', $id);
 
-        return response()->json(['data' => [...$this->withRequests([$snapshot], 'odoo_quotation_id')[0], 'lines' => $odoo->paperLines('sale.order', $id)]]);
+        return response()->json(['data' => [
+            ...$this->withRequests([$snapshot], 'odoo_quotation_id')[0],
+            'lines' => $odoo->paperLines('sale.order', $id),
+            'invoiced' => $odoo->saleOrderInvoiced($id),
+        ]]);
     }
 
     public function showInvoice(int $id, OdooClient $odoo): JsonResponse
@@ -686,41 +690,154 @@ class OdooController extends Controller
                 ? ServiceRequest::query()->where('client_id', $client->id)->where('odoo_quotation_id', (string) $quotationId)->latest('id')->first()
                 : null;
             $opened ??= $openRequest->handle($client, $created, $lines, is_string($reference) ? $reference : null);
-            try {
-                $chatId = $client->telegram_user_id;
-                $onBot = filled($chatId) && $telegram->canReachClient($chatId);
-                $created = $publish->invoice(
-                    $client,
-                    $opened,
-                    $created,
-                    (string) $request->validated('deliver'),
-                    true,
-                    $request->validated('invoice_date'),
-                    $request->validated('due_date'),
-                    deliver: ! $onBot,
-                );
-                $this->recordInvoice($opened, $created, $publish->pdfPath);
-                if ($onBot) {
-                    $publish->delivered = $this->sendInvoiceOnBot($telegram, $opened, $created, $publish->pdfPath);
-                }
-                // Payment steps follow on the bot: QR, then the client's receipt.
-                $opened = $this->awaitPayment($opened->refresh(), $approve, $acceptance, $transitions);
-                $clickup = $opened->clickupTasks()->where('task_type', 'sales')->exists()
-                    ? ' ومهمة المبيعات في ClickUp.'
-                    : '.';
-                $message = $publish->delivered
-                    ? 'تم ترحيل الفاتورة، والطلب '.$opened->number.' بانتظار الدفع'.$clickup
-                    : 'رُحّلت الفاتورة والطلب '.$opened->number.' بانتظار الدفع، وتعذر إيصالها إلى البريد أو واتساب.';
-            } catch (\Throwable $exception) {
-                Log::warning('Odoo invoice post failed.', ['error' => $exception->getMessage()]);
-                $message = 'أُنشئت الفاتورة وفُتح الطلب '.$opened->number.' وتعذر ترحيلها أو إرسالها.';
-            }
+            [$created, $message] = $this->postAndSend(
+                $client,
+                $opened,
+                $created,
+                (string) $request->validated('deliver'),
+                $request->validated('invoice_date'),
+                $request->validated('due_date'),
+                $publish,
+                $approve,
+                $acceptance,
+                $transitions,
+                $telegram,
+            );
         }
 
         return response()->json([
             'data' => $created,
             'message' => $message,
         ], 201);
+    }
+
+    /**
+     * Odoo's "Create invoice" wizard on a quotation or sales order: a regular invoice of what
+     * is left, or a down payment by percentage or fixed amount. The result is a draft linked
+     * to the order, opened in the dashboard for review before it is confirmed.
+     */
+    public function invoiceQuotation(Request $request, int $id, OdooClient $odoo): JsonResponse
+    {
+        $validated = $request->validate([
+            'method' => ['required', 'in:delivered,percentage,fixed'],
+            'amount' => ['nullable', 'required_unless:method,delivered', 'numeric', 'gt:0', 'max:100000000'],
+        ]);
+        if ($validated['method'] === 'percentage') {
+            abort_if((float) $validated['amount'] > 100, 422, 'النسبة لا تتجاوز 100%.');
+        }
+        $snapshot = $this->paper($odoo, 'sale.order', $id);
+        abort_if(($snapshot['state'] ?? '') === 'cancel', 422, 'عرض السعر ملغى في أودو.');
+
+        try {
+            $invoiceId = $odoo->invoiceSaleOrderWizard($id, $validated['method'], isset($validated['amount']) ? (float) $validated['amount'] : null);
+        } catch (\Throwable $exception) {
+            Log::warning('Odoo invoice wizard failed.', ['order' => $id, 'error' => $exception->getMessage()]);
+
+            return response()->json(['message' => 'تعذر إنشاء الفاتورة في أودو: '.$exception->getMessage()], 502);
+        }
+
+        $invoice = $odoo->invoiceSnapshot($invoiceId) ?? ['id' => $invoiceId];
+
+        return response()->json([
+            'data' => [...$invoice, 'lines' => $odoo->paperLines('account.move', $invoiceId), 'quotation_id' => $id],
+            'message' => 'أُنشئت مسودة الفاتورة. راجعها ثم اضغط «تأكيد» لترحيلها.',
+        ], 201);
+    }
+
+    /**
+     * «تأكيد» on a draft invoice: posted in Odoo, sent to the client, and the request waits
+     * for payment, as when an invoice is created and posted at once.
+     */
+    public function postInvoice(
+        Request $request,
+        int $id,
+        OdooClient $odoo,
+        PublishOdooPaper $publish,
+        OpenRequestFromStaffInvoice $openRequest,
+        ApproveQuotation $approve,
+        ApplyQuotationAcceptance $acceptance,
+        RequestStatusTransitionService $transitions,
+        TelegramNotifier $telegram,
+    ): JsonResponse {
+        $validated = $request->validate([
+            'deliver' => ['required', 'in:email,whatsapp,both,phone'],
+            'quotation_id' => ['nullable', 'integer', 'min:1'],
+            'invoice_date' => ['nullable', 'date'],
+            'due_date' => ['nullable', 'date'],
+        ]);
+        $snapshot = $this->paper($odoo, 'account.move', $id);
+        abort_unless(($snapshot['state'] ?? '') === 'draft', 422, 'الفاتورة ليست مسودة.');
+        $client = Client::query()->where('odoo_partner_id', (string) ($snapshot['partner_id'] ?? ''))->latest('id')->first();
+        abort_if($client === null, 422, 'عميل الفاتورة غير موجود في الداشبورد.');
+        $blocked = $this->paperChannel($client, $validated['deliver']);
+        if ($blocked instanceof JsonResponse) {
+            return $blocked;
+        }
+
+        // A draft opened from the invoice list knows its order only by the origin name.
+        $quotationId = (int) ($validated['quotation_id'] ?? $odoo->saleOrderIdByName($snapshot['invoice_origin'] ?? null) ?? 0);
+        $opened = ServiceRequest::query()->where('odoo_invoice_id', (string) $id)->latest('id')->first()
+            ?? ($quotationId > 0 ? ServiceRequest::query()->where('client_id', $client->id)->where('odoo_quotation_id', (string) $quotationId)->latest('id')->first() : null)
+            ?? $openRequest->handle($client, $snapshot, [], is_string($snapshot['ref'] ?? null) ? $snapshot['ref'] : null);
+        [$created, $message] = $this->postAndSend(
+            $client,
+            $opened,
+            $snapshot,
+            $validated['deliver'],
+            $validated['invoice_date'] ?? null,
+            $validated['due_date'] ?? null,
+            $publish,
+            $approve,
+            $acceptance,
+            $transitions,
+            $telegram,
+        );
+
+        return response()->json(['data' => $created, 'message' => $message]);
+    }
+
+    /**
+     * Posts the invoice, records it on the request, sends it (bot for bot clients, else email
+     * or WhatsApp), and moves the request to awaiting payment.
+     *
+     * @param  array<string, mixed>  $created
+     * @return array{0: array<string, mixed>, 1: string}
+     */
+    private function postAndSend(
+        Client $client,
+        ServiceRequest $opened,
+        array $created,
+        string $deliver,
+        ?string $invoiceDate,
+        ?string $dueDate,
+        PublishOdooPaper $publish,
+        ApproveQuotation $approve,
+        ApplyQuotationAcceptance $acceptance,
+        RequestStatusTransitionService $transitions,
+        TelegramNotifier $telegram,
+    ): array {
+        try {
+            $chatId = $client->telegram_user_id;
+            $onBot = filled($chatId) && $telegram->canReachClient($chatId);
+            $created = $publish->invoice($client, $opened, $created, $deliver, true, $invoiceDate, $dueDate, deliver: ! $onBot);
+            $this->recordInvoice($opened, $created, $publish->pdfPath);
+            if ($onBot) {
+                $publish->delivered = $this->sendInvoiceOnBot($telegram, $opened, $created, $publish->pdfPath);
+            }
+            // Payment steps follow on the bot: QR, then the client's receipt.
+            $opened = $this->awaitPayment($opened->refresh(), $approve, $acceptance, $transitions);
+            $clickup = $opened->clickupTasks()->where('task_type', 'sales')->exists()
+                ? ' ومهمة المبيعات في ClickUp.'
+                : '.';
+            $message = $publish->delivered
+                ? 'تم ترحيل الفاتورة، والطلب '.$opened->number.' بانتظار الدفع'.$clickup
+                : 'رُحّلت الفاتورة والطلب '.$opened->number.' بانتظار الدفع، وتعذر إيصالها إلى البريد أو واتساب.';
+        } catch (\Throwable $exception) {
+            Log::warning('Odoo invoice post failed.', ['error' => $exception->getMessage()]);
+            $message = 'أُنشئت الفاتورة وفُتح الطلب '.$opened->number.' وتعذر ترحيلها أو إرسالها.';
+        }
+
+        return [$created, $message];
     }
 
     /**
@@ -780,6 +897,10 @@ class OdooController extends Controller
         try {
             if ($request->status === RequestStatus::QuotationSent) {
                 return $approve->handle($request, null, 'admin');
+            }
+            // Posting the invoice is the admin's go-ahead for an approval that was waiting on them.
+            if ($request->status === RequestStatus::AwaitingAdminApproval) {
+                return $approve->confirm($request, 'admin');
             }
             if (in_array($request->status, [RequestStatus::Submitted, RequestStatus::QuotationRejected], true)) {
                 if ($request->status === RequestStatus::QuotationRejected) {

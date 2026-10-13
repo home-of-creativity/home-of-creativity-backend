@@ -186,6 +186,48 @@ class OdooPaperFlowTest extends TestCase
         return collect($this->odoo['payloads'])->first(fn (array $call): bool => $call[0] === $model && $call[1] === $method)[2];
     }
 
+    public function test_the_invoice_wizard_makes_a_named_down_payment_draft_then_confirm_posts_it(): void
+    {
+        $client = $this->botClient();
+        $this->postJson('/api/admin/odoo/quotations', [
+            'client_id' => $client->id, 'action' => 'send', 'deliver' => 'email',
+            'lines' => [['title' => 'باقة إنستغرام شهرية', 'amount' => 300, 'units' => 1]],
+        ])->assertCreated();
+        $request = ServiceRequest::query()->sole();
+        $this->getJson('/api/admin/odoo/quotations/880')->assertOk()->assertJsonPath('data.invoiced', 0);
+
+        $this->postJson('/api/admin/odoo/quotations/880/invoice', ['method' => 'percentage', 'amount' => 120])->assertUnprocessable();
+        $this->postJson('/api/admin/odoo/quotations/880/invoice', ['method' => 'percentage'])->assertUnprocessable();
+
+        $this->odoo['order_lines'] = [['name' => "باقة إنستغرام شهرية\nتصميم ونشر", 'product_uom_qty' => 1, 'price_unit' => 300, 'discount' => 0, 'display_type' => false, 'product_id' => false]];
+        $draft = $this->postJson('/api/admin/odoo/quotations/880/invoice', ['method' => 'percentage', 'amount' => 50])
+            ->assertCreated()
+            ->assertJsonPath('data.id', 990)
+            ->assertJsonPath('data.state', 'draft')
+            ->assertJsonPath('data.quotation_id', 880)
+            ->json('data');
+        $this->assertSame('draft', $this->odoo['move']);
+
+        // The quotation was confirmed first, and the wizard ran on it with a 50% down payment.
+        $this->assertSame('sale', $this->odoo['order']);
+        $wizard = collect($this->odoo['payloads'])->first(fn (array $call): bool => $call[0] === 'sale.advance.payment.inv' && $call[1] === 'create');
+        $values = $wizard[2][0][0] ?? $wizard[2][0];
+        $this->assertSame('percentage', $values['advance_payment_method']);
+        $this->assertEquals(50, $values['amount']);
+        $rename = collect($this->odoo['payloads'])->last(fn (array $call): bool => $call[0] === 'account.move' && $call[1] === 'write');
+        $this->assertSame('باقة إنستغرام شهرية — دفعة مقدّمة 50%', $rename[2][1]['invoice_line_ids'][0][2]['name']);
+        $this->assertSame(RequestStatus::QuotationSent, $request->fresh()->status);
+
+        // «تأكيد»: posted, recorded on the request, and the request waits for payment.
+        $this->postJson("/api/admin/odoo/invoices/{$draft['id']}/post", ['deliver' => 'email', 'quotation_id' => 880])->assertOk();
+        $this->assertSame('posted', $this->odoo['move']);
+        $request->refresh();
+        $this->assertSame(RequestStatus::AwaitingPayment, $request->status);
+        $this->assertSame('990', (string) $request->odoo_invoice_id);
+        $this->assertSame(1, ServiceRequest::query()->count());
+        $this->postJson("/api/admin/odoo/invoices/{$draft['id']}/post", ['deliver' => 'email'])->assertUnprocessable();
+    }
+
     private function botClient(): Client
     {
         return Client::factory()->create([
@@ -220,7 +262,12 @@ class OdooPaperFlowTest extends TestCase
             $model === 'sale.order' && $method === 'search_read' => [[
                 'id' => 880, 'name' => 'S00880', 'partner_id' => [44, 'Damastech'], 'amount_total' => 300,
                 'currency_id' => [1, 'USD'], 'state' => $this->odoo['order'], 'client_order_ref' => 'DASH',
+                'invoice_ids' => $this->odoo['move'] === null ? [] : [990],
             ]],
+            // Odoo's "Create invoice" wizard: a draft invoice linked to the order.
+            $model === 'sale.advance.payment.inv' && $method === 'create' => [77],
+            $model === 'sale.advance.payment.inv' && $method === 'create_invoices' => $this->setMove('draft', ['type' => 'ir.actions.act_window']),
+            $model === 'account.move.line' && $method === 'search_read' => [['id' => 5, 'name' => 'Down payment of 50%', 'quantity' => 1, 'price_unit' => 150, 'discount' => 0, 'display_type' => 'product', 'product_id' => [9, 'Down payment'], 'tax_ids' => []]],
             $model === 'account.tax' && $method === 'search_read' => [['id' => 7, 'name' => 'VAT 5%', 'amount' => 5, 'amount_type' => 'percent', 'price_include' => false]],
             $model === 'account.payment.term' && $method === 'search_read' => [['id' => 3, 'name' => '30 Days']],
             $model === 'sale.order.line' && $method === 'search_read' => $this->odoo['order_lines'] ?: [['name' => 'شعار', 'product_uom_qty' => 1, 'price_unit' => 200, 'discount' => 0, 'display_type' => false, 'product_id' => false]],
@@ -232,6 +279,7 @@ class OdooPaperFlowTest extends TestCase
                 'id' => 990, 'name' => 'INV/2026/0090', 'partner_id' => [44, 'Damastech'], 'amount_total' => 280,
                 'amount_residual' => 280, 'currency_id' => [1, 'USD'], 'state' => $this->odoo['move'] ?? 'draft',
                 'payment_state' => 'not_paid', 'invoice_origin' => 'S00880', 'ref' => 'DASH', 'invoice_date' => '2026-10-12',
+                'move_type' => 'out_invoice',
             ]],
             default => [],
         };
