@@ -1,6 +1,8 @@
 # Staff dashboard (Vite SPA)
 
-Last updated: 13 October 2026 (Clients › quotation and invoice form: the product column takes the room and quantity is narrow. Each line picks one or more Odoo sales taxes (a popover with checkboxes; a new line starts with the last line's taxes), and the totals show untaxed, taxes, and total. Payment terms is a list from Odoo; on an invoice a chosen term hides the due date, which Odoo computes.)
+Last updated: 13 October 2026 (Comments (`CommentsPanel`): a «التعليقات» tab in the report editor panel once the report is saved, a comments card under the post editor, and a folded «التعليقات (n)» section in calendar event and photography booking popovers. Threads with one level of replies, edit and delete for the author, Ctrl+Enter sends, refresh every 30 s while the page is visible. Without the permission the panel says so.)
+
+Previous: 13 October 2026 (Clients › quotation and invoice form: the product column takes the room and quantity is narrow. Each line picks one or more Odoo sales taxes (a popover with checkboxes; a new line starts with the last line's taxes), and the totals show untaxed, taxes, and total. Payment terms is a list from Odoo; on an invoice a chosen term hides the due date, which Odoo computes.)
 
 Previous: 13 October 2026 (Vouchers: «اسم السند» replaces the kind name on the sheet and in the list, for every kind. Each signature has «الصفة في التوقيع», the word after «توقيع» («الموظف», «الطرف الآخر», or «المستلم» / «المُسلّم» on delivery), e.g. «توقيع HOC». The amount and lines accept negative numbers; zero is still refused. Templates keep the title and both words.)
 

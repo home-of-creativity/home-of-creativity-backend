@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, canSocial, type SocialPost, type SocialPostMedia } from "../../api";
 import { useAuth } from "../../auth";
+import { CommentsPanel } from "../../components/CommentsPanel";
 import { ConfirmAction } from "../../components/ConfirmAction";
 import { DateTimeField } from "../../components/DateTimeField";
 import { startUploadToast } from "../../components/UploadToast";
@@ -236,6 +237,12 @@ export function SocialCompose({ locale, t }: { locale: Locale; t: (c: { ar: stri
             </section>
           ) : null}
         </div>
+        {postId ? (
+          <section className="card stack">
+            <h2 className="section-title">{t(copy.comments)}</h2>
+            <CommentsPanel subject={{ type: "social_post", id: String(postId) }} locale={locale} t={t} />
+          </section>
+        ) : null}
         </aside>
       </form>
     </SocialChrome>

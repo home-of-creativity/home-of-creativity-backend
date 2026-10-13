@@ -4,6 +4,7 @@ use App\Http\Controllers\Admin\ArticleController as AdminArticleController;
 use App\Http\Controllers\Admin\ClientChannelController as AdminClientChannelController;
 use App\Http\Controllers\Admin\ClientController as AdminClientController;
 use App\Http\Controllers\Admin\ClientReportController as AdminClientReportController;
+use App\Http\Controllers\Admin\CommentController as AdminCommentController;
 use App\Http\Controllers\Admin\ComplaintController as AdminComplaintController;
 use App\Http\Controllers\Admin\ContactChannelController as AdminContactChannelController;
 use App\Http\Controllers\Admin\DriveFolderController as AdminDriveFolderController;
@@ -136,6 +137,13 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
     Route::delete('roles/{role}', [RoleController::class, 'destroy']);
     Route::get('staff-access', [StaffAccessController::class, 'index']);
     Route::put('staff-access/{employee}', [StaffAccessController::class, 'update']);
+
+    // Comments check access on the thing they sit on (report, post, event, booking).
+    Route::get('comments', [AdminCommentController::class, 'index']);
+    Route::get('comments/counts', [AdminCommentController::class, 'counts']);
+    Route::post('comments', [AdminCommentController::class, 'store'])->middleware('throttle:60,1');
+    Route::patch('comments/{comment}', [AdminCommentController::class, 'update']);
+    Route::delete('comments/{comment}', [AdminCommentController::class, 'destroy']);
 
     Route::middleware('ability:ops.overview')->group(function () {
         Route::get('overview', OverviewController::class);

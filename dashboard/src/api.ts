@@ -992,6 +992,30 @@ export type Paginated<T> = {
 
 type Envelope<T> = { data: T; message?: string };
 
+/** What a comment thread sits on. A Google event also names its calendar. */
+export type CommentSubject = {
+  type: "report" | "social_post" | "calendar_event" | "photography_booking";
+  id: string;
+  calendarId?: string;
+};
+
+export type TeamComment = {
+  id: number;
+  parent_id: number | null;
+  body: string;
+  user: { id: number; name: string } | null;
+  created_at: string | null;
+  edited_at: string | null;
+  can_edit: boolean;
+  can_delete: boolean;
+};
+
+function commentQuery(subject: CommentSubject) {
+  const query = new URLSearchParams({ subject: subject.type, id: subject.id });
+  if (subject.calendarId) query.set("calendar_id", subject.calendarId);
+  return query;
+}
+
 function queryString(params: Record<string, string | number | undefined>) {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
@@ -1431,6 +1455,21 @@ export const api = {
   },
   deleteVoucherTemplate(id: number) {
     return request<Envelope<null>>(`/admin/voucher-templates/${id}`, { method: "DELETE" });
+  },
+  comments(subject: CommentSubject) {
+    return request<Envelope<TeamComment[]>>(`/admin/comments?${commentQuery(subject).toString()}`);
+  },
+  addComment(subject: CommentSubject, body: string, parentId?: number) {
+    return request<Envelope<TeamComment>>("/admin/comments", {
+      method: "POST",
+      body: JSON.stringify({ subject: subject.type, id: subject.id, calendar_id: subject.calendarId, body, parent_id: parentId }),
+    });
+  },
+  updateComment(id: number, body: string) {
+    return request<Envelope<TeamComment>>(`/admin/comments/${id}`, { method: "PATCH", body: JSON.stringify({ body }) });
+  },
+  deleteComment(id: number) {
+    return request<Envelope<null>>(`/admin/comments/${id}`, { method: "DELETE" });
   },
   ensureDriveFolder(id: number) {
     return request<Envelope<ServiceRequest>>(`/admin/requests/${id}/ensure-drive-folder`, { method: "POST" });

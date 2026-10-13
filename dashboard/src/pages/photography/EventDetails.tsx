@@ -1,8 +1,9 @@
-import { TriangleAlert, Bell, CalendarDays, Check, Copy, ExternalLink, CircleQuestionMark, Mail, MapPin, Pencil, Phone, Repeat, Trash, User, Users, Video, X } from "lucide-react";
+import { TriangleAlert, Bell, CalendarDays, Check, Copy, ExternalLink, CircleQuestionMark, Mail, MapPin, MessageSquare, Pencil, Phone, Repeat, Trash, User, Users, Video, X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import {
   api,
+  type CommentSubject,
   type CalendarEventRow,
   type CalendarScope,
   type CalendarSource,
@@ -11,11 +12,31 @@ import {
   type PhotographyBookingRow,
   type PhotographySlot,
 } from "../../api";
-import type { Locale } from "../../i18n";
+import { CommentsPanel } from "../../components/CommentsPanel";
+import { copy, type Locale } from "../../i18n";
 import { scopeLabel } from "./EventDialog";
 import { TONE_COLORS, bookingTone, describeRule, eventColor, formatRangeText, plainText, statusCopy, wallClock } from "./model";
 
 type ActExtra = { starts_at?: string; direct?: boolean; override_lead?: boolean };
+
+/** Team comments under a calendar popover: folded, with the count on the button. */
+function PopComments({ locale, subject }: { locale: Locale; subject: CommentSubject }) {
+  const [open, setOpen] = useState(false);
+  const [count, setCount] = useState(0);
+  const t = (text: { ar: string; en: string }) => text[locale];
+  return (
+    <div className="comments-section">
+      <button type="button" className="btn btn-ghost btn-sm comments-toggle" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+        <MessageSquare size={15} aria-hidden />
+        {t(copy.comments)}{count > 0 ? ` (${count})` : ""}
+      </button>
+      {/* Mounted while folded so the button shows the count. */}
+      <div hidden={!open}>
+        <CommentsPanel subject={subject} locale={locale} t={t} compact onCount={setCount} />
+      </div>
+    </div>
+  );
+}
 
 export function GoogleEventDetails({
   locale,
@@ -182,6 +203,7 @@ export function GoogleEventDetails({
           </li>
         ) : null}
       </ul>
+      <PopComments key={`${row.calendar_id}:${row.id}`} locale={locale} subject={{ type: "calendar_event", id: row.id, calendarId: row.calendar_id }} />
     </div>
   );
 }
@@ -284,6 +306,7 @@ export function BookingDetails({
           </div>
         </div>
       ) : null}
+      <PopComments key={row.id} locale={locale} subject={{ type: "photography_booking", id: String(row.id) }} />
     </div>
   );
 }
