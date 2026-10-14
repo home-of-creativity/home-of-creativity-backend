@@ -31,6 +31,13 @@ class SyncOdooQuotations
             return $result;
         }
 
+        // Orders confirmed inside Odoo get their order number too (QN00041 → S00041).
+        try {
+            $this->odoo->renameConfirmedOrders();
+        } catch (Throwable $exception) {
+            Log::warning('Odoo order numbers were not updated.', ['error' => $exception->getMessage()]);
+        }
+
         $waiting = ServiceRequest::query()
             ->with('client')
             ->where('status', RequestStatus::QuotationSent)

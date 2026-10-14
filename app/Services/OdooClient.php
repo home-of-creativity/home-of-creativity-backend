@@ -13,6 +13,15 @@ use Throwable;
 
 class OdooClient
 {
+    /** Quotations keep Odoo's «QN» numbers; a confirmed order reads «S», a proforma «PF», an invoice «INV». */
+    public const QUOTATION_PREFIX = 'QN';
+
+    public const ORDER_PREFIX = 'S';
+
+    public const PROFORMA_PREFIX = 'PF';
+
+    public const INVOICE_CODE = 'INV';
+
     private ?int $legacyUid = null;
 
     private ?int $currencyId = null;
@@ -1633,6 +1642,11 @@ class OdooClient
             return $state === 'sale';
         }
         $this->call('sale.order', 'action_confirm', ['ids' => [$id]]);
+        try {
+            $this->renameConfirmedOrders($id);
+        } catch (Throwable $exception) {
+            Log::warning('Odoo order kept its quotation number.', ['order' => $id, 'error' => $exception->getMessage()]);
+        }
 
         return true;
     }
@@ -1710,7 +1724,7 @@ class OdooClient
         }
         $this->call('account.move', 'write', ['ids' => [$id], 'vals' => $vals]);
         if ($posted) {
-            $this->call('account.move', 'action_post', ['ids' => [$id]]);
+            $this->postMove($id);
         }
 
         return $this->invoiceSnapshot($id) ?? ['id' => $id];
@@ -1927,9 +1941,138 @@ class OdooClient
         if ($name === '' || ! $this->configured()) {
             return null;
         }
-        $row = $this->firstRecord($this->searchRead('sale.order', [['name', '=', $name]], ['id'], 1));
+        $names = array_values(array_unique([$name, self::orderName($name)]));
+        $row = $this->firstRecord($this->searchRead('sale.order', [['name', 'in', $names]], ['id'], 1));
 
         return $row === null ? null : (int) $row['id'];
+    }
+
+    /** «QN00041» → «S00041»: the number of a confirmed order. Any other name stays. */
+    public static function orderName(string $name): string
+    {
+        return str_starts_with($name, self::QUOTATION_PREFIX)
+            ? self::ORDER_PREFIX.substr($name, strlen(self::QUOTATION_PREFIX))
+            : $name;
+    }
+
+    /**
+     * Odoo keeps the quotation number after confirmation; a confirmed order gets its order
+     * number instead (QN00041 → S00041). One order, or every confirmed one still named QN.
+     *
+     * @return list<array{id: int, from: string, to: string}>
+     */
+    public function renameConfirmedOrders(?int $orderId = null, bool $dryRun = false): array
+    {
+        if (! $this->configured()) {
+            return [];
+        }
+        $domain = [['state', 'in', ['sale', 'done']], ['name', '=like', self::QUOTATION_PREFIX.'%']];
+        if ($orderId !== null) {
+            $domain[] = ['id', '=', $orderId];
+        }
+
+        $renamed = [];
+        foreach ($this->searchRead('sale.order', $domain, ['id', 'name'], 500, 0, 'id asc') as $row) {
+            $from = (string) ($row['name'] ?? '');
+            $to = self::orderName($from);
+            if ($to === $from) {
+                continue;
+            }
+            if ($this->firstRecord($this->searchRead('sale.order', [['name', '=', $to]], ['id'], 1)) !== null) {
+                Log::warning('Odoo order number already taken; the order keeps its quotation number.', ['from' => $from, 'to' => $to]);
+
+                continue;
+            }
+            if (! $dryRun) {
+                $this->writeRecord('sale.order', (int) $row['id'], ['name' => $to]);
+            }
+            $renamed[] = ['id' => (int) $row['id'], 'from' => $from, 'to' => $to];
+        }
+
+        return $renamed;
+    }
+
+    /**
+     * The sales journal code is the invoice prefix (INV/2026/00012). Odoo numbers an invoice
+     * after the previous one in its journal, so the first invoice posted after the code changes
+     * is named here, continuing the year's count; Odoo continues from it.
+     *
+     * @return array{journal: string|null, from: string|null, to: string}
+     */
+    public function useInvoicePrefix(bool $dryRun = false): array
+    {
+        $journal = $this->firstRecord($this->searchRead('account.journal', [['type', '=', 'sale']], ['id', 'code'], 1, 0, 'id asc'));
+        if ($journal === null) {
+            throw new RuntimeException('Odoo has no sales journal.');
+        }
+        $from = (string) ($journal['code'] ?? '');
+        if ($from !== self::INVOICE_CODE && ! $dryRun) {
+            $this->writeRecord('account.journal', (int) $journal['id'], ['code' => self::INVOICE_CODE]);
+        }
+
+        return ['journal' => (string) $journal['id'], 'from' => $from, 'to' => self::INVOICE_CODE];
+    }
+
+    /**
+     * The proforma invoice prints «PF00041» (its order number with PF), and a confirmed order
+     * is titled «رقم أمر البيع» instead of the quotation title.
+     */
+    public function installDocumentNumberView(): void
+    {
+        $quote = self::QUOTATION_PREFIX;
+        $order = self::ORDER_PREFIX;
+        $proforma = self::PROFORMA_PREFIX;
+        $arch = <<<XML
+<data>
+    <xpath expr="//t[@t-set='layout_document_title']/span[@t-else='']" position="replace">
+        <span t-else="">رقم أمر البيع </span>
+    </xpath>
+    <xpath expr="//t[@t-set='layout_document_title']/span[@t-field='doc.name']" position="replace">
+        <span t-if="is_proforma" t-out="'{$proforma}' + (doc.name[len('{$quote}'):] if doc.name.startswith('{$quote}') else (doc.name[len('{$order}'):] if doc.name.startswith('{$order}') else doc.name))"/>
+        <span t-else="" t-field="doc.name"/>
+    </xpath>
+</data>
+XML;
+        $this->upsertInheritedView('HOC document numbers', 'sale.report_saleorder_document', $arch);
+    }
+
+    /** Posts a draft invoice, naming it first when it is the first one with the INV prefix. */
+    private function postMove(int $id): void
+    {
+        try {
+            $this->numberFirstInvoice($id);
+        } catch (Throwable $exception) {
+            Log::warning('Odoo invoice keeps the number Odoo gives it.', ['invoice' => $id, 'error' => $exception->getMessage()]);
+        }
+        $this->call('account.move', 'action_post', ['ids' => [$id]]);
+    }
+
+    private function numberFirstInvoice(int $id): void
+    {
+        $move = $this->firstRecord($this->searchRead('account.move', [['id', '=', $id]], ['name', 'move_type', 'journal_id', 'invoice_date', 'state'], 1));
+        $name = is_string($move['name'] ?? null) ? trim($move['name']) : '';
+        if ($move === null || ($move['move_type'] ?? '') !== 'out_invoice' || ($move['state'] ?? '') !== 'draft' || ($name !== '' && $name !== '/')) {
+            return;
+        }
+        $journalId = $this->relationId($move['journal_id'] ?? null);
+        $journal = $journalId === null ? null : $this->firstRecord($this->searchRead('account.journal', [['id', '=', $journalId]], ['code'], 1));
+        if (($journal['code'] ?? '') !== self::INVOICE_CODE) {
+            return;
+        }
+        $posted = [['journal_id', '=', $journalId], ['move_type', '=', 'out_invoice'], ['state', '=', 'posted']];
+        $last = $this->firstRecord($this->searchRead('account.move', $posted, ['name'], 1, 0, 'id desc'));
+        // No earlier invoice: Odoo starts from the journal code. An INV invoice: Odoo continues it.
+        if ($last === null || str_starts_with((string) ($last['name'] ?? ''), self::INVOICE_CODE.'/')) {
+            return;
+        }
+        $year = substr(is_string($move['invoice_date'] ?? null) && $move['invoice_date'] !== '' ? $move['invoice_date'] : now()->toDateString(), 0, 4);
+        $highest = $this->firstRecord($this->searchRead('account.move', [
+            ...$posted,
+            ['invoice_date', '>=', "{$year}-01-01"],
+            ['invoice_date', '<=', "{$year}-12-31"],
+        ], ['sequence_number'], 1, 0, 'sequence_number desc'));
+        $next = (int) ($highest['sequence_number'] ?? 0) + 1;
+        $this->writeRecord('account.move', $id, ['name' => sprintf('%s/%s/%05d', self::INVOICE_CODE, $year, $next)]);
     }
 
     /** «باقة إنستغرام — دفعة مقدّمة 50%» on the down payment line of a draft invoice. */
@@ -1989,7 +2132,7 @@ class OdooClient
             return;
         }
 
-        $this->call('account.move', 'action_post', ['ids' => [$id]]);
+        $this->postMove($id);
     }
 
     public function downloadSaleOrderPdf(int|string $orderId): ?string
@@ -2616,7 +2759,7 @@ XML;
         }
 
         if ($state === 'draft') {
-            $this->call('account.move', 'action_post', ['ids' => [$id]]);
+            $this->postMove($id);
             $row = $this->invoiceAccountingRow($id) ?? $row;
             $paymentState = (string) ($row['payment_state'] ?? $paymentState);
             if (in_array($paymentState, ['paid', 'in_payment', 'reversed'], true)) {
