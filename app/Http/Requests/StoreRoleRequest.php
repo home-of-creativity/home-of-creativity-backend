@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Enums\StaffAbility;
+use App\Models\ReportCalendar;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -30,7 +31,7 @@ class StoreRoleRequest extends FormRequest
         return [
             'name' => ['required', 'string', 'max:80', 'unique:roles,name'],
             'abilities' => ['required', 'array', 'min:1'],
-            'abilities.*' => ['string', Rule::in(StaffAbility::values())],
+            'abilities.*' => ['string', Rule::in([...StaffAbility::values(), ...ReportCalendar::abilityKeys()])],
         ];
     }
 }

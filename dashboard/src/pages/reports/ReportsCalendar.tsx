@@ -35,6 +35,7 @@ import {
   RefreshCw,
   Repeat,
   Search,
+  Settings,
   SkipForward,
   StickyNote,
   Trash,
@@ -47,10 +48,12 @@ import { DayPicker } from "react-day-picker";
 import "react-day-picker/style.css";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { api, type ClientReport, type ReportDeadlineRow, type ReportDeadlineStatus, type ReportVersion, type ReportVersionEvent } from "../../api";
+import { api, type ClientReport, type ReportCalendar, type ReportDeadlineRow, type ReportDeadlineStatus, type ReportVersion, type ReportVersionEvent } from "../../api";
 import type { Locale } from "../../i18n";
 import { useCan } from "../../lib/useCan";
 import { VIEWS, ZONE, addDays, contrast, formatRangeText, intlTag, zoned, type ViewId } from "../photography/model";
+import { CalendarDialog } from "./CalendarDialog";
+import { CalendarPdfExport } from "./CalendarPdfExport";
 import { DeadlineDialog, deadlinePayload, draftFromDeadline, emptyDeadline, type DeadlineDraft } from "./DeadlineDialog";
 import { EVENT_COLORS, EVENT_COPY, REPEAT_COPY, STATUS_COLORS, STATUS_COPY, clientLabel, stamp } from "./model";
 
@@ -61,6 +64,8 @@ type Prefs = {
   firstDay: 0 | 1 | 6;
   statuses: ReportDeadlineStatus[];
   activity: ActivityLayer[];
+  /** Calendars switched off in the side panel; 0 is the main calendar. */
+  hiddenCalendars: number[];
 };
 
 const DEFAULT_PREFS: Prefs = {
@@ -68,6 +73,7 @@ const DEFAULT_PREFS: Prefs = {
   firstDay: 6,
   statuses: ["upcoming", "overdue", "done", "skipped"],
   activity: ["edits", "publishes"],
+  hiddenCalendars: [],
 };
 
 const PREFS_KEY = "hoc:report-cal:prefs";
@@ -116,8 +122,11 @@ function message(err: unknown) {
   return err instanceof Error ? err.message : String(err);
 }
 
-function deadlineColor(row: ReportDeadlineRow) {
-  if (row.status === "upcoming") return row.color ?? STATUS_COLORS.upcoming;
+/** The main calendar has no id; the side panel stores it as 0. */
+const MAIN_CALENDAR = 0;
+
+function deadlineColor(row: ReportDeadlineRow, calendarColor?: string | null) {
+  if (row.status === "upcoming") return row.color ?? calendarColor ?? STATUS_COLORS.upcoming;
   return STATUS_COLORS[row.status];
 }
 
@@ -135,6 +144,10 @@ export function ReportsCalendar({ locale, client }: { locale: Locale; client?: {
   const [range, setRange] = useState<{ from: string; to: string } | null>(null);
   const [deadlines, setDeadlines] = useState<ReportDeadlineRow[]>([]);
   const [activity, setActivity] = useState<ReportVersion[]>([]);
+  const [calendars, setCalendars] = useState<ReportCalendar[]>([]);
+  const [canManageCalendars, setCanManageCalendars] = useState(false);
+  const [roles, setRoles] = useState<Array<{ id: number; name: string }>>([]);
+  const [calendarDialog, setCalendarDialog] = useState<{ calendar: ReportCalendar | null } | null>(null);
   const [loading, setLoading] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [current, setCurrent] = useState(() => new Date());
@@ -167,6 +180,9 @@ export function ReportsCalendar({ locale, client }: { locale: Locale; client?: {
         if (cancelled) return;
         setDeadlines(res.data.deadlines);
         setActivity(res.data.activity);
+        setCalendars(res.data.calendars ?? []);
+        setCanManageCalendars(Boolean(res.data.can_manage_calendars));
+        setRoles(res.data.roles ?? []);
       })
       .catch((err) => {
         if (!cancelled) toast.error(message(err));
@@ -187,18 +203,40 @@ export function ReportsCalendar({ locale, client }: { locale: Locale; client?: {
     [needle],
   );
 
+  const calendarColors = useMemo(() => new Map(calendars.map((calendar) => [calendar.id, calendar.color])), [calendars]);
+  const shownDeadlines = useMemo(
+    () => deadlines.filter((row) => !prefs.hiddenCalendars.includes(row.calendar_id ?? MAIN_CALENDAR)),
+    [deadlines, prefs.hiddenCalendars],
+  );
+
   const counts = useMemo(() => {
     const result: Record<ReportDeadlineStatus, number> = { upcoming: 0, overdue: 0, done: 0, skipped: 0 };
-    for (const row of deadlines) result[row.status] += 1;
+    for (const row of shownDeadlines) result[row.status] += 1;
+    return result;
+  }, [shownDeadlines]);
+
+  const calendarCounts = useMemo(() => {
+    const result = new Map<number, number>();
+    for (const row of deadlines) {
+      const id = row.calendar_id ?? MAIN_CALENDAR;
+      result.set(id, (result.get(id) ?? 0) + 1);
+    }
     return result;
   }, [deadlines]);
 
+  function toggleCalendar(id: number) {
+    updatePrefs((value) => ({
+      ...value,
+      hiddenCalendars: value.hiddenCalendars.includes(id) ? value.hiddenCalendars.filter((item) => item !== id) : [...value.hiddenCalendars, id],
+    }));
+  }
+
   const fcEvents = useMemo<EventInput[]>(() => {
     const list: EventInput[] = [];
-    for (const row of deadlines) {
+    for (const row of shownDeadlines) {
       if (!prefs.statuses.includes(row.status)) continue;
       if (!matches([row.title, row.client?.name, row.client?.company_name])) continue;
-      const color = deadlineColor(row);
+      const color = deadlineColor(row, row.calendar_id == null ? null : calendarColors.get(row.calendar_id));
       const name = client ? row.title : `${clientLabel(row.client)} · ${row.title}`;
       list.push({
         id: `d:${row.key}`,
@@ -232,7 +270,7 @@ export function ReportsCalendar({ locale, client }: { locale: Locale; client?: {
       });
     }
     return list;
-  }, [deadlines, activity, prefs, matches, client, ar, locale, canUpdate]);
+  }, [shownDeadlines, calendarColors, activity, prefs, matches, client, ar, locale, canUpdate]);
 
   const selectedDeadline = selected?.key.startsWith("d:") ? deadlines.find((row) => `d:${row.key}` === selected.key) ?? null : null;
   const selectedActivity = selected?.key.startsWith("a:") ? activity.find((row) => `a:${row.id}` === selected.key) ?? null : null;
@@ -351,7 +389,7 @@ export function ReportsCalendar({ locale, client }: { locale: Locale; client?: {
   const calendarLocale = useMemo(() => (ar ? { ...arLocale, code: "ar-SY-u-nu-latn" } : enGbLocale), [ar]);
   const activeView = (controller.view?.type ?? prefs.view) as string;
   const tag = intlTag(locale);
-  const overdue = deadlines.filter((row) => row.status === "overdue");
+  const overdue = shownDeadlines.filter((row) => row.status === "overdue");
 
   return (
     <>
@@ -392,6 +430,7 @@ export function ReportsCalendar({ locale, client }: { locale: Locale; client?: {
         <button type="button" className="gcal-icon-btn" onClick={reload} aria-label={ar ? "تحديث" : "Refresh"} title="R">
           <RefreshCw size={17} aria-hidden />
         </button>
+        <CalendarPdfExport locale={locale} client={client} range={range} />
       </div>
 
       <div className={sideOpen ? "gcal is-side-open" : "gcal"}>
@@ -424,6 +463,58 @@ export function ReportsCalendar({ locale, client }: { locale: Locale; client?: {
               formatDay: (value) => String(value.getDate()),
             }}
           />
+
+          <section className="gcal-side-section">
+            <div className="gcal-side-head">
+              <h2>{ar ? "التقاويم" : "Calendars"}</h2>
+              {canManageCalendars ? (
+                <button type="button" className="gcal-icon-btn" onClick={() => setCalendarDialog({ calendar: null })} title={ar ? "تقويم جديد" : "New calendar"} aria-label={ar ? "تقويم جديد" : "New calendar"}>
+                  <Plus size={16} aria-hidden />
+                </button>
+              ) : null}
+            </div>
+            <ul className="gcal-cal-list">
+              <li>
+                <label className="gcal-cal">
+                  <input
+                    type="checkbox"
+                    checked={!prefs.hiddenCalendars.includes(MAIN_CALENDAR)}
+                    onChange={() => toggleCalendar(MAIN_CALENDAR)}
+                    style={{ accentColor: STATUS_COLORS.upcoming }}
+                  />
+                  <span className="gcal-swatch" style={{ background: STATUS_COLORS.upcoming }} aria-hidden />
+                  <span>{ar ? "التقويم الرئيسي" : "Main calendar"}</span>
+                  <small className="muted">{calendarCounts.get(MAIN_CALENDAR) ?? 0}</small>
+                </label>
+              </li>
+              {calendars.map((calendar) => {
+                const color = calendar.color ?? STATUS_COLORS.upcoming;
+                const seenBy = calendar.roles.length
+                  ? `${ar ? "يراه" : "Seen by"}: ${calendar.roles.join(ar ? "، " : ", ")}`
+                  : ar
+                    ? "لا يراه أي دور بعد، فقط الإدارة الكاملة"
+                    : "No role sees it yet, only full admins";
+                return (
+                  <li key={calendar.id} className="rc-calendar-item">
+                    <label className="gcal-cal" title={seenBy}>
+                      <input type="checkbox" checked={!prefs.hiddenCalendars.includes(calendar.id)} onChange={() => toggleCalendar(calendar.id)} style={{ accentColor: color }} />
+                      <span className="gcal-swatch" style={{ background: color }} aria-hidden />
+                      <span className="rc-calendar-name">
+                        {calendar.name}
+                        <small className="muted">{seenBy}</small>
+                      </span>
+                      <small className="muted">{calendarCounts.get(calendar.id) ?? 0}</small>
+                    </label>
+                    {canManageCalendars ? (
+                      <button type="button" className="gcal-icon-btn" onClick={() => setCalendarDialog({ calendar })} title={ar ? "إعدادات التقويم ومن يراه" : "Calendar settings and access"} aria-label={ar ? `إعدادات ${calendar.name}` : `${calendar.name} settings`}>
+                        <Settings size={15} aria-hidden />
+                      </button>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
 
           <section className="gcal-side-section">
             <h2>{ar ? "مواعيد التسليم" : "Deadlines"}</h2>
@@ -610,9 +701,28 @@ export function ReportsCalendar({ locale, client }: { locale: Locale; client?: {
           locale={locale}
           initial={dialog}
           fixedClient={client != null}
+          calendars={calendars}
           onClose={() => setDialog(null)}
           onSaved={() => {
             setDialog(null);
+            reload();
+          }}
+        />
+      ) : null}
+
+      {calendarDialog ? (
+        <CalendarDialog
+          locale={locale}
+          initial={calendarDialog.calendar}
+          roles={roles}
+          onClose={() => setCalendarDialog(null)}
+          onSaved={() => {
+            setCalendarDialog(null);
+            reload();
+          }}
+          onDeleted={(id) => {
+            setCalendarDialog(null);
+            updatePrefs((value) => ({ ...value, hiddenCalendars: value.hiddenCalendars.filter((item) => item !== id) }));
             reload();
           }}
         />

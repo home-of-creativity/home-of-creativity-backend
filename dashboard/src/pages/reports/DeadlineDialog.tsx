@@ -1,7 +1,7 @@
-import { Building, Clock, Repeat, StickyNote, X } from "lucide-react";
+import { Building, CalendarDays, Clock, Repeat, StickyNote, X } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
-import { api, type Client, type ReportDeadlinePayload, type ReportDeadlineRow, type ReportRepeat } from "../../api";
+import { api, type Client, type ReportCalendar, type ReportDeadlinePayload, type ReportDeadlineRow, type ReportRepeat } from "../../api";
 import type { Locale } from "../../i18n";
 import { GOOGLE_COLORS } from "../photography/model";
 import { REPEATS, REPEAT_COPY, clientLabel } from "./model";
@@ -9,6 +9,8 @@ import { REPEATS, REPEAT_COPY, clientLabel } from "./model";
 export type DeadlineDraft = {
   id?: number;
   client: { id: number; name: string; company_name: string | null } | null;
+  /** Null is the main calendar. */
+  calendar_id: number | null;
   title: string;
   starts_on: string;
   all_day: boolean;
@@ -19,14 +21,15 @@ export type DeadlineDraft = {
   notes: string;
 };
 
-export function emptyDeadline(date: string, time: string | null, client: DeadlineDraft["client"]): DeadlineDraft {
-  return { client, title: "", starts_on: date, all_day: time == null, due_time: time ?? "12:00", repeat: "monthly", repeat_until: "", color: null, notes: "" };
+export function emptyDeadline(date: string, time: string | null, client: DeadlineDraft["client"], calendarId: number | null = null): DeadlineDraft {
+  return { client, calendar_id: calendarId, title: "", starts_on: date, all_day: time == null, due_time: time ?? "12:00", repeat: "monthly", repeat_until: "", color: null, notes: "" };
 }
 
 export function draftFromDeadline(row: ReportDeadlineRow): DeadlineDraft {
   return {
     id: row.deadline_id,
     client: row.client,
+    calendar_id: row.calendar_id,
     title: row.title,
     starts_on: row.starts_on,
     all_day: row.due_time == null,
@@ -41,6 +44,7 @@ export function draftFromDeadline(row: ReportDeadlineRow): DeadlineDraft {
 export function deadlinePayload(draft: DeadlineDraft): ReportDeadlinePayload {
   return {
     client_id: draft.client?.id ?? 0,
+    report_calendar_id: draft.calendar_id,
     title: draft.title.trim(),
     starts_on: draft.starts_on,
     due_time: draft.all_day ? null : draft.due_time,
@@ -56,12 +60,15 @@ export function DeadlineDialog({
   locale,
   initial,
   fixedClient,
+  calendars,
   onClose,
   onSaved,
 }: {
   locale: Locale;
   initial: DeadlineDraft;
   fixedClient: boolean;
+  /** Extra calendars this staff member sees; the main calendar is always offered. */
+  calendars: ReportCalendar[];
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -128,6 +135,25 @@ export function DeadlineDialog({
                 )}
               </div>
             </div>
+
+            {calendars.length > 0 ? (
+              <div className="gcal-line">
+                <CalendarDays size={17} aria-hidden />
+                <div className="gcal-line-body">
+                  <select
+                    className="field"
+                    value={draft.calendar_id ?? ""}
+                    onChange={(event) => patch({ calendar_id: event.target.value ? Number(event.target.value) : null })}
+                    aria-label={ar ? "التقويم" : "Calendar"}
+                  >
+                    <option value="">{ar ? "التقويم الرئيسي" : "Main calendar"}</option>
+                    {calendars.map((calendar) => (
+                      <option key={calendar.id} value={calendar.id}>{calendar.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            ) : null}
 
             <div className="gcal-line">
               <Clock size={17} aria-hidden />

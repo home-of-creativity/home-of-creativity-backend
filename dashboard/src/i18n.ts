@@ -1129,6 +1129,13 @@ export const copy = {
   abilityOps: { ar: "العمليات", en: "Operations" },
   abilitySite: { ar: "الموقع", en: "Website" },
   abilitySocial: { ar: "السوشال ميديا", en: "Social" },
+  abilityCalendars: { ar: "تقاويم التقارير (عرض)", en: "Report calendars (view)" },
+  abilityCalendarsHint: {
+    ar: "كل تقويم يُنشأ من صفحة تقويم التقارير يظهر هنا. الإدارة الكاملة بلا دور ترى كل التقاويم.",
+    en: "Every calendar created on the reports calendar page shows here. A full admin with no role sees them all.",
+  },
+  calendarViewers: { ar: "يراه", en: "Seen by" },
+  calendarNoViewers: { ar: "لا يراه أي دور بعد", en: "No role sees it yet" },
   assignRole: { ar: "تعيين للموظفين", en: "Assign to employees" },
   noRole: { ar: "بدون صلاحية", en: "No permission" },
   dashboardPassword: { ar: "كلمة مرور الدخول", en: "Sign-in password" },

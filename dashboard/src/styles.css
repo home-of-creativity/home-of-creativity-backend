@@ -2280,6 +2280,22 @@ html[dir="rtl"] .back-link span {
   background: color-mix(in srgb, var(--brand-purple) 8%, transparent);
 }
 
+.permission-hint {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+}
+
+.permission-calendar {
+  align-items: center;
+}
+
+.permission-swatch {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  flex: none;
+}
+
 .form-grid .field-span {
   grid-column: 1 / -1;
 }
@@ -10170,6 +10186,28 @@ fieldset.form-page-fieldset {
 
 .gcal-main .rc-activity {
   opacity: 0.88;
+}
+
+.rc-calendar-name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.rc-calendar-name small {
+  overflow: hidden;
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rc-role-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  margin: 0.4rem 0;
+  padding: 0;
+  list-style: none;
 }
 
 .rc-client-chosen {

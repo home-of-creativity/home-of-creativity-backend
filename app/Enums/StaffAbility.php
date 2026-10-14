@@ -16,6 +16,7 @@ enum StaffAbility: string
     case OpsReportGemini = 'ops.report_gemini';
     case OpsReportTemplates = 'ops.report_templates';
     case OpsReportMedia = 'ops.report_media';
+    case OpsReportCalendars = 'ops.report_calendars';
     case OpsDrive = 'ops.drive';
     case OpsPhotography = 'ops.photography';
     case OpsPhotographyAll = 'ops.photography_all';
@@ -187,6 +188,7 @@ enum StaffAbility: string
             self::OpsReportGemini => ['ar' => 'مساعد التقارير', 'en' => 'Report assistant'],
             self::OpsReportTemplates => ['ar' => 'قوالب التقارير', 'en' => 'Report templates'],
             self::OpsReportMedia => ['ar' => 'صور التقارير ومربع النص', 'en' => 'Report pictures and text box'],
+            self::OpsReportCalendars => ['ar' => 'التقارير: إضافة التقاويم ومن يراها', 'en' => 'Reports: add calendars and who sees them'],
             self::OpsDrive => ['ar' => 'حساب تخزين Drive', 'en' => 'Drive storage account'],
             self::OpsPhotography => ['ar' => 'التصوير: الطابور ومواعيدي', 'en' => 'Photography: queue and my shoots'],
             self::OpsPhotographyAll => ['ar' => 'التصوير: كل المواعيد والإلغاء وضبط الجلسات', 'en' => 'Photography: all bookings, cancel, session counts'],

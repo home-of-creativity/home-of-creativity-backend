@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Enums\StaffAbility;
+use App\Models\ReportCalendar;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -32,7 +33,7 @@ class UpdateRoleRequest extends FormRequest
         return [
             'name' => ['required', 'string', 'max:80', Rule::unique('roles', 'name')->ignore($roleId)],
             'abilities' => ['required', 'array', 'min:1'],
-            'abilities.*' => ['string', Rule::in(StaffAbility::values())],
+            'abilities.*' => ['string', Rule::in([...StaffAbility::values(), ...ReportCalendar::abilityKeys()])],
         ];
     }
 }

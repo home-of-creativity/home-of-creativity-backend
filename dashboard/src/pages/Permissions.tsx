@@ -4,6 +4,7 @@ import {
   api,
   type CrudAction,
   type PageGrant,
+  type ReportCalendarAbility,
   type SocialPageOption,
   type StaffAbility,
   type StaffAccessRow,
@@ -30,6 +31,7 @@ const abilityLabels: Record<StaffModule, { ar: string; en: string }> = {
   "ops.report_gemini": { ar: "مساعد التقارير", en: "Report assistant" },
   "ops.report_templates": { ar: "قوالب التقارير", en: "Report templates" },
   "ops.report_media": { ar: "صور التقارير ومربع النص", en: "Report pictures and text box" },
+  "ops.report_calendars": { ar: "التقارير: إضافة التقاويم ومن يراها", en: "Reports: add calendars and who sees them" },
   "ops.drive": { ar: "حساب تخزين Drive", en: "Drive storage account" },
   "site.projects": { ar: "المشاريع", en: "Projects" },
   "site.categories": { ar: "التصنيفات", en: "Categories" },
@@ -57,13 +59,23 @@ const crudLabels: Record<CrudAction, { ar: string; en: string }> = {
 const pageAbilities = ["social.content", "social.approve", "social.engage", "social.messages"] as const;
 
 type AbilityModule = {
-  key: StaffModule;
-  group: "ops" | "site" | "social";
+  key: StaffModule | ReportCalendarAbility;
+  group: "ops" | "site" | "social" | "calendars";
   actions: string[];
   action_labels?: Record<string, { ar: string; en: string }>;
   label_ar?: string;
   label_en?: string;
+  /** Report calendars: color swatch and the roles that see it now. */
+  color?: string | null;
+  viewers?: string[];
 };
+
+const GROUP_TITLES = {
+  ops: copy.abilityOps,
+  site: copy.abilitySite,
+  social: copy.abilitySocial,
+  calendars: copy.abilityCalendars,
+} as const;
 
 type Draft = {
   id: number | null;
@@ -301,14 +313,15 @@ export function Permissions({ locale, t }: { locale: Locale; t: (c: { ar: string
             {t(copy.permissionName)}
             <input value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} required />
           </label>
-          {(["ops", "site", "social"] as const).map((group) => {
+          {(["ops", "site", "social", "calendars"] as const).map((group) => {
             const items = groups.filter((item) => item.group === group);
+            if (group === "calendars" && items.length === 0) return null;
             const filled = items.reduce((count, item) => count + moduleFilled(draft.abilities, item), 0);
             const total = items.reduce((count, item) => count + moduleKeys(item).length, 0);
             return (
               <fieldset key={group} className="permission-fieldset">
                 <legend className="permission-line">
-                  <span>{t(group === "ops" ? copy.abilityOps : group === "site" ? copy.abilitySite : copy.abilitySocial)}</span>
+                  <span>{t(GROUP_TITLES[group])}</span>
                   <label className="check-row">
                     <input
                       type="checkbox"
@@ -321,10 +334,26 @@ export function Permissions({ locale, t }: { locale: Locale; t: (c: { ar: string
                     {t(copy.selectAll)}
                   </label>
                 </legend>
+                {group === "calendars" ? <p className="muted permission-hint">{t(copy.abilityCalendarsHint)}</p> : null}
                 <div className="permission-line">
                   {items.map((item) => {
                     const picked = moduleFilled(draft.abilities, item);
                     const size = moduleKeys(item).length;
+                    if (group === "calendars") {
+                      return (
+                        <label key={item.key} className="check-row permission-calendar">
+                          <input type="checkbox" checked={holds(draft.abilities, item.key)} onChange={() => toggleAbility(item.key)} />
+                          <span className="permission-swatch" style={{ background: item.color ?? "#f0b56a" }} aria-hidden />
+                          <span>
+                            {abilityName(item.key)}
+                            <small className="muted">
+                              {" · "}
+                              {item.viewers?.length ? `${t(copy.calendarViewers)}: ${item.viewers.join("، ")}` : t(copy.calendarNoViewers)}
+                            </small>
+                          </span>
+                        </label>
+                      );
+                    }
                     return item.actions.length === 0 ? (
                       <label key={item.key} className="check-row">
                         <input type="checkbox" checked={holds(draft.abilities, item.key)} onChange={() => toggleAbility(item.key)} />

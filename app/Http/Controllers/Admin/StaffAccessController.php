@@ -7,15 +7,20 @@ use App\Enums\StaffAbility;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\UpdateStaffAccessRequest;
 use App\Models\Employee;
+use App\Models\ReportCalendar;
 use App\Models\Role;
 use App\Models\User;
 use App\Services\SocialPageAccess;
+use App\Support\ReportCalendarAccess;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 
 class StaffAccessController extends Controller
 {
-    public function __construct(private SocialPageAccess $pages) {}
+    public function __construct(
+        private SocialPageAccess $pages,
+        private ReportCalendarAccess $calendars,
+    ) {}
 
     public function index(): JsonResponse
     {
@@ -133,11 +138,13 @@ class StaffAccessController extends Controller
     }
 
     /**
-     * @return list<array{key: string, group: string, actions: list<string>, action_labels: object}>
+     * Fixed abilities, then one view switch per reports calendar.
+     *
+     * @return list<array<string, mixed>>
      */
     private function catalog(): array
     {
-        return array_map(function (StaffAbility $ability): array {
+        $fixed = array_map(function (StaffAbility $ability): array {
             $group = match (true) {
                 str_starts_with($ability->value, 'ops.') => 'ops',
                 str_starts_with($ability->value, 'site.') => 'site',
@@ -155,6 +162,25 @@ class StaffAccessController extends Controller
                 'action_labels' => (object) (StaffAbility::actionCatalog()[$ability->value] ?? []),
             ];
         }, StaffAbility::cases());
+
+        $calendars = ReportCalendar::query()->orderBy('name')->get()
+            ->map(function (ReportCalendar $calendar): array {
+                $payload = $this->calendars->payload($calendar);
+
+                return [
+                    'key' => $calendar->abilityKey(),
+                    'group' => 'calendars',
+                    'label_ar' => $calendar->name,
+                    'label_en' => $calendar->name,
+                    'actions' => [],
+                    'action_labels' => (object) [],
+                    'color' => $calendar->color,
+                    'viewers' => $payload['roles'],
+                ];
+            })
+            ->all();
+
+        return [...$fixed, ...$calendars];
     }
 
     /**

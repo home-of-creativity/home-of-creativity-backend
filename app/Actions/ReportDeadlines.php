@@ -27,13 +27,17 @@ class ReportDeadlines
     private const COMPLETE_AHEAD_DAYS = 20;
 
     /**
+     * @param  list<int>|null  $calendarIds  extra calendars the viewer sees; the main calendar always shows. Null shows every calendar.
      * @return list<array<string, mixed>>
      */
-    public function between(CarbonImmutable $from, CarbonImmutable $to, ?int $clientId = null): array
+    public function between(CarbonImmutable $from, CarbonImmutable $to, ?int $clientId = null, ?array $calendarIds = null): array
     {
         $deadlines = ReportDeadline::query()
             ->with(['client', 'occurrences.report', 'occurrences.doneBy'])
             ->when($clientId, fn ($query) => $query->where('client_id', $clientId))
+            ->when($calendarIds !== null, fn ($query) => $query->where(
+                fn ($inner) => $inner->whereNull('report_calendar_id')->orWhereIn('report_calendar_id', $calendarIds ?? []),
+            ))
             ->whereDate('starts_on', '<=', $to)
             ->where(fn ($query) => $query->whereNull('repeat_until')->orWhereDate('repeat_until', '>=', $from->subDays(self::MOVE_REACH_DAYS)))
             ->get();
@@ -124,6 +128,7 @@ class ReportDeadlines
         return [
             'key' => $deadline->id.':'.$date,
             'deadline_id' => $deadline->id,
+            'calendar_id' => $deadline->report_calendar_id === null ? null : (int) $deadline->report_calendar_id,
             'occurs_on' => $date,
             'date' => $day,
             'time' => $time,

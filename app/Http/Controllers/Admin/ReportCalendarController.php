@@ -7,8 +7,11 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\ClientReportVersionResource;
 use App\Models\ClientReport;
 use App\Models\ClientReportVersion;
+use App\Models\ReportCalendar;
 use App\Models\ReportDeadline;
 use App\Models\ReportDeadlineOccurrence;
+use App\Models\Role;
+use App\Support\ReportCalendarAccess;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -22,6 +25,8 @@ use Illuminate\Validation\Rule;
 class ReportCalendarController extends Controller
 {
     private const ACTIVITY_LIMIT = 1500;
+
+    public function __construct(private ReportCalendarAccess $access) {}
 
     public function index(Request $request, ReportDeadlines $deadlines): JsonResponse
     {
@@ -51,10 +56,23 @@ class ReportCalendarController extends Controller
             ->limit(self::ACTIVITY_LIMIT)
             ->get();
 
+        $calendars = $this->access->visible($request->user());
+        $canManage = $this->access->canManage($request->user());
+
         return response()->json([
             'data' => [
-                'deadlines' => $deadlines->between($from, $to, $clientId),
+                'deadlines' => $deadlines->between(
+                    $from,
+                    $to,
+                    $clientId,
+                    array_map(fn (ReportCalendar $calendar): int => $calendar->id, $calendars),
+                ),
                 'activity' => ClientReportVersionResource::collection($activity)->resolve(),
+                'calendars' => array_map(fn (ReportCalendar $calendar): array => $this->access->payload($calendar), $calendars),
+                'can_manage_calendars' => $canManage,
+                'roles' => $canManage
+                    ? Role::query()->orderBy('name')->get(['id', 'name'])->map(fn (Role $role): array => ['id' => $role->id, 'name' => $role->name])->all()
+                    : [],
             ],
             'message' => 'ok',
         ]);
@@ -76,6 +94,7 @@ class ReportCalendarController extends Controller
      */
     public function update(Request $request, ReportDeadline $reportDeadline): JsonResponse
     {
+        $this->assertVisible($request, $reportDeadline);
         $data = $this->validated($request);
         $shift = (int) CarbonImmutable::parse((string) ReportDeadlines::day($reportDeadline->starts_on))
             ->diffInDays(CarbonImmutable::parse($data['starts_on']), false);
@@ -96,8 +115,9 @@ class ReportCalendarController extends Controller
         return response()->json(['data' => ['id' => $reportDeadline->id], 'message' => 'Saved.']);
     }
 
-    public function destroy(ReportDeadline $reportDeadline): JsonResponse
+    public function destroy(Request $request, ReportDeadline $reportDeadline): JsonResponse
     {
+        $this->assertVisible($request, $reportDeadline);
         $reportDeadline->delete();
 
         return response()->json(['data' => null, 'message' => 'Deleted.']);
@@ -106,6 +126,7 @@ class ReportCalendarController extends Controller
     /** One date of the series: done, undone, skipped, restored, or moved. */
     public function occurrence(Request $request, ReportDeadline $reportDeadline, string $date, ReportDeadlines $deadlines): JsonResponse
     {
+        $this->assertVisible($request, $reportDeadline);
         $data = $request->validate([
             'action' => ['required', Rule::in(['done', 'undo', 'skip', 'unskip', 'move', 'reset'])],
             'date' => ['required_if:action,move', 'nullable', 'date_format:Y-m-d'],
@@ -153,6 +174,7 @@ class ReportCalendarController extends Controller
     {
         $data = $request->validate([
             'client_id' => ['required', 'integer', Rule::exists('clients', 'id')->whereNull('deleted_at')],
+            'report_calendar_id' => ['nullable', 'integer', Rule::exists('report_calendars', 'id')],
             'title' => ['required', 'string', 'max:160'],
             'starts_on' => ['required', 'date_format:Y-m-d'],
             'due_time' => ['nullable', 'date_format:H:i'],
@@ -164,7 +186,15 @@ class ReportCalendarController extends Controller
         if ($data['repeat'] === 'none') {
             $data['repeat_until'] = null;
         }
+        $calendarId = isset($data['report_calendar_id']) ? (int) $data['report_calendar_id'] : null;
+        abort_unless($this->access->canView($request->user(), $calendarId), 403, 'You cannot add to this calendar.');
 
-        return $data + ['due_time' => null, 'repeat_until' => null, 'color' => null, 'notes' => null];
+        return $data + ['report_calendar_id' => null, 'due_time' => null, 'repeat_until' => null, 'color' => null, 'notes' => null];
+    }
+
+    /** A deadline on a calendar the staff member does not see does not exist for them. */
+    private function assertVisible(Request $request, ReportDeadline $deadline): void
+    {
+        abort_unless($this->access->canSeeDeadline($request->user(), $deadline), 404);
     }
 }

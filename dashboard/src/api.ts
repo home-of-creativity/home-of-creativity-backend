@@ -38,6 +38,7 @@ export type StaffModule =
   | "ops.report_gemini"
   | "ops.report_templates"
   | "ops.report_media"
+  | "ops.report_calendars"
   | "ops.drive"
   | "site.projects"
   | "site.categories"
@@ -54,8 +55,11 @@ export type StaffModule =
   | "social.accounts"
   | "social.links";
 
+/** Seeing one calendar on the reports calendar page, created from that page. */
+export type ReportCalendarAbility = `ops.report_calendar.${number}`;
+
 /** A whole feature, or one of its operations ("ops.finance.expense_create"). */
-export type StaffAbility = StaffModule | `${StaffModule}.${string}`;
+export type StaffAbility = StaffModule | `${StaffModule}.${string}` | ReportCalendarAbility;
 
 /**
  * `feature.action` is granted by that operation or by the whole feature. A bare feature
@@ -332,7 +336,16 @@ export type SocialPageOption = {
 export type StaffAccessPayload = {
   data: StaffAccessRow[];
   pages: SocialPageOption[];
-  abilities: { key: StaffModule; group: "ops" | "site" | "social"; actions: CrudAction[]; label_ar: string; label_en: string }[];
+  abilities: {
+    key: StaffModule | ReportCalendarAbility;
+    group: "ops" | "site" | "social" | "calendars";
+    actions: CrudAction[];
+    label_ar: string;
+    label_en: string;
+    /** Calendars only: their color and the roles that see them. */
+    color?: string | null;
+    viewers?: string[];
+  }[];
   message: string;
 };
 
@@ -551,10 +564,29 @@ export type ReportRepeat = "none" | "weekly" | "monthly" | "quarterly" | "yearly
 
 export type ReportDeadlineStatus = "upcoming" | "overdue" | "done" | "skipped";
 
+/** A calendar on the reports calendar page; seeing it is its own permission. */
+export type ReportCalendar = {
+  id: number;
+  name: string;
+  color: string | null;
+  ability: ReportCalendarAbility;
+  role_ids: number[];
+  roles: string[];
+  deadlines_count: number;
+};
+
+export type ReportCalendarPayload = {
+  name: string;
+  color: string | null;
+  role_ids: number[];
+};
+
 /** One date of a report deadline series. */
 export type ReportDeadlineRow = {
   key: string;
   deadline_id: number;
+  /** Null is the main calendar. */
+  calendar_id: number | null;
   /** The date in the series; moving it keeps this as its key. */
   occurs_on: string;
   date: string;
@@ -578,6 +610,7 @@ export type ReportDeadlineRow = {
 
 export type ReportDeadlinePayload = {
   client_id: number;
+  report_calendar_id: number | null;
   title: string;
   starts_on: string;
   due_time: string | null;
@@ -1785,7 +1818,24 @@ export const api = {
     return request<Envelope<ClientReport>>(`/admin/report-versions/${id}/restore`, { method: "PUT" });
   },
   reportCalendar(from: string, to: string, clientId?: number) {
-    return request<Envelope<{ deadlines: ReportDeadlineRow[]; activity: ReportVersion[] }>>(`/admin/report-calendar${queryString({ from, to, client_id: clientId })}`);
+    return request<
+      Envelope<{
+        deadlines: ReportDeadlineRow[];
+        activity: ReportVersion[];
+        calendars: ReportCalendar[];
+        can_manage_calendars: boolean;
+        roles: Array<{ id: number; name: string }>;
+      }>
+    >(`/admin/report-calendar${queryString({ from, to, client_id: clientId })}`);
+  },
+  createReportCalendar(payload: ReportCalendarPayload) {
+    return request<Envelope<ReportCalendar>>("/admin/report-calendars", { method: "POST", body: JSON.stringify(payload) });
+  },
+  updateReportCalendar(id: number, payload: ReportCalendarPayload) {
+    return request<Envelope<ReportCalendar>>(`/admin/report-calendars/${id}`, { method: "PUT", body: JSON.stringify(payload) });
+  },
+  deleteReportCalendar(id: number) {
+    return request<Envelope<null>>(`/admin/report-calendars/${id}`, { method: "DELETE" });
   },
   createReportDeadline(payload: ReportDeadlinePayload) {
     return request<Envelope<{ id: number }>>("/admin/report-deadlines", { method: "POST", body: JSON.stringify(payload) });

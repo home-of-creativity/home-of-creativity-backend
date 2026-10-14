@@ -26,6 +26,7 @@ use App\Http\Controllers\Admin\PricingPackageController as AdminPricingPackageCo
 use App\Http\Controllers\Admin\PricingSubcategoryController as AdminPricingSubcategoryController;
 use App\Http\Controllers\Admin\ProfilePdfController as AdminProfilePdfController;
 use App\Http\Controllers\Admin\ReportCalendarController;
+use App\Http\Controllers\Admin\ReportCalendarListController;
 use App\Http\Controllers\Admin\ReportGeminiController;
 use App\Http\Controllers\Admin\ReportHistoryController;
 use App\Http\Controllers\Admin\ReportTemplateController;
@@ -235,6 +236,11 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::put('report-deadlines/{report_deadline}', [ReportCalendarController::class, 'update']);
         Route::delete('report-deadlines/{report_deadline}', [ReportCalendarController::class, 'destroy']);
         Route::put('report-deadlines/{report_deadline}/occurrences/{date}', [ReportCalendarController::class, 'occurrence']);
+    });
+    Route::middleware('ability:ops.report_calendars')->group(function () {
+        Route::post('report-calendars', [ReportCalendarListController::class, 'store']);
+        Route::put('report-calendars/{report_calendar}', [ReportCalendarListController::class, 'update']);
+        Route::delete('report-calendars/{report_calendar}', [ReportCalendarListController::class, 'destroy']);
     });
 
     Route::middleware('crud:ops.employees')->group(function () {

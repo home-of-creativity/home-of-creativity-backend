@@ -12,6 +12,7 @@ class ReportDeadline extends Model
 
     protected $fillable = [
         'client_id',
+        'report_calendar_id',
         'user_id',
         'title',
         'starts_on',
@@ -28,6 +29,12 @@ class ReportDeadline extends Model
     public function client(): BelongsTo
     {
         return $this->belongsTo(Client::class)->withTrashed();
+    }
+
+    /** Null is the main calendar that every reports viewer sees. */
+    public function calendar(): BelongsTo
+    {
+        return $this->belongsTo(ReportCalendar::class, 'report_calendar_id');
     }
 
     public function user(): BelongsTo
