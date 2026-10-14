@@ -246,7 +246,7 @@ class TelegramBotController extends Controller
 
         return response()->json([
             'data' => array_merge(ServiceRequestResource::make($fresh)->resolve(), [
-                'status_label' => $fresh->status->labelAr(),
+                'status_label' => $fresh->status->forClient()->labelAr(),
             ]),
             'message' => 'Created.',
         ], 201);
@@ -266,10 +266,10 @@ class TelegramBotController extends Controller
                 'number' => $item->number,
                 'display_number' => ResolveServiceRequest::displayNumber($item),
                 'title' => $item->title,
-                'status' => $item->status->value,
-                'status_label' => StatusLabel::requestAr($item->status->value),
+                'status' => $item->status->forClient()->value,
+                'status_label' => StatusLabel::requestAr($item->status->forClient()->value),
                 'execution_status' => $item->execution_status?->value,
-                'execution_status_label' => $mapper->toClientLabel($item->execution_status) ?: StatusLabel::requestAr($item->status->value),
+                'execution_status_label' => $mapper->toClientLabel($item->execution_status) ?: StatusLabel::requestAr($item->status->forClient()->value),
                 'package_name' => $item->pricingPackage?->name_ar ?: $item->pricingPackage?->name_en,
                 'billing_period' => $item->billing_period,
                 'amount_paid' => $item->amount_paid,
@@ -315,8 +315,7 @@ class TelegramBotController extends Controller
     {
         $this->assertClientOwns($request, $serviceRequest);
         $updated = $approveQuotation->handle($serviceRequest);
-        // The payment steps reach the client only after an admin confirms.
-        $additional = ['message' => 'Approved.', 'awaiting_admin' => $approveQuotation->heldForAdmin];
+        $additional = ['message' => 'Approved.'];
         if (is_array($approveQuotation->clientPaymentNotice)) {
             $additional['sham_cash_qr'] = ShamCashQr::toBotPayload($approveQuotation->clientPaymentNotice);
         }
@@ -676,7 +675,7 @@ class TelegramBotController extends Controller
 
         return response()->json([
             'data' => array_merge(ServiceRequestResource::make($fresh)->resolve(), [
-                'status_label' => $fresh->status->labelAr(),
+                'status_label' => $fresh->status->forClient()->labelAr(),
                 'quotation_delivered' => $createCatalogRequest->quotationDelivered,
             ]),
             'message' => 'Created.',

@@ -155,7 +155,7 @@ class ProcessBotSla
             ->with(['client', 'pricingPackage', 'files' => fn ($query) => $query
                 ->where('kind', 'payment_receipt')
                 ->latest('id')])
-            ->where('status', RequestStatus::AwaitingPayment)
+            ->whereIn('status', RequestStatus::awaitingPayment())
             ->whereHas('files', fn ($query) => $query->where('kind', 'payment_receipt'))
             ->orderBy('id')
             ->limit($limit * 3)
@@ -340,13 +340,13 @@ class ProcessBotSla
 
         $quoteWaiting = ServiceRequest::query()->where('status', RequestStatus::Submitted)->count();
         $receiptWaiting = ServiceRequest::query()
-            ->where('status', RequestStatus::AwaitingPayment)
+            ->whereIn('status', RequestStatus::awaitingPayment())
             ->whereDoesntHave('files', fn ($query) => $query->where('kind', 'payment_receipt'))
             ->get()
             ->filter(fn (ServiceRequest $request): bool => $request->needsPaymentCollection())
             ->count();
         $receiptsToReview = ServiceRequest::query()
-            ->where('status', RequestStatus::AwaitingPayment)
+            ->whereIn('status', RequestStatus::awaitingPayment())
             ->whereHas('files', fn ($query) => $query->where('kind', 'payment_receipt'))
             ->get()
             ->filter(fn (ServiceRequest $request): bool => $request->needsPaymentCollection())
@@ -375,15 +375,26 @@ class ProcessBotSla
 
         return ServiceRequest::query()
             ->with(['client', 'statusHistory'])
-            ->where('status', RequestStatus::AwaitingPayment)
+            ->whereIn('status', RequestStatus::awaitingPayment())
             ->whereDoesntHave('files', fn ($query) => $query->where('kind', 'payment_receipt'))
             ->orderBy('id')
             ->limit($limit * 3)
             ->get()
             ->filter(fn (ServiceRequest $request): bool => $request->needsPaymentCollection()
-                && $this->enteredStatusAt($request, RequestStatus::AwaitingPayment)->lte($cutoff))
+                && $this->askedToPayAt($request)->lte($cutoff))
             ->take($limit)
             ->all();
+    }
+
+    /**
+     * The client was asked to pay when they approved: an admin's later approval moves the
+     * request to awaiting payment without restarting the reminder clock.
+     */
+    private function askedToPayAt(ServiceRequest $request): Carbon
+    {
+        $held = $request->statusHistory->where('to_status', RequestStatus::AwaitingAdminApproval->value)->isNotEmpty();
+
+        return $this->enteredStatusAt($request, $held ? RequestStatus::AwaitingAdminApproval : RequestStatus::AwaitingPayment);
     }
 
     private function enteredStatusAt(ServiceRequest $request, RequestStatus $status): Carbon

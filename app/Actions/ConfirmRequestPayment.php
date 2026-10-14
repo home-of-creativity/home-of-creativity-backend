@@ -44,6 +44,12 @@ class ConfirmRequestPayment
 
         $remainingOnly = ! $isFirst && $request->hasRemainingBalance();
 
+        // A confirmed payment approves a request still waiting for an admin: the sales order
+        // and its invoice are made now, and the invoice reaches the client paid, once.
+        if ($isFirst && $request->awaitsAdminApproval() && $receivedAmount > 0) {
+            $request = app(ApproveQuotation::class)->confirm($request, 'admin:payment', deliverInvoice: false);
+        }
+
         if ($isFirst && $request->status !== RequestStatus::AwaitingPayment) {
             throw ValidationException::withMessages([
                 'status' => 'Payment can only be confirmed while awaiting payment.',

@@ -112,8 +112,7 @@ class FullWorkflowTest extends TestCase
             ->postJson("/api/bot/telegram/requests/{$number}/approve", [
                 'telegram_user_id' => 'tg-full-flow',
             ])->assertOk()
-            ->assertJsonPath('data.status', 'awaiting_admin_approval');
-        $this->confirmClientApproval($number);
+            ->assertJsonPath('data.status', 'awaiting_payment');
 
         $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
             ->postJson("/api/bot/telegram/requests/{$number}/receipt", [

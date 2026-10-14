@@ -284,20 +284,15 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
     }
   }
 
-  async function settleClientApproval(decision: "confirm" | "decline") {
+  async function approveRequest() {
     if (!item || recordingDecision) return;
-    if (decision === "decline" && !decisionReason.trim()) {
-      setError("اكتب سبب عدم الاعتماد، فهو يُحفظ في سجل الطلب.");
-      return;
-    }
     setError("");
     setNotice("");
     setRecordingDecision(true);
     try {
-      const res = await api.clientApproval(item.id, decision, decisionReason.trim());
+      const res = await api.clientApproval(item.id);
       setItem(res.data);
       setStatus(res.data.status);
-      setDecisionReason("");
       setNotice(res.message ?? "");
     } catch (err) {
       setError(err instanceof Error ? err.message : t(copy.saveFailed));
@@ -356,10 +351,12 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
   const canIntegrations = can("ops.requests.integrations");
   const canWorkPlan = can("ops.requests.work_plan");
   const canEdit = can("ops.requests.edit");
-  const canConfirmPayment = item.status === "awaiting_payment" && canPayments;
+  // Confirming a payment while the request awaits approval approves it too.
+  const awaitingPayment = item.status === "awaiting_payment" || item.status === "awaiting_admin_approval";
+  const canConfirmPayment = awaitingPayment && canPayments;
   const canApproveQuotation = can("ops.requests.approve_quotation");
   const canConfirmRemaining = remaining > 0.009 && Boolean(item.paid_at) && canPayments;
-  const showReceipts = item.status === "awaiting_payment";
+  const showReceipts = awaitingPayment;
   const receipts = item.files?.filter((file) => file.kind === "payment_receipt") ?? [];
   const attachments = item.files?.filter((file) => file.kind === "brief_attachment") ?? [];
   const quotationTotal = quotationLines.reduce((sum, line) => {
@@ -850,28 +847,18 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
           </p>
         ) : null}
       </section>
-      {item.status === "awaiting_admin_approval" ? (
+      {item.admin_approval_pending ? (
         <section className="card action-card approval-gate" aria-labelledby="approval-gate-title">
-          <h2 className="form-title" id="approval-gate-title">وافق الزبون على عرض السعر وينتظر الاعتماد</h2>
+          <h2 className="form-title" id="approval-gate-title">وافق الزبون على العرض وينتظر اعتمادك</h2>
           <p className="muted">
             {canApproveQuotation
-              ? "بعد الاعتماد يتحول العرض إلى أمر بيع في أودو ويصل الزبون المبلغ وخطوات الدفع. عدم الاعتماد يُرجع العرض مرفوضاً ويُبلغ الزبون بأن عرضاً محدّثاً سيصله."
-              : "ينتظر هذا الطلب اعتماد الإدارة قبل أمر البيع وطلب الدفع."}
+              ? "وصلت الزبون خطوات الدفع ولا يعلم بهذه الخطوة. بعد الاعتماد يتحول العرض إلى أمر بيع في أودو وتصله الفاتورة. تأكيد الدفع يعتمد الطلب تلقائياً."
+              : "ينتظر هذا الطلب اعتماد الإدارة. تأكيد الدفع يعتمده تلقائياً."}
           </p>
           {canApproveQuotation ? (
             <div className="toolbar">
-              <button className="btn btn-teal" type="button" disabled={recordingDecision} onClick={() => void settleClientApproval("confirm")}>
-                اعتماد الموافقة
-              </button>
-              <input
-                className="field"
-                value={decisionReason}
-                onChange={(e) => setDecisionReason(e.target.value)}
-                placeholder="سبب عدم الاعتماد"
-                aria-label="سبب عدم الاعتماد"
-              />
-              <button className="btn" type="button" disabled={recordingDecision} onClick={() => void settleClientApproval("decline")}>
-                عدم الاعتماد
+              <button className="btn btn-teal" type="button" disabled={recordingDecision} onClick={() => void approveRequest()}>
+                اعتماد الطلب
               </button>
             </div>
           ) : null}

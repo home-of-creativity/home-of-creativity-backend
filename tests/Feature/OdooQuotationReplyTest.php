@@ -68,10 +68,11 @@ class OdooQuotationReplyTest extends TestCase
 
         $this->whatsApp('1');
 
+        // The client is asked to pay now; the sales order waits for an admin's approval.
         $this->assertSame(RequestStatus::AwaitingAdminApproval, $request->fresh()->status);
+        $this->assertTrue($request->fresh()->awaitsAdminApproval());
         $this->assertNotSame('sale', $this->order);
         $this->confirmClientApproval($request);
-        $this->assertSame(RequestStatus::AwaitingPayment, $request->fresh()->status);
         $this->assertSame('sale', $this->order);
         $this->assertSame(1, Client::query()->count());
         $this->assertSame('wa:963944000123', $client->fresh()->telegram_user_id);
@@ -110,7 +111,7 @@ class OdooQuotationReplyTest extends TestCase
         $this->artisan('odoo:sync-quotations')->assertSuccessful();
         $this->assertSame(RequestStatus::QuotationSent, $request->fresh()->status);
 
-        // Accepted on the portal: the request moves as if the client pressed approve, and waits for an admin.
+        // Accepted on the portal: the request moves as if the client pressed approve.
         $this->order = 'sale';
         $this->artisan('odoo:sync-quotations')->expectsOutputToContain('approved=1')->assertSuccessful();
         $this->assertSame(RequestStatus::AwaitingAdminApproval, $request->fresh()->status);

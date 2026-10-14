@@ -252,7 +252,11 @@ class AdminBotController extends Controller
         $updated = $approve->confirm($serviceRequest, 'admin:telegram:'.$telegramId);
 
         return response()->json([
-            'data' => ['number' => ResolveServiceRequest::displayNumber($updated), 'status' => $updated->status->value],
+            'data' => [
+                'number' => ResolveServiceRequest::displayNumber($updated),
+                'status' => $updated->status->value,
+                'invoice_error' => $approve->invoiceError,
+            ],
             'message' => 'Approval confirmed.',
         ]);
     }

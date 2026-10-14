@@ -178,7 +178,7 @@ If it is urgent, call {$phone}."
         foreach ($requests as $request) {
             $ref = '#'.ResolveServiceRequest::displayNumber($request);
             $lines[] = $ref.' ('.$request->number.') "'.$request->title.'"';
-            $lines[] = '  status: '.$request->status->labelAr().' / '.$request->status->labelEn()
+            $lines[] = '  status: '.$request->status->forClient()->labelAr().' / '.$request->status->forClient()->labelEn()
                 .' | created '.$request->created_at?->timezone('Asia/Damascus')->toDateString();
 
             $package = $request->pricingPackage;
@@ -239,7 +239,7 @@ If it is urgent, call {$phone}."
 
             $next = match ($request->status) {
                 RequestStatus::QuotationSent => 'approve or reject the quotation for '.$ref,
-                RequestStatus::AwaitingPayment => 'pay and send the receipt for '.$ref,
+                RequestStatus::AwaitingAdminApproval, RequestStatus::AwaitingPayment => 'pay and send the receipt for '.$ref,
                 RequestStatus::ReadyForReview => 'review the delivery of '.$ref,
                 default => null,
             };

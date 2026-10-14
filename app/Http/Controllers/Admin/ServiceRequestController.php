@@ -260,23 +260,15 @@ class ServiceRequestController extends Controller
             ->additional(['message' => 'سُجّل قرار الزبون يدوياً.']);
     }
 
-    /** The admin confirms or turns down a client's approval that is waiting on them. */
+    /** The admin approves a request the client already said yes to (the client never sees this step). */
     public function clientApproval(Request $request, ServiceRequest $serviceRequest, ApproveQuotation $approve): ServiceRequestResource
     {
-        $validated = $request->validate([
-            'decision' => ['required', 'in:confirm,decline'],
-            'reason' => ['required_if:decision,decline', 'nullable', 'string', 'max:2000'],
-        ]);
-        $actor = 'admin:'.$request->user()?->id;
-
-        $updated = $validated['decision'] === 'confirm'
-            ? $approve->confirm($serviceRequest, $actor)
-            : $approve->decline($serviceRequest, trim((string) $validated['reason']), $actor);
+        $updated = $approve->confirm($serviceRequest, 'admin:'.$request->user()?->id);
 
         return ServiceRequestResource::make($updated->fresh(['client', 'statusHistory', 'quotationDecisions.quotation', 'clickupTasks']) ?? $updated)
-            ->additional(['message' => $validated['decision'] === 'confirm'
-                ? 'اعتُمدت الموافقة: تحول العرض إلى أمر بيع ووصل الزبون طلب الدفع.'
-                : 'لم تُعتمد الموافقة، وأُبلغ الزبون بأن عرضاً محدّثاً سيصله.']);
+            ->additional(['message' => $approve->invoiceError === null
+                ? 'اعتُمد الطلب: تحول العرض إلى أمر بيع ووصلت الفاتورة إلى الزبون.'
+                : 'اعتُمد الطلب، ولم تُرسل الفاتورة: '.$approve->invoiceError]);
     }
 
     public function provisionClickUp(ServiceRequest $serviceRequest, ProvisionClickUpTasks $provision, ClickUpClient $clickUp): ServiceRequestResource

@@ -41,7 +41,7 @@ class AppClientController extends Controller
         $counts = [
             'active' => (clone $requests)->whereNotIn('status', self::ACTIVE_EXCLUDED)->count(),
             'awaiting_decision' => (clone $requests)->where('status', RequestStatus::QuotationSent)->count(),
-            'awaiting_payment' => (clone $requests)->where('status', RequestStatus::AwaitingPayment)->count(),
+            'awaiting_payment' => (clone $requests)->whereIn('status', RequestStatus::awaitingPayment())->count(),
             'completed' => (clone $requests)->where('status', RequestStatus::Completed)->count(),
         ];
         $remaining = (float) (clone $requests)->whereNotIn('status', [RequestStatus::Cancelled])->sum('amount_remaining');

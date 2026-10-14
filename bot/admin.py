@@ -723,8 +723,11 @@ async def on_confirm_client_approval(update: Update, context: ContextTypes.DEFAU
         await query.edit_message_reply_markup(reply_markup=None)
     except Exception:
         pass
+    error = (response.json().get("data") or {}).get("invoice_error")
     await query.message.reply_text(
-        f"✅ اعتُمدت موافقة الزبون للطلب #{escape(ref)}: تحول العرض إلى أمر بيع ووصل الزبون طلب الدفع.",
+        f"✅ اعتُمد الطلب #{escape(ref)}: تحول العرض إلى أمر بيع ووصلت الفاتورة إلى الزبون."
+        if not error
+        else f"✅ اعتُمد الطلب #{escape(ref)}، ولم تُرسل الفاتورة: {escape(str(error))}",
         reply_markup=admin_keyboard(),
     )
 

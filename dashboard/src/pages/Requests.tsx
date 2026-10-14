@@ -160,8 +160,7 @@ export function Requests({ t }: { locale: Locale; t: (c: { ar: string; en: strin
                   <td>
                     <span className={`status status-${item.status}`}>
                       {t(statuses[item.status] ?? { ar: item.status, en: item.status })}
-                    </span>
-                  </td>
+                    </span>                  </td>
                   <td>
                     <span className={`source source-${item.source}`}>
                       {t(sources[item.source] ?? { ar: item.source, en: item.source })}

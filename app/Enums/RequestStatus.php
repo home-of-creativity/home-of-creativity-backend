@@ -7,7 +7,10 @@ enum RequestStatus: string
     case Submitted = 'submitted';
     case QuotationSent = 'quotation_sent';
     case QuotationRejected = 'quotation_rejected';
-    /** The client accepted the quotation; an admin confirms before the sales order and payment. */
+    /**
+     * The client approved the quotation and already has the payment steps; an admin has not
+     * approved it yet. Staff only: the client sees awaiting payment (forClient()).
+     */
     case AwaitingAdminApproval = 'awaiting_admin_approval';
     case AwaitingPayment = 'awaiting_payment';
     case PaymentConfirmed = 'payment_confirmed';
@@ -25,7 +28,7 @@ enum RequestStatus: string
             self::Submitted => [self::QuotationSent, self::AwaitingPayment, self::Cancelled],
             self::QuotationSent => [self::QuotationRejected, self::AwaitingAdminApproval, self::AwaitingPayment, self::Cancelled],
             self::QuotationRejected => [self::QuotationSent, self::Cancelled],
-            self::AwaitingAdminApproval => [self::AwaitingPayment, self::QuotationRejected, self::Cancelled],
+            self::AwaitingAdminApproval => [self::AwaitingPayment, self::Cancelled],
             self::AwaitingPayment => [self::PaymentConfirmed, self::Cancelled],
             self::PaymentConfirmed => [self::InProgress, self::RevisionRequested, self::Cancelled],
             self::InProgress => [self::ReadyForReview, self::RevisionRequested, self::Cancelled],
@@ -39,6 +42,23 @@ enum RequestStatus: string
     public function canTransitionTo(self $next): bool
     {
         return in_array($next, $this->allowedTransitions(), true);
+    }
+
+    /** The statuses where the client is asked to pay (the admin's approval is not the client's business). */
+    public static function awaitingPayment(): array
+    {
+        return [self::AwaitingAdminApproval, self::AwaitingPayment];
+    }
+
+    public function isAwaitingPayment(): bool
+    {
+        return in_array($this, self::awaitingPayment(), true);
+    }
+
+    /** The status the client is shown: the admin approval step reads as awaiting payment. */
+    public function forClient(): self
+    {
+        return $this === self::AwaitingAdminApproval ? self::AwaitingPayment : $this;
     }
 
     public function allowsClientEdit(): bool

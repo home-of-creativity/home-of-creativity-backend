@@ -153,6 +153,7 @@ class StaffBotController extends Controller
                 RequestStatus::Submitted,
                 RequestStatus::QuotationSent,
                 RequestStatus::QuotationRejected,
+                RequestStatus::AwaitingAdminApproval,
                 RequestStatus::AwaitingPayment,
             ])
             ->latest('id')
@@ -674,7 +675,7 @@ class StaffBotController extends Controller
                 ['text' => '✅ موافقة على العرض', 'callback_data' => "approve:{$ref}"],
                 ['text' => '❌ رفض العرض', 'callback_data' => "reject:{$ref}"],
             ],
-            RequestStatus::AwaitingPayment => array_values(array_filter([
+            RequestStatus::AwaitingAdminApproval, RequestStatus::AwaitingPayment => array_values(array_filter([
                 ['text' => '📎 رفع وصل الدفع', 'callback_data' => "receipt_hint:{$ref}"],
                 $serviceRequest->clientCancelClosed() ? null : ['text' => '❌ إلغاء الطلب', 'callback_data' => "reqcancel:{$ref}"],
             ])),

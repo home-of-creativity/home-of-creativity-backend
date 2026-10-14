@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Actions\ApproveQuotation;
 use App\Actions\ConfirmRequestPayment;
 use App\Actions\DeclineRenewal;
 use App\Actions\EnsureRequestDriveFolder;
@@ -658,20 +657,17 @@ class ClientOpsAutomationTest extends TestCase
             'sent_at' => now(),
         ]);
 
-        // The client's yes waits for an admin, so the bot gets no payment steps yet.
-        $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
+        $response = $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
             ->postJson("/api/bot/telegram/requests/{$request->number}/approve", [
                 'telegram_user_id' => 'tg-sham-cash',
             ])
             ->assertOk()
-            ->assertJsonPath('data.status', 'awaiting_admin_approval')
-            ->assertJsonPath('awaiting_admin', true)
-            ->assertJsonMissingPath('sham_cash_qr');
+            ->assertJsonPath('data.status', 'awaiting_payment')
+            ->assertJsonPath('sham_cash_qr.qr_available', true)
+            ->assertJsonPath('sham_cash_qr.delivered', false)
+            ->assertJsonPath('sham_cash_qr.file_name', basename((string) $path));
 
-        $approve = app(ApproveQuotation::class);
-        $this->assertSame(RequestStatus::AwaitingPayment, $approve->confirm($request->fresh(), 'admin')->status);
-        $this->assertTrue($approve->clientPaymentNotice['qr_available']);
-        $this->assertStringContainsString('تعليمات الدفع', $approve->clientPaymentNotice['caption']);
+        $this->assertNotEmpty($response->json('sham_cash_qr.content_base64'));
 
         $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
             ->get('/api/bot/telegram/sham-cash-qr')
@@ -710,13 +706,9 @@ class ClientOpsAutomationTest extends TestCase
                 'telegram_user_id' => 'tg-sham-sent',
             ])
             ->assertOk()
-            ->assertJsonPath('awaiting_admin', true);
-        Http::assertNotSent(fn (Request $httpRequest): bool => str_contains($httpRequest->url(), 'botclient-token/sendPhoto'));
-
-        // The admin's confirmation sends the QR with the amount to the client.
-        $approve = app(ApproveQuotation::class);
-        $approve->confirm($request->fresh(), 'admin');
-        $this->assertTrue($approve->clientPaymentNotice['delivered']);
+            ->assertJsonPath('sham_cash_qr.qr_available', true)
+            ->assertJsonPath('sham_cash_qr.delivered', true)
+            ->assertJsonPath('sham_cash_qr.content_base64', null);
 
         Http::assertSent(function (Request $httpRequest): bool {
             if (! str_contains($httpRequest->url(), 'botclient-token/sendPhoto')) {
@@ -754,19 +746,17 @@ class ClientOpsAutomationTest extends TestCase
             'sent_at' => now(),
         ]);
 
-        $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
+        $response = $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
             ->postJson("/api/bot/telegram/requests/{$request->number}/approve", [
                 'telegram_user_id' => 'tg-no-amount',
             ])
             ->assertOk()
-            ->assertJsonPath('data.status', 'awaiting_admin_approval');
+            ->assertJsonPath('data.status', 'awaiting_payment')
+            ->assertJsonPath('sham_cash_qr.qr_available', false)
+            ->assertJsonPath('sham_cash_qr.delivered', true)
+            ->assertJsonPath('sham_cash_qr.content_base64', null);
 
-        $approve = app(ApproveQuotation::class);
-        $this->assertSame(RequestStatus::AwaitingPayment, $approve->confirm($request->fresh(), 'admin')->status);
-        $this->assertFalse($approve->clientPaymentNotice['qr_available']);
-        $this->assertTrue($approve->clientPaymentNotice['delivered']);
-
-        $caption = (string) $approve->clientPaymentNotice['caption'];
+        $caption = (string) $response->json('sham_cash_qr.caption');
         $this->assertStringContainsString('سيصلك المبلغ المطلوب', $caption);
         $this->assertStringNotContainsString('تعليمات الدفع', $caption);
         $this->assertStringNotContainsString('شام كاش', $caption);

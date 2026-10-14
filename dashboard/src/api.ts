@@ -742,6 +742,9 @@ export type ServiceRequest = {
     source?: string;
     operations?: Array<{
       department: string;
+  /** Staff only: the client approved the quotation and an admin has not yet. */
+  admin_approval_pending?: boolean;
+  admin_approved_at?: string | null;
       brief: string;
       hours?: number;
       priority?: number;
@@ -1405,12 +1408,9 @@ export const api = {
       body: JSON.stringify({ decision, reason: reason || undefined }),
     });
   },
-  /** An admin confirms or turns down a client's approval that waits for them. */
-  clientApproval(id: number, decision: "confirm" | "decline", reason?: string) {
-    return request<Envelope<ServiceRequest>>(`/admin/requests/${id}/client-approval`, {
-      method: "POST",
-      body: JSON.stringify({ decision, reason: reason || undefined }),
-    });
+  /** An admin approves a request the client said yes to: sales order and invoice. */
+  clientApproval(id: number) {
+    return request<Envelope<ServiceRequest>>(`/admin/requests/${id}/client-approval`, { method: "POST" });
   },
   finance(filters: FinanceFilters = {}) {
     return request<Envelope<FinanceSummary>>(`/admin/finance${queryString({ ...filters })}`);

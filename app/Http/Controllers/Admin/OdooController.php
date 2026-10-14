@@ -833,7 +833,8 @@ class OdooController extends Controller
                 ? 'تم ترحيل الفاتورة، والطلب '.$opened->number.' بانتظار الدفع'.$clickup
                 : 'رُحّلت الفاتورة والطلب '.$opened->number.' بانتظار الدفع، وتعذر إيصالها إلى البريد أو واتساب.';
         } catch (\Throwable $exception) {
-            Log::warning('Odoo invoice post failed.', ['error' => $exception->getMessage()]);            $message = 'أُنشئت الفاتورة وفُتح الطلب '.$opened->number.' وتعذر ترحيلها أو إرسالها.';
+            Log::warning('Odoo invoice post failed.', ['error' => $exception->getMessage()]);
+            $message = 'أُنشئت الفاتورة وفُتح الطلب '.$opened->number.' وتعذر ترحيلها أو إرسالها.';
         }
 
         return [$created, $message];
@@ -898,8 +899,8 @@ class OdooController extends Controller
                 return $approve->handle($request, null, 'admin');
             }
             // Posting the invoice is the admin's go-ahead for an approval that was waiting on them.
-            if ($request->status === RequestStatus::AwaitingAdminApproval) {
-                return $approve->confirm($request, 'admin');
+            if ($request->awaitsAdminApproval()) {
+                $approve->markApproved($request, 'admin', confirmOrder: true);
             }
             if (in_array($request->status, [RequestStatus::Submitted, RequestStatus::QuotationRejected], true)) {
                 if ($request->status === RequestStatus::QuotationRejected) {
@@ -910,7 +911,8 @@ class OdooController extends Controller
                 return $acceptance->handle($request->fresh(['client', 'pricingPackage']) ?? $request);
             }
         } catch (\Throwable $exception) {
-            Log::warning('Invoice could not move the request to payment.', ['request' => $request->number, 'error' => $exception->getMessage()]);        }
+            Log::warning('Invoice could not move the request to payment.', ['request' => $request->number, 'error' => $exception->getMessage()]);
+        }
 
         return $request->fresh() ?? $request;
     }

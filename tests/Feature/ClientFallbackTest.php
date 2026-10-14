@@ -47,7 +47,7 @@ class ClientFallbackTest extends TestCase
             ->assertJsonPath('data.manual_decisions.0.to_status', 'awaiting_admin_approval')
             ->assertJsonPath('message', 'سُجّل قرار الزبون يدوياً.');
 
-        // The call is recorded on the client's behalf, then the admin's own approval rights confirm it.
+        // Entered on the client's behalf, then approved at once by the admin's own rights.
         $this->assertDatabaseHas('request_status_history', [
             'request_id' => $request->id,
             'to_status' => 'awaiting_admin_approval',

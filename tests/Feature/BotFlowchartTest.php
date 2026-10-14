@@ -309,8 +309,7 @@ class BotFlowchartTest extends TestCase
         $this->clientBot()->postJson("/api/bot/telegram/requests/{$number}/approve", [
             'telegram_user_id' => 'tg-flow',
         ])->assertOk()
-            ->assertJsonPath('data.status', 'awaiting_admin_approval');
-        $this->confirmClientApproval($number);
+            ->assertJsonPath('data.status', 'awaiting_payment');
 
         $this->clientBot()->postJson("/api/bot/telegram/requests/{$number}/receipt", [
             'telegram_user_id' => 'tg-flow',
@@ -422,7 +421,6 @@ class BotFlowchartTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.client_bot_reachable', false);
 
-        // An admin entering the client's yes confirms it in the same step.
         $this->postJson("/api/admin/requests/{$request->number}/client-decision", ['decision' => 'approve'])
             ->assertOk()
             ->assertJsonPath('data.status', 'awaiting_payment');

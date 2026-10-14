@@ -30,7 +30,8 @@ class AppRequestResource extends JsonResource
     public function toArray(Request $request): array
     {
         $locale = AppLocale::from($request);
-        $status = $this->status;
+        // The admin approval step is ours: the client sees awaiting payment.
+        $status = $this->status->forClient();
         $quotation = $this->relationLoaded('quotations')
             ? $this->quotations->sortByDesc('version')->first()
             : null;
@@ -73,7 +74,11 @@ class AppRequestResource extends JsonResource
             ? $this->statusHistory
                 ->sortBy('id')
                 ->map(function ($row) use ($locale): ?array {
-                    $to = RequestStatus::tryFrom((string) $row->to_status);
+                    $to = RequestStatus::tryFrom((string) $row->to_status)?->forClient();
+                    // Leaving the admin approval step is not a new step for the client.
+                    if ((string) $row->from_status === RequestStatus::AwaitingAdminApproval->value) {
+                        return null;
+                    }
 
                     return $to ? [
                         'status' => $to->value,
@@ -126,8 +131,8 @@ class AppRequestResource extends JsonResource
     {
         return match ($status) {
             RequestStatus::Submitted => 0,
-            RequestStatus::QuotationSent, RequestStatus::QuotationRejected, RequestStatus::AwaitingAdminApproval => 1,
-            RequestStatus::AwaitingPayment => 2,
+            RequestStatus::QuotationSent, RequestStatus::QuotationRejected => 1,
+            RequestStatus::AwaitingAdminApproval, RequestStatus::AwaitingPayment => 2,
             RequestStatus::PaymentConfirmed,
             RequestStatus::InProgress,
             RequestStatus::ReadyForReview,

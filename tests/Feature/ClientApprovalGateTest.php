@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Enums\PaymentMethod;
 use App\Enums\RequestStatus;
 use App\Models\Client;
 use App\Models\Quotation;
@@ -14,7 +15,10 @@ use Illuminate\Support\Facades\Http;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
-/** A client's yes to a quotation waits for an admin before the sales order and the payment steps. */
+/**
+ * A client's yes to a quotation sends the payment steps at once and waits for an admin out
+ * of the client's sight; the admin's approval (or a confirmed payment) completes it.
+ */
 class ClientApprovalGateTest extends TestCase
 {
     use RefreshDatabase;
@@ -27,7 +31,11 @@ class ClientApprovalGateTest extends TestCase
             'services.telegram.admin_bot_token' => 'admin-token',
             'services.telegram.admin_telegram_ids' => ['900'],
         ]);
-        Http::fake(['https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 1]], 200)]);
+        Http::fake([
+            'https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 1]], 200),
+            // Nothing else leaves the test (Gemini, ClickUp, Drive).
+            '*' => Http::response([], 200),
+        ]);
     }
 
     private function quoted(string $chat = 'tg-gate'): ServiceRequest
@@ -44,64 +52,78 @@ class ClientApprovalGateTest extends TestCase
         $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
             ->postJson("/api/bot/telegram/requests/{$request->number}/approve", ['telegram_user_id' => $chat])
             ->assertOk()
-            ->assertJsonPath('data.status', 'awaiting_admin_approval')
-            ->assertJsonPath('awaiting_admin', true);
+            ->assertJsonPath('data.status', 'awaiting_payment')
+            ->assertJsonMissingPath('awaiting_admin');
     }
 
-    public function test_admins_get_a_confirm_button_and_the_client_gets_no_payment_steps_yet(): void
+    public function test_the_client_gets_the_payment_steps_at_once_and_admins_get_a_button(): void
     {
         $request = $this->quoted();
         $this->clientApproves($request);
+
+        // The client sees an ordinary request awaiting payment, with the amount and QR.
+        Http::assertSent(fn (Request $sent): bool => str_contains($sent->url(), 'botclient-token/send')
+            && str_contains((string) ($sent['caption'] ?? $sent['text'] ?? ''), 'تعليمات الدفع'));
+        Http::assertNotSent(fn (Request $sent): bool => str_contains($sent->url(), 'botclient-token/')
+            && str_contains((string) ($sent['caption'] ?? $sent['text'] ?? ''), 'اعتماد'));
+        $this->assertTrue($request->fresh()->awaitsAdminApproval());
+        $this->assertSame(RequestStatus::AwaitingAdminApproval, $request->fresh()->status);
+
+        // The client's list shows an ordinary request awaiting payment that takes a receipt.
+        $mine = $this->withHeaders(['X-Webhook-Secret' => 'change-me-bot'])
+            ->getJson('/api/bot/telegram/requests?telegram_user_id=tg-gate')
+            ->assertOk()
+            ->json('data.0');
+        $this->assertSame('awaiting_payment', $mine['status']);
+        $this->assertSame('بانتظار الدفع', $mine['status_label']);
+        $this->assertTrue($request->fresh()->acceptsReceiptUpload());
 
         Http::assertSent(fn (Request $sent): bool => str_contains($sent->url(), 'botadmin-token/sendMessage')
             && $sent['chat_id'] === '900'
             && str_contains((string) $sent['text'], 'ينتظر اعتمادك')
             && str_contains(json_encode($sent['reply_markup'], JSON_UNESCAPED_UNICODE) ?: '', 'qok:'));
-        Http::assertNotSent(fn (Request $sent): bool => str_contains($sent->url(), 'botclient-token/') && str_contains((string) ($sent['caption'] ?? $sent['text'] ?? ''), 'تعليمات الدفع'));
     }
 
-    public function test_the_dashboard_confirms_and_the_client_gets_the_payment_steps(): void
+    public function test_the_dashboard_approves_once(): void
     {
         $request = $this->quoted();
         $this->clientApproves($request);
         Sanctum::actingAs(User::factory()->create(['is_admin' => true]));
 
-        $this->postJson("/api/admin/requests/{$request->id}/client-approval", ['decision' => 'confirm'])
+        $this->getJson("/api/admin/requests/{$request->id}")->assertOk()->assertJsonPath('data.admin_approval_pending', true);
+        $this->postJson("/api/admin/requests/{$request->id}/client-approval")
             ->assertOk()
-            ->assertJsonPath('data.status', 'awaiting_payment');
+            ->assertJsonPath('data.status', 'awaiting_payment')
+            ->assertJsonPath('data.admin_approval_pending', false);
 
-        $this->assertEqualsWithDelta(300, (float) $request->fresh()->amount_total, 0.01);
-        Http::assertSent(fn (Request $sent): bool => str_contains($sent->url(), 'botclient-token/send')
-            && str_contains((string) ($sent['caption'] ?? $sent['text'] ?? ''), 'تعليمات الدفع'));
-        $this->postJson("/api/admin/requests/{$request->id}/client-approval", ['decision' => 'confirm'])->assertStatus(422);
+        $this->assertNotNull($request->fresh()->admin_approved_at);
+        $this->postJson("/api/admin/requests/{$request->id}/client-approval")->assertStatus(422);
     }
 
-    public function test_a_declined_approval_rejects_the_quotation_and_tells_the_client(): void
-    {
-        $request = $this->quoted();
-        $this->clientApproves($request);
-        Sanctum::actingAs(User::factory()->create(['is_admin' => true]));
-
-        $this->postJson("/api/admin/requests/{$request->id}/client-approval", ['decision' => 'decline'])
-            ->assertUnprocessable()
-            ->assertJsonValidationErrors('reason');
-        $this->postJson("/api/admin/requests/{$request->id}/client-approval", ['decision' => 'decline', 'reason' => 'السعر يحتاج تعديل'])
-            ->assertOk()
-            ->assertJsonPath('data.status', 'quotation_rejected');
-
-        Http::assertSent(fn (Request $sent): bool => str_contains($sent->url(), 'botclient-token/sendMessage')
-            && str_contains((string) $sent['text'], 'عرض محدّث'));
-    }
-
-    public function test_only_staff_with_the_operation_may_confirm(): void
+    public function test_only_staff_with_the_operation_may_approve(): void
     {
         $request = $this->quoted();
         $this->clientApproves($request);
         $role = Role::query()->create(['name' => 'مبيعات', 'abilities' => ['ops.requests.view', 'ops.requests.quotation']]);
         Sanctum::actingAs(User::factory()->create(['role_id' => $role->id]));
 
-        $this->postJson("/api/admin/requests/{$request->id}/client-approval", ['decision' => 'confirm'])->assertForbidden();
-        $this->assertSame(RequestStatus::AwaitingAdminApproval, $request->fresh()->status);
+        $this->postJson("/api/admin/requests/{$request->id}/client-approval")->assertForbidden();
+        $this->assertTrue($request->fresh()->awaitsAdminApproval());
+    }
+
+    public function test_a_confirmed_payment_approves_the_request(): void
+    {
+        $request = $this->quoted();
+        $this->clientApproves($request);
+        Sanctum::actingAs(User::factory()->create(['is_admin' => true]));
+
+        $this->postJson("/api/admin/requests/{$request->id}/confirm-payment", ['payment_method' => PaymentMethod::Cash->value, 'amount' => 150])
+            ->assertOk();
+
+        $fresh = $request->fresh();
+        $this->assertFalse($fresh->awaitsAdminApproval());
+        $this->assertSame('admin:payment', $fresh->admin_approved_by);
+        $this->assertSame(RequestStatus::PaymentConfirmed, $fresh->status);
     }
 
     public function test_sales_entering_a_call_still_wait_for_the_admin(): void
@@ -113,10 +135,11 @@ class ClientApprovalGateTest extends TestCase
 
         $this->postJson("/api/admin/requests/{$request->id}/client-decision", ['decision' => 'approve'])
             ->assertOk()
-            ->assertJsonPath('data.status', 'awaiting_admin_approval');
+            ->assertJsonPath('data.status', 'awaiting_admin_approval')
+            ->assertJsonPath('data.admin_approval_pending', true);
     }
 
-    public function test_the_admin_bot_button_confirms(): void
+    public function test_the_admin_bot_button_approves(): void
     {
         $request = $this->quoted();
         $this->clientApproves($request);
@@ -129,10 +152,6 @@ class ClientApprovalGateTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.status', 'awaiting_payment');
 
-        $this->assertDatabaseHas('request_status_history', [
-            'request_id' => $request->id,
-            'to_status' => 'awaiting_payment',
-            'actor' => 'admin:telegram:900',
-        ]);
+        $this->assertSame('admin:telegram:900', $request->fresh()->admin_approved_by);
     }
 }

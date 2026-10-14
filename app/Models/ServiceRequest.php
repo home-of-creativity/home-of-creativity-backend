@@ -15,6 +15,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 
 class ServiceRequest extends Model
@@ -34,6 +35,9 @@ class ServiceRequest extends Model
         'title',
         'description',
         'status',
+        'admin_approval_pending_at',
+        'admin_approved_at',
+        'admin_approved_by',
         'source',
         'work_type',
         'execution_status',
@@ -95,6 +99,8 @@ class ServiceRequest extends Model
             'edit_rounds' => 'integer',
             'edit_estimate_hours' => 'integer',
             'paid_at' => 'datetime',
+            'admin_approval_pending_at' => 'datetime',
+            'admin_approved_at' => 'datetime',
             'invoice_sent_at' => 'datetime',
             'gemini_processed_at' => 'datetime',
             'quotation_amount' => 'decimal:2',
@@ -214,6 +220,12 @@ class ServiceRequest extends Model
         return trim('#'.$ref.($title !== '' ? ' '.$title : '').' '.$folderDate);
     }
 
+    /** The client approved the quotation and an admin has not approved it yet (staff only). */
+    public function awaitsAdminApproval(): bool
+    {
+        return $this->status === RequestStatus::AwaitingAdminApproval;
+    }
+
     public function hasRemainingBalance(): bool
     {
         return (float) ($this->amount_remaining ?? 0) > 0.009;
@@ -275,7 +287,7 @@ class ServiceRequest extends Model
             return true;
         }
 
-        if ($this->status === RequestStatus::AwaitingPayment) {
+        if ($this->status->isAwaitingPayment()) {
             return true;
         }
 
@@ -429,7 +441,7 @@ class ServiceRequest extends Model
     }
 
     /** The moment the invoice reached the client. Cancel stays open for 24 hours after that. */
-    public function invoiceSentAt(): ?\Illuminate\Support\Carbon
+    public function invoiceSentAt(): ?Carbon
     {
         if ($this->invoice_sent_at !== null) {
             return $this->invoice_sent_at;
@@ -440,12 +452,12 @@ class ServiceRequest extends Model
             ->whereNotNull('issued_at')
             ->min('issued_at');
         if ($issued) {
-            return \Illuminate\Support\Carbon::parse($issued);
+            return Carbon::parse($issued);
         }
 
         $synced = OdooInvoice::query()->where('request_id', $this->id)->min('created_at');
 
-        return $synced ? \Illuminate\Support\Carbon::parse($synced) : null;
+        return $synced ? Carbon::parse($synced) : null;
     }
 
     public function clientCancelClosed(): bool

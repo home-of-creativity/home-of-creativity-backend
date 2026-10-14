@@ -20,6 +20,8 @@ class ServiceRequestResource extends JsonResource
         $mapper = app(ClickUpStatusMapper::class);
         $odoo = app(OdooClient::class);
         $odooReady = $odoo->configured();
+        // The client bot never sees the admin approval step: it reads as awaiting payment.
+        $clientView = $request->is('api/bot/telegram/*');
 
         return [
             'id' => $this->id,
@@ -27,7 +29,7 @@ class ServiceRequestResource extends JsonResource
             'number' => $this->number,
             'title' => $this->title,
             'description' => $this->description,
-            'status' => $this->status->value,
+            'status' => ($clientView ? $this->status->forClient() : $this->status)->value,
             'source' => $this->source->value,
             'work_type' => $this->work_type?->value,
             'execution_status' => $this->execution_status?->value,
@@ -90,6 +92,9 @@ class ServiceRequestResource extends JsonResource
             'clickup_tasks' => $this->whenLoaded('clickupTasks'),
             'status_history' => $this->whenLoaded('statusHistory'),
             'client_bot_reachable' => app(ClientReachability::class)->botReachable($this->relationLoaded('client') ? $this->client : null),
+            // Staff only: the client approved and an admin has not yet (the client sees awaiting payment).
+            'admin_approval_pending' => ! $clientView && $this->resource->awaitsAdminApproval(),
+            'admin_approved_at' => $this->admin_approved_at?->toIso8601String(),
             'manual_decisions' => $this->whenLoaded('statusHistory', fn () => $this->statusHistory
                 ->filter(fn ($row): bool => str_starts_with((string) $row->actor, 'manual:'))
                 ->map(fn ($row): array => [

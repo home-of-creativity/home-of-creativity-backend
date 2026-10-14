@@ -551,6 +551,7 @@ class PollDriveDeliveriesCommand extends Command
             ->whereIn('status', [
                 RequestStatus::Submitted,
                 RequestStatus::QuotationSent,
+                RequestStatus::AwaitingAdminApproval,
                 RequestStatus::AwaitingPayment,
                 RequestStatus::PaymentConfirmed,
                 RequestStatus::InProgress,

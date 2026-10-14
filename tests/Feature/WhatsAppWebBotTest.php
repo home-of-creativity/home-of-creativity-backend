@@ -2,11 +2,11 @@
 
 namespace Tests\Feature;
 
+use App\Actions\BookPhotographySlot;
+use App\Actions\PhotographySessions;
 use App\Enums\ClickUpTaskType;
 use App\Enums\RequestStatus;
 use App\Models\ClickUpTask;
-use App\Actions\BookPhotographySlot;
-use App\Actions\PhotographySessions;
 use App\Models\Client;
 use App\Models\PhotographyBooking;
 use App\Models\PricingCategory;
@@ -244,17 +244,10 @@ class WhatsAppWebBotTest extends TestCase
             ])
             ->assertOk();
 
-        // The client hears that the team confirms first; the payment steps come after that.
         $this->assertSame(RequestStatus::AwaitingAdminApproval, $serviceRequest->fresh()->status);
         Http::assertSent(fn (Request $request): bool => $request->url() === 'http://wa-web.test/send'
-            && str_contains((string) data_get($request->data(), 'text'), 'بانتظار تأكيد الفريق')
+            && str_contains((string) data_get($request->data(), 'text'), 'وصل')
             && ! str_contains((string) data_get($request->data(), 'text'), 'اختر الفئة'));
-        $this->assertSame('idle', Cache::get('hoc:wa-session:963955555555')['step'] ?? null);
-
-        $this->confirmClientApproval($serviceRequest);
-        $this->assertSame(RequestStatus::AwaitingPayment, $serviceRequest->fresh()->status);
-        Http::assertSent(fn (Request $request): bool => $request->url() === 'http://wa-web.test/send'
-            && str_contains((string) data_get($request->data(), 'text'), 'تعليمات الدفع'));
     }
 
     public function test_asking_for_a_bigger_package_sends_a_larger_quotation_with_the_ad_budget(): void
@@ -501,7 +494,7 @@ class WhatsAppWebBotTest extends TestCase
             'step' => 'quote',
             'quote_ref' => $serviceRequest->number,
         ], now()->addHour());
-        Http::fake(function (\Illuminate\Http\Client\Request $request) {
+        Http::fake(function (Request $request) {
             if (str_contains($request->url(), 'wa-web.test')) {
                 return Http::response(['id' => 'wa-web-1'], 200);
             }

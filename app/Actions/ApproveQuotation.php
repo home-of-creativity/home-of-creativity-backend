@@ -2,7 +2,6 @@
 
 namespace App\Actions;
 
-use App\Enums\EmployeeProfession;
 use App\Enums\QuotationDecisionType;
 use App\Enums\RequestStatus;
 use App\Models\Quotation;
@@ -16,25 +15,29 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
 /**
- * A client's yes to a quotation (bot, app, Odoo portal, or entered by staff after a call)
- * waits for an admin: the request sits in awaiting_admin_approval and admins get a button.
- * Only the admin's confirmation turns the Odoo quotation into a sales order and sends the
- * client the payment steps. An admin acting directly (posting an invoice) skips the wait.
+ * A client's yes to a quotation moves the request to awaiting payment and sends the payment
+ * steps straight away. When the yes came from the client (bot, app, Odoo portal, or staff
+ * entering a call) it also waits for an admin, out of the client's sight: the admin's
+ * approval (or the payment being confirmed) turns the quotation into a sales order and
+ * sends the Odoo invoice. An admin acting directly (posting an invoice) is approved at once.
  */
 class ApproveQuotation
 {
     /** @var array{caption: string, qr_available: bool, delivered: bool}|null */
     public ?array $clientPaymentNotice = null;
 
-    /** True when the last handle() left the approval waiting for an admin. */
+    /** True when the last handle() left the request waiting for an admin's approval. */
     public bool $heldForAdmin = false;
+
+    /** Why the invoice was not sent on the last confirm(), null when it was. */
+    public ?string $invoiceError = null;
 
     public function __construct(
         private RequestStatusTransitionService $transitions,
         private ApplyQuotationAcceptance $applyQuotationAcceptance,
         private NotifyPaymentStage $notifyPaymentStage,
         private NotifyEmployees $notifyEmployees,
-        private NotifyClientChannels $notifyClient,
+        private SendApprovedInvoice $sendApprovedInvoice,
         private OdooClient $odoo,
     ) {}
 
@@ -51,7 +54,8 @@ class ApproveQuotation
             throw ValidationException::withMessages(['quotation' => 'No quotation found.']);
         }
 
-        DB::transaction(function () use ($request, $quotation): void {
+        $held = self::needsAdmin($actor);
+        $updated = DB::transaction(function () use ($request, $quotation, $actor, $held): ServiceRequest {
             QuotationDecision::query()->firstOrCreate(
                 [
                     'request_id' => $request->id,
@@ -60,45 +64,87 @@ class ApproveQuotation
                 ],
                 ['reason' => null],
             );
+
+            // The client is asked to pay either way; awaiting_admin_approval reads as awaiting payment to them.
+            $updated = $held
+                ? $this->transitions->transition($request, RequestStatus::AwaitingAdminApproval, $actor, 'Quotation approved; waiting for an admin.')
+                : $this->transitions->transition($request, RequestStatus::AwaitingPayment, $actor, 'Quotation approved.');
+            $updated->forceFill($held
+                ? ['admin_approval_pending_at' => now(), 'admin_approved_at' => null, 'admin_approved_by' => null]
+                : ['admin_approved_at' => now(), 'admin_approved_by' => $actor])->save();
+
+            return $updated->fresh(['client', 'pricingPackage']) ?? $updated;
         });
 
-        if (self::needsAdmin($actor)) {
-            return $this->hold($request, $actor);
+        if (! $held) {
+            $this->confirmSaleOrder($updated);
+        }
+        // The client gets the amount and the payment steps now, whether or not we approved yet.
+        $updated = $this->applyQuotationAcceptance->handle($updated->fresh(['client', 'pricingPackage']) ?? $updated);
+        $this->clientPaymentNotice = $this->applyQuotationAcceptance->clientNotice;
+        $fresh = $updated->fresh(['client', 'pricingPackage']) ?? $updated;
+        $displayNumber = ResolveServiceRequest::displayNumber($fresh);
+        $headline = $held ? '✅ وافق الزبون على عرض السعر — بانتظار اعتماد الإدارة' : '✅ وافق الزبون على عرض السعر';
+        $this->notifyPaymentStage->handle(
+            $fresh,
+            null,
+            $this->salesDecisionMessage($fresh, "{$headline}\n#{$displayNumber} — {$fresh->title}\n{$fresh->client?->name}"),
+        );
+
+        if ($held) {
+            $this->heldForAdmin = true;
+            $this->askAdmins($fresh);
         }
 
-        return $this->accept($request, $actor, 'Quotation approved.', '✅ وافق الزبون على عرض السعر');
+        return $updated->fresh(['client', 'invoices', 'pricingPackage']) ?? $updated;
     }
 
-    /** The admin confirms the client's approval: sales order, payment plan, and payment steps. */
-    public function confirm(ServiceRequest $request, string $actor): ServiceRequest
+    /**
+     * The admin approves a request the client already said yes to: the Odoo quotation becomes
+     * a sales order and its invoice goes to the client. With $deliverInvoice false (payment
+     * being confirmed) the invoice is created and the payment step sends it paid.
+     */
+    public function confirm(ServiceRequest $request, string $actor, bool $deliverInvoice = true): ServiceRequest
     {
-        $this->clientPaymentNotice = null;
-        if ($request->status !== RequestStatus::AwaitingAdminApproval) {
-            throw ValidationException::withMessages(['request' => 'الطلب ليس بانتظار اعتماد الإدارة.']);
+        $this->invoiceError = null;
+        if (! $request->awaitsAdminApproval()) {
+            throw ValidationException::withMessages(['request' => 'هذا الطلب ليس بانتظار اعتماد الإدارة.']);
         }
 
-        $updated = $this->accept($request, $actor, 'Client approval confirmed by an admin.', '✅ اعتمدت الإدارة موافقة الزبون');
-        // Telegram clients already got the QR from ApplyQuotationAcceptance; others get the same steps on their channel.
-        $notice = $this->clientPaymentNotice;
-        if (is_array($notice) && ! $notice['delivered']) {
-            $this->notifyClient->send($updated, $notice['caption']);
+        $this->markApproved($request, $actor);
+        $fresh = $request->fresh(['client', 'pricingPackage']) ?? $request;
+        if (filled($fresh->odoo_quotation_id)) {
+            $this->invoiceError = $this->sendApprovedInvoice->handle($fresh, $deliverInvoice);
+            // Without an invoice the order is still confirmed so the work can start.
+            if ($this->invoiceError !== null) {
+                $this->confirmSaleOrder($fresh);
+            }
         }
+        $number = ResolveServiceRequest::displayNumber($fresh);
+        $this->notifyEmployees->handleAdmins(
+            "✅ اعتُمد الطلب #{$number} — {$fresh->title}".($this->invoiceError !== null ? "\n⚠️ {$this->invoiceError}" : ''),
+        );
 
-        return $updated;
+        return $fresh->fresh(['client', 'invoices', 'pricingPackage']) ?? $fresh;
     }
 
-    /** The admin does not confirm: the quotation counts as rejected so staff can send a new one. */
-    public function decline(ServiceRequest $request, string $reason, string $actor): ServiceRequest
+    /**
+     * Records the approval. With $confirmOrder the Odoo quotation becomes a sales order too
+     * (an admin posting the invoice from the dashboard); no second invoice is made.
+     */
+    public function markApproved(ServiceRequest $request, string $actor, bool $confirmOrder = false): void
     {
-        if ($request->status !== RequestStatus::AwaitingAdminApproval) {
-            throw ValidationException::withMessages(['request' => 'الطلب ليس بانتظار اعتماد الإدارة.']);
+        if ($request->status === RequestStatus::AwaitingAdminApproval) {
+            $request = $this->transitions->transition($request, RequestStatus::AwaitingPayment, $actor, 'Approved by an admin.');
         }
-        $updated = $this->transitions->transition($request, RequestStatus::QuotationRejected, $actor, 'Admin did not confirm the client approval: '.$reason);
-        $updated = $updated->fresh(['client']) ?? $updated;
-        $number = ResolveServiceRequest::displayNumber($updated);
-        $this->notifyClient->send($updated, "راجع الفريق عرض السعر للطلب #{$number}، وسيصلك عرض محدّث قريباً.");
-
-        return $updated;
+        $request->forceFill([
+            'admin_approval_pending_at' => $request->admin_approval_pending_at ?? now(),
+            'admin_approved_at' => now(),
+            'admin_approved_by' => $actor,
+        ])->save();
+        if ($confirmOrder) {
+            $this->confirmSaleOrder($request);
+        }
     }
 
     /** Client and staff-entered approvals wait; the dashboard and the Odoo invoice path act as admin. */
@@ -107,52 +153,21 @@ class ApproveQuotation
         return $actor === 'client' || str_starts_with($actor, 'client:') || str_starts_with($actor, 'manual:');
     }
 
-    private function hold(ServiceRequest $request, string $actor): ServiceRequest
+    private function askAdmins(ServiceRequest $request): void
     {
-        $updated = $this->transitions->transition($request, RequestStatus::AwaitingAdminApproval, $actor, 'Client approved the quotation; waiting for an admin.');
-        $updated = $updated->fresh(['client', 'pricingPackage']) ?? $updated;
-        $this->heldForAdmin = true;
-
-        $number = ResolveServiceRequest::displayNumber($updated);
-        $amount = (float) ($updated->quotation_amount ?? $updated->amount_total ?? 0);
+        $number = ResolveServiceRequest::displayNumber($request);
+        $amount = (float) ($request->quotation_amount ?? $request->amount_total ?? 0);
         $lines = array_filter([
             '🟡 وافق الزبون على عرض السعر وينتظر اعتمادك',
-            "#{$number} — {$updated->title}",
-            trim(($updated->client?->name ?? '').($updated->client?->company_name ? ' — '.$updated->client->company_name : '')),
+            "#{$number} — {$request->title}",
+            trim(($request->client?->name ?? '').($request->client?->company_name ? ' — '.$request->client->company_name : '')),
             $amount > 0 ? 'المبلغ: '.number_format($amount, 2).' USD' : null,
-            'بعد الاعتماد يتحول العرض إلى أمر بيع ويصل الزبون طلب الدفع.',
+            'وصلت الزبون خطوات الدفع. بعد الاعتماد يتحول العرض إلى أمر بيع وتصله الفاتورة.',
         ]);
-        // Sales hear about the yes now; the payment-stage message with its button follows the admin's confirmation.
-        $this->notifyEmployees->handle(
-            $updated,
-            EmployeeProfession::Sales,
-            $this->salesDecisionMessage($updated, "🟡 وافق الزبون على عرض السعر — بانتظار اعتماد الإدارة\n#{$number} — {$updated->title}\n{$updated->client?->name}"),
-        );
         $this->notifyEmployees->handleAdmins(implode("\n", $lines), [
             ['text' => '✅ اعتماد', 'callback_data' => 'qok:'.$number],
-            ['text' => '📋 فتح الطلب', 'url' => rtrim((string) config('app.url'), '/').'/dashboard/requests/'.$updated->id],
+            ['text' => '📋 فتح الطلب', 'url' => rtrim((string) config('app.url'), '/').'/dashboard/requests/'.$request->id],
         ]);
-
-        return $updated;
-    }
-
-    private function accept(ServiceRequest $request, string $actor, string $note, string $headline): ServiceRequest
-    {
-        $updated = $this->transitions->transition($request, RequestStatus::AwaitingPayment, $actor, $note);
-        $updated = $updated->fresh(['client', 'pricingPackage']) ?? $updated;
-
-        $this->confirmSaleOrder($updated);
-        $updated = $this->applyQuotationAcceptance->handle($updated->fresh(['client', 'pricingPackage']) ?? $updated);
-        $this->clientPaymentNotice = $this->applyQuotationAcceptance->clientNotice;
-        $fresh = $updated->fresh(['client', 'pricingPackage']) ?? $updated;
-        $displayNumber = ResolveServiceRequest::displayNumber($fresh);
-        $this->notifyPaymentStage->handle(
-            $fresh,
-            null,
-            $this->salesDecisionMessage($fresh, "{$headline}\n#{$displayNumber} — {$fresh->title}\n{$fresh->client?->name}"),
-        );
-
-        return $updated->fresh(['client', 'invoices', 'pricingPackage']) ?? $updated;
     }
 
     /** The approved Odoo quotation becomes a sales order; a failure leaves the approval standing. */
