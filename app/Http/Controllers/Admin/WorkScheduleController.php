@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Actions\ChangeWorkPlan;
 use App\Actions\ConfirmWorkPlan;
 use App\Actions\ExtendClientSchedule;
 use App\Http\Controllers\Controller;
@@ -96,14 +97,48 @@ class WorkScheduleController extends Controller
         ExtendClientSchedule $extendClientSchedule,
     ): ServiceRequestResource {
         $validated = $request->validate([
-            'hours' => ['required', 'integer', 'min:1', 'max:80'],
+            'days' => ['required_without:hours', 'nullable', 'integer', 'min:1', 'max:60'],
+            'hours' => ['required_without:days', 'nullable', 'integer', 'min:1', 'max:80'],
             'reason' => ['required', 'string', 'max:500'],
         ]);
 
-        return new ServiceRequestResource($extendClientSchedule->handle(
+        $updated = filled($validated['days'] ?? null)
+            ? $extendClientSchedule->byDays($serviceRequest, (int) $validated['days'], $validated['reason'])
+            : $extendClientSchedule->handle($serviceRequest, (int) $validated['hours'], $validated['reason']);
+
+        return (new ServiceRequestResource($updated))->additional(['message' => 'مُدّدت المدة في ClickUp وأُبلغ الزبون بموعد التسليم الجديد.']);
+    }
+
+    /** «تغيير الخطة»: the approved plan with every department and its staff. */
+    public function showPlan(ServiceRequest $serviceRequest, ChangeWorkPlan $changeWorkPlan): JsonResponse
+    {
+        return response()->json(['data' => $changeWorkPlan->current($serviceRequest), 'message' => 'ok']);
+    }
+
+    public function changePlan(Request $request, ServiceRequest $serviceRequest, ChangeWorkPlan $changeWorkPlan): ServiceRequestResource
+    {
+        $validated = $request->validate([
+            'operations' => ['present', 'array', 'max:3'],
+            'operations.*.department' => ['required', 'string', 'distinct', 'in:'.implode(',', ChangeWorkPlan::DEPARTMENTS)],
+            'operations.*.brief' => ['required', 'string', 'max:4000'],
+            'operations.*.hours' => ['required', 'integer', 'min:1', 'max:400'],
+            'operations.*.priority' => ['nullable', 'integer', 'min:1', 'max:4'],
+            'operations.*.employee_id' => ['nullable', 'integer'],
+            'photography_sessions' => ['required', 'integer', 'min:0', 'max:100'],
+        ]);
+
+        $result = $changeWorkPlan->handle(
             $serviceRequest,
-            (int) $validated['hours'],
-            $validated['reason'],
-        ));
+            array_values($validated['operations']),
+            (int) $validated['photography_sessions'],
+            'admin:'.$request->user()?->id,
+        );
+
+        return (new ServiceRequestResource($result['request']))->additional([
+            'message' => $result['errors'] === []
+                ? 'حُفظت الخطة وحُدّثت مهام ClickUp.'
+                : 'حُفظت الخطة، وتعذر تحديث بعض مهام ClickUp: '.implode(' · ', $result['errors']),
+            'clickup_errors' => $result['errors'],
+        ]);
     }
 }

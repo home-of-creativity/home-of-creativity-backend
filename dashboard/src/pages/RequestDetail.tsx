@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { LoadingLottie } from "../components/LoadingLottie";
 import { PageHeader } from "../components/PageHeader";
 import { api, type ServiceRequest } from "../api";
+import { ExtendScheduleDialog, WorkPlanDialog } from "./requests/WorkPlanDialog";
 import { copy, sources, statuses, type Locale } from "../i18n";
 import { useCan } from "../lib/useCan";
 import { useLive, useLiveStamp } from "../live";
@@ -64,6 +65,8 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
   const [pollingDrive, setPollingDrive] = useState(false);
   const [decisionReason, setDecisionReason] = useState("");
   const [recordingDecision, setRecordingDecision] = useState(false);
+  const [planOpen, setPlanOpen] = useState(false);
+  const [extendOpen, setExtendOpen] = useState(false);
 
   useEffect(() => {
     if (!receiptUrl) return;
@@ -254,18 +257,6 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
     }
   }
 
-  async function confirmPlan() {
-    if (!item) return;
-    setError("");
-    try {
-      const res = await api.confirmWorkPlan(item.id);
-      setItem(res.data);
-      setNotice(res.message ?? "");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t(copy.saveFailed));
-    }
-  }
-
   async function recordDecision(decision: "approve" | "reject" | "revision" | "complete") {
     if (!item || recordingDecision) return;
     setError("");
@@ -314,18 +305,13 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
     }
   }
 
-  async function extendSchedule() {
-    if (!item) return;
-    const reason = window.prompt("سبب زيادة المدة") ?? "";
-    if (!reason.trim()) return;
+  function planSaved(saved: ServiceRequest, message: string) {
+    setItem(saved);
+    setStatus(saved.status);
+    setPlanOpen(false);
+    setExtendOpen(false);
     setError("");
-    try {
-      const res = await api.extendSchedule(item.id, 8, reason.trim());
-      setItem(res.data);
-      setNotice(res.message ?? "");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t(copy.saveFailed));
-    }
+    setNotice(message);
   }
 
   async function renew() {
@@ -822,11 +808,11 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
           ) : null}
           {canWorkPlan ? (
             <>
-              <button className="btn" type="button" onClick={() => void confirmPlan()}>
-                تأكيد الخطة
+              <button className="btn" type="button" onClick={() => setPlanOpen(true)}>
+                تغيير الخطة
               </button>
-              <button className="btn" type="button" onClick={() => void extendSchedule()}>
-                زيادة المدة
+              <button className="btn" type="button" onClick={() => setExtendOpen(true)}>
+                تمديد المدة
               </button>
             </>
           ) : null}
@@ -961,6 +947,8 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
           <img src={receiptUrl} alt="" onClick={(event) => event.stopPropagation()} />
         </div>
       ) : null}
+      {planOpen ? <WorkPlanDialog requestId={item.id} onClose={() => setPlanOpen(false)} onSaved={planSaved} /> : null}
+      {extendOpen ? <ExtendScheduleDialog requestId={item.id} onClose={() => setExtendOpen(false)} onSaved={planSaved} /> : null}
     </div>
   );
 }

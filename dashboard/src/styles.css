@@ -10651,3 +10651,55 @@ div:has(> .report-bar) {
   gap: 0.4rem;
 }
 
+
+
+/* Request: «تغيير الخطة» */
+
+.work-plan-dialog .form-dialog-body {
+  max-height: min(72svh, 46rem);
+  overflow-y: auto;
+}
+
+.work-plan-rows {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.work-plan-row {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--brand-line);
+  border-radius: 14px;
+}
+
+.work-plan-row.is-on {
+  border-color: color-mix(in srgb, var(--brand-purple) 40%, var(--brand-line));
+  background: color-mix(in srgb, var(--brand-purple) 4%, var(--brand-surface));
+}
+
+.work-plan-row legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+  align-items: center;
+  padding: 0 0.3rem;
+}
+
+.work-plan-task {
+  display: inline-flex;
+  gap: 0.25rem;
+  align-items: center;
+  font-size: 0.82rem;
+}
+
+.work-plan-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.6rem;
+}
+
+.work-plan-sessions {
+  max-width: 14rem;
+}

@@ -136,6 +136,52 @@ class ClickUpClient
             ->throw();
     }
 
+    /**
+     * Rewrites a task from an edited work plan: description, time estimate, due date, priority,
+     * and the assignee (the previous one is removed). Null leaves a field as it is.
+     */
+    public function updateTaskDetails(
+        string $taskId,
+        ?string $description = null,
+        ?int $hours = null,
+        ?int $dueDateMs = null,
+        ?int $priority = null,
+        ?string $assigneeId = null,
+        ?string $previousAssigneeId = null,
+    ): void {
+        $payload = [];
+        if ($description !== null) {
+            $payload['description'] = $description;
+        }
+        if ($hours !== null && $hours > 0) {
+            $payload['time_estimate'] = $hours * 3_600_000;
+        }
+        if ($dueDateMs !== null && $dueDateMs > 0) {
+            $payload['due_date'] = $dueDateMs;
+        }
+        if ($priority !== null) {
+            $payload['priority'] = max(1, min(4, $priority));
+        }
+        if (filled($assigneeId) && $assigneeId !== $previousAssigneeId) {
+            $id = fn (string $value): int|string => ctype_digit($value) ? (int) $value : $value;
+            $payload['assignees'] = array_filter([
+                'add' => [$id((string) $assigneeId)],
+                'rem' => filled($previousAssigneeId) ? [$id((string) $previousAssigneeId)] : [],
+            ]);
+        }
+        if ($payload === []) {
+            return;
+        }
+
+        Http::timeout((int) config('services.clickup.timeout', 12))
+            ->connectTimeout(3)
+            ->retry(2, 200)
+            ->acceptJson()
+            ->withHeaders(['Authorization' => (string) config('services.clickup.token')])
+            ->put('https://api.clickup.com/api/v2/task/'.$taskId, $payload)
+            ->throw();
+    }
+
     public function addTaskToList(string $taskId, string $listId): void
     {
         if ($taskId === '' || $listId === '') {

@@ -500,6 +500,32 @@ export type ClientReport = {
   updated_at?: string | null;
 };
 
+export type WorkPlanDepartment = "design" | "content" | "programming";
+
+/** «تغيير الخطة»: every ClickUp department with its staff and what the approved plan holds. */
+export type WorkPlanEditor = {
+  confirmed: boolean;
+  departments: Array<{
+    department: WorkPlanDepartment;
+    label: string;
+    included: boolean;
+    brief: string;
+    hours: number;
+    priority: number;
+    employee_id: number | null;
+    due_at: string | null;
+    task: { url: string | null; status: string | null } | null;
+    employees: Array<{ id: number; name: string; in_clickup: boolean }>;
+  }>;
+  photography: { enabled: boolean; sessions: number; used: number };
+  client_due_at: string | null;
+};
+
+export type WorkPlanChange = {
+  operations: Array<{ department: WorkPlanDepartment; brief: string; hours: number; priority: number; employee_id: number | null }>;
+  photography_sessions: number;
+};
+
 export type ReportVersionEvent = "created" | "edited" | "published" | "restored" | "attachment_added" | "attachment_removed" | "deleted";
 
 export type ReportVersion = {
@@ -709,6 +735,9 @@ export type ServiceRequest = {
   clickup_error?: string | null;
   clickup_attempts?: number;
   client_bot_reachable?: boolean;
+  /** Staff only: the client approved the quotation and an admin has not yet. */
+  admin_approval_pending?: boolean;
+  admin_approved_at?: string | null;
   manual_decisions?: { to_status: string; note: string | null; created_at: string | null }[];
   quotation_amount?: string | null;
   quotation_notes?: string | null;
@@ -742,9 +771,6 @@ export type ServiceRequest = {
     source?: string;
     operations?: Array<{
       department: string;
-  /** Staff only: the client approved the quotation and an admin has not yet. */
-  admin_approval_pending?: boolean;
-  admin_approved_at?: string | null;
       brief: string;
       hours?: number;
       priority?: number;
@@ -1508,10 +1534,20 @@ export const api = {
       body: JSON.stringify({ lines }),
     });
   },
-  extendSchedule(id: number, hours: number, reason: string) {
+  /** Working days on our side: ClickUp due dates move and the client gets the new date. */
+  extendSchedule(id: number, days: number, reason: string) {
     return request<Envelope<ServiceRequest>>(`/admin/requests/${id}/extend-schedule`, {
       method: "POST",
-      body: JSON.stringify({ hours, reason }),
+      body: JSON.stringify({ days, reason }),
+    });
+  },
+  workPlan(id: number) {
+    return request<Envelope<WorkPlanEditor>>(`/admin/requests/${id}/work-plan`);
+  },
+  changeWorkPlan(id: number, payload: WorkPlanChange) {
+    return request<Envelope<ServiceRequest> & { clickup_errors?: string[] }>(`/admin/requests/${id}/work-plan`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
     });
   },
   workCalendar() {

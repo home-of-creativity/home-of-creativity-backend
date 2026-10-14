@@ -268,6 +268,8 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::post('requests/{service_request}/confirm-plan', [AdminWorkScheduleController::class, 'confirmPlan']);
         Route::put('requests/{service_request}/draft-work-lines', [AdminWorkScheduleController::class, 'draftLines']);
         Route::post('requests/{service_request}/extend-schedule', [AdminWorkScheduleController::class, 'extendSchedule']);
+        Route::get('requests/{service_request}/work-plan', [AdminWorkScheduleController::class, 'showPlan']);
+        Route::put('requests/{service_request}/work-plan', [AdminWorkScheduleController::class, 'changePlan']);
     });
     Route::middleware('ability:ops.requests.integrations')->group(function () {
         Route::post('requests/{service_request}/retry-gemini', [AdminServiceRequestController::class, 'retryGemini']);
