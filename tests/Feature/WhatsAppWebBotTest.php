@@ -712,9 +712,9 @@ class WhatsAppWebBotTest extends TestCase
         $this->assertSame(2, $this->sentCount('963933333332', 'اختار اليوم'));
 
         $this->chat('963933333332', 'web-photo-day', '2');
-        $this->assertSentTo('963933333332', 'اختار الوقت يوم الأحد 18/10');
+        $this->assertSentTo('963933333332', 'اختار الوقت يوم الأربعاء 14/10');
         $this->chat('963933333332', 'web-photo-time', '1');
-        $this->assertSentTo('963933333332', 'وصلنا طلب الموعد يوم الأحد 18/10 الساعة 9 الصبح');
+        $this->assertSentTo('963933333332', 'وصلنا طلب الموعد يوم الأربعاء 14/10 الساعة 9 الصبح');
 
         $booking = PhotographyBooking::query()->where('request_id', $request->id)->firstOrFail();
         $this->assertSame('pending_staff', $booking->status);
@@ -817,7 +817,7 @@ class WhatsAppWebBotTest extends TestCase
         $moving = $booking->fresh();
         $this->assertSame('rescheduling', $moving->status);
         $this->assertSame('2026-10-18 10:00', $moving->starts_at?->format('Y-m-d H:i'));
-        $this->assertSame('2026-10-19 09:00', $moving->proposed_starts_at?->format('Y-m-d H:i'));
+        $this->assertSame('2026-10-15 09:00', $moving->proposed_starts_at?->format('Y-m-d H:i'));
         $this->assertSentTo('963955555551', 'طلب تعديل موعد #'.$booking->id);
         $this->assertSame(1, $request->fresh()->photography_sessions_used);
 

@@ -366,7 +366,7 @@ class WorkScenarioCoverageTest extends TestCase
         $this->assertSame(0, PhotographyBooking::query()->count());
     }
 
-    public function test_photography_cannot_be_booked_before_a_week(): void
+    public function test_photography_cannot_be_booked_before_three_days(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-10-07 08:00:00', 'Asia/Damascus'));
         $book = app(BookPhotographySlot::class);
@@ -376,12 +376,12 @@ class WorkScenarioCoverageTest extends TestCase
             $book->hold($request, Carbon::parse('2026-10-08 09:00:00', 'Asia/Damascus')->toIso8601String());
             $this->fail('A next-day photography slot must be refused.');
         } catch (ValidationException $exception) {
-            $this->assertStringContainsString('بعد 7 أيام', $exception->errors()['starts_at'][0]);
+            $this->assertStringContainsString('بعد 3 أيام', $exception->errors()['starts_at'][0]);
         }
 
-        $held = $book->hold($request, Carbon::parse('2026-10-14 09:00:00', 'Asia/Damascus')->toIso8601String());
+        $held = $book->hold($request, Carbon::parse('2026-10-10 09:00:00', 'Asia/Damascus')->toIso8601String());
         $this->assertSame('pending_staff', $held->status);
-        $this->assertSame('2026-10-14 09:00', $held->starts_at?->format('Y-m-d H:i'));
+        $this->assertSame('2026-10-10 09:00', $held->starts_at?->format('Y-m-d H:i'));
     }
 
     public function test_three_photography_bookings_at_the_same_time_keep_one_calendar_event(): void

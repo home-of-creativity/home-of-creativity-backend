@@ -141,7 +141,7 @@ class WorkCalendar
 
     public function photographyLeadDays(): int
     {
-        $value = (int) OpsSetting::getValue(self::PHOTO_LEAD_KEY, '7');
+        $value = (int) OpsSetting::getValue(self::PHOTO_LEAD_KEY, '3');
 
         return max(0, min(90, $value));
     }

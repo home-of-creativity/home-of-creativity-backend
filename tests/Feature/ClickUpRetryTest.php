@@ -12,6 +12,7 @@ use App\Models\ServiceRequest;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
@@ -115,6 +116,7 @@ class ClickUpRetryTest extends TestCase
 
     public function test_photography_clickup_task_is_created_only_after_the_shoot_is_agreed(): void
     {
+        $this->travelTo(Carbon::parse('2026-10-05 09:00:00', 'Asia/Damascus'));
         $this->contentListDown = false;
         config(['services.clickup.lists.photography' => 'photo-list']);
         Http::fake([

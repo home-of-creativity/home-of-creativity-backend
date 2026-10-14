@@ -46,7 +46,7 @@ export function ClientChannelsPage({ locale, t }: { locale: Locale; t: (c: { ar:
         setCloseAt(res.data.whatsapp_close || "09:00");
         setTeamOpen(res.data.team_open || "09:00");
         setTeamClose(res.data.team_close || "21:00");
-        setPhotoLead(String(res.data.photography_lead_days ?? 7));
+        setPhotoLead(String(res.data.photography_lead_days ?? 3));
         setHolidays(res.data.holidays);
       })
       .catch(() => undefined);
