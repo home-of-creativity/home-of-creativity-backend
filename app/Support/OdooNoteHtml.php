@@ -18,6 +18,20 @@ final class OdooNoteHtml
     /** Elements that print something even with no text in them. */
     private const VISIBLE = ['img', 'svg', 'video', 'iframe', 'hr', 'canvas', 'object', 'embed', 'input'];
 
+    /**
+     * Terms typed in the dashboard editor, without scripts, styles blocks, or event
+     * handlers. Odoo's own markup (divs, inline styles) is kept so its layout survives.
+     */
+    public static function safe(string $html): string
+    {
+        $html = preg_replace('#<(script|style|iframe|object|embed)\b[^>]*>.*?</\1>#is', '', $html) ?? $html;
+        $html = preg_replace('#<(script|iframe|object|embed)\b[^>]*/?>#i', '', $html) ?? $html;
+        $html = preg_replace('/\son\w+\s*=\s*("[^"]*"|\'[^\']*\'|[^\s>]+)/i', '', $html) ?? $html;
+        $html = preg_replace('/(href|src)\s*=\s*(["\'])\s*javascript:[^"\']*\2/i', '$1="#"', $html) ?? $html;
+
+        return self::trimEmptyTail(trim($html));
+    }
+
     public static function trimEmptyTail(string $html): string
     {
         if (trim($html) === '' || ! str_contains($html, '<')) {

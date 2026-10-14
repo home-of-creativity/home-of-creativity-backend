@@ -17,6 +17,7 @@ enum StaffAbility: string
     case OpsReportTemplates = 'ops.report_templates';
     case OpsReportMedia = 'ops.report_media';
     case OpsReportCalendars = 'ops.report_calendars';
+    case OpsReportCalendarMain = 'ops.report_calendar.main';
     case OpsDrive = 'ops.drive';
     case OpsPhotography = 'ops.photography';
     case OpsPhotographyAll = 'ops.photography_all';
@@ -68,6 +69,7 @@ enum StaffAbility: string
             ],
             self::OpsClients->value => $crud + [
                 'odoo' => ['ar' => 'Odoo: مزامنة واستيراد وعروض وفواتير', 'en' => 'Odoo: sync, import, quotations, invoices'],
+                'odoo_note' => ['ar' => 'رسالة داخلية على عرض السعر والفاتورة', 'en' => 'Internal note on quotations and invoices'],
             ],
             self::OpsReports->value => $crud + [
                 'send' => ['ar' => 'إرسال التقرير للعميل بالبريد أو واتساب', 'en' => 'Send the report by email or WhatsApp'],
@@ -191,6 +193,7 @@ enum StaffAbility: string
             self::OpsReportTemplates => ['ar' => 'قوالب التقارير', 'en' => 'Report templates'],
             self::OpsReportMedia => ['ar' => 'صور التقارير ومربع النص', 'en' => 'Report pictures and text box'],
             self::OpsReportCalendars => ['ar' => 'التقارير: إضافة التقاويم ومن يراها', 'en' => 'Reports: add calendars and who sees them'],
+            self::OpsReportCalendarMain => ['ar' => 'التقويم الرئيسي للتقارير', 'en' => 'Main reports calendar'],
             self::OpsDrive => ['ar' => 'حساب تخزين Drive', 'en' => 'Drive storage account'],
             self::OpsPhotography => ['ar' => 'التصوير: الطابور ومواعيدي', 'en' => 'Photography: queue and my shoots'],
             self::OpsPhotographyAll => ['ar' => 'التصوير: كل المواعيد والإلغاء وضبط الجلسات', 'en' => 'Photography: all bookings, cancel, session counts'],

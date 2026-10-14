@@ -2,7 +2,9 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { LoadingLottie } from "../components/LoadingLottie";
 import { PageHeader } from "../components/PageHeader";
-import { api, type ServiceRequest } from "../api";
+import { OdooPaperActivity } from "../components/OdooPaperActivity";
+import { OdooPaperPreview } from "../components/OdooPaperPreview";
+import { api, type OdooPaperKind, type ServiceRequest } from "../api";
 import { ExtendScheduleDialog, WorkPlanDialog } from "./requests/WorkPlanDialog";
 import { copy, sources, statuses, type Locale } from "../i18n";
 import { useCan } from "../lib/useCan";
@@ -37,6 +39,21 @@ const geminiLabels: Record<string, { ar: string; en: string }> = {
   failed: { ar: "فشل", en: "Failed" },
 };
 
+const paperStateLabels: Record<string, { ar: string; en: string }> = {
+  draft: copy.quoteStateDraft,
+  sent: copy.quoteStateSent,
+  sale: copy.quoteStateSale,
+  posted: copy.quoteStatePosted,
+  cancel: copy.quoteStateCancel,
+};
+
+const payStateLabels: Record<string, { ar: string; en: string }> = {
+  not_paid: copy.payNotPaid,
+  partial: copy.payPartial,
+  paid: copy.payPaid,
+  in_payment: copy.payInPayment,
+};
+
 function createQuotationLine(): QuotationLine {
   return {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -67,6 +84,7 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
   const [recordingDecision, setRecordingDecision] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
   const [extendOpen, setExtendOpen] = useState(false);
+  const [paperView, setPaperView] = useState<{ kind: OdooPaperKind; id: number; mode: "preview" | "activity" } | null>(null);
 
   useEffect(() => {
     if (!receiptUrl) return;
@@ -358,6 +376,19 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
   const revisionOpen = ["in_progress", "ready_for_review", "revision_requested"].includes(item.status);
   const completionOpen = item.status === "ready_for_review";
   const showClientFallback = item.client_bot_reachable === false && (quoteDecisionOpen || revisionOpen || completionOpen) && can("ops.requests.quotation");
+  const paperState = (state: string) => t(paperStateLabels[state] ?? { ar: state, en: state });
+  const payState = (state: string) => t(payStateLabels[state] ?? { ar: state, en: state });
+  const paperButtons = (kind: OdooPaperKind, paperId: number) =>
+    can("ops.clients.view") ? (
+      <span className="paper-inline-actions" dir="auto">
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPaperView({ kind, id: paperId, mode: "preview" })}>
+          {t(copy.paperPreview)}
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPaperView({ kind, id: paperId, mode: "activity" })}>
+          {t(copy.paperActivity)}
+        </button>
+      </span>
+    ) : null;
 
   return (
     <div className="detail">
@@ -441,8 +472,9 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
               ) : (
                 item.odoo_quotation_id ?? "—"
               )}
-              {item.odoo_quotation_live?.state ? ` · ${item.odoo_quotation_live.state}` : ""}
+              {item.odoo_quotation_live?.state ? <span dir="auto"> · {paperState(item.odoo_quotation_live.state)}</span> : ""}
               {item.odoo_quotation_live?.amount_total != null ? ` · ${item.odoo_quotation_live.amount_total}` : ""}
+              {item.odoo_quotation_id ? paperButtons("quotations", Number(item.odoo_quotation_id)) : null}
             </dd>
           </div>
           <div>
@@ -455,9 +487,10 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
               ) : (
                 item.odoo_invoice_id ?? "—"
               )}
-              {item.odoo_invoice_live?.state ? ` · ${item.odoo_invoice_live.state}` : ""}
-              {item.odoo_invoice_live?.payment_state ? ` / ${item.odoo_invoice_live.payment_state}` : ""}
+              {item.odoo_invoice_live?.state ? <span dir="auto"> · {paperState(item.odoo_invoice_live.state)}</span> : ""}
+              {item.odoo_invoice_live?.payment_state ? <span dir="auto"> / {payState(item.odoo_invoice_live.payment_state)}</span> : ""}
               {item.odoo_invoice_live?.amount_total != null ? ` · ${item.odoo_invoice_live.amount_total}` : ""}
+              {item.odoo_invoice_id ? paperButtons("invoices", Number(item.odoo_invoice_id)) : null}
             </dd>
           </div>
           <div>
@@ -949,6 +982,19 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
       ) : null}
       {planOpen ? <WorkPlanDialog requestId={item.id} onClose={() => setPlanOpen(false)} onSaved={planSaved} /> : null}
       {extendOpen ? <ExtendScheduleDialog requestId={item.id} onClose={() => setExtendOpen(false)} onSaved={planSaved} /> : null}
+      {paperView?.mode === "preview" ? (
+        <OdooPaperPreview kind={paperView.kind} id={paperView.id} name={String(paperView.id)} t={t} onClose={() => setPaperView(null)} />
+      ) : null}
+      {paperView?.mode === "activity" ? (
+        <OdooPaperActivity
+          kind={paperView.kind}
+          id={paperView.id}
+          name={String(paperView.id)}
+          canNote={can("ops.clients.odoo_note")}
+          t={t}
+          onClose={() => setPaperView(null)}
+        />
+      ) : null}
     </div>
   );
 }

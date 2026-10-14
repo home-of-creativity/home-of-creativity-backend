@@ -146,14 +146,14 @@ class StaffAccessController extends Controller
     {
         $fixed = array_map(function (StaffAbility $ability): array {
             $group = match (true) {
+                $ability === StaffAbility::OpsReportCalendarMain => 'calendars',
                 str_starts_with($ability->value, 'ops.') => 'ops',
                 str_starts_with($ability->value, 'site.') => 'site',
                 default => 'social',
             };
 
             $labels = $ability->labels();
-
-            return [
+            $row = [
                 'key' => $ability->value,
                 'group' => $group,
                 'label_ar' => $labels['ar'],
@@ -161,6 +161,13 @@ class StaffAccessController extends Controller
                 'actions' => StaffAbility::actionsOf($ability->value),
                 'action_labels' => (object) (StaffAbility::actionCatalog()[$ability->value] ?? []),
             ];
+            if ($ability === StaffAbility::OpsReportCalendarMain) {
+                $row['viewers'] = Role::query()->orderBy('name')->get()
+                    ->filter(fn (Role $role): bool => in_array($ability->value, $role->abilities ?? [], true))
+                    ->pluck('name')->values()->all();
+            }
+
+            return $row;
         }, StaffAbility::cases());
 
         $calendars = ReportCalendar::query()->orderBy('name')->get()

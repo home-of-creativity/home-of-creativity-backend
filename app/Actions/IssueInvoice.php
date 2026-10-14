@@ -17,6 +17,12 @@ use Throwable;
 
 class IssueInvoice
 {
+    /** Why the last payment did not reach Odoo, for the staff member who confirmed it. */
+    public ?string $error = null;
+
+    /** @var array<string, mixed>|null the Odoo invoice the last payment went on, after posting */
+    public ?array $odooInvoice = null;
+
     public function __construct(
         private TelegramNotifier $telegram,
         private OdooClient $odoo,
@@ -30,82 +36,107 @@ class IssueInvoice
         string $kind = 'full',
         bool $sendPaidNotice = true,
     ): Invoice {
-        return DB::transaction(function () use ($request, $amount, $kind, $sendPaidNotice): Invoice {
-            $existing = $kind === 'received'
-                ? null
-                : $request->invoices()->where('kind', $kind)->latest('id')->first();
-            if ($existing) {
-                return $existing;
+        $this->error = null;
+        $this->odooInvoice = null;
+        $existing = $kind === 'received'
+            ? null
+            : $request->invoices()->where('kind', $kind)->latest('id')->first();
+        if ($existing) {
+            return $existing;
+        }
+
+        $resolvedAmount = $amount;
+        if ($resolvedAmount === null || $resolvedAmount <= 0) {
+            $resolvedAmount = (float) ($request->quotation_amount ?? $request->amount_total ?? 0);
+        }
+
+        if ($kind === 'received') {
+            $seq = $request->invoices()->count() + 1;
+            $invoiceNumber = 'INV-'.$request->number.'-rcv'.$seq;
+        } else {
+            $suffix = $kind === 'full' ? '' : '-'.$kind;
+            $invoiceNumber = 'INV-'.$request->number.$suffix;
+        }
+        if ($request->invoices()->where('invoice_number', $invoiceNumber)->exists()) {
+            $invoiceNumber = 'INV-'.$request->number.'-'.now()->format('His');
+        }
+
+        $paymentMethod = $request->payment_method?->value ?? PaymentMethod::Cash->value;
+        // Odoo is called before the local write so a slow or failing Odoo holds no lock.
+        [$pdfPath, $odooInvoiceId] = $this->resolveInvoicePdf($request, $invoiceNumber, $resolvedAmount, $kind, $paymentMethod);
+
+        $invoice = DB::transaction(function () use ($request, $invoiceNumber, $resolvedAmount, $kind, $pdfPath, $odooInvoiceId): Invoice {
+            $odoo = $this->odooInvoice;
+            $status = match ($odoo['payment_state'] ?? null) {
+                'paid', 'in_payment' => 'paid',
+                'partial' => 'partial',
+                default => 'issued',
+            };
+            $same = filled($odooInvoiceId)
+                ? $request->invoices()->where('odoo_invoice_id', (string) $odooInvoiceId)->latest('id')->first()
+                : null;
+            if ($same !== null) {
+                $same->forceFill([
+                    'status' => $status,
+                    'pdf_path' => $pdfPath !== '' ? $pdfPath : $same->pdf_path,
+                    'payment_method' => $request->payment_method,
+                ])->save();
+
+                return $same;
             }
 
-            $resolvedAmount = $amount;
-            if ($resolvedAmount === null || $resolvedAmount <= 0) {
-                $resolvedAmount = (float) ($request->quotation_amount ?? $request->amount_total ?? 0);
-            }
+            $odooName = (string) ($odoo['name'] ?? '');
+            $number = $odooName !== '' && $odooName !== '/' && ! Invoice::query()->where('invoice_number', $odooName)->exists() ? $odooName : $invoiceNumber;
 
-            if ($kind === 'received') {
-                $seq = $request->invoices()->count() + 1;
-                $invoiceNumber = 'INV-'.$request->number.'-rcv'.$seq;
-            } else {
-                $suffix = $kind === 'full' ? '' : '-'.$kind;
-                $invoiceNumber = 'INV-'.$request->number.$suffix;
-            }
-            if ($request->invoices()->where('invoice_number', $invoiceNumber)->exists()) {
-                $invoiceNumber = 'INV-'.$request->number.'-'.now()->format('His');
-            }
-
-            $paymentMethod = $request->payment_method?->value ?? PaymentMethod::Cash->value;
-            [$pdfPath, $odooInvoiceId] = $this->resolveInvoicePdf($request, $invoiceNumber, $resolvedAmount, $kind, $paymentMethod);
-
-            $invoice = Invoice::query()->create([
+            return Invoice::query()->create([
                 'request_id' => $request->id,
-                'invoice_number' => $invoiceNumber,
-                'amount' => $resolvedAmount,
-                'kind' => $kind,
-                'status' => 'issued',
+                'invoice_number' => $number,
+                'amount' => $odoo !== null ? (float) ($odoo['amount_total'] ?? $resolvedAmount) : $resolvedAmount,
+                'kind' => $odoo !== null && $kind === 'received' ? Invoice::kindFor($request, (float) ($odoo['amount_total'] ?? $resolvedAmount)) : $kind,
+                'status' => $odoo !== null ? $status : 'issued',
                 'pdf_path' => $pdfPath,
                 'issued_at' => now(),
                 'payment_method' => $request->payment_method,
                 'odoo_invoice_id' => $odooInvoiceId,
             ]);
-            if ($request->invoice_sent_at === null) {
-                $request->forceFill(['invoice_sent_at' => now()])->save();
-            }
-
-            try {
-                if ($pdfPath !== '') {
-                    $fileId = $this->telegram->sendStoredDocument(
-                        $request,
-                        $pdfPath,
-                        $this->invoiceCaption($request, $resolvedAmount, $paymentMethod, $kind),
-                    );
-                    if ($fileId) {
-                        $invoice->forceFill(['telegram_file_id' => $fileId])->save();
-                    }
-                }
-
-                if ($sendPaidNotice && $request->client?->telegram_user_id) {
-                    $this->telegram->send(
-                        (string) $request->client->telegram_user_id,
-                        'عملية الدفع تم بنجاح سيتم العمل على متطلباتكم ويتم المراجعة بأقرب وقت',
-                    );
-                }
-            } catch (Throwable $exception) {
-                if ((bool) config('services.telegram.strict')) {
-                    throw $exception;
-                }
-
-                Log::warning('Telegram invoice delivery failed; invoice was still saved.', [
-                    'request' => $request->number,
-                    'error' => $exception->getMessage(),
-                ]);
-                if ($this->telegram->canReachClient($request->client?->telegram_user_id)) {
-                    $this->alertTelegramDeliveryFailure->handle($request, 'invoice', $exception->getMessage());
-                }
-            }
-
-            return $invoice;
         });
+        if ($request->invoice_sent_at === null) {
+            $request->forceFill(['invoice_sent_at' => now()])->save();
+        }
+
+        try {
+            if ($pdfPath !== '') {
+                $fileId = $this->telegram->sendStoredDocument(
+                    $request,
+                    $pdfPath,
+                    $this->invoiceCaption($request, $resolvedAmount, $paymentMethod, $kind),
+                );
+                if ($fileId) {
+                    $invoice->forceFill(['telegram_file_id' => $fileId])->save();
+                }
+            }
+
+            if ($sendPaidNotice && $request->client?->telegram_user_id) {
+                $this->telegram->send(
+                    (string) $request->client->telegram_user_id,
+                    'عملية الدفع تم بنجاح سيتم العمل على متطلباتكم ويتم المراجعة بأقرب وقت',
+                );
+            }
+        } catch (Throwable $exception) {
+            if ((bool) config('services.telegram.strict')) {
+                throw $exception;
+            }
+
+            Log::warning('Telegram invoice delivery failed; invoice was still saved.', [
+                'request' => $request->number,
+                'error' => $exception->getMessage(),
+            ]);
+            if ($this->telegram->canReachClient($request->client?->telegram_user_id)) {
+                $this->alertTelegramDeliveryFailure->handle($request, 'invoice', $exception->getMessage());
+            }
+        }
+
+        return $invoice;
     }
 
     /**
@@ -142,27 +173,20 @@ class IssueInvoice
                 ]);
             }
 
-            // An invoice posted from the dashboard and still unpaid takes this payment,
-            // so the client is not billed twice.
-            $odooInvoiceId = filled($request->odoo_invoice_id) && $this->odoo->invoiceAwaitsPayment((int) $request->odoo_invoice_id)
-                ? (string) $request->odoo_invoice_id
-                : $this->odoo->createInvoice(
-                    (string) $partnerId,
-                    $request->number,
-                    $request->odoo_quotation_id,
-                    $amount > 0 ? $amount : null,
-                );
+            $odooInvoiceId = $this->invoiceForPayment($request, (string) $partnerId, $amount);
             $request->forceFill(['odoo_invoice_id' => $odooInvoiceId])->save();
 
             try {
                 $this->odoo->postAndPayInvoice($odooInvoiceId, $amount > 0 ? $amount : null);
             } catch (Throwable $exception) {
+                $this->error = 'لم تُرحّل الفاتورة أو لم تُسجّل الدفعة في أودو: '.$exception->getMessage();
                 Log::warning('Odoo invoice was created but not posted or paid.', [
                     'request' => $request->number,
                     'odoo_invoice_id' => $odooInvoiceId,
                     'error' => $exception->getMessage(),
                 ]);
             }
+            $this->odooInvoice = $this->odoo->invoiceSnapshot((int) $odooInvoiceId);
 
             $pdfBinary = $this->odoo->downloadInvoicePdf($odooInvoiceId);
             if (! is_string($pdfBinary) || $pdfBinary === '') {
@@ -176,6 +200,9 @@ class IssueInvoice
 
             return [$relativePath, $odooInvoiceId];
         } catch (Throwable $exception) {
+            if (blank($odooInvoiceId)) {
+                $this->error ??= 'لم تُنشأ الفاتورة في أودو: '.$exception->getMessage();
+            }
             Log::warning('Odoo invoice PDF skipped; using the correspondence template.', [
                 'request' => $request->number,
                 'error' => $exception->getMessage(),
@@ -186,6 +213,42 @@ class IssueInvoice
                 filled($odooInvoiceId) ? (string) $odooInvoiceId : null,
             ];
         }
+    }
+
+    /**
+     * The Odoo invoice this payment goes on, so the client is never billed twice: the
+     * request's invoice while it has something left to pay (a draft is posted first), else
+     * the rest of the sales order through Odoo's invoice wizard, and only without an order
+     * a standalone invoice.
+     */
+    private function invoiceForPayment(ServiceRequest $request, string $partnerId, float $amount): string
+    {
+        if (filled($request->odoo_invoice_id) && $this->odoo->invoiceOpenForPayment((int) $request->odoo_invoice_id)) {
+            return (string) $request->odoo_invoice_id;
+        }
+
+        $orderId = (int) ($request->odoo_quotation_id ?? 0);
+        if ($orderId > 0) {
+            try {
+                return (string) $this->odoo->invoiceSaleOrderWizard($orderId, 'delivered', null);
+            } catch (Throwable $exception) {
+                // An order already invoiced must not be billed again.
+                try {
+                    $invoiced = $this->odoo->saleOrderInvoiced($orderId);
+                } catch (Throwable) {
+                    $invoiced = 0.0;
+                }
+                if ($invoiced > 0.009) {
+                    throw $exception;
+                }
+                Log::warning('Odoo invoice wizard failed; a standalone invoice takes the payment.', [
+                    'request' => $request->number,
+                    'error' => $exception->getMessage(),
+                ]);
+            }
+        }
+
+        return $this->odoo->createInvoice($partnerId, $request->number, $request->odoo_quotation_id, $amount > 0 ? $amount : null);
     }
 
     private function localInvoicePdf(

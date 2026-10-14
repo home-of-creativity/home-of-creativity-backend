@@ -8,6 +8,7 @@ use App\Enums\PaymentMethod;
 use App\Enums\RequestStatus;
 use App\Enums\WorkType;
 use App\Jobs\ClassifyWithGeminiJob;
+use App\Models\Invoice;
 use App\Models\OpsFollowUp;
 use App\Models\PaymentReminder;
 use App\Models\ServiceRequest;
@@ -23,6 +24,14 @@ use Illuminate\Validation\ValidationException;
 
 class ConfirmRequestPayment
 {
+    /** The invoice the last payment was recorded on. */
+    public ?Invoice $invoice = null;
+
+    /** @var array<string, mixed>|null its Odoo invoice, posted */
+    public ?array $odooInvoice = null;
+
+    public ?string $invoiceError = null;
+
     public function __construct(
         private RequestStatusTransitionService $transitions,
         private TelegramNotifier $telegram,
@@ -145,10 +154,17 @@ class ConfirmRequestPayment
 
         $this->notifyClientSuccess($updated, $isFirst);
 
+        $this->invoice = null;
+        $this->odooInvoice = null;
+        $this->invoiceError = null;
         try {
-            $this->issueInvoice->handle($updated, $appliedAmount, 'received', false);
-        } catch (\Throwable) {
-            // Continue locally if Odoo invoice fails.
+            $this->invoice = $this->issueInvoice->handle($updated, $appliedAmount, 'received', false);
+            $this->invoiceError = $this->issueInvoice->error;
+            $this->odooInvoice = $this->issueInvoice->odooInvoice;
+        } catch (\Throwable $exception) {
+            // The payment stands; the staff member is told the invoice did not follow.
+            $this->invoiceError = 'لم تُصدر الفاتورة: '.$exception->getMessage();
+            Log::warning('Invoice after payment failed.', ['request' => $updated->number, 'error' => $exception->getMessage()]);
         }
 
         if (blank($updated->google_drive_folder_id)) {
@@ -186,6 +202,30 @@ class ConfirmRequestPayment
         }
 
         return $updated->fresh(['client', 'files', 'invoices', 'subscriptions']) ?? $updated;
+    }
+
+    /** «الفاتورة INV/2026/0090 مرحّلة ومدفوعة.» for the staff member who confirmed the payment. */
+    public function invoiceSummary(): ?string
+    {
+        if ($this->invoiceError !== null) {
+            return $this->invoiceError;
+        }
+        if ($this->odooInvoice === null) {
+            return $this->invoice === null ? null : 'سُجّلت الفاتورة '.$this->invoice->invoice_number.'.';
+        }
+        $state = match ($this->odooInvoice['state'] ?? '') {
+            'posted' => 'مرحّلة',
+            'draft' => 'مسودة',
+            'cancel' => 'ملغاة',
+            default => (string) ($this->odooInvoice['state'] ?? ''),
+        };
+        $payment = match ($this->odooInvoice['payment_state'] ?? '') {
+            'paid', 'in_payment' => ' ومدفوعة',
+            'partial' => ' ومدفوعة جزئياً',
+            default => '',
+        };
+
+        return 'الفاتورة '.($this->odooInvoice['name'] ?? '').' '.$state.$payment.'.';
     }
 
     private function markWon(ServiceRequest $request): void

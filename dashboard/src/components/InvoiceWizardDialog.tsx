@@ -1,11 +1,11 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { X } from "lucide-react";
-import { api, type OdooInvoice, type OdooPaperLine, type OdooQuotation } from "../api";
+import { api, type OdooInvoice, type OdooPaperLine, type OdooQuotation, type PaperClient } from "../api";
 import { copy } from "../i18n";
 
 export type InvoiceMethod = "delivered" | "percentage" | "fixed";
 
-export type InvoiceDraft = OdooInvoice & { lines: OdooPaperLine[]; quotation_id: number };
+export type InvoiceDraft = OdooInvoice & PaperClient & { lines: OdooPaperLine[]; quotation_id: number };
 
 function money(value: number) {
   return `$ ${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;

@@ -1259,8 +1259,8 @@ class AdminDashboardTest extends TestCase
                 && (($pair[0]->data()['params']['args'][3] ?? null) === $model)
                 && (($pair[0]->data()['params']['args'][4] ?? null) === $method))
             ->count();
-        // Approval turned the quotation into a sales order.
-        $this->assertSame(1, $odooCalls('sale.order', 'action_confirm'));
+        // Invoicing turned the quotation into a sales order (this fake keeps it "sent", so it is asked again).
+        $this->assertGreaterThanOrEqual(1, $odooCalls('sale.order', 'action_confirm'));
         // The client got the invoice on the bot with the receipt step.
         Http::assertSent(fn (Request $sent): bool => str_contains($sent->url(), 'api.telegram.org')
             && str_contains(json_encode($sent->data(), JSON_UNESCAPED_UNICODE), 'ابعت صورة الإيصال'));

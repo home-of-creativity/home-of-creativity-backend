@@ -468,6 +468,92 @@ class WhatsAppWebBotTest extends TestCase
             && str_contains((string) data_get($request->data(), 'text'), 'nour@shop.com'));
     }
 
+    public function test_a_sentence_with_the_new_number_saves_it_at_once(): void
+    {
+        $client = $this->profileClient('963977777781');
+
+        $this->say('963977777781', 'web-phone-direct', ['text' => 'تغيير الرقم ل +٩٦٣٩٥٧٤٧٠٣٧١']);
+
+        $this->assertSame('+963957470371', $client->fresh()->phone);
+        $this->assertSentTo('963977777781', '+963957470371');
+        Http::assertNotSent(fn (Request $request): bool => str_contains((string) data_get($request->data(), 'text'), 'التعديل متاح قبل صدور عرض السعر'));
+    }
+
+    public function test_a_number_without_its_code_only_asks_for_the_country(): void
+    {
+        $client = $this->profileClient('963977777782');
+
+        $this->say('963977777782', 'web-phone-local', ['text' => 'تعديل الرقم الى 0957470371']);
+        $this->assertSentTo('963977777782', 'الرقم 0957470371 بدون مفتاح دولة');
+        Http::assertSent(fn (Request $request): bool => collect(data_get($request->data(), 'buttons', []))->contains('id', 'pcc:963'));
+
+        $this->say('963977777782', 'web-phone-country', ['text' => 'من سوريا']);
+        $this->assertSame('+963957470371', $client->fresh()->phone);
+    }
+
+    public function test_the_country_button_joins_the_code_to_the_number(): void
+    {
+        $client = $this->profileClient('963977777783');
+
+        $this->say('963977777783', 'web-phone-local2', ['text' => 'غير رقمي ل 70123456']);
+        $this->say('963977777783', 'web-phone-pick', ['button_id' => 'pcc:961']);
+
+        $this->assertSame('+96170123456', $client->fresh()->phone);
+    }
+
+    public function test_the_company_name_is_taken_from_the_sentence(): void
+    {
+        $client = $this->profileClient('963977777784');
+
+        $this->say('963977777784', 'web-company-direct', ['text' => 'غير اسم الشركة الى محل الموالح']);
+
+        $this->assertSame('محل الموالح', $client->fresh()->company_name);
+    }
+
+    public function test_gemini_reads_a_change_the_rules_miss(): void
+    {
+        config(['services.gemini.api_key' => 'test-key', 'services.gemini.e2e_stub' => false, 'services.gemini.vertex_project' => null]);
+        Http::fake([
+            '*generativelanguage.googleapis.com/*' => Http::response(['candidates' => [['content' => ['parts' => [['text' => json_encode(['field' => 'name', 'value' => 'عمار الشامي'])]]]]]], 200),
+        ]);
+        $client = $this->profileClient('963977777785');
+
+        $this->say('963977777785', 'web-name-ai', ['text' => 'بدي حط اسمي الجديد عمار الشامي بدل القديم']);
+
+        $this->assertSame('عمار الشامي', $client->fresh()->name);
+    }
+
+    public function test_a_whatsapp_internal_id_is_not_kept_as_the_phone(): void
+    {
+        $this->say('41768909283482', 'web-lid-first', ['text' => 'مرحبا', 'profile_name' => 'Ammar Sh']);
+
+        $client = Client::query()->where('telegram_user_id', 'wa:41768909283482')->firstOrFail();
+        $this->assertNull($client->phone);
+
+        $client->forceFill(['phone' => '+41768909283482', 'company_name' => 'Nivx'])->save();
+        $this->say('41768909283482', 'web-lid-profile', ['button_id' => 'menu:profile']);
+        $this->assertSentTo('41768909283482', 'الهاتف: غير مضاف');
+    }
+
+    private function profileClient(string $digits): Client
+    {
+        return Client::query()->create([
+            'name' => 'Nour',
+            'phone' => '+'.$digits,
+            'company_name' => 'المحل القديم',
+            'telegram_user_id' => 'wa:'.$digits,
+            'locale' => 'ar',
+        ]);
+    }
+
+    /** @param  array<string, mixed>  $body */
+    private function say(string $digits, string $id, array $body): void
+    {
+        $this->withHeaders(['X-Webhook-Secret' => 'web-secret'])
+            ->postJson('/api/bot/whatsapp/web', ['phone' => $digits, 'message_id' => $id, ...$body])
+            ->assertOk();
+    }
+
     public function test_a_sentence_about_the_company_opens_that_field(): void
     {
         config(['services.gemini.e2e_stub' => true]);

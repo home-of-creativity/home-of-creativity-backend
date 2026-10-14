@@ -39,6 +39,7 @@ export type StaffModule =
   | "ops.report_templates"
   | "ops.report_media"
   | "ops.report_calendars"
+  | "ops.report_calendar.main"
   | "ops.drive"
   | "site.projects"
   | "site.categories"
@@ -642,6 +643,8 @@ export type OdooProduct = {
   id: number;
   name: string;
   price: number;
+  /** Odoo's sales description, plain text. */
+  description?: string | null;
 };
 
 /** A sales tax from Odoo; `amount` is a percent unless `amount_type` is `fixed`. */
@@ -668,6 +671,23 @@ export type OdooQuotation = {
 };
 
 export type PaperRequest = { id: number; number: string; status: string };
+
+export type OdooPaperKind = "quotations" | "invoices";
+
+/** The dashboard client of an Odoo paper (its partner, the partner's company, or its request). */
+export type PaperClient = { client_id?: number | null; client_name?: string | null };
+
+/** One chatter entry of an Odoo quotation or invoice. */
+export type OdooPaperMessage = {
+  id: number;
+  date: string | null;
+  author: string | null;
+  /** Sanitized HTML from Odoo. */
+  body: string;
+  kind: "note" | "message" | "change";
+  subtype: string | null;
+  changes: Array<{ field: string; old: string; new: string }>;
+};
 
 export type OdooPaperLine = {
   title: string;
@@ -1802,10 +1822,12 @@ export const api = {
     stage?: string;
     drive?: string;
     per_page?: number;
+    id?: number;
   } = {}) {
     return request<Paginated<Client> & { stages?: string[] }>(`/admin/clients${queryString({
       page,
       per_page: filters.per_page,
+      id: filters.id,
       search: filters.search || undefined,
       odoo: filters.odoo,
       company: filters.company,
@@ -1872,6 +1894,7 @@ export const api = {
         activity: ReportVersion[];
         calendars: ReportCalendar[];
         can_manage_calendars: boolean;
+        main_visible: boolean;
         roles: Array<{ id: number; name: string }>;
       }>
     >(`/admin/report-calendar${queryString({ from, to, client_id: clientId })}`);
@@ -2056,18 +2079,36 @@ export const api = {
     return request<{ data: OdooPaymentTerm[] }>("/admin/odoo/payment-terms");
   },
   odooQuotation(id: number) {
-    return request<Envelope<OdooQuotation & { lines: OdooPaperLine[]; invoiced?: number }>>(`/admin/odoo/quotations/${id}`);
+    return request<Envelope<OdooQuotation & PaperClient & { lines: OdooPaperLine[]; notes?: string | null; invoiced?: number }>>(`/admin/odoo/quotations/${id}`);
   },
   /** Odoo's "Create invoice" wizard on a quotation: a draft invoice comes back. */
   invoiceOdooQuotation(id: number, payload: { method: "delivered" | "percentage" | "fixed"; amount?: number }) {
-    return request<Envelope<OdooInvoice & { lines: OdooPaperLine[]; quotation_id: number }>>(`/admin/odoo/quotations/${id}/invoice`, { method: "POST", body: JSON.stringify(payload) });
+    return request<Envelope<OdooInvoice & PaperClient & { lines: OdooPaperLine[]; quotation_id: number }>>(`/admin/odoo/quotations/${id}/invoice`, { method: "POST", body: JSON.stringify(payload) });
   },
   /** «تأكيد» on a draft invoice: posted, sent, and the request waits for payment. */
-  postOdooInvoice(id: number, payload: { deliver: "email" | "whatsapp" | "both"; quotation_id?: number }) {
+  postOdooInvoice(id: number, payload: { deliver: "email" | "whatsapp" | "both"; quotation_id?: number; client_id?: number }) {
     return request<Envelope<OdooInvoice>>(`/admin/odoo/invoices/${id}/post`, { method: "POST", body: JSON.stringify(payload) });
   },
+  /** The quotation or invoice PDF exactly as Odoo prints it. */
+  async odooPaperPdf(kind: OdooPaperKind, id: number) {
+    const headers = new Headers({ Accept: "application/pdf" });
+    const token = getToken();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    const response = await fetch(`${API_URL}/admin/odoo/${kind}/${id}/pdf`, { headers });
+    if (!response.ok) {
+      const body = await response.json().catch(() => null) as { message?: string } | null;
+      throw new Error(body?.message || `HTTP ${response.status}`);
+    }
+    return response.blob();
+  },
+  odooPaperActivity(kind: OdooPaperKind, id: number) {
+    return request<Envelope<OdooPaperMessage[]>>(`/admin/odoo/${kind}/${id}/activity`);
+  },
+  odooPaperNote(kind: OdooPaperKind, id: number, body: string) {
+    return request<Envelope<OdooPaperMessage[]>>(`/admin/odoo/${kind}/${id}/notes`, { method: "POST", body: JSON.stringify({ body }) });
+  },
   odooInvoice(id: number) {
-    return request<Envelope<OdooInvoice & { lines: OdooPaperLine[] }>>(`/admin/odoo/invoices/${id}`);
+    return request<Envelope<OdooInvoice & PaperClient & { lines: OdooPaperLine[] }>>(`/admin/odoo/invoices/${id}`);
   },
   updateOdooQuotation(id: number, payload: { lines: PaperLineInput[]; notes?: string; reference?: string; payment_term_id?: number; deliver?: "email" | "whatsapp" | "both" }) {
     return request<Envelope<OdooQuotation>>(`/admin/odoo/quotations/${id}`, { method: "PUT", body: JSON.stringify(payload) });
@@ -2075,7 +2116,7 @@ export const api = {
   deleteOdooQuotation(id: number) {
     return request<Envelope<{ id: number; result: string }>>(`/admin/odoo/quotations/${id}`, { method: "DELETE" });
   },
-  updateOdooInvoice(id: number, payload: { lines: PaperLineInput[]; reference?: string; payment_term_id?: number; deliver?: "email" | "whatsapp" | "both" }) {
+  updateOdooInvoice(id: number, payload: { lines?: PaperLineInput[]; client_id?: number; reference?: string; payment_term_id?: number; deliver?: "email" | "whatsapp" | "both" }) {
     return request<Envelope<OdooInvoice>>(`/admin/odoo/invoices/${id}`, { method: "PUT", body: JSON.stringify(payload) });
   },
   deleteOdooInvoice(id: number) {

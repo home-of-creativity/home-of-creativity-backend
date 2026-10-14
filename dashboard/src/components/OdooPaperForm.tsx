@@ -2,7 +2,11 @@ import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent 
 import * as Popover from "@radix-ui/react-popover";
 import { api, type Client, type OdooPaperLine, type OdooPaymentTerm, type OdooProduct, type OdooQuotation, type OdooTax, type PaperLineInput } from "../api";
 import { copy } from "../i18n";
+import { useCan } from "../lib/useCan";
+import { HtmlEditorField } from "./HtmlEditorField";
 import { InvoiceWizardDialog, type InvoiceDraft } from "./InvoiceWizardDialog";
+import { OdooPaperActivity } from "./OdooPaperActivity";
+import { OdooPaperPreview } from "./OdooPaperPreview";
 
 type LineKind = "product" | "section" | "note";
 type Line = { id: string; kind: LineKind; title: string; amount: string; units: string; discount: string; taxIds: number[]; productId?: number; notes?: string };
@@ -13,8 +17,13 @@ export type PaperEditing = {
   name: string;
   reference: string | null;
   partnerId: string | null;
+  /** The dashboard client of the paper's partner or company, when one is linked. */
+  clientId?: number | null;
+  clientName?: string | null;
   paymentTermId?: number | null;
   lines: OdooPaperLine[];
+  /** The quotation terms (HTML). */
+  notes?: string | null;
   /** Odoo state; a draft invoice gets «تأكيد». */
   state?: string;
   /** The sales order a wizard invoice came from, so «تأكيد» continues its request. */
@@ -147,6 +156,7 @@ export function OdooPaperForm({
   /** A draft from Odoo's invoice wizard, opened for review. */
   onDraft?: (draft: InvoiceDraft, message: string) => void;
 }) {
+  const can = useCan();
   const clientListId = useId();
   const quoteListId = useId();
   const clientBox = useRef<HTMLLabelElement>(null);
@@ -157,12 +167,14 @@ export function OdooPaperForm({
   const [wizardFor, setWizardFor] = useState<OdooQuotation | null>(null);
   const draftInvoice = kind === "invoice" && editing?.state === "draft";
   const [clients, setClients] = useState<Client[]>([]);
-  const [clientQuery, setClientQuery] = useState("");
-  const [clientId, setClientId] = useState("");
+  const [pinned, setPinned] = useState<Client | null>(null);
+  const [clientQuery, setClientQuery] = useState(editing?.clientName ?? "");
+  const [clientId, setClientId] = useState(editing?.clientId ? String(editing.clientId) : "");
+  const [paperView, setPaperView] = useState<"preview" | "activity" | null>(null);
   const [clientOpen, setClientOpen] = useState(false);
   const [clientActive, setClientActive] = useState(0);
   const [reference, setReference] = useState(editing?.reference ?? "");
-  const [notes, setNotes] = useState("");
+  const [notes, setNotes] = useState(editing?.notes ?? "");
   const [emailOn, setEmailOn] = useState(true);
   const [whatsappOn, setWhatsappOn] = useState(true);
   const [products, setProducts] = useState<OdooProduct[]>([]);
@@ -237,6 +249,23 @@ export function OdooPaperForm({
   }, [clientQuery]);
 
   useEffect(() => {
+    const id = editing?.clientId;
+    if (!id) return;
+    let cancelled = false;
+    api.clients(1, { id, per_page: 1 })
+      .then((res) => {
+        const found = res.data.find((item) => item.id === id);
+        if (cancelled || !found) return;
+        setPinned(found);
+        if (!typedClient.current) setClientQuery(clientLabel(found));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [editing?.clientId]);
+
+  useEffect(() => {
     if (typedClient.current || clientId) return;
     const preset = partnerId
       ? clients.find((item) => item.odoo_partner_id === partnerId)
@@ -248,7 +277,9 @@ export function OdooPaperForm({
     setClientQuery(clientLabel(preset));
   }, [clients, clientId, partnerId, quotation]);
 
-  const selected = clients.find((item) => String(item.id) === clientId);
+  const selected = clients.find((item) => String(item.id) === clientId) ?? (pinned && String(pinned.id) === clientId ? pinned : undefined);
+  const clientMoved = draftInvoice && Boolean(selected) && String(selected?.id) !== String(editing?.clientId ?? "");
+  const clientUnlinked = Boolean(editing) && !editing?.clientId && !selected;
 
   useEffect(() => {
     if (kind !== "invoice" || !selected?.odoo_partner_id) {
@@ -357,6 +388,7 @@ export function OdooPaperForm({
         units: "1",
         discount: "0",
         taxIds: lastTaxes(current),
+        notes: product.description ?? undefined,
       };
       const kept = current.filter((line) => line.title.trim() !== "" || line.kind !== "product" || line.productId);
       return [...kept, next];
@@ -377,7 +409,7 @@ export function OdooPaperForm({
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
     const mode = sendMode.current;
-    if (!selected) {
+    if (!selected && (!editing || (draftInvoice && mode === "send"))) {
       setError(t(copy.paperChooseClient));
       setClientOpen(true);
       return;
@@ -426,27 +458,30 @@ export function OdooPaperForm({
     setBusy(true);
     setError("");
     try {
+      const movedTo = clientMoved && selected ? selected.id : undefined;
       if (draftInvoice && mode === "draft" && !linesTouched.current) {
-        // Nothing changed: the wizard's lines stay linked to the order.
+        // The wizard's lines stay linked to the order; only the customer may change.
+        if (movedTo) await api.updateOdooInvoice(editing.id, { client_id: movedTo });
         onCreated(t(copy.saved));
         return;
       }
       if (draftInvoice && mode === "send") {
         if (linesTouched.current) {
-          await api.updateOdooInvoice(editing.id, { lines: filled, reference: reference.trim() || undefined, payment_term_id: termId, deliver });
+          await api.updateOdooInvoice(editing.id, { lines: filled, client_id: movedTo, reference: reference.trim() || undefined, payment_term_id: termId, deliver });
         }
-        const res = await api.postOdooInvoice(editing.id, { deliver, quotation_id: editing.quotationId ?? undefined });
+        const res = await api.postOdooInvoice(editing.id, { deliver, quotation_id: editing.quotationId ?? undefined, client_id: movedTo });
         onCreated(res.message || t(copy.saved));
         return;
       }
       if (editing) {
         // Editing: the server updates Odoo and sends the paper to the client again when it was already sent.
         const res = kind === "quotation"
-          ? await api.updateOdooQuotation(editing.id, { lines: filled, notes: notes.trim() || undefined, reference: reference.trim() || undefined, payment_term_id: termId, deliver })
-          : await api.updateOdooInvoice(editing.id, { lines: filled, reference: reference.trim() || undefined, payment_term_id: termId, deliver });
+          ? await api.updateOdooQuotation(editing.id, { lines: filled, notes: notes.trim(), reference: reference.trim() || undefined, payment_term_id: termId, deliver })
+          : await api.updateOdooInvoice(editing.id, { lines: filled, client_id: movedTo, reference: reference.trim() || undefined, payment_term_id: termId, deliver });
         onCreated(res.message || t(copy.saved));
         return;
       }
+      if (!selected) return;
       if (kind === "quotation") {
         const res = await api.createOdooQuotation({
           client_id: selected.id,
@@ -506,6 +541,12 @@ export function OdooPaperForm({
             ? `${t(kind === "quotation" ? copy.editQuotation : copy.editInvoice)} ${editing.name}`
             : t(kind === "quotation" ? copy.createQuotation : copy.createInvoice)}
         </h2>
+        {editing ? (
+          <span className="paper-inline-actions">
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPaperView("preview")}>{t(copy.paperPreview)}</button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPaperView("activity")}>{t(copy.paperActivity)}</button>
+          </span>
+        ) : null}
       </div>
       <form className="quotation-form" onSubmit={(event) => void onSubmit(event)}>
         <div className="odoo-paper-head">
@@ -515,7 +556,7 @@ export function OdooPaperForm({
               <input
                 className="field"
                 role="combobox"
-                disabled={Boolean(editing)}
+                disabled={Boolean(editing) && !draftInvoice}
                 aria-expanded={clientOpen}
                 aria-controls={clientListId}
                 aria-autocomplete="list"
@@ -551,6 +592,7 @@ export function OdooPaperForm({
                 </ul>
               ) : null}
             </span>
+            {clientUnlinked ? <span className="paper-client-hint" role="status">{t(copy.paperClientUnlinked)}</span> : null}
           </label>
           {kind === "quotation" ? (
             <>
@@ -671,6 +713,7 @@ export function OdooPaperForm({
               return (
                 <article className="odoo-product-card" key={product.id}>
                   <strong>{product.name}</strong>
+                  {product.description ? <p className="odoo-product-desc" title={product.description}>{product.description}</p> : null}
                   <span className="odoo-product-price" dir="ltr">{money(product.price)}</span>
                   {qty > 0 ? (
                     <div className="odoo-qty" role="group" aria-label={t(copy.paperQty)}>
@@ -715,6 +758,16 @@ export function OdooPaperForm({
                         placeholder={line.kind === "product" ? t(copy.paperProduct) : line.kind === "section" ? t(copy.paperAddSection) : t(copy.paperAddNote)}
                         aria-label={t(copy.paperProduct)}
                       />
+                      {line.kind === "product" ? (
+                        <textarea
+                          className="field odoo-line-desc"
+                          rows={line.notes ? Math.min(6, line.notes.split("\n").length + 1) : 1}
+                          value={line.notes ?? ""}
+                          onChange={(event) => updateLine(line.id, { notes: event.target.value })}
+                          placeholder={t(copy.paperLineDescription)}
+                          aria-label={t(copy.paperLineDescription)}
+                        />
+                      ) : null}
                     </td>
                     {kind === "invoice" ? <td>{line.kind === "product" ? t(copy.paperSalesJournal) : "—"}</td> : null}
                     <td className="odoo-col-qty">
@@ -751,10 +804,20 @@ export function OdooPaperForm({
         ) : null}
 
         <div className="odoo-paper-foot">
-          <label className="field-label">
-            {t(copy.paperTerms)}
-            <textarea className="field" rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} />
-          </label>
+          {kind === "quotation" ? (
+            <HtmlEditorField
+              label={t(copy.paperTerms)}
+              value={notes}
+              onChange={setNotes}
+              dir="rtl"
+              rows={6}
+              toolbarLabel={t(copy.paperTerms)}
+              previewLabel={t(copy.paperTermsPreview)}
+              hint={t(copy.paperTermsHint)}
+              showInlinePreview
+              className="field"
+            />
+          ) : <span />}
           <dl className="odoo-totals">
             <div><dt>{t(copy.paperUntaxed)}</dt><dd dir="ltr">{money(untaxed)}</dd></div>
             {taxTotal > 0.004 ? <div><dt>{t(copy.paperTax)}</dt><dd dir="ltr">{money(taxTotal)}</dd></div> : null}
@@ -817,6 +880,19 @@ export function OdooPaperForm({
             setWizardFor(null);
             onDraft?.(draft, message);
           }}
+        />
+      ) : null}
+      {editing && paperView === "preview" ? (
+        <OdooPaperPreview kind={kind === "quotation" ? "quotations" : "invoices"} id={editing.id} name={editing.name} t={t} onClose={() => setPaperView(null)} />
+      ) : null}
+      {editing && paperView === "activity" ? (
+        <OdooPaperActivity
+          kind={kind === "quotation" ? "quotations" : "invoices"}
+          id={editing.id}
+          name={editing.name}
+          canNote={can("ops.clients.odoo_note")}
+          t={t}
+          onClose={() => setPaperView(null)}
         />
       ) : null}
     </section>

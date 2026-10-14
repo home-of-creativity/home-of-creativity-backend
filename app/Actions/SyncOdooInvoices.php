@@ -155,7 +155,7 @@ class SyncOdooInvoices
             'name' => filled($row['name'] ?? null) ? (string) $row['name'] : null,
             'partner_id' => $row['partner_id'] ?? null,
             'partner_name' => $row['partner_name'] ?? null,
-            'client_id' => $this->clientFor($row['partner_id'] ?? null),
+            'client_id' => $this->clientFor($row['partner_id'] ?? null, $row['commercial_partner_id'] ?? null),
             'request_id' => $this->requestFor($odooId, $row),
             'amount_total' => round((float) ($row['amount_total'] ?? 0), 2),
             'amount_residual' => round((float) ($row['amount_residual'] ?? 0), 2),
@@ -202,7 +202,8 @@ class SyncOdooInvoices
             ->update(['status' => $status]);
     }
 
-    private function clientFor(mixed $partnerId): ?int
+    /** The partner's client, else its company's (an invoice made out to a contact). */
+    private function clientFor(mixed $partnerId, mixed $commercialId = null): ?int
     {
         if (! is_numeric($partnerId) || (int) $partnerId <= 0) {
             return null;
@@ -210,6 +211,10 @@ class SyncOdooInvoices
         $key = (string) (int) $partnerId;
         if (! array_key_exists($key, $this->clientByPartner)) {
             $id = Client::query()->where('odoo_partner_id', $key)->value('id');
+            $commercial = is_array($commercialId) ? ($commercialId[0] ?? null) : $commercialId;
+            if ($id === null && is_numeric($commercial) && (string) (int) $commercial !== $key) {
+                $id = Client::query()->where('odoo_partner_id', (string) (int) $commercial)->value('id');
+            }
             $this->clientByPartner[$key] = $id !== null ? (int) $id : null;
         }
 

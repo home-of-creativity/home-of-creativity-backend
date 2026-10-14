@@ -252,6 +252,54 @@ PROMPT;
         return $tasks !== [] ? array_slice($tasks, 0, 40) : ($current !== [] ? $current : $fallback);
     }
 
+    /**
+     * Reads a client chat message that may change their own details: which field (name, phone,
+     * company_name, email) and the new value as written. Null when the message is not a change.
+     *
+     * @param  array{name?: string|null, phone?: string|null, company_name?: string|null, email?: string|null}  $current
+     * @return array{field: string, value: string}|null
+     */
+    public function parseProfileEdit(string $text, array $current): ?array
+    {
+        $text = trim($text);
+        if ($text === '' || config('services.gemini.e2e_stub') || (! $this->usesVertex() && $this->apiKey() === '')) {
+            return null;
+        }
+
+        $known = json_encode(array_map(fn (mixed $value): string => (string) $value, $current), JSON_UNESCAPED_UNICODE);
+        $prompt = <<<PROMPT
+A client of a creative agency writes to its WhatsApp bot, often in Syrian Arabic. Decide whether the message asks to change one of the client's own saved details.
+Fields: name (the person's full name), phone (their mobile number), company_name (their company or shop), email.
+Words like الرقم, رقمي, الموبايل, الجوال mean phone. اسمي, الاسم mean name. الشركة, المحل, اسم النشاط mean company_name. الإيميل, البريد mean email.
+"value" is the new value exactly as the client wrote it (keep + and digits, Arabic digits are fine). Empty when the message names the field but gives no new value.
+A message about an order, a request (طلب), a quotation, a package, or a delivery is NOT a profile change: return field "".
+Return ONLY JSON: {"field":"name|phone|company_name|email|","value":""}
+
+Current details: {$known}
+Message: {$text}
+PROMPT;
+
+        try {
+            $response = $this->generateJson($prompt, 15);
+        } catch (\Throwable $exception) {
+            Log::warning('Gemini profile edit exception.', ['error' => $exception->getMessage()]);
+
+            return null;
+        }
+        if (! $response->successful()) {
+            Log::warning('Gemini profile edit failed.', ['status' => $response->status()]);
+
+            return null;
+        }
+        $decoded = json_decode($this->extractJsonText($this->responseText($response)), true);
+        $field = is_array($decoded) ? trim((string) ($decoded['field'] ?? '')) : '';
+        if (! in_array($field, ['name', 'phone', 'company_name', 'email'], true)) {
+            return null;
+        }
+
+        return ['field' => $field, 'value' => mb_substr(trim(strip_tags((string) ($decoded['value'] ?? ''))), 0, 190)];
+    }
+
     public function classifyCompanyIndustry(string $companyName): ?string
     {
         $companyName = trim($companyName);

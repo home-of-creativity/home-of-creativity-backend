@@ -20,11 +20,19 @@ class OpenRequestFromStaffInvoice
      * @param  array<string, mixed>  $created
      * @param  list<array{title?: string|null, amount?: float|int|string|null, units?: float|int|string|null, discount?: float|int|string|null, display_type?: string|null}>  $lines
      */
-    public function handle(Client $client, array $created, array $lines, ?string $reference, string $origin = 'invoice'): ServiceRequest
-    {
+    public function handle(
+        Client $client,
+        array $created,
+        array $lines,
+        ?string $reference,
+        string $origin = 'invoice',
+        ?int $orderId = null,
+        ?float $orderTotal = null,
+    ): ServiceRequest {
         $quotation = $origin === 'quotation';
         $title = $this->title($created, $lines, $reference, $quotation ? 'عرض سعر' : 'فاتورة');
-        $amount = $this->amount($created, $lines);
+        // A down payment invoice of an order: the request is for the whole order.
+        $amount = $orderTotal !== null && $orderTotal > 0 ? $orderTotal : $this->amount($created, $lines);
         $odooId = (int) ($created['id'] ?? 0);
         $label = $quotation ? 'عرض سعر' : 'فاتورة';
 
@@ -37,7 +45,7 @@ class OpenRequestFromStaffInvoice
             'status' => RequestStatus::Submitted,
             'source' => $client->requestSource(),
             'odoo_invoice_id' => ! $quotation && $odooId > 0 ? (string) $odooId : null,
-            'odoo_quotation_id' => $quotation && $odooId > 0 ? (string) $odooId : null,
+            'odoo_quotation_id' => $quotation && $odooId > 0 ? (string) $odooId : ($orderId !== null && $orderId > 0 ? (string) $orderId : null),
             'amount_total' => $amount,
             'amount_remaining' => $amount,
         ]);

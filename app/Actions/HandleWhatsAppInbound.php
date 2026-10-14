@@ -550,9 +550,10 @@ class HandleWhatsAppInbound
 
         $name = ClientProfileValue::usableName($profileName) ?? ($profileName !== '' ? $profileName : 'عميل واتساب');
 
+        // A chat that reaches us by WhatsApp's internal id has no real number; the profile asks for it.
         return $this->resolveTelegramClient->link($chatId, [
             'name' => $name,
-            'phone' => '+'.$phone,
+            'phone' => ClientPhone::fromCallerDigits($phone),
             'locale' => 'ar',
         ]);
     }
@@ -622,6 +623,9 @@ class HandleWhatsAppInbound
     {
         $client = $client->fresh() ?? $client;
         $missing = $client->missingProfileFields();
+        if (! in_array('phone', $missing, true) && $this->phoneUnreadable($client)) {
+            $missing = array_values(array_filter(['name', 'phone', 'company_name'], fn (string $field): bool => $field === 'phone' || in_array($field, $missing, true)));
+        }
         if ($missing === []) {
             if ($greet) {
                 $this->sendMenu(
@@ -725,7 +729,7 @@ class HandleWhatsAppInbound
             $session['phone_national'] = $read['national'];
             $session['phone_resume'] = $resume;
             $this->putSession($phone, $session);
-            $this->safeSend($chatId, $this->tx('من أي بلد هاد الرقم؟', 'Which country is this number from?'));
+            $this->askPhoneCountry($chatId, (string) $read['national']);
 
             return null;
         }
@@ -763,25 +767,44 @@ class HandleWhatsAppInbound
 
             return;
         }
-        if ($again['status'] === 'country') {
+        // A country name or code first: «963» alone is a code, not a new number.
+        $stored = ClientPhone::applyCountry($national, $value);
+        if ($stored === null && $again['status'] === 'country' && strlen((string) $again['national']) >= 6) {
             $session['phone_national'] = $again['national'];
             $this->putSession($phone, $session);
-            $this->safeSend($chatId, $this->tx('من أي بلد هاد الرقم؟', 'Which country is this number from?'));
+            $this->askPhoneCountry($chatId, (string) $again['national']);
 
             return;
         }
-
-        $stored = ClientPhone::applyCountry($national, $value);
         if ($stored === null) {
-            $this->safeSend($chatId, $this->tx(
-                'ما لقيت هاد البلد. اكتب اسمه أو المفتاح، مثل سوريا أو 963.',
-                'That country was not found. Send its name or code, such as Syria or 963.',
-            ));
+            $code = ClientPhone::dialFor($value);
+            $this->safeSend($chatId, $code !== null
+                ? $this->tx(
+                    "الرقم {$national} ما بيمشي مع مفتاح +{$code}. تأكد من البلد، أو ابعت الرقم كامل مع المفتاح.",
+                    "{$national} does not fit the +{$code} code. Check the country, or send the full number with its code.",
+                )
+                : $this->tx(
+                    'ما عرفت البلد. اكتب اسمه أو مفتاحه بس، مثل سوريا أو 963، ومنركّبه على الرقم.',
+                    'I did not recognise the country. Send only its name or code, such as Syria or 963, and we add it to the number.',
+                ));
 
             return;
         }
 
         $this->storeResolvedPhone($client, $chatId, $phone, $session, $stored);
+    }
+
+    /** The number arrived without a country code: ask only for the country, then join them. */
+    private function askPhoneCountry(string $chatId, string $national): void
+    {
+        $buttons = [];
+        foreach (['963', '961', '966', '971', '90'] as $code) {
+            $buttons[] = [['text' => ClientPhone::countryName($code)." +{$code}", 'callback_data' => 'pcc:'.$code]];
+        }
+        $this->telegram->sendInlineKeyboard($chatId, $this->tx(
+            "الرقم 0{$national} بدون مفتاح دولة. من أي بلد هو؟\nاختر البلد أو اكتب اسمه أو مفتاحه، ومنركّبه على الرقم.",
+            "0{$national} has no country code. Which country is it from?\nPick it or type its name or code, and we add it to the number.",
+        ), $buttons);
     }
 
     /**
@@ -794,13 +817,14 @@ class HandleWhatsAppInbound
         $client->forceFill(['phone' => $stored])->save();
         $client = $client->fresh() ?? $client;
         $this->pushCompletedClientToOdoo($client);
+        $shownPhone = $this->shownPhone($client);
 
         if ($resume === 'edit') {
             $this->safeSend($chatId, $this->tx('تمام، حدّثنا بياناتك.', 'Your details were updated.'));
             if (filled($session['quote_ref'] ?? null)) {
                 $this->safeSend($chatId, $this->tx(
-                    "بياناتك:\nالاسم: {$client->name}\nالهاتف: {$client->phone}\nالشركة: {$client->company_name}",
-                    "Your details:\nName: {$client->name}\nPhone: {$client->phone}\nCompany: {$client->company_name}",
+                    "بياناتك:\nالاسم: {$client->name}\nالهاتف: {$shownPhone}\nالشركة: {$client->company_name}",
+                    "Your details:\nName: {$client->name}\nPhone: {$shownPhone}\nCompany: {$client->company_name}",
                 ));
                 $this->showQuoteDecision($chatId, $phone, $session);
 
@@ -919,6 +943,15 @@ class HandleWhatsAppInbound
         }
         if ($this->isNav($data, self::NAV_PROFILE) || $data === 'menu:profile') {
             $this->showProfile($client, $chatId, $phone, $session);
+
+            return;
+        }
+        if (str_starts_with($data, 'pcc:')) {
+            if (filled($session['phone_national'] ?? null)) {
+                $this->capturePhoneCountry($client, $chatId, $phone, $session, substr($data, 4));
+            } else {
+                $this->showProfile($client, $chatId, $phone, $session);
+            }
 
             return;
         }
@@ -1726,6 +1759,9 @@ class HandleWhatsAppInbound
         }
 
         $step = (string) ($session['step'] ?? 'idle');
+        if ($this->applyProfileSentence($client, $chatId, $phone, $session, $text)) {
+            return true;
+        }
         $target = $this->profileTarget($text);
         if ($target !== null) {
             $this->openProfileTarget($client, $chatId, $phone, $session, $target);
@@ -3676,7 +3712,8 @@ class HandleWhatsAppInbound
             || preg_match('/\b(package|subscription|quotation|quote)\b/i', $text) === 1) {
             return null;
         }
-        if (preg_match('/رقمي|رقم الهاتف|هاتفي|موبايلي|جوالي|رقم الموبايل|رقم الجوال/u', $text) === 1
+        if (preg_match('/رقمي|رقم الهاتف|هاتفي|موبايلي|جوالي|رقم الموبايل|رقم الجوال|رقم الواتس/u', $text) === 1
+            || (preg_match('/(?:^|\s)(?:ال)?(?:رقم|هاتف|موبايل|جوال)(?:\s|$)/u', $text) === 1 && preg_match('/غير|تغيير|عدل|تعديل|بدل|حدث|صحح|غلط|خطأ/u', $text) === 1)
             || preg_match('/\b(my phone|phone number|my number)\b/i', $text) === 1) {
             return 'phone';
         }
@@ -3703,6 +3740,106 @@ class HandleWhatsAppInbound
     }
 
     /**
+     * A sentence that changes one detail and already carries the new value, such as
+     * «غير الرقم ل +963…» or «ايميلي صار a@b.com». Null when the rules cannot tell.
+     *
+     * @return array{field: string, value: string}|null
+     */
+    private function profileEditFromText(string $text): ?array
+    {
+        $text = trim($text);
+        if ($text === '' || preg_match('/طلب|باقة|اشتراك|عرض سعر|فاتورة|تصوير/u', $text) === 1
+            || preg_match('/\b(order|request|package|subscription|quotation|invoice)\b/i', $text) === 1) {
+            return null;
+        }
+        if (preg_match('/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/u', $text, $email) === 1) {
+            return ['field' => 'email', 'value' => $email[0]];
+        }
+        $phoneWord = '/رقم|الرقم|هاتف|موبايل|جوال|واتس|\b(phone|number|mobile)\b/iu';
+        if (preg_match($phoneWord, $text) === 1
+            && preg_match('/[+＋]?[\d٠-٩۰-۹][\d٠-٩۰-۹\s\-]{5,}[\d٠-٩۰-۹]/u', $text, $number) === 1) {
+            return ['field' => 'phone', 'value' => trim($number[0])];
+        }
+        if (! $this->mentionsProfileChange($text) && preg_match('/[:=]/u', $text) !== 1) {
+            return null;
+        }
+        $joiner = '(?:\s+(?:صار|صاير|هو|هي|يكون|الى|إلى|ل|لـ|to|is)\s+|\s+لـ|\s*[:=]\s*)';
+        foreach ([
+            'company_name' => '(?:اسم الشركة|اسم المحل|اسم النشاط|شركتي|الشركة|المحل|company name|company)',
+            'name' => '(?:اسمي|الاسم|my name|name)',
+        ] as $field => $label) {
+            if (preg_match('/'.$label.$joiner.'(.{2,80})$/iu', $text, $match) === 1) {
+                $value = trim($match[1], " \t\n\r\0\x0B«»\"'.،,");
+                if ($value !== '') {
+                    return ['field' => $field, 'value' => $value];
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /** The message names a detail of the client and a change, but the rules could not read the value. */
+    private function mentionsProfileChange(string $text): bool
+    {
+        if (preg_match('/طلب|باقة|اشتراك|عرض سعر|فاتورة/u', $text) === 1) {
+            return false;
+        }
+
+        return preg_match('/رقم|هاتف|موبايل|جوال|اسم|شركة|محل|ايميل|إيميل|بريد|\b(phone|number|name|company|e-?mail)\b/iu', $text) === 1
+            && preg_match('/غير|غيّر|تغيير|عدل|عدّل|تعديل|بدل|بدّل|حدث|حدّث|صحح|صلح|حط|ضيف|أضيف|اضيف|اضافة|إضافة|صار|غلط|خطأ|\b(change|edit|update|wrong|fix|set)\b/iu', $text) === 1;
+    }
+
+    /**
+     * A detail change read from free text: the rules first, then Gemini when the message clearly
+     * talks about a detail. With a value it is saved at once; without one the field is asked.
+     *
+     * @param  array<string, mixed>  $session
+     */
+    private function applyProfileSentence(Client $client, string $chatId, string $phone, array $session, string $text): bool
+    {
+        $edit = $this->profileEditFromText($text);
+        if ($edit === null && $this->mentionsProfileChange($text)) {
+            $edit = app(GeminiService::class)->parseProfileEdit($text, [
+                'name' => $client->name,
+                'phone' => $client->phone,
+                'company_name' => $client->company_name,
+                'email' => $client->email,
+            ]);
+        }
+        if ($edit === null) {
+            return false;
+        }
+        if (trim($edit['value']) === '') {
+            $this->openProfileTarget($client, $chatId, $phone, $session, $edit['field']);
+
+            return true;
+        }
+
+        unset($session['phone_national'], $session['phone_resume'], $session['awaiting_unclear']);
+        $session['step'] = 'profile_edit';
+        $session['profile_field'] = $edit['field'];
+        $this->putSession($phone, $session);
+        $this->saveProfileEdit($client, $chatId, $phone, $session, $edit['value']);
+
+        return true;
+    }
+
+    /** The saved phone when it reads as a real number; a WhatsApp internal id is not one. */
+    private function shownPhone(Client $client): string
+    {
+        return $this->phoneUnreadable($client)
+            ? $this->tx('غير مضاف', 'not added')
+            : (string) $client->phone;
+    }
+
+    /** Empty, or digits that are no number (a WhatsApp internal id saved by an older version). */
+    private function phoneUnreadable(Client $client): bool
+    {
+        return ! filled($client->phone) || ClientPhone::interpret((string) $client->phone)['status'] === 'invalid';
+    }
+
+    /**
      * @param  array<string, mixed>  $session
      */
     private function openProfileTarget(Client $client, string $chatId, string $phone, array $session, string $target): void
@@ -3725,11 +3862,12 @@ class HandleWhatsAppInbound
         unset($session['profile_field']);
         $this->putSession($phone, $session);
         $email = filled($client->email) ? (string) $client->email : $this->tx('غير مضاف', 'not added');
+        $shownPhone = $this->shownPhone($client);
         $this->telegram->sendInlineKeyboard(
             $chatId,
             $this->tx(
-                "بياناتك:\nالاسم: {$client->name}\nالهاتف: {$client->phone}\nالشركة: {$client->company_name}\nالإيميل: {$email}\nأي حقل بدك تعدله؟",
-                "Your details:\nName: {$client->name}\nPhone: {$client->phone}\nCompany: {$client->company_name}\nEmail: {$email}\nChoose the field to change.",
+                "بياناتك:\nالاسم: {$client->name}\nالهاتف: {$shownPhone}\nالشركة: {$client->company_name}\nالإيميل: {$email}\nأي حقل بدك تعدله؟",
+                "Your details:\nName: {$client->name}\nPhone: {$shownPhone}\nCompany: {$client->company_name}\nEmail: {$email}\nChoose the field to change.",
             ),
             [
                 [['text' => $this->tx('تعديل الاسم', 'Edit name'), 'callback_data' => 'prof:name']],
@@ -3754,6 +3892,14 @@ class HandleWhatsAppInbound
 
         $field = (string) ($session['profile_field'] ?? '');
         $value = trim((string) $text);
+        // «غير الرقم ل +963…» typed while a field is open carries its own field and value.
+        $read = $this->profileEditFromText($value);
+        if ($read !== null && trim($read['value']) !== '') {
+            $field = $read['field'];
+            $value = trim($read['value']);
+            $session['profile_field'] = $field;
+            $this->putSession($phone, $session);
+        }
         if ($value === '' || ClientProfileValue::isKeyboardLabel($value) || ! in_array($field, ['name', 'phone', 'company_name', 'email'], true)) {
             $this->safeSend($chatId, $this->tx('اكتب القيمة الجديدة.', 'Type the new value.'));
 
@@ -3818,11 +3964,12 @@ class HandleWhatsAppInbound
     {
         $fresh = $client->fresh() ?? $client;
         $this->pushEditedClientToOdoo($fresh);
+        $shownPhone = $this->shownPhone($fresh);
         $this->safeSend($chatId, $this->tx('تمام، حدّثنا بياناتك.', 'Your details were updated.'));
         if (filled($session['quote_ref'] ?? null)) {
             $this->safeSend($chatId, $this->tx(
-                "بياناتك:\nالاسم: {$fresh->name}\nالهاتف: {$fresh->phone}\nالشركة: {$fresh->company_name}",
-                "Your details:\nName: {$fresh->name}\nPhone: {$fresh->phone}\nCompany: {$fresh->company_name}",
+                "بياناتك:\nالاسم: {$fresh->name}\nالهاتف: {$shownPhone}\nالشركة: {$fresh->company_name}",
+                "Your details:\nName: {$fresh->name}\nPhone: {$shownPhone}\nCompany: {$fresh->company_name}",
             ));
             $this->showQuoteDecision($chatId, $phone, $session);
 

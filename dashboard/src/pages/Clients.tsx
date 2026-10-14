@@ -2,8 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Search } from "lucide-react";
 import { toast } from "sonner";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { api, type Client, type OdooInvoice, type OdooQuotation, type PageMeta, type PaperRequest } from "../api";
+import { api, type Client, type OdooInvoice, type OdooPaperKind, type OdooQuotation, type PageMeta, type PaperRequest } from "../api";
 import { type PaperEditing } from "../components/OdooPaperForm";
+import { OdooPaperActivity } from "../components/OdooPaperActivity";
+import { OdooPaperPreview } from "../components/OdooPaperPreview";
 import { ConfirmAction } from "../components/ConfirmAction";
 import { useCan } from "../lib/useCan";
 import { DriveFolderPicker } from "../components/DriveFolderPicker";
@@ -124,7 +126,22 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
       const res = kind === "quotation" ? await api.odooQuotation(id) : await api.odooInvoice(id);
       const reference = kind === "quotation" ? (res.data as OdooQuotation).client_order_ref : (res.data as OdooInvoice).ref;
       const partner = res.data.partner_id ? String(res.data.partner_id) : null;
-      setPaper({ kind, editing: { id, name: res.data.name, reference: reference ?? null, partnerId: partner, paymentTermId: res.data.payment_term_id ?? null, lines: res.data.lines, state: res.data.state } });
+      const notes = kind === "quotation" ? (res.data as OdooQuotation & { notes?: string | null }).notes ?? null : null;
+      setPaper({
+        kind,
+        editing: {
+          id,
+          name: res.data.name,
+          reference: reference ?? null,
+          partnerId: partner,
+          clientId: res.data.client_id ?? null,
+          clientName: res.data.client_name ?? res.data.partner_name ?? null,
+          paymentTermId: res.data.payment_term_id ?? null,
+          lines: res.data.lines,
+          state: res.data.state,
+          notes,
+        },
+      });
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t(copy.saveFailed));
@@ -134,6 +151,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
   }
 
   const [wizardQuote, setWizardQuote] = useState<OdooQuotation | null>(null);
+  const [paperView, setPaperView] = useState<{ kind: OdooPaperKind; id: number; name: string; mode: "preview" | "activity" } | null>(null);
 
   /** A draft from Odoo's invoice wizard opens in the invoice form for review and «تأكيد». */
   function openDraft(draft: InvoiceDraft, message: string) {
@@ -151,6 +169,8 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
         name: draft.name,
         reference: draft.ref ?? null,
         partnerId: draft.partner_id ? String(draft.partner_id) : null,
+        clientId: draft.client_id ?? null,
+        clientName: draft.client_name ?? draft.partner_name ?? null,
         paymentTermId: draft.payment_term_id ?? null,
         lines: draft.lines,
         state: draft.state,
@@ -730,9 +750,16 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                           onConfirm={() => void removePaper("quotation", item.id)}
                         />
                       ) : null}
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPaperView({ kind: "quotations", id: item.id, name: item.name, mode: "preview" })}>
+                        {t(copy.paperPreview)}
+                      </button>
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPaperView({ kind: "quotations", id: item.id, name: item.name, mode: "activity" })}>
+                        {t(copy.paperActivity)}
+                      </button>
                       <button
                         type="button"
                         className="btn btn-ghost"
+                        hidden={item.state === "cancel" || !can("ops.clients.odoo")}
                         onClick={() => {
                           const params: Record<string, string> = { tab: "invoices" };
                           if (item.partner_id) params.partner = String(item.partner_id);
@@ -740,7 +767,6 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                           setSearchParams(params);
                           setWizardQuote(item);
                         }}
-                        hidden={item.state === "cancel"}
                       >
                         {t(copy.invoiceFromQuote)}
                       </button>
@@ -870,6 +896,12 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                           />
                         </>
                       ) : null}
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPaperView({ kind: "invoices", id: item.id, name: item.name, mode: "preview" })}>
+                        {t(copy.paperPreview)}
+                      </button>
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPaperView({ kind: "invoices", id: item.id, name: item.name, mode: "activity" })}>
+                        {t(copy.paperActivity)}
+                      </button>
                     </td>
                   </tr>
                   );
@@ -882,6 +914,19 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
       ) : null}
       {wizardQuote ? (
         <InvoiceWizardDialog quotation={wizardQuote} t={t} onClose={() => setWizardQuote(null)} onDraft={openDraft} />
+      ) : null}
+      {paperView?.mode === "preview" ? (
+        <OdooPaperPreview kind={paperView.kind} id={paperView.id} name={paperView.name} t={t} onClose={() => setPaperView(null)} />
+      ) : null}
+      {paperView?.mode === "activity" ? (
+        <OdooPaperActivity
+          kind={paperView.kind}
+          id={paperView.id}
+          name={paperView.name}
+          canNote={can("ops.clients.odoo_note")}
+          t={t}
+          onClose={() => setPaperView(null)}
+        />
       ) : null}
     </>
   );

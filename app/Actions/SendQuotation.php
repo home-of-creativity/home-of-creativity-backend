@@ -249,7 +249,8 @@ class SendQuotation
                 $request->number,
                 $request->title,
                 $amount,
-                $notes,
+                // With lines the notes are only the line list, which the PDF already prints.
+                $lines !== null && $lines !== [] ? null : $notes,
                 $lines,
                 $request->client?->odoo_partner_id,
                 $request->client?->odoo_lead_id,

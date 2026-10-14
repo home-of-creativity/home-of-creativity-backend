@@ -36,6 +36,20 @@ class Invoice extends Model
         ];
     }
 
+    /**
+     * What a new Odoo invoice is to its request: the first one short of the total is the
+     * down payment, a later one the remainder, otherwise the full amount.
+     */
+    public static function kindFor(ServiceRequest $request, float $amount): string
+    {
+        if ($request->invoices()->whereNotNull('odoo_invoice_id')->whereIn('kind', ['full', 'deposit', 'remaining'])->exists()) {
+            return 'remaining';
+        }
+        $total = (float) ($request->amount_total ?? $request->quotation_amount ?? 0);
+
+        return $total > 0 && $amount < $total - 0.009 ? 'deposit' : 'full';
+    }
+
     public function request(): BelongsTo
     {
         return $this->belongsTo(ServiceRequest::class, 'request_id');

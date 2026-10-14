@@ -9,14 +9,15 @@ namespace App\Support;
 class ClientPhone
 {
     /**
-     * Dial code, shortest national length, longest national length, names.
+     * Dial code, shortest national length, longest national length, names, and words found
+     * inside a sentence (nationalities).
      *
-     * @var list<array{0: string, 1: int, 2: int, 3: list<string>}>
+     * @var list<array{0: string, 1: int, 2: int, 3: list<string>, 4?: list<string>}>
      */
     private const COUNTRIES = [
         ['1', 10, 10, ['امريكا', 'أمريكا', 'الولايات المتحدة', 'usa', 'us', 'america', 'united states', 'كندا', 'canada']],
         ['7', 10, 10, ['روسيا', 'russia']],
-        ['20', 10, 10, ['مصر', 'egypt']],
+        ['20', 10, 10, ['مصر', 'egypt'], ['مصري', 'egyptian']],
         ['30', 10, 10, ['اليونان', 'greece']],
         ['33', 9, 9, ['فرنسا', 'france']],
         ['34', 9, 9, ['اسبانيا', 'إسبانيا', 'spain']],
@@ -24,7 +25,7 @@ class ClientPhone
         ['44', 10, 10, ['بريطانيا', 'انجلترا', 'إنجلترا', 'المملكة المتحدة', 'uk', 'britain', 'england', 'united kingdom']],
         ['49', 10, 11, ['المانيا', 'ألمانيا', 'germany']],
         ['86', 11, 11, ['الصين', 'china']],
-        ['90', 10, 10, ['تركيا', 'turkey']],
+        ['90', 10, 10, ['تركيا', 'turkey'], ['تركي', 'turkish']],
         ['91', 10, 10, ['الهند', 'india']],
         ['92', 10, 10, ['باكستان', 'pakistan']],
         ['98', 10, 10, ['ايران', 'إيران', 'iran']],
@@ -33,16 +34,16 @@ class ClientPhone
         ['216', 8, 8, ['تونس', 'tunisia']],
         ['218', 9, 9, ['ليبيا', 'libya']],
         ['249', 9, 9, ['السودان', 'sudan']],
-        ['961', 7, 8, ['لبنان', 'lebanon']],
-        ['962', 9, 9, ['الاردن', 'الأردن', 'jordan']],
-        ['963', 8, 9, ['سوريا', 'سورية', 'syria']],
-        ['964', 10, 10, ['العراق', 'iraq']],
+        ['961', 7, 8, ['لبنان', 'lebanon'], ['لبناني', 'lebanese']],
+        ['962', 9, 9, ['الاردن', 'الأردن', 'jordan'], ['اردني', 'أردني', 'jordanian']],
+        ['963', 8, 9, ['سوريا', 'سورية', 'syria'], ['سوري', 'الشام', 'syrian']],
+        ['964', 10, 10, ['العراق', 'iraq'], ['عراقي', 'iraqi']],
         ['965', 8, 8, ['الكويت', 'kuwait']],
-        ['966', 9, 9, ['السعودية', 'السعوديه', 'saudi', 'saudi arabia']],
+        ['966', 9, 9, ['السعودية', 'السعوديه', 'saudi', 'saudi arabia'], ['سعودي']],
         ['967', 9, 9, ['اليمن', 'yemen']],
         ['968', 8, 8, ['عمان', 'عُمان', 'oman']],
         ['970', 9, 9, ['فلسطين', 'palestine']],
-        ['971', 9, 9, ['الامارات', 'الإمارات', 'الإمارات العربية المتحدة', 'uae', 'emirates']],
+        ['971', 9, 9, ['الامارات', 'الإمارات', 'الإمارات العربية المتحدة', 'uae', 'emirates'], ['اماراتي', 'إماراتي', 'دبي', 'dubai']],
         ['972', 9, 9, ['اسرائيل', 'إسرائيل', 'israel']],
         ['973', 8, 8, ['البحرين', 'bahrain']],
         ['974', 8, 8, ['قطر', 'qatar']],
@@ -175,6 +176,36 @@ class ClientPhone
                 if (self::normalizeWords($alias) === $name) {
                     return $row[0];
                 }
+            }
+        }
+
+        // A sentence: «من سوريا», «رقم سوري», «the code is +961».
+        if (preg_match('/(?:\+|00)(\d{1,3})\b/', self::asciiDigits((string) $country), $code) === 1) {
+            foreach (self::countriesByCodeLength() as $row) {
+                if ($code[1] === $row[0]) {
+                    return $row[0];
+                }
+            }
+        }
+        $padded = ' '.$name.' ';
+        foreach (self::COUNTRIES as $row) {
+            foreach ([...$row[3], ...($row[4] ?? [])] as $alias) {
+                $word = self::normalizeWords($alias);
+                if (mb_strlen($word) >= 3 && str_contains($padded, ' '.$word.' ')) {
+                    return $row[0];
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /** The country name for a dial code, for the question that confirms it. */
+    public static function countryName(string $code): ?string
+    {
+        foreach (self::COUNTRIES as $row) {
+            if ($row[0] === $code) {
+                return $row[3][0];
             }
         }
 

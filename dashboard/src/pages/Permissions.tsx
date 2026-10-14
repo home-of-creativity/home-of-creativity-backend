@@ -32,6 +32,7 @@ const abilityLabels: Record<StaffModule, { ar: string; en: string }> = {
   "ops.report_templates": { ar: "قوالب التقارير", en: "Report templates" },
   "ops.report_media": { ar: "صور التقارير ومربع النص", en: "Report pictures and text box" },
   "ops.report_calendars": { ar: "التقارير: إضافة التقاويم ومن يراها", en: "Reports: add calendars and who sees them" },
+  "ops.report_calendar.main": { ar: "التقويم الرئيسي للتقارير", en: "Main reports calendar" },
   "ops.drive": { ar: "حساب تخزين Drive", en: "Drive storage account" },
   "site.projects": { ar: "المشاريع", en: "Projects" },
   "site.categories": { ar: "التصنيفات", en: "Categories" },

@@ -940,6 +940,10 @@ async def on_confirm_payment(update: Update, context: ContextTypes.DEFAULT_TYPE)
     text = f"✅ تم تأكيد الدفع للطلب #{escape(request_ref)}"
     if amount != "":
         text += f" — {escape(str(amount))} USD"
+    summary = data.get("invoice_summary")
+    if summary:
+        prefix = "⚠️ " if data.get("invoice_error") else "🧾 "
+        text += f"\n{prefix}{escape(str(summary))}"
     await query.answer("تم تأكيد الدفع.")
     try:
         await query.edit_message_reply_markup(reply_markup=None)

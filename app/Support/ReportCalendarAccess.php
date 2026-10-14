@@ -9,9 +9,9 @@ use App\Models\Role;
 use App\Models\User;
 
 /**
- * Who sees which reports calendar. The main calendar (no calendar id) follows the
- * reports view; every other calendar is its own role ability. An admin without a
- * role sees them all.
+ * Who sees which reports calendar. The main calendar (no calendar id) is the ability
+ * `ops.report_calendar.main`; every other calendar is its own role ability. An admin
+ * without a role sees them all.
  */
 class ReportCalendarAccess
 {
@@ -23,7 +23,7 @@ class ReportCalendarAccess
     public function canView(?User $user, ?int $calendarId): bool
     {
         if ($calendarId === null) {
-            return true;
+            return (bool) $user?->canAbility(StaffAbility::OpsReportCalendarMain);
         }
 
         return (bool) $user?->canAbility(ReportCalendar::keyFor($calendarId));

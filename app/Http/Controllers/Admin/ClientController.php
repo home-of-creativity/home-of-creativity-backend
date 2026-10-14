@@ -33,6 +33,7 @@ class ClientController extends Controller
         $paginator = Client::query()
             ->visibleOnDashboard()
             ->withCount('requests')
+            ->when((int) $request->query('id') > 0, fn ($query) => $query->whereKey((int) $request->query('id')))
             ->when($like !== '', function ($query) use ($like) {
                 $query->where(function ($inner) use ($like) {
                     $inner->where('name', 'like', $like)

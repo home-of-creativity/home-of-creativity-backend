@@ -17,6 +17,7 @@ use App\Http\Controllers\Admin\LandingReelController as AdminLandingReelControll
 use App\Http\Controllers\Admin\LegalPageController as AdminLegalPageController;
 use App\Http\Controllers\Admin\LiveController;
 use App\Http\Controllers\Admin\OdooController as AdminOdooController;
+use App\Http\Controllers\Admin\OdooPaperController as AdminOdooPaperController;
 use App\Http\Controllers\Admin\OverviewController;
 use App\Http\Controllers\Admin\PhotographyCalendarController as AdminPhotographyCalendarController;
 use App\Http\Controllers\Admin\PhotographyController as AdminPhotographyController;
@@ -177,7 +178,12 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::get('odoo/invoices', [AdminOdooController::class, 'invoices']);
         Route::get('odoo/quotations/{id}', [AdminOdooController::class, 'showQuotation'])->whereNumber('id');
         Route::get('odoo/invoices/{id}', [AdminOdooController::class, 'showInvoice'])->whereNumber('id');
+        Route::get('odoo/{kind}/{id}/pdf', [AdminOdooPaperController::class, 'pdf'])->whereIn('kind', ['quotations', 'invoices'])->whereNumber('id');
+        Route::get('odoo/{kind}/{id}/activity', [AdminOdooPaperController::class, 'activity'])->whereIn('kind', ['quotations', 'invoices'])->whereNumber('id');
     });
+    Route::post('odoo/{kind}/{id}/notes', [AdminOdooPaperController::class, 'note'])
+        ->middleware(['ability:ops.clients.odoo_note', 'throttle:30,1'])
+        ->whereIn('kind', ['quotations', 'invoices'])->whereNumber('id');
     Route::middleware('ability:ops.clients.odoo')->group(function () {
         Route::post('odoo/sync-partners', [AdminOdooController::class, 'syncPartners']);
         Route::post('odoo/import-crm-clients', [AdminOdooController::class, 'importCrmClients']);

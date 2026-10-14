@@ -83,7 +83,7 @@ class ReportCalendarsTest extends TestCase
         $this->deadline(null, 'رئيسي');
         $this->deadline($calendar->id, 'سري');
 
-        $without = $this->staff($this->role('بلا تقويم', ['ops.reports.view', 'ops.reports.create', 'ops.reports.delete']));
+        $without = $this->staff($this->role('بلا تقويم', ['ops.reports.view', 'ops.reports.create', 'ops.reports.delete', 'ops.report_calendar.main']));
         Sanctum::actingAs($without);
         $response = $this->getJson($this->range())->assertOk();
         $this->assertSame(['رئيسي'], array_column($response->json('data.deadlines'), 'title'));
@@ -101,7 +101,7 @@ class ReportCalendarsTest extends TestCase
         $hidden = ReportDeadline::query()->where('title', 'سري')->firstOrFail();
         $this->deleteJson("/api/admin/report-deadlines/{$hidden->id}")->assertNotFound();
 
-        $with = $this->staff($this->role('مع التقويم', ['ops.reports.view', 'ops.reports.create', $calendar->abilityKey()]));
+        $with = $this->staff($this->role('مع التقويم', ['ops.reports.view', 'ops.reports.create', 'ops.report_calendar.main', $calendar->abilityKey()]));
         Sanctum::actingAs($with);
         $titles = array_column($this->getJson($this->range())->json('data.deadlines'), 'title');
         sort($titles);
@@ -114,6 +114,33 @@ class ReportCalendarsTest extends TestCase
             'starts_on' => '2026-10-20',
             'repeat' => 'none',
         ])->assertCreated();
+    }
+
+    public function test_the_main_calendar_needs_its_own_permission(): void
+    {
+        $calendar = ReportCalendar::query()->create(['name' => 'خاص']);
+        $main = $this->deadline(null, 'رئيسي');
+        $this->deadline($calendar->id, 'سري');
+
+        Sanctum::actingAs($this->staff($this->role('تقويم خاص فقط', ['ops.reports.view', 'ops.reports.create', 'ops.reports.update', 'ops.reports.delete', $calendar->abilityKey()])));
+        $response = $this->getJson($this->range())->assertOk();
+        $this->assertSame(['سري'], array_column($response->json('data.deadlines'), 'title'));
+        $this->assertFalse($response->json('data.main_visible'));
+
+        $this->deleteJson("/api/admin/report-deadlines/{$main->id}")->assertNotFound();
+        $this->putJson("/api/admin/report-deadlines/{$main->id}/occurrences/2026-10-15", ['action' => 'done'])->assertNotFound();
+        $this->postJson('/api/admin/report-deadlines', [
+            'client_id' => $this->client->id,
+            'title' => 'على الرئيسي',
+            'starts_on' => '2026-10-20',
+            'repeat' => 'none',
+        ])->assertForbidden();
+
+        Sanctum::actingAs($this->admin);
+        $row = collect($this->getJson('/api/admin/staff-access')->assertOk()->json('abilities'))
+            ->firstWhere('key', 'ops.report_calendar.main');
+        $this->assertSame('calendars', $row['group']);
+        $this->assertSame([], $row['viewers']);
     }
 
     public function test_an_unrestricted_admin_sees_every_calendar_and_can_manage(): void

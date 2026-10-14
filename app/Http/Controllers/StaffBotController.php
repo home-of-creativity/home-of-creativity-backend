@@ -22,8 +22,8 @@ use App\Http\Requests\StaffSendQuotationRequest;
 use App\Http\Resources\EmployeeResource;
 use App\Http\Resources\ServiceRequestResource;
 use App\Models\DriveDelivery;
-use App\Models\PhotographyBooking;
 use App\Models\Employee;
+use App\Models\PhotographyBooking;
 use App\Models\ServiceRequest;
 use App\Services\RequestStatusTransitionService;
 use App\Services\TelegramNotifier;
@@ -533,6 +533,10 @@ class StaffBotController extends Controller
                 'request_number' => $updated->number,
                 'status' => $updated->status->value,
                 'amount' => $amount,
+                'invoice_number' => $confirmRequestPayment->odooInvoice['name'] ?? $confirmRequestPayment->invoice?->invoice_number,
+                'invoice_state' => $confirmRequestPayment->odooInvoice['state'] ?? null,
+                'invoice_summary' => $confirmRequestPayment->invoiceSummary(),
+                'invoice_error' => $confirmRequestPayment->invoiceError,
             ],
             'message' => 'Payment confirmed.',
         ]);

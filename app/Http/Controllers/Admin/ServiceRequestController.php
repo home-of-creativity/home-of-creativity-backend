@@ -214,9 +214,19 @@ class ServiceRequestController extends Controller
             (float) $request->validated('amount'),
         );
 
+        $invoice = $confirmRequestPayment->invoiceSummary();
+
         return ServiceRequestResource::make($serviceRequest->fresh([
             'client', 'files', 'invoices',
-        ]))->additional(['message' => 'Payment confirmed.']);
+        ]))->additional([
+            'message' => trim('تم تأكيد الدفع. '.($invoice ?? '')),
+            'invoice' => [
+                'number' => $confirmRequestPayment->odooInvoice['name'] ?? $confirmRequestPayment->invoice?->invoice_number,
+                'state' => $confirmRequestPayment->odooInvoice['state'] ?? null,
+                'payment_state' => $confirmRequestPayment->odooInvoice['payment_state'] ?? null,
+                'error' => $confirmRequestPayment->invoiceError,
+            ],
+        ]);
     }
 
     public function retryGemini(ServiceRequest $serviceRequest): ServiceRequestResource

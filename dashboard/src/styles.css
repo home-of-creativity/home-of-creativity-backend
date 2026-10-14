@@ -1418,6 +1418,180 @@ td[colspan] {
   font-variant-numeric: tabular-nums;
 }
 
+.odoo-product-desc {
+  margin: 0;
+  color: var(--brand-muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+  white-space: pre-line;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.odoo-line-desc {
+  margin-top: 0.35rem;
+  min-height: 2.2rem;
+  font-size: 0.82rem;
+  color: var(--brand-muted);
+  resize: vertical;
+}
+
+.paper-client-hint {
+  font-size: 0.8rem;
+  color: var(--brand-orange);
+}
+
+.paper-inline-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-inline-start: 0.5rem;
+  vertical-align: middle;
+}
+
+.form-dialog-panel.odoo-preview-panel {
+  width: min(64rem, 100%);
+  max-height: 94svh;
+  height: 94svh;
+}
+
+.odoo-preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.odoo-preview-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  padding: 0.75rem;
+  background: var(--brand-surface);
+}
+
+.odoo-preview-body > p {
+  place-self: center;
+}
+
+.odoo-preview-frame {
+  width: 100%;
+  height: 100%;
+  min-height: 60svh;
+  border: 1px solid var(--brand-line);
+  border-radius: var(--radius);
+  background: #fff;
+}
+
+.form-dialog-panel.odoo-activity-panel {
+  width: min(40rem, 100%);
+  max-height: 92svh;
+}
+
+.odoo-activity-body {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem 1.35rem 1.35rem;
+  overflow-y: auto;
+}
+
+.odoo-activity-note {
+  display: grid;
+  gap: 0.5rem;
+  justify-items: start;
+}
+
+.odoo-activity-note .field-label {
+  width: 100%;
+}
+
+.odoo-activity-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.odoo-activity-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.65rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--brand-line);
+  border-radius: var(--radius);
+  background: var(--brand-surface);
+}
+
+.odoo-activity-item.is-note {
+  border-inline-start: 3px solid var(--brand-orange);
+}
+
+.odoo-activity-icon {
+  display: grid;
+  place-items: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 999px;
+  background: var(--brand-cream);
+  color: var(--brand-teal);
+}
+
+.odoo-activity-main {
+  min-width: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.odoo-activity-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.odoo-activity-badge {
+  padding: 0.05rem 0.5rem;
+  border-radius: 999px;
+  background: var(--brand-orange);
+  color: #fff;
+  font-size: 0.72rem;
+}
+
+.odoo-activity-text {
+  font-size: 0.9rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.odoo-activity-text p {
+  margin: 0 0 0.35rem;
+}
+
+.odoo-activity-changes {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.85rem;
+}
+
+.odoo-activity-changes li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.odoo-activity-old {
+  text-decoration: line-through;
+  color: var(--brand-muted);
+}
+
 .odoo-product-card .btn,
 .odoo-qty {
   margin-top: 0.2rem;

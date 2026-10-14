@@ -2,6 +2,7 @@
 
 namespace App\Actions;
 
+use App\Models\Invoice;
 use App\Models\ServiceRequest;
 use App\Services\OdooClient;
 use App\Services\TelegramNotifier;
@@ -33,13 +34,17 @@ class SendApprovedInvoice
         if ($orderId <= 0 || $client === null || ! $this->odoo->configured()) {
             return 'لا يوجد عرض سعر في أودو لهذا الطلب.';
         }
-        // A dashboard invoice already posted on this request is the one the client pays.
-        if (filled($request->odoo_invoice_id) && $this->odoo->invoiceAwaitsPayment((int) $request->odoo_invoice_id)) {
+        // A dashboard invoice already posted on this request is the one the client pays;
+        // a draft linked to it (a wizard down payment) is posted instead of billing again.
+        $linked = (int) ($request->odoo_invoice_id ?? 0);
+        if ($linked > 0 && $this->odoo->invoiceAwaitsPayment($linked)) {
             return null;
         }
 
         try {
-            $invoiceId = $this->odoo->invoiceSaleOrderWizard($orderId, 'delivered', null);
+            $invoiceId = $linked > 0 && $this->odoo->invoiceOpenForPayment($linked)
+                ? $linked
+                : $this->odoo->invoiceSaleOrderWizard($orderId, 'delivered', null);
             $onBot = filled($client->telegram_user_id) && $this->telegram->canReachClient($client->telegram_user_id);
             $channel = filled($client->email) ? (filled($client->phone) ? 'both' : 'email') : 'whatsapp';
             $snapshot = $this->publish->invoice($client, $request, ['id' => $invoiceId], $channel, true, null, null, deliver: $deliver && ! $onBot);
@@ -66,7 +71,7 @@ class SendApprovedInvoice
         $request->invoices()->create([
             'invoice_number' => (string) ($snapshot['name'] ?? 'INV-'.$request->number),
             'amount' => (float) ($snapshot['amount_total'] ?? $request->amount_total ?? 0),
-            'kind' => 'full',
+            'kind' => Invoice::kindFor($request, (float) ($snapshot['amount_total'] ?? $request->amount_total ?? 0)),
             'status' => 'issued',
             'pdf_path' => $pdfPath !== '' ? $pdfPath : null,
             'issued_at' => now(),

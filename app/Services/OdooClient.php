@@ -2,8 +2,8 @@
 
 namespace App\Services;
 
-use App\Support\OdooPaperLimits;
 use App\Support\OdooNoteHtml;
+use App\Support\OdooPaperLimits;
 use App\Support\OdooPaperPdf;
 use App\Support\PaymentTermLabel;
 use Illuminate\Support\Facades\Http;
@@ -77,7 +77,7 @@ class OdooClient
      */
     private function invoiceFields(): array
     {
-        return ['id', 'name', 'partner_id', 'amount_total', 'amount_untaxed', 'amount_residual', 'currency_id', 'state', 'payment_state', 'invoice_origin', 'ref', 'invoice_date', 'invoice_date_due', 'write_date', 'invoice_payment_term_id'];
+        return ['id', 'name', 'partner_id', 'amount_total', 'amount_untaxed', 'amount_residual', 'currency_id', 'state', 'payment_state', 'invoice_origin', 'ref', 'invoice_date', 'invoice_date_due', 'write_date', 'invoice_payment_term_id', 'commercial_partner_id'];
     }
 
     /**
@@ -114,6 +114,7 @@ class OdooClient
             'name' => (string) ($row['name'] ?? ''),
             'partner_id' => $this->relationId($row['partner_id'] ?? null),
             'partner_name' => $this->relationName($row['partner_id'] ?? null),
+            'commercial_partner_id' => $this->relationId($row['commercial_partner_id'] ?? null),
             'amount_total' => (float) ($row['amount_total'] ?? 0),
             'amount_residual' => $this->invoiceResidual($row),
             'currency' => $this->relationName($row['currency_id'] ?? null),
@@ -152,6 +153,18 @@ class OdooClient
         $row = $this->firstRecord($this->searchRead('sale.order', [['id', '=', $id]], $this->quotationFields(), 1, 0, 'id desc'));
 
         return $row === null ? null : $this->mapQuotation($row);
+    }
+
+    /** The terms block (`note`, HTML) of a quotation, or null when it has none. */
+    public function quotationNote(int $id): ?string
+    {
+        if ($id <= 0) {
+            return null;
+        }
+        $row = $this->firstRecord($this->searchRead('sale.order', [['id', '=', $id]], ['note'], 1));
+        $note = $row['note'] ?? null;
+
+        return is_string($note) && trim(strip_tags($note)) !== '' ? $note : null;
     }
 
     /**
@@ -665,6 +678,129 @@ class OdooClient
         }
     }
 
+    /** An internal note in the record's chatter. Unlike messagePost, a failure is thrown. */
+    public function postNote(string $model, int $recordId, string $html): void
+    {
+        $this->call($model, 'message_post', [
+            'ids' => [$recordId],
+            'body' => $html,
+            'body_html' => $html,
+            'body_is_html' => true,
+            'message_type' => 'comment',
+            'subtype_xmlid' => 'mail.mt_note',
+        ]);
+    }
+
+    /**
+     * The chatter of a quotation or invoice, newest first: messages, internal notes, and
+     * the field changes Odoo tracked on each.
+     *
+     * @return list<array{id: int, date: string|null, author: string|null, body: string, kind: string, subtype: string|null, changes: list<array{field: string, old: string, new: string}>}>
+     */
+    public function paperMessages(string $model, int $recordId, int $limit = 80): array
+    {
+        if ($recordId <= 0 || ! $this->configured()) {
+            return [];
+        }
+        $domain = [['model', '=', $model], ['res_id', '=', $recordId]];
+        $fields = ['id', 'date', 'body', 'author_id', 'message_type', 'subtype_id', 'tracking_value_ids'];
+        try {
+            $rows = $this->searchRead('mail.message', $domain, [...$fields, 'is_internal'], $limit, 0, 'date desc, id desc');
+        } catch (Throwable) {
+            $rows = $this->searchRead('mail.message', $domain, $fields, $limit, 0, 'date desc, id desc');
+        }
+
+        $trackingIds = [];
+        foreach ($rows as $row) {
+            foreach ($this->idList($row['tracking_value_ids'] ?? []) as $id) {
+                $trackingIds[] = $id;
+            }
+        }
+        $tracking = $this->trackingValues($trackingIds);
+
+        $messages = [];
+        foreach ($rows as $row) {
+            if (! is_array($row) || ! isset($row['id'])) {
+                continue;
+            }
+            $subtype = $this->relationName($row['subtype_id'] ?? null);
+            $type = (string) ($row['message_type'] ?? '');
+            $internal = (bool) ($row['is_internal'] ?? false) || in_array($subtype, ['Note', 'ملاحظة'], true);
+            $changes = [];
+            foreach ($this->idList($row['tracking_value_ids'] ?? []) as $id) {
+                if (isset($tracking[$id])) {
+                    $changes[] = $tracking[$id];
+                }
+            }
+            $body = is_string($row['body'] ?? null) ? OdooNoteHtml::safe((string) $row['body']) : '';
+            if ($body === '' && $changes === [] && $subtype === null) {
+                continue;
+            }
+            $messages[] = [
+                'id' => (int) $row['id'],
+                'date' => $this->optionalString($row['date'] ?? null),
+                'author' => $this->relationName($row['author_id'] ?? null),
+                'body' => $body,
+                'kind' => $internal ? 'note' : (($type === 'notification' || ($changes !== [] && $body === '')) ? 'change' : 'message'),
+                'subtype' => $subtype,
+                'changes' => $changes,
+            ];
+        }
+
+        return $messages;
+    }
+
+    /**
+     * @param  list<int>  $ids
+     * @return array<int, array{field: string, old: string, new: string}>
+     */
+    private function trackingValues(array $ids): array
+    {
+        $ids = array_values(array_unique(array_filter($ids, fn (int $id): bool => $id > 0)));
+        if ($ids === []) {
+            return [];
+        }
+        try {
+            // Every field: the names moved between Odoo versions (field_desc, field_id, *_value_*).
+            $rows = $this->searchRead('mail.tracking.value', [['id', 'in', $ids]], [], count($ids));
+        } catch (Throwable) {
+            return [];
+        }
+
+        $values = [];
+        foreach ($rows as $row) {
+            if (! is_array($row) || ! isset($row['id'])) {
+                continue;
+            }
+            $field = $this->optionalString($row['field_desc'] ?? null) ?? $this->relationName($row['field_id'] ?? null) ?? $this->optionalString($row['field'] ?? null) ?? '';
+            $values[(int) $row['id']] = [
+                'field' => $field,
+                'old' => $this->trackedValue($row, 'old'),
+                'new' => $this->trackedValue($row, 'new'),
+            ];
+        }
+
+        return $values;
+    }
+
+    /** @param  array<string, mixed>  $row */
+    private function trackedValue(array $row, string $side): string
+    {
+        foreach (['char', 'text', 'datetime', 'integer', 'float', 'monetary'] as $type) {
+            $value = $row["{$side}_value_{$type}"] ?? null;
+            if ($value === null || $value === false || $value === '') {
+                continue;
+            }
+            if (in_array($type, ['integer', 'float', 'monetary'], true) && (float) $value === 0.0 && ($row["{$side}_value_char"] ?? false)) {
+                continue;
+            }
+
+            return is_float($value) ? rtrim(rtrim(number_format($value, 2, '.', ''), '0'), '.') : (string) $value;
+        }
+
+        return '';
+    }
+
     public function postLeadNote(int $leadId, string $body): void
     {
         if ($leadId <= 0 || trim($body) === '') {
@@ -855,6 +991,31 @@ class OdooClient
             'partner_id' => $partnerId > 0 ? (string) $partnerId : null,
             'odoo_url' => $this->recordUrl('crm.lead', (int) $leadId),
         ];
+    }
+
+    /**
+     * The company a contact belongs to: its commercial partner, then its parent.
+     *
+     * @return list<int>
+     */
+    public function partnerParents(int $partnerId): array
+    {
+        if ($partnerId <= 0 || ! $this->configured()) {
+            return [];
+        }
+        try {
+            $row = $this->firstRecord($this->searchRead('res.partner', [['id', '=', $partnerId]], ['commercial_partner_id', 'parent_id'], 1));
+        } catch (Throwable) {
+            return [];
+        }
+        if ($row === null) {
+            return [];
+        }
+
+        return array_values(array_unique(array_filter([
+            $this->relationId($row['commercial_partner_id'] ?? null),
+            $this->relationId($row['parent_id'] ?? null),
+        ], fn (?int $id): bool => $id !== null && $id !== $partnerId)));
     }
 
     /**
@@ -1190,13 +1351,34 @@ class OdooClient
     }
 
     /**
-     * A customer invoice copied from the quotation lines. The quotation stays a quotation.
+     * The invoice of what is left on the order, through Odoo's wizard so its lines stay
+     * linked to the order and its "invoiced" amounts stay right. When the wizard fails on
+     * an order with nothing invoiced yet, the lines are copied instead.
      *
-     * @param  array{id: int, name: string, partner_id: int, client_order_ref?: string|null}  $order
+     * @param  array{id: int, name: string, partner_id: int, client_order_ref?: string|null, payment_term_id?: int|null}  $order
      * @return array<string, mixed>
      */
     public function invoiceFromSaleOrder(array $order): array
     {
+        try {
+            $invoiceId = $this->invoiceSaleOrderWizard((int) $order['id'], 'delivered', null);
+            if (array_key_exists('payment_term_id', $order)) {
+                $this->call('account.move', 'write', ['ids' => [$invoiceId], 'vals' => ['invoice_payment_term_id' => $order['payment_term_id'] ?: false]]);
+            }
+
+            return $this->invoiceSnapshot($invoiceId) ?? ['id' => $invoiceId];
+        } catch (Throwable $exception) {
+            try {
+                $invoiced = $this->saleOrderInvoiced((int) $order['id']);
+            } catch (Throwable) {
+                $invoiced = 0.0;
+            }
+            if ($invoiced > 0.009) {
+                throw $exception;
+            }
+            Log::warning('Odoo invoice wizard failed; copying the order lines.', ['order' => $order['id'], 'error' => $exception->getMessage()]);
+        }
+
         return $this->createStaffInvoice(
             (string) $order['partner_id'],
             $this->quotationLines((int) $order['id']),
@@ -1207,13 +1389,13 @@ class OdooClient
     }
 
     /**
-     * @return list<array{id: int, name: string, price: float}>
+     * @return list<array{id: int, name: string, price: float, description: string|null}>
      */
     public function listSaleProducts(int $limit = 80): array
     {
         $rows = $this->searchRead('product.product', [
             ['sale_ok', '=', true],
-        ], ['id', 'name', 'list_price'], $limit, 0, 'name asc');
+        ], ['id', 'name', 'list_price', 'description_sale'], $limit, 0, 'name asc');
 
         $products = [];
         foreach ($rows as $row) {
@@ -1228,6 +1410,7 @@ class OdooClient
                 'id' => (int) $row['id'],
                 'name' => $name,
                 'price' => (float) ($row['list_price'] ?? 0),
+                'description' => ($text = $this->plainProductText($row['description_sale'] ?? null)) !== '' ? $text : null,
             ];
         }
 
@@ -1331,14 +1514,20 @@ class OdooClient
         int|string|null $opportunityId = null,
     ): array {
         $partnerId = $this->createOrReusePartner($partnerName, $email, $phone, $requestNumber, $existingPartnerId);
-        $notes = $notes !== null ? OdooNoteHtml::trimEmptyTail($notes) : null;
+        $notes = $notes !== null ? OdooNoteHtml::safe($notes) : null;
         $lineName = filled($notes) ? "{$title}\n{$notes}" : $title;
         $orderValues = [
             'partner_id' => (int) $partnerId,
             'client_order_ref' => $requestNumber,
             'origin' => $requestNumber,
-            'note' => $lineName,
         ];
+        // The note is the terms block of the printed quotation. With lines it carries only the
+        // staff terms; a single-amount quotation keeps its text on the line. Without terms the
+        // key is left out so Odoo's default terms stay.
+        $withLines = $lines !== null && $lines !== [];
+        if ($withLines && filled($notes)) {
+            $orderValues['note'] = $notes;
+        }
 
         if (filled($opportunityId) && (int) $opportunityId > 0) {
             $orderValues['opportunity_id'] = (int) $opportunityId;
@@ -1348,7 +1537,7 @@ class OdooClient
             $orderValues['currency_id'] = $currencyId;
         }
 
-        if ($lines !== null && $lines !== []) {
+        if ($withLines) {
             $lines = $this->withProductDetails($lines);
             $orderValues['order_line'] = array_map(
                 fn (array $line): array => [0, 0, $this->staffSaleLine($line)],
@@ -1461,7 +1650,7 @@ class OdooClient
             'order_line' => array_merge([[5, 0, 0]], array_map(fn (array $line): array => [0, 0, $this->staffSaleLine($line)], $lines)),
         ];
         if ($notes !== null) {
-            $vals['note'] = OdooNoteHtml::trimEmptyTail($notes);
+            $vals['note'] = OdooNoteHtml::safe($notes);
         }
         if ($reference !== null && $reference !== '') {
             $vals['client_order_ref'] = $reference;
@@ -1525,6 +1714,12 @@ class OdooClient
         }
 
         return $this->invoiceSnapshot($id) ?? ['id' => $id];
+    }
+
+    /** The customer of a draft invoice; its lines stay linked to the order. */
+    public function setInvoicePartner(int $id, int $partnerId): void
+    {
+        $this->call('account.move', 'write', ['ids' => [$id], 'vals' => ['partner_id' => $partnerId]]);
     }
 
     /** An unpaid invoice is cancelled; a posted one goes through draft first, as in Odoo. */
@@ -1649,7 +1844,7 @@ class OdooClient
             if (! is_array($rows) || ! array_is_list($rows)) {
                 throw new RuntimeException('Odoo did not return a record list.');
             }
-        } catch (\Throwable) {
+        } catch (Throwable) {
             $rows = $this->searchRead('account.payment.term', $domain, $fields, 100, 0, $order);
         }
 
@@ -1772,6 +1967,20 @@ class OdooClient
         return $row !== null
             && ($row['state'] ?? '') === 'posted'
             && in_array((string) ($row['payment_state'] ?? ''), ['not_paid', 'partial'], true);
+    }
+
+    /** A draft or posted invoice with something left to pay: a payment posts it if needed, then goes on it. */
+    public function invoiceOpenForPayment(int $id): bool
+    {
+        if ($id <= 0 || ! $this->configured()) {
+            return false;
+        }
+        $row = $this->invoiceSnapshot($id);
+
+        return $row !== null
+            && in_array($row['state'] ?? '', ['draft', 'posted'], true)
+            && ! in_array((string) ($row['payment_state'] ?? ''), ['paid', 'in_payment', 'reversed'], true)
+            && (($row['state'] ?? '') === 'draft' || (float) ($row['amount_residual'] ?? 0) > 0.009);
     }
 
     public function postInvoice(int $id): void
@@ -2746,6 +2955,7 @@ XML;
         if (! is_string($value)) {
             return '';
         }
+        $value = preg_replace('#<br\s*/?>|</(p|div|li|h[1-6]|tr)>#i', "\n", $value) ?? $value;
         $text = html_entity_decode(strip_tags($value), ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $text = preg_replace("/[ \t]*\n[ \t]*/", "\n", $text) ?? $text;
         $text = preg_replace("/\n{3,}/", "\n\n", $text) ?? $text;

@@ -18,12 +18,14 @@ use App\Http\Requests\ImportOdooCrmClientsExcelRequest;
 use App\Http\Requests\StoreOdooInvoiceRequest;
 use App\Http\Requests\StoreOdooQuotationRequest;
 use App\Models\Client;
+use App\Models\Invoice;
 use App\Models\ServiceRequest;
 use App\Services\OdooClient;
 use App\Services\RequestStatusTransitionService;
 use App\Services\TelegramNotifier;
 use App\Support\Money;
 use App\Support\OdooPaperLimits;
+use App\Support\ResolveOdooClient;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -329,22 +331,45 @@ class OdooController extends Controller
         ], 201);
     }
 
-    public function showQuotation(int $id, OdooClient $odoo): JsonResponse
+    public function showQuotation(int $id, OdooClient $odoo, ResolveOdooClient $resolve): JsonResponse
     {
         $snapshot = $this->paper($odoo, 'sale.order', $id);
 
         return response()->json(['data' => [
             ...$this->withRequests([$snapshot], 'odoo_quotation_id')[0],
+            ...$this->paperClient($resolve, $snapshot, 'odoo_quotation_id'),
             'lines' => $odoo->paperLines('sale.order', $id),
+            'notes' => $odoo->quotationNote($id),
             'invoiced' => $odoo->saleOrderInvoiced($id),
         ]]);
     }
 
-    public function showInvoice(int $id, OdooClient $odoo): JsonResponse
+    public function showInvoice(int $id, OdooClient $odoo, ResolveOdooClient $resolve): JsonResponse
     {
         $snapshot = $this->paper($odoo, 'account.move', $id);
 
-        return response()->json(['data' => [...$this->withRequests([$snapshot], 'odoo_invoice_id')[0], 'lines' => $odoo->paperLines('account.move', $id)]]);
+        return response()->json(['data' => [
+            ...$this->withRequests([$snapshot], 'odoo_invoice_id')[0],
+            ...$this->paperClient($resolve, $snapshot, 'odoo_invoice_id'),
+            'lines' => $odoo->paperLines('account.move', $id),
+        ]]);
+    }
+
+    /**
+     * The dashboard client of a paper: by its partner or company, else by the request it is on.
+     *
+     * @param  array<string, mixed>  $snapshot
+     * @return array{client_id: int|null, client_name: string|null}
+     */
+    private function paperClient(ResolveOdooClient $resolve, array $snapshot, string $column): array
+    {
+        $client = $resolve->forPartner($snapshot['partner_id'] ?? null, $snapshot['commercial_partner_id'] ?? null)
+            ?? ServiceRequest::query()->where($column, (string) ($snapshot['id'] ?? ''))->latest('id')->first()?->client;
+
+        return [
+            'client_id' => $client?->id,
+            'client_name' => $client === null ? null : (filled($client->company_name) ? (string) $client->company_name : (string) $client->name),
+        ];
     }
 
     /**
@@ -360,7 +385,7 @@ class OdooController extends Controller
         TelegramNotifier $telegram,
     ): JsonResponse {
         $validated = $request->validate($this->paperRules() + [
-            'notes' => ['nullable', 'string', 'max:5000'],
+            'notes' => OdooPaperLimits::notesRule(),
             'deliver' => ['nullable', 'in:email,whatsapp,both,phone'],
         ]);
         $snapshot = $this->paper($odoo, 'sale.order', $id);
@@ -471,15 +496,21 @@ class OdooController extends Controller
         PublishOdooPaper $publish,
         TelegramNotifier $telegram,
     ): JsonResponse {
-        $validated = $request->validate($this->paperRules() + [
+        $validated = $request->validate([
+            'reference' => ['nullable', 'string', 'max:64'],
+            'payment_term_id' => ['nullable', 'integer', 'min:0'],
+            'client_id' => ['nullable', 'integer', 'exists:clients,id'],
             'deliver' => ['nullable', 'in:email,whatsapp,both,phone'],
-        ]);
+        ] + OdooPaperLimits::lineRules('required_without:client_id'));
         $snapshot = $this->paper($odoo, 'account.move', $id);
         abort_if(($snapshot['state'] ?? '') === 'cancel', 422, 'الفاتورة ملغاة.');
         abort_unless(in_array($snapshot['payment_state'] ?? 'not_paid', ['not_paid'], true), 422, 'دُفعت الفاتورة كلها أو بعضها، فلا تُعدَّل.');
 
+        $this->moveDraftToClient($odoo, $snapshot, $validated['client_id'] ?? null);
         try {
-            $updated = $odoo->updateStaffInvoice($id, $validated['lines'], $validated['reference'] ?? null, $this->paymentTerm($validated));
+            $updated = isset($validated['lines'])
+                ? $odoo->updateStaffInvoice($id, $validated['lines'], $validated['reference'] ?? null, $this->paymentTerm($validated))
+                : ($odoo->invoiceSnapshot($id) ?? $snapshot);
         } catch (\Throwable $exception) {
             return response()->json(['message' => 'تعذر تعديل الفاتورة في أودو: '.$exception->getMessage()], 502);
         }
@@ -504,6 +535,30 @@ class OdooController extends Controller
         }
 
         return response()->json(['data' => $updated, 'message' => $message]);
+    }
+
+    /**
+     * A draft made out to the wrong partner moves to the chosen client. A posted invoice
+     * keeps its customer, as in Odoo.
+     *
+     * @param  array<string, mixed>  $snapshot
+     */
+    private function moveDraftToClient(OdooClient $odoo, array $snapshot, mixed $clientId): void
+    {
+        if (! is_numeric($clientId) || (int) $clientId <= 0) {
+            return;
+        }
+        $client = Client::query()->findOrFail((int) $clientId);
+        abort_unless(filled($client->odoo_partner_id), 422, 'العميل غير مربوط بشريك في أودو.');
+        if ((string) $client->odoo_partner_id === (string) ($snapshot['partner_id'] ?? '')) {
+            return;
+        }
+        abort_unless(($snapshot['state'] ?? '') === 'draft', 422, 'عميل الفاتورة يتغير وهي مسودة فقط.');
+        try {
+            $odoo->setInvoicePartner((int) $snapshot['id'], (int) $client->odoo_partner_id);
+        } catch (\Throwable $exception) {
+            abort(502, 'تعذر تغيير عميل الفاتورة في أودو: '.$exception->getMessage());
+        }
     }
 
     /** An unpaid invoice is cancelled in Odoo; its request keeps waiting for payment until a correct one is issued. */
@@ -627,6 +682,7 @@ class OdooController extends Controller
         ApplyQuotationAcceptance $acceptance,
         RequestStatusTransitionService $transitions,
         TelegramNotifier $telegram,
+        ResolveOdooClient $resolve,
     ): JsonResponse {
         if (! $odoo->configured()) {
             return response()->json(['message' => 'Odoo is not configured.'], 422);
@@ -654,7 +710,7 @@ class OdooController extends Controller
                 if ($link === null) {
                     return response()->json(['message' => 'عرض السعر غير موجود في أودو.'], 422);
                 }
-                if ((string) $link['partner_id'] !== (string) $client->odoo_partner_id) {
+                if (! $resolve->belongsTo($client, $link['partner_id'])) {
                     return response()->json(['message' => 'عرض السعر يخص عميلاً آخر في أودو.'], 422);
                 }
                 if ($link['state'] === 'cancel') {
@@ -716,7 +772,7 @@ class OdooController extends Controller
      * is left, or a down payment by percentage or fixed amount. The result is a draft linked
      * to the order, opened in the dashboard for review before it is confirmed.
      */
-    public function invoiceQuotation(Request $request, int $id, OdooClient $odoo): JsonResponse
+    public function invoiceQuotation(Request $request, int $id, OdooClient $odoo, ResolveOdooClient $resolve): JsonResponse
     {
         $validated = $request->validate([
             'method' => ['required', 'in:delivered,percentage,fixed'],
@@ -737,11 +793,47 @@ class OdooController extends Controller
         }
 
         $invoice = $odoo->invoiceSnapshot($invoiceId) ?? ['id' => $invoiceId];
+        $linked = $this->linkDraftToRequest($odoo, $id, $invoiceId);
 
         return response()->json([
-            'data' => [...$invoice, 'lines' => $odoo->paperLines('account.move', $invoiceId), 'quotation_id' => $id],
+            'data' => [
+                ...$invoice,
+                ...$this->paperClient($resolve, $invoice, 'odoo_invoice_id'),
+                'lines' => $odoo->paperLines('account.move', $invoiceId),
+                'quotation_id' => $id,
+                'request' => $linked === null ? null : ['id' => $linked->id, 'number' => $linked->number, 'status' => $linked->status->value],
+            ],
             'message' => 'أُنشئت مسودة الفاتورة. راجعها ثم اضغط «تأكيد» لترحيلها.',
         ], 201);
+    }
+
+    /**
+     * The wizard draft becomes the request's invoice, so confirming the payment posts it
+     * instead of making a second one. An invoice still waiting on its payment keeps its place.
+     */
+    private function linkDraftToRequest(OdooClient $odoo, int $orderId, int $invoiceId): ?ServiceRequest
+    {
+        $linked = ServiceRequest::query()->where('odoo_quotation_id', (string) $orderId)->latest('id')->first();
+        if ($linked === null) {
+            return null;
+        }
+        $current = (int) ($linked->odoo_invoice_id ?? 0);
+        if ($current > 0 && $current !== $invoiceId) {
+            try {
+                $snapshot = $odoo->invoiceSnapshot($current);
+            } catch (\Throwable) {
+                return $linked;
+            }
+            $open = $snapshot !== null
+                && ($snapshot['state'] ?? '') !== 'cancel'
+                && ! in_array((string) ($snapshot['payment_state'] ?? ''), ['paid', 'in_payment', 'reversed'], true);
+            if ($open) {
+                return $linked;
+            }
+        }
+        $linked->forceFill(['odoo_invoice_id' => (string) $invoiceId])->save();
+
+        return $linked;
     }
 
     /**
@@ -758,27 +850,43 @@ class OdooController extends Controller
         ApplyQuotationAcceptance $acceptance,
         RequestStatusTransitionService $transitions,
         TelegramNotifier $telegram,
+        ResolveOdooClient $resolve,
     ): JsonResponse {
         $validated = $request->validate([
             'deliver' => ['required', 'in:email,whatsapp,both,phone'],
             'quotation_id' => ['nullable', 'integer', 'min:1'],
+            'client_id' => ['nullable', 'integer', 'exists:clients,id'],
             'invoice_date' => ['nullable', 'date'],
             'due_date' => ['nullable', 'date'],
         ]);
         $snapshot = $this->paper($odoo, 'account.move', $id);
         abort_unless(($snapshot['state'] ?? '') === 'draft', 422, 'الفاتورة ليست مسودة.');
-        $client = Client::query()->where('odoo_partner_id', (string) ($snapshot['partner_id'] ?? ''))->latest('id')->first();
-        abort_if($client === null, 422, 'عميل الفاتورة غير موجود في الداشبورد.');
+        if (isset($validated['client_id'])) {
+            $this->moveDraftToClient($odoo, $snapshot, $validated['client_id']);
+            $snapshot = $odoo->invoiceSnapshot($id) ?? $snapshot;
+        }
+        // A draft opened from the invoice list knows its order only by the origin name.
+        $quotationId = (int) ($validated['quotation_id'] ?? $odoo->saleOrderIdByName($snapshot['invoice_origin'] ?? null) ?? 0);
+        $client = $resolve->forPartner($snapshot['partner_id'] ?? null, $snapshot['commercial_partner_id'] ?? null)
+            ?? ServiceRequest::query()->where('odoo_invoice_id', (string) $id)->latest('id')->first()?->client
+            ?? ($quotationId > 0 ? ServiceRequest::query()->where('odoo_quotation_id', (string) $quotationId)->latest('id')->first()?->client : null)
+            ?? ($quotationId > 0 ? $resolve->forPartner($odoo->quotationSnapshot($quotationId)['partner_id'] ?? null) : null);
+        abort_if($client === null, 422, 'عميل الفاتورة غير مربوط بعميل في الداشبورد. اربط شريك أودو بالعميل أولاً.');
         $blocked = $this->paperChannel($client, $validated['deliver']);
         if ($blocked instanceof JsonResponse) {
             return $blocked;
         }
 
-        // A draft opened from the invoice list knows its order only by the origin name.
-        $quotationId = (int) ($validated['quotation_id'] ?? $odoo->saleOrderIdByName($snapshot['invoice_origin'] ?? null) ?? 0);
         $opened = ServiceRequest::query()->where('odoo_invoice_id', (string) $id)->latest('id')->first()
             ?? ($quotationId > 0 ? ServiceRequest::query()->where('client_id', $client->id)->where('odoo_quotation_id', (string) $quotationId)->latest('id')->first() : null)
-            ?? $openRequest->handle($client, $snapshot, [], is_string($snapshot['ref'] ?? null) ? $snapshot['ref'] : null);
+            ?? $openRequest->handle(
+                $client,
+                $snapshot,
+                [],
+                is_string($snapshot['ref'] ?? null) ? $snapshot['ref'] : null,
+                orderId: $quotationId > 0 ? $quotationId : null,
+                orderTotal: $quotationId > 0 ? (float) ($odoo->quotationSnapshot($quotationId)['amount_total'] ?? 0) : null,
+            );
         [$created, $message] = $this->postAndSend(
             $client,
             $opened,
@@ -855,7 +963,7 @@ class OdooController extends Controller
         $request->invoices()->create([
             'invoice_number' => (string) ($snapshot['name'] ?? 'INV-'.$request->number),
             'amount' => (float) ($snapshot['amount_total'] ?? $request->amount_total ?? 0),
-            'kind' => 'full',
+            'kind' => Invoice::kindFor($request, (float) ($snapshot['amount_total'] ?? $request->amount_total ?? 0)),
             'status' => 'issued',
             'pdf_path' => $pdfPath !== '' ? $pdfPath : null,
             'issued_at' => now(),

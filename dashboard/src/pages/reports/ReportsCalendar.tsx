@@ -137,7 +137,7 @@ function deadlineColor(row: ReportDeadlineRow, calendarColor?: string | null) {
 export function ReportsCalendar({ locale, client }: { locale: Locale; client?: { id: number; name: string; company_name: string | null } }) {
   const ar = locale === "ar";
   const can = useCan();
-  const canCreate = can("ops.reports.create");
+  const canCreateReports = can("ops.reports.create");
   const canUpdate = can("ops.reports.update");
   const canDelete = can("ops.reports.delete");
   const [prefs, setPrefsState] = useState<Prefs>(loadPrefs);
@@ -146,6 +146,8 @@ export function ReportsCalendar({ locale, client }: { locale: Locale; client?: {
   const [activity, setActivity] = useState<ReportVersion[]>([]);
   const [calendars, setCalendars] = useState<ReportCalendar[]>([]);
   const [canManageCalendars, setCanManageCalendars] = useState(false);
+  const [mainVisible, setMainVisible] = useState(true);
+  const canCreate = canCreateReports && (mainVisible || calendars.length > 0);
   const [roles, setRoles] = useState<Array<{ id: number; name: string }>>([]);
   const [calendarDialog, setCalendarDialog] = useState<{ calendar: ReportCalendar | null } | null>(null);
   const [loading, setLoading] = useState(false);
@@ -182,6 +184,7 @@ export function ReportsCalendar({ locale, client }: { locale: Locale; client?: {
         setActivity(res.data.activity);
         setCalendars(res.data.calendars ?? []);
         setCanManageCalendars(Boolean(res.data.can_manage_calendars));
+        setMainVisible(res.data.main_visible !== false);
         setRoles(res.data.roles ?? []);
       })
       .catch((err) => {
@@ -474,7 +477,7 @@ export function ReportsCalendar({ locale, client }: { locale: Locale; client?: {
               ) : null}
             </div>
             <ul className="gcal-cal-list">
-              <li>
+              {mainVisible ? <li>
                 <label className="gcal-cal">
                   <input
                     type="checkbox"
@@ -486,7 +489,7 @@ export function ReportsCalendar({ locale, client }: { locale: Locale; client?: {
                   <span>{ar ? "التقويم الرئيسي" : "Main calendar"}</span>
                   <small className="muted">{calendarCounts.get(MAIN_CALENDAR) ?? 0}</small>
                 </label>
-              </li>
+              </li> : null}
               {calendars.map((calendar) => {
                 const color = calendar.color ?? STATUS_COLORS.upcoming;
                 const seenBy = calendar.roles.length
@@ -702,6 +705,7 @@ export function ReportsCalendar({ locale, client }: { locale: Locale; client?: {
           initial={dialog}
           fixedClient={client != null}
           calendars={calendars}
+          mainVisible={mainVisible}
           onClose={() => setDialog(null)}
           onSaved={() => {
             setDialog(null);

@@ -61,19 +61,24 @@ export function DeadlineDialog({
   initial,
   fixedClient,
   calendars,
+  mainVisible = true,
   onClose,
   onSaved,
 }: {
   locale: Locale;
   initial: DeadlineDraft;
   fixedClient: boolean;
-  /** Extra calendars this staff member sees; the main calendar is always offered. */
+  /** Extra calendars this staff member sees. */
   calendars: ReportCalendar[];
+  /** Whether the main calendar is offered. */
+  mainVisible?: boolean;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const ar = locale === "ar";
-  const [draft, setDraft] = useState(initial);
+  const [draft, setDraft] = useState(() =>
+    !mainVisible && initial.calendar_id == null && calendars.length > 0 ? { ...initial, calendar_id: calendars[0].id } : initial,
+  );
   const [saving, setSaving] = useState(false);
   const editing = initial.id != null;
 
@@ -136,7 +141,7 @@ export function DeadlineDialog({
               </div>
             </div>
 
-            {calendars.length > 0 ? (
+            {calendars.length > 1 || (calendars.length > 0 && mainVisible) ? (
               <div className="gcal-line">
                 <CalendarDays size={17} aria-hidden />
                 <div className="gcal-line-body">
@@ -146,7 +151,7 @@ export function DeadlineDialog({
                     onChange={(event) => patch({ calendar_id: event.target.value ? Number(event.target.value) : null })}
                     aria-label={ar ? "التقويم" : "Calendar"}
                   >
-                    <option value="">{ar ? "التقويم الرئيسي" : "Main calendar"}</option>
+                    {mainVisible ? <option value="">{ar ? "التقويم الرئيسي" : "Main calendar"}</option> : null}
                     {calendars.map((calendar) => (
                       <option key={calendar.id} value={calendar.id}>{calendar.name}</option>
                     ))}
