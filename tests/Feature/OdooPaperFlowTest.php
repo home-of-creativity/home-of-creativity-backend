@@ -6,6 +6,7 @@ use App\Actions\ApproveQuotation;
 use App\Actions\ConfirmRequestPayment;
 use App\Enums\PaymentMethod;
 use App\Enums\RequestStatus;
+use App\Mail\ClientDocumentMail;
 use App\Models\Client;
 use App\Models\Role;
 use App\Models\ServiceRequest;
@@ -14,6 +15,7 @@ use GuzzleHttp\Promise\PromiseInterface;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Mail;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -391,6 +393,46 @@ class OdooPaperFlowTest extends TestCase
         $this->postJson('/api/admin/odoo/invoices/990/notes', ['body' => 'x'])->assertCreated();
     }
 
+    public function test_the_proforma_previews_and_reaches_the_client_without_making_an_invoice(): void
+    {
+        Mail::fake();
+        $this->botClient();
+
+        $response = $this->get('/api/admin/odoo/quotations/880/pdf?proforma=1')->assertOk();
+        $this->assertStringStartsWith('%PDF', $response->getContent());
+        $this->assertStringContainsString('proforma-S00880', (string) $response->headers->get('Content-Disposition'));
+        $composer = collect($this->odoo['payloads'])->first(fn (array $row): bool => $row[0] === 'mail.compose.message' && $row[1] === 'create');
+        $this->assertTrue($composer[3]['context']['proforma']);
+        $this->assertSame(28, $composer[3]['context']['default_template_id']);
+        $this->assertSame(1, $this->calls('ir.attachment', 'unlink'));
+        $this->assertSame(0, $this->calls('mail.compose.message', 'action_send_mail'));
+
+        $this->postJson('/api/admin/odoo/quotations/880/proforma', ['deliver' => 'email'])->assertOk()
+            ->assertJsonPath('message', 'أُرسلت الفاتورة الشكلية S00880 للعميل.');
+        Mail::assertSent(ClientDocumentMail::class, fn (ClientDocumentMail $mail): bool => $mail->hasTo('client@example.com'));
+        $note = collect($this->odoo['payloads'])->first(fn (array $row): bool => $row[0] === 'sale.order' && $row[1] === 'message_post');
+        $this->assertStringContainsString('أُرسلت الفاتورة الشكلية للعميل عبر البريد', $note[3]['body']);
+        $this->assertSame(0, $this->calls('account.move', 'create'));
+        $this->assertSame(0, $this->calls('sale.advance.payment.inv', 'create'));
+        $this->assertSame(0, $this->calls('account.move', 'action_post'));
+        $this->postJson('/api/admin/odoo/quotations/880/proforma', ['deliver' => 'fax'])->assertUnprocessable();
+    }
+
+    public function test_the_proforma_needs_its_own_permission(): void
+    {
+        $this->botClient();
+        $role = Role::query()->create(['name' => 'Sales', 'abilities' => ['ops.clients.view', 'ops.clients.odoo']]);
+        $staff = User::factory()->create(['is_admin' => false, 'role_id' => $role->id]);
+        Sanctum::actingAs($staff);
+
+        $this->get('/api/admin/odoo/quotations/880/pdf?proforma=1')->assertForbidden();
+        $this->postJson('/api/admin/odoo/quotations/880/proforma', ['deliver' => 'email'])->assertForbidden();
+
+        $role->forceFill(['abilities' => ['ops.clients.view', 'ops.clients.proforma']])->save();
+        Sanctum::actingAs($staff->fresh());
+        $this->get('/api/admin/odoo/quotations/880/pdf?proforma=1')->assertOk();
+    }
+
     public function test_an_invoice_made_out_to_a_company_contact_finds_the_client_and_can_move_while_draft(): void
     {
         $client = $this->botClient();
@@ -448,6 +490,11 @@ class OdooPaperFlowTest extends TestCase
             $model === 'sale.order' && $method === 'action_confirm' => $this->setOrder('sale'),
             $model === 'sale.order' && $method === 'action_cancel' => $this->setOrder('cancel'),
             $model === 'sale.order' && $method === 'write' => $this->writeOrderLines($payload),
+            $model === 'sale.order' && $method === 'action_quotation_send' => ['context' => ['default_template_id' => 28, 'proforma' => true]],
+            $model === 'mail.compose.message' && $method === 'create' => 4,
+            $model === 'mail.compose.message' && $method === 'read' => [['id' => 4, 'attachment_ids' => [1155]]],
+            $model === 'ir.attachment' && $method === 'read' => [['id' => 1155, 'mimetype' => 'application/pdf', 'datas' => base64_encode('%PDF-1.4 proforma')]],
+            $model === 'ir.attachment' && $method === 'unlink' => true,
             $method === 'get_portal_url' => $this->odoo['portal'] ?? false,
             $method === 'message_post' => 501,
             $model === 'mail.message' && $method === 'search_read' => $this->odoo['messages'] ?? [],

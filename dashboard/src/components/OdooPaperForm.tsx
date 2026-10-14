@@ -7,6 +7,7 @@ import { HtmlEditorField } from "./HtmlEditorField";
 import { InvoiceWizardDialog, type InvoiceDraft } from "./InvoiceWizardDialog";
 import { OdooPaperActivity } from "./OdooPaperActivity";
 import { OdooPaperPreview } from "./OdooPaperPreview";
+import { PaperDraftPreview, type DraftPaper } from "./PaperDraftPreview";
 
 type LineKind = "product" | "section" | "note";
 type Line = { id: string; kind: LineKind; title: string; amount: string; units: string; discount: string; taxIds: number[]; productId?: number; notes?: string };
@@ -150,8 +151,8 @@ export function OdooPaperForm({
   quotation?: OdooQuotation | null;
   t: (c: { ar: string; en: string }) => string;
   onCancel: () => void;
-  /** `requestId` is the request a sent quotation opened. */
-  onCreated: (message: string, requestId?: number) => void;
+  /** `requestId` is the request a sent quotation opened; `saved` is the paper in Odoo. */
+  onCreated: (message: string, requestId?: number, saved?: { id: number; name: string }) => void;
   editing?: PaperEditing | null;
   /** A draft from Odoo's invoice wizard, opened for review. */
   onDraft?: (draft: InvoiceDraft, message: string) => void;
@@ -170,7 +171,7 @@ export function OdooPaperForm({
   const [pinned, setPinned] = useState<Client | null>(null);
   const [clientQuery, setClientQuery] = useState(editing?.clientName ?? "");
   const [clientId, setClientId] = useState(editing?.clientId ? String(editing.clientId) : "");
-  const [paperView, setPaperView] = useState<"preview" | "activity" | null>(null);
+  const [paperView, setPaperView] = useState<"preview" | "draft" | "activity" | null>(null);
   const [clientOpen, setClientOpen] = useState(false);
   const [clientActive, setClientActive] = useState(0);
   const [reference, setReference] = useState(editing?.reference ?? "");
@@ -462,7 +463,7 @@ export function OdooPaperForm({
       if (draftInvoice && mode === "draft" && !linesTouched.current) {
         // The wizard's lines stay linked to the order; only the customer may change.
         if (movedTo) await api.updateOdooInvoice(editing.id, { client_id: movedTo });
-        onCreated(t(copy.saved));
+        onCreated(t(copy.saved), undefined, { id: editing.id, name: editing.name });
         return;
       }
       if (draftInvoice && mode === "send") {
@@ -470,7 +471,7 @@ export function OdooPaperForm({
           await api.updateOdooInvoice(editing.id, { lines: filled, client_id: movedTo, reference: reference.trim() || undefined, payment_term_id: termId, deliver });
         }
         const res = await api.postOdooInvoice(editing.id, { deliver, quotation_id: editing.quotationId ?? undefined, client_id: movedTo });
-        onCreated(res.message || t(copy.saved));
+        onCreated(res.message || t(copy.saved), undefined, { id: editing.id, name: res.data?.name || editing.name });
         return;
       }
       if (editing) {
@@ -478,7 +479,7 @@ export function OdooPaperForm({
         const res = kind === "quotation"
           ? await api.updateOdooQuotation(editing.id, { lines: filled, notes: notes.trim(), reference: reference.trim() || undefined, payment_term_id: termId, deliver })
           : await api.updateOdooInvoice(editing.id, { lines: filled, client_id: movedTo, reference: reference.trim() || undefined, payment_term_id: termId, deliver });
-        onCreated(res.message || t(copy.saved));
+        onCreated(res.message || t(copy.saved), undefined, { id: editing.id, name: res.data?.name || editing.name });
         return;
       }
       if (!selected) return;
@@ -494,7 +495,7 @@ export function OdooPaperForm({
           payment_term_id: termId || undefined,
           lines: filled,
         });
-        onCreated(res.message || t(copy.quotationCreated), res.request?.id);
+        onCreated(res.message || t(copy.quotationCreated), res.request?.id, res.data ? { id: Number(res.data.id), name: res.data.name } : undefined);
         return;
       }
       const res = await api.createOdooInvoice({
@@ -509,7 +510,7 @@ export function OdooPaperForm({
         payment_term_id: quotationId ? termId : termId || undefined,
         lines: !quotationId && filled.length ? filled : undefined,
       });
-      onCreated(res.message || t(copy.invoiceCreated));
+      onCreated(res.message || t(copy.invoiceCreated), undefined, res.data ? { id: Number(res.data.id), name: res.data.name } : undefined);
     } catch (err) {
       setError(err instanceof Error ? err.message : t(copy.saveFailed));
     } finally {
@@ -526,6 +527,39 @@ export function OdooPaperForm({
   const taxTotal = taxed.reduce((sum, row) => sum + row.tax, 0);
   const total = untaxed + taxTotal;
 
+  function draftPaper(): DraftPaper {
+    const termName = paymentTermId
+      ? terms.find((term) => String(term.id) === paymentTermId)?.name ?? `${t(copy.paperPaymentTerms)} #${paymentTermId}`
+      : t(copy.paperImmediate);
+    const dates = editing
+      ? []
+      : kind === "quotation"
+      ? [{ label: t(copy.paperQuoteDate), value: quoteDate }, { label: t(copy.paperValidity), value: validityDate }]
+      : [{ label: t(copy.paperInvoiceDate), value: invoiceDate }, ...(paymentTermId ? [] : [{ label: t(copy.paperDueDate), value: dueDate }])];
+    return {
+      kind,
+      name: editing?.name && editing.name !== "/" ? editing.name : undefined,
+      client: selected
+        ? { name: selected.name, company: selected.company_name, email: selected.email, phone: selected.phone }
+        : editing?.clientName ? { name: editing.clientName } : null,
+      info: [...dates, { label: t(copy.paperPaymentTerms), value: termName }, { label: t(copy.paperReference), value: reference.trim() }],
+      lines: lines.map((line, index) => ({
+        kind: line.kind,
+        title: line.title,
+        notes: line.notes,
+        units: Number(line.units || "1") || 0,
+        price: Number(line.amount) || 0,
+        discount: Number(line.discount || "0") || 0,
+        taxes: taxes.filter((tax) => line.taxIds.includes(tax.id)).map((tax) => tax.name),
+        amount: taxed[index].base,
+      })),
+      untaxed,
+      tax: taxTotal,
+      total,
+      terms: kind === "quotation" ? notes : undefined,
+    };
+  }
+
   return (
     <section className="card action-card odoo-paper-card">
       <div className="odoo-paper-top">
@@ -541,12 +575,17 @@ export function OdooPaperForm({
             ? `${t(kind === "quotation" ? copy.editQuotation : copy.editInvoice)} ${editing.name}`
             : t(kind === "quotation" ? copy.createQuotation : copy.createInvoice)}
         </h2>
-        {editing ? (
-          <span className="paper-inline-actions">
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPaperView("preview")}>{t(copy.paperPreview)}</button>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPaperView("activity")}>{t(copy.paperActivity)}</button>
-          </span>
-        ) : null}
+        <span className="paper-inline-actions">
+          {showLines ? (
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPaperView("draft")}>{t(copy.paperDraftPreviewTitle)}</button>
+          ) : null}
+          {editing ? (
+            <>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPaperView("preview")}>{t(copy.paperPreview)}</button>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPaperView("activity")}>{t(copy.paperActivity)}</button>
+            </>
+          ) : null}
+        </span>
       </div>
       <form className="quotation-form" onSubmit={(event) => void onSubmit(event)}>
         <div className="odoo-paper-head">
@@ -882,6 +921,7 @@ export function OdooPaperForm({
           }}
         />
       ) : null}
+      {paperView === "draft" ? <PaperDraftPreview paper={draftPaper()} t={t} onClose={() => setPaperView(null)} /> : null}
       {editing && paperView === "preview" ? (
         <OdooPaperPreview kind={kind === "quotation" ? "quotations" : "invoices"} id={editing.id} name={editing.name} t={t} onClose={() => setPaperView(null)} />
       ) : null}

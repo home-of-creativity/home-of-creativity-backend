@@ -6,6 +6,7 @@ import { api, type Client, type OdooInvoice, type OdooPaperKind, type OdooQuotat
 import { type PaperEditing } from "../components/OdooPaperForm";
 import { OdooPaperActivity } from "../components/OdooPaperActivity";
 import { OdooPaperPreview } from "../components/OdooPaperPreview";
+import { ProformaDialog } from "../components/ProformaDialog";
 import { ConfirmAction } from "../components/ConfirmAction";
 import { useCan } from "../lib/useCan";
 import { DriveFolderPicker } from "../components/DriveFolderPicker";
@@ -151,7 +152,19 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
   }
 
   const [wizardQuote, setWizardQuote] = useState<OdooQuotation | null>(null);
-  const [paperView, setPaperView] = useState<{ kind: OdooPaperKind; id: number; name: string; mode: "preview" | "activity" } | null>(null);
+  const [paperView, setPaperView] = useState<{ kind: OdooPaperKind; id: number; name: string; mode: "preview" | "activity" | "proforma" } | null>(null);
+
+  /** After saving, Odoo's file is one click away from the toast. */
+  function announceSaved(message: string, kind: OdooPaperKind, saved?: { id: number; name: string }) {
+    if (!saved?.id) {
+      toast.success(message);
+      return;
+    }
+    toast.success(message, {
+      duration: 10000,
+      action: { label: t(copy.paperPreviewSaved), onClick: () => setPaperView({ kind, id: saved.id, name: saved.name, mode: "preview" }) },
+    });
+  }
 
   /** A draft from Odoo's invoice wizard opens in the invoice form for review and «تأكيد». */
   function openDraft(draft: InvoiceDraft, message: string) {
@@ -648,13 +661,17 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
             editing={paper.editing}
             t={t}
             onCancel={() => setPaper(null)}
-            onCreated={(message, requestId) => {
+            onCreated={(message, requestId, saved) => {
               setNotice(message);
-              toast.success(message);
               setPaper(null);
               setRefresh((value) => value + 1);
               // A sent quotation opened a request; follow it from its page.
-              if (requestId) navigate(`/requests/${requestId}`);
+              if (requestId) {
+                toast.success(message);
+                navigate(`/requests/${requestId}`);
+                return;
+              }
+              announceSaved(message, "quotations", saved);
             }}
           />
         ) : null}
@@ -756,6 +773,11 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                       <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPaperView({ kind: "quotations", id: item.id, name: item.name, mode: "activity" })}>
                         {t(copy.paperActivity)}
                       </button>
+                      {item.state !== "cancel" && can("ops.clients.proforma") ? (
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPaperView({ kind: "quotations", id: item.id, name: item.name, mode: "proforma" })}>
+                          {t(copy.paperProforma)}
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         className="btn btn-ghost"
@@ -792,11 +814,11 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
             editing={paper.editing}
             t={t}
             onCancel={() => setPaper(null)}
-            onCreated={(message) => {
+            onCreated={(message, _requestId, saved) => {
               setNotice(message);
-              toast.success(message);
               setPaper(null);
               setRefresh((value) => value + 1);
+              announceSaved(message, "invoices", saved);
             }}
             onDraft={openDraft}
           />
@@ -917,6 +939,9 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
       ) : null}
       {paperView?.mode === "preview" ? (
         <OdooPaperPreview kind={paperView.kind} id={paperView.id} name={paperView.name} t={t} onClose={() => setPaperView(null)} />
+      ) : null}
+      {paperView?.mode === "proforma" ? (
+        <ProformaDialog id={paperView.id} name={paperView.name} t={t} onClose={() => setPaperView(null)} />
       ) : null}
       {paperView?.mode === "activity" ? (
         <OdooPaperActivity

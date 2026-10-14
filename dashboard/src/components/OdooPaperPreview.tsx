@@ -1,19 +1,24 @@
 import { Download, Printer, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, type OdooPaperKind } from "../api";
 import { copy } from "../i18n";
 
-/** The quotation or invoice PDF as Odoo prints it, with print and download. */
+/** The quotation, its pro-forma invoice, or the invoice PDF as Odoo prints it, with print and download. */
 export function OdooPaperPreview({
   kind,
   id,
   name,
+  proforma = false,
+  actions,
   t,
   onClose,
 }: {
   kind: OdooPaperKind;
   id: number;
   name: string;
+  proforma?: boolean;
+  /** Extra controls in the header, e.g. sending the pro-forma. */
+  actions?: ReactNode;
   t: (c: { ar: string; en: string }) => string;
   onClose: () => void;
 }) {
@@ -24,7 +29,7 @@ export function OdooPaperPreview({
   useEffect(() => {
     let cancelled = false;
     let objectUrl = "";
-    api.odooPaperPdf(kind, id)
+    api.odooPaperPdf(kind, id, proforma)
       .then((blob) => {
         if (cancelled) return;
         objectUrl = URL.createObjectURL(blob);
@@ -37,7 +42,7 @@ export function OdooPaperPreview({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [kind, id]);
+  }, [kind, id, proforma]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -54,15 +59,16 @@ export function OdooPaperPreview({
     view.print();
   }
 
-  const fileName = `${name.replace(/[\\/:*?"<>|]+/g, "-") || id}.pdf`;
+  const fileName = `${proforma ? "proforma-" : ""}${name.replace(/[\\/:*?"<>|]+/g, "-") || id}.pdf`;
 
   return (
     <div className="form-dialog" role="dialog" aria-modal="true" aria-labelledby="odoo-preview-title">
       <div className="form-dialog-backdrop" onClick={onClose} />
       <div className="form-dialog-panel is-lg odoo-preview-panel">
         <div className="form-dialog-head">
-          <h2 className="form-dialog-title" id="odoo-preview-title">{t(copy.paperPreviewTitle)} {name}</h2>
+          <h2 className="form-dialog-title" id="odoo-preview-title">{t(proforma ? copy.paperProforma : copy.paperPreviewTitle)} {name}</h2>
           <div className="odoo-preview-actions">
+            {actions}
             <button type="button" className="btn btn-ghost" onClick={print} disabled={!url}>
               <Printer size={16} aria-hidden /> {t(copy.paperPrint)}
             </button>

@@ -184,6 +184,9 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
     Route::post('odoo/{kind}/{id}/notes', [AdminOdooPaperController::class, 'note'])
         ->middleware(['ability:ops.clients.odoo_note', 'throttle:30,1'])
         ->whereIn('kind', ['quotations', 'invoices'])->whereNumber('id');
+    Route::post('odoo/quotations/{id}/proforma', [AdminOdooPaperController::class, 'sendProforma'])
+        ->middleware(['ability:ops.clients.proforma', 'throttle:20,1'])
+        ->whereNumber('id');
     Route::middleware('ability:ops.clients.odoo')->group(function () {
         Route::post('odoo/sync-partners', [AdminOdooController::class, 'syncPartners']);
         Route::post('odoo/import-crm-clients', [AdminOdooController::class, 'importCrmClients']);

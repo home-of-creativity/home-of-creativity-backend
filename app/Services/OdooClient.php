@@ -2354,11 +2354,7 @@ XML,
 
             $body = $response->body();
             if ($response->successful() && str_starts_with($body, '%PDF')) {
-                $pages = app(OdooPaperPdf::class);
-                $paged = $pages->paginate($body);
-                $cover = $this->companyLetterheadPng();
-
-                return $cover === null ? $paged : $pages->stampContinuationCovers($paged, $cover);
+                return $this->decoratePaperPdf($body);
             }
 
             Log::warning('Odoo portal PDF response was not a PDF.', [
@@ -2373,6 +2369,74 @@ XML,
                 'record_id' => $recordId,
                 'error' => $exception->getMessage(),
             ]);
+        }
+
+        return null;
+    }
+
+    /** Page numbers and the letterhead on continuation pages, as on every paper we send. */
+    private function decoratePaperPdf(string $body): string
+    {
+        $pages = app(OdooPaperPdf::class);
+        $paged = $pages->paginate($body);
+        $cover = $this->companyLetterheadPng();
+
+        return $cover === null ? $paged : $pages->stampContinuationCovers($paged, $cover);
+    }
+
+    /**
+     * The order printed as Odoo's pro-forma invoice. The portal only prints the quotation,
+     * so the PDF comes from the «Send PRO-FORMA» mail composer, which renders it as an
+     * attachment; nothing is sent and the attachment is deleted after reading.
+     */
+    public function downloadProformaPdf(int $orderId): ?string
+    {
+        if (! $this->configured() || $orderId <= 0) {
+            return null;
+        }
+
+        $attachmentIds = [];
+        try {
+            $action = $this->call('sale.order', 'action_quotation_send', ['ids' => [$orderId], 'context' => ['proforma' => true]]);
+            $templateId = (int) (is_array($action) ? ($action['context']['default_template_id'] ?? 0) : 0);
+            $context = [
+                'default_model' => 'sale.order',
+                'default_res_ids' => [$orderId],
+                'default_composition_mode' => 'comment',
+                'proforma' => true,
+            ];
+            if ($templateId > 0) {
+                $context['default_template_id'] = $templateId;
+            }
+            $created = $this->createWithContext('mail.compose.message', [], $context);
+            $composerId = (int) (is_array($created) ? ($created[0] ?? 0) : $created);
+            $rows = $this->call('mail.compose.message', 'read', ['ids' => [$composerId], 'fields' => ['attachment_ids'], 'context' => $context]);
+            $attachmentIds = array_values(array_map('intval', (array) ($rows[0]['attachment_ids'] ?? [])));
+            if ($attachmentIds === []) {
+                Log::warning('Odoo pro-forma composer had no attachment.', ['order' => $orderId]);
+
+                return null;
+            }
+            $files = $this->call('ir.attachment', 'read', ['ids' => $attachmentIds, 'fields' => ['mimetype', 'datas']]);
+            foreach ((array) $files as $file) {
+                if (($file['mimetype'] ?? '') !== 'application/pdf' || ! is_string($file['datas'] ?? null)) {
+                    continue;
+                }
+                $body = base64_decode($file['datas'], true);
+                if (is_string($body) && str_starts_with($body, '%PDF')) {
+                    return $this->decoratePaperPdf($body);
+                }
+            }
+            Log::warning('Odoo pro-forma attachment was not a PDF.', ['order' => $orderId]);
+        } catch (Throwable $exception) {
+            Log::warning('Odoo pro-forma PDF failed.', ['order' => $orderId, 'error' => $exception->getMessage()]);
+        } finally {
+            if ($attachmentIds !== []) {
+                try {
+                    $this->call('ir.attachment', 'unlink', ['ids' => $attachmentIds]);
+                } catch (Throwable) {
+                }
+            }
         }
 
         return null;

@@ -2090,16 +2090,20 @@ export const api = {
     return request<Envelope<OdooInvoice>>(`/admin/odoo/invoices/${id}/post`, { method: "POST", body: JSON.stringify(payload) });
   },
   /** The quotation or invoice PDF exactly as Odoo prints it. */
-  async odooPaperPdf(kind: OdooPaperKind, id: number) {
+  async odooPaperPdf(kind: OdooPaperKind, id: number, proforma = false) {
     const headers = new Headers({ Accept: "application/pdf" });
     const token = getToken();
     if (token) headers.set("Authorization", `Bearer ${token}`);
-    const response = await fetch(`${API_URL}/admin/odoo/${kind}/${id}/pdf`, { headers });
+    const response = await fetch(`${API_URL}/admin/odoo/${kind}/${id}/pdf${proforma ? "?proforma=1" : ""}`, { headers });
     if (!response.ok) {
       const body = await response.json().catch(() => null) as { message?: string } | null;
       throw new Error(body?.message || `HTTP ${response.status}`);
     }
     return response.blob();
+  },
+  /** The order's pro-forma invoice to the client; no invoice is made in Odoo. */
+  sendOdooProforma(id: number, deliver: "email" | "whatsapp" | "both") {
+    return request<Envelope<{ id: number; name: string }>>(`/admin/odoo/quotations/${id}/proforma`, { method: "POST", body: JSON.stringify({ deliver }) });
   },
   odooPaperActivity(kind: OdooPaperKind, id: number) {
     return request<Envelope<OdooPaperMessage[]>>(`/admin/odoo/${kind}/${id}/activity`);

@@ -4,6 +4,7 @@ import { LoadingLottie } from "../components/LoadingLottie";
 import { PageHeader } from "../components/PageHeader";
 import { OdooPaperActivity } from "../components/OdooPaperActivity";
 import { OdooPaperPreview } from "../components/OdooPaperPreview";
+import { ProformaDialog } from "../components/ProformaDialog";
 import { api, type OdooPaperKind, type ServiceRequest } from "../api";
 import { ExtendScheduleDialog, WorkPlanDialog } from "./requests/WorkPlanDialog";
 import { copy, sources, statuses, type Locale } from "../i18n";
@@ -84,7 +85,7 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
   const [recordingDecision, setRecordingDecision] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
   const [extendOpen, setExtendOpen] = useState(false);
-  const [paperView, setPaperView] = useState<{ kind: OdooPaperKind; id: number; mode: "preview" | "activity" } | null>(null);
+  const [paperView, setPaperView] = useState<{ kind: OdooPaperKind; id: number; mode: "preview" | "activity" | "proforma" } | null>(null);
 
   useEffect(() => {
     if (!receiptUrl) return;
@@ -387,6 +388,11 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPaperView({ kind, id: paperId, mode: "activity" })}>
           {t(copy.paperActivity)}
         </button>
+        {kind === "quotations" && can("ops.clients.proforma") ? (
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPaperView({ kind, id: paperId, mode: "proforma" })}>
+            {t(copy.paperProforma)}
+          </button>
+        ) : null}
       </span>
     ) : null;
 
@@ -984,6 +990,9 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
       {extendOpen ? <ExtendScheduleDialog requestId={item.id} onClose={() => setExtendOpen(false)} onSaved={planSaved} /> : null}
       {paperView?.mode === "preview" ? (
         <OdooPaperPreview kind={paperView.kind} id={paperView.id} name={String(paperView.id)} t={t} onClose={() => setPaperView(null)} />
+      ) : null}
+      {paperView?.mode === "proforma" ? (
+        <ProformaDialog id={paperView.id} name={String(paperView.id)} t={t} onClose={() => setPaperView(null)} />
       ) : null}
       {paperView?.mode === "activity" ? (
         <OdooPaperActivity
