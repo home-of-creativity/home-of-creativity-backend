@@ -8,6 +8,7 @@ use App\Actions\ExtendClientSchedule;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\ServiceRequestResource;
 use App\Models\ServiceRequest;
+use App\Services\GeminiService;
 use App\Support\WorkCalendar;
 use App\Support\WorkLines;
 use Illuminate\Http\JsonResponse;
@@ -100,13 +101,22 @@ class WorkScheduleController extends Controller
             'days' => ['required_without:hours', 'nullable', 'integer', 'min:1', 'max:60'],
             'hours' => ['required_without:days', 'nullable', 'integer', 'min:1', 'max:80'],
             'reason' => ['required', 'string', 'max:500'],
+            'departments' => ['nullable', 'array', 'max:3'],
+            'departments.*' => ['string', 'distinct', 'in:'.implode(',', ChangeWorkPlan::DEPARTMENTS)],
         ]);
+        $departments = isset($validated['departments']) ? array_values($validated['departments']) : null;
+        $before = $serviceRequest->client_due_at?->toIso8601String();
 
         $updated = filled($validated['days'] ?? null)
-            ? $extendClientSchedule->byDays($serviceRequest, (int) $validated['days'], $validated['reason'])
-            : $extendClientSchedule->handle($serviceRequest, (int) $validated['hours'], $validated['reason']);
+            ? $extendClientSchedule->byDays($serviceRequest, (int) $validated['days'], $validated['reason'], $departments)
+            : $extendClientSchedule->handle($serviceRequest, (int) $validated['hours'], $validated['reason'], $departments);
+        $moved = $updated->client_due_at?->toIso8601String() !== $before;
 
-        return (new ServiceRequestResource($updated))->additional(['message' => 'مُدّدت المدة في ClickUp وأُبلغ الزبون بموعد التسليم الجديد.']);
+        return (new ServiceRequestResource($updated))->additional([
+            'message' => $moved
+                ? 'مُدّدت المدة في ClickUp وأُبلغ الزبون بموعد التسليم الجديد.'
+                : 'مُدّدت مهام الأقسام المختارة في ClickUp. موعد التسليم للزبون لم يتغير، فلم يُبلَّغ.',
+        ]);
     }
 
     /** «تغيير الخطة»: the approved plan with every department and its staff. */
@@ -115,12 +125,45 @@ class WorkScheduleController extends Controller
         return response()->json(['data' => $changeWorkPlan->current($serviceRequest), 'message' => 'ok']);
     }
 
+    /** Gemini's tasks for one department, to compare with the dialog's and apply. Nothing is saved. */
+    public function suggestTasks(Request $request, ServiceRequest $serviceRequest, GeminiService $gemini): JsonResponse
+    {
+        $validated = $request->validate([
+            'department' => ['required', 'string', 'in:'.implode(',', ChangeWorkPlan::DEPARTMENTS)],
+            'brief' => ['nullable', 'string', 'max:4000'],
+            'tasks' => ['nullable', 'array', 'max:40'],
+            'tasks.*.title' => ['required', 'string', 'max:200'],
+            'tasks.*.description' => ['nullable', 'string', 'max:4000'],
+        ]);
+        $current = array_map(
+            fn (array $task): array => ['title' => $task['title'], 'description' => $task['description']],
+            ChangeWorkPlan::tasks($validated['tasks'] ?? []),
+        );
+        $tasks = $gemini->suggestDepartmentTasks(
+            $validated['department'],
+            (string) $serviceRequest->title,
+            mb_substr((string) $serviceRequest->description, 0, 3000),
+            ChangeWorkPlan::packageFeatures($serviceRequest),
+            (string) ($validated['brief'] ?? ''),
+            $current,
+        );
+
+        return response()->json([
+            'data' => ['tasks' => $tasks],
+            'message' => $tasks === $current ? 'لم يقترح Gemini تغييراً على المهام.' : 'راجع اقتراح Gemini ثم طبّقه.',
+        ]);
+    }
+
     public function changePlan(Request $request, ServiceRequest $serviceRequest, ChangeWorkPlan $changeWorkPlan): ServiceRequestResource
     {
         $validated = $request->validate([
             'operations' => ['present', 'array', 'max:3'],
             'operations.*.department' => ['required', 'string', 'distinct', 'in:'.implode(',', ChangeWorkPlan::DEPARTMENTS)],
-            'operations.*.brief' => ['required', 'string', 'max:4000'],
+            'operations.*.brief' => ['nullable', 'string', 'max:4000'],
+            'operations.*.tasks' => ['nullable', 'array', 'max:40'],
+            'operations.*.tasks.*.title' => ['required', 'string', 'max:200'],
+            'operations.*.tasks.*.description' => ['nullable', 'string', 'max:4000'],
+            'operations.*.tasks.*.clickup_task_id' => ['nullable', 'string', 'max:40'],
             'operations.*.hours' => ['required', 'integer', 'min:1', 'max:400'],
             'operations.*.priority' => ['nullable', 'integer', 'min:1', 'max:4'],
             'operations.*.employee_id' => ['nullable', 'integer'],

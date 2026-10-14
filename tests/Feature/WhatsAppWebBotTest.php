@@ -442,6 +442,32 @@ class WhatsAppWebBotTest extends TestCase
         $this->assertSame('محل الموالح', $client->fresh()->company_name);
     }
 
+    public function test_the_client_can_add_an_email_from_the_profile(): void
+    {
+        $client = Client::query()->create([
+            'name' => 'Nour',
+            'phone' => '+963977777778',
+            'telegram_user_id' => 'wa:963977777778',
+            'locale' => 'ar',
+        ]);
+        $send = fn (string $id, array $body) => $this->withHeaders(['X-Webhook-Secret' => 'web-secret'])
+            ->postJson('/api/bot/whatsapp/web', ['phone' => '963977777778', 'message_id' => $id, ...$body])
+            ->assertOk();
+
+        $send('web-email-profile', ['button_id' => 'menu:profile']);
+        Http::assertSent(fn (Request $request): bool => $request->url() === 'http://wa-web.test/send'
+            && collect(data_get($request->data(), 'buttons', []))->contains('title', 'إضافة إيميل'));
+
+        $send('web-email-field', ['button_id' => 'prof:email']);
+        $send('web-email-bad', ['text' => 'مو إيميل']);
+        $this->assertNull($client->fresh()->email);
+
+        $send('web-email-value', ['text' => 'nour@shop.com']);
+        $this->assertSame('nour@shop.com', $client->fresh()->email);
+        Http::assertSent(fn (Request $request): bool => $request->url() === 'http://wa-web.test/send'
+            && str_contains((string) data_get($request->data(), 'text'), 'nour@shop.com'));
+    }
+
     public function test_a_sentence_about_the_company_opens_that_field(): void
     {
         config(['services.gemini.e2e_stub' => true]);

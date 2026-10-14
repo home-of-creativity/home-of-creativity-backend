@@ -523,6 +523,7 @@ export type WorkPlanEditor = {
     label: string;
     included: boolean;
     brief: string;
+    tasks: WorkPlanTask[];
     hours: number;
     priority: number;
     employee_id: number | null;
@@ -532,10 +533,14 @@ export type WorkPlanEditor = {
   }>;
   photography: { enabled: boolean; sessions: number; used: number };
   client_due_at: string | null;
+  package_features: string[];
 };
 
+/** One task of a department; it becomes a ClickUp subtask of the department's task. */
+export type WorkPlanTask = { title: string; description: string; clickup_task_id?: string | null };
+
 export type WorkPlanChange = {
-  operations: Array<{ department: WorkPlanDepartment; brief: string; hours: number; priority: number; employee_id: number | null }>;
+  operations: Array<{ department: WorkPlanDepartment; brief: string; tasks: WorkPlanTask[]; hours: number; priority: number; employee_id: number | null }>;
   photography_sessions: number;
 };
 
@@ -1067,11 +1072,23 @@ export type TeamComment = {
   id: number;
   parent_id: number | null;
   body: string;
+  attachment: { kind: "image" | "audio"; name: string; mime: string; size: number } | null;
   user: { id: number; name: string } | null;
   created_at: string | null;
   edited_at: string | null;
   can_edit: boolean;
   can_delete: boolean;
+};
+
+/** One delivery of a report PDF to a client. */
+export type ReportSend = {
+  id: number;
+  channel: "email" | "whatsapp";
+  recipient: string;
+  message: string | null;
+  delivered: boolean;
+  user: { id: number; name: string } | null;
+  created_at: string | null;
 };
 
 function commentQuery(subject: CommentSubject) {
@@ -1531,11 +1548,35 @@ export const api = {
   comments(subject: CommentSubject) {
     return request<Envelope<TeamComment[]>>(`/admin/comments?${commentQuery(subject).toString()}`);
   },
-  addComment(subject: CommentSubject, body: string, parentId?: number) {
+  addComment(subject: CommentSubject, body: string, parentId?: number, attachment?: File | null) {
+    if (attachment) {
+      const form = new FormData();
+      form.set("subject", subject.type);
+      form.set("id", subject.id);
+      if (subject.calendarId) form.set("calendar_id", subject.calendarId);
+      if (body) form.set("body", body);
+      if (parentId) form.set("parent_id", String(parentId));
+      form.set("attachment", attachment);
+      return request<Envelope<TeamComment>>("/admin/comments", { method: "POST", body: form });
+    }
     return request<Envelope<TeamComment>>("/admin/comments", {
       method: "POST",
       body: JSON.stringify({ subject: subject.type, id: subject.id, calendar_id: subject.calendarId, body, parent_id: parentId }),
     });
+  },
+  async commentAttachment(id: number) {
+    const headers = new Headers();
+    const token = getToken();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    const response = await fetch(`${API_URL}/admin/comments/${id}/attachment`, { headers });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.blob();
+  },
+  reportSends(id: number) {
+    return request<Envelope<ReportSend[]>>(`/admin/reports/${id}/sends`);
+  },
+  sendReport(id: number, payload: { email: string | null; phone: string | null; message: string | null; save_contact: boolean }) {
+    return request<Envelope<ReportSend[]>>(`/admin/reports/${id}/send`, { method: "POST", body: JSON.stringify(payload) });
   },
   updateComment(id: number, body: string) {
     return request<Envelope<TeamComment>>(`/admin/comments/${id}`, { method: "PATCH", body: JSON.stringify({ body }) });
@@ -1568,14 +1609,21 @@ export const api = {
     });
   },
   /** Working days on our side: ClickUp due dates move and the client gets the new date. */
-  extendSchedule(id: number, days: number, reason: string) {
+  /** `departments` null extends the whole request. */
+  extendSchedule(id: number, days: number, reason: string, departments: WorkPlanDepartment[] | null = null) {
     return request<Envelope<ServiceRequest>>(`/admin/requests/${id}/extend-schedule`, {
       method: "POST",
-      body: JSON.stringify({ days, reason }),
+      body: JSON.stringify(departments ? { days, reason, departments } : { days, reason }),
     });
   },
   workPlan(id: number) {
     return request<Envelope<WorkPlanEditor>>(`/admin/requests/${id}/work-plan`);
+  },
+  suggestWorkPlanTasks(id: number, department: WorkPlanDepartment, brief: string, tasks: WorkPlanTask[]) {
+    return request<Envelope<{ tasks: WorkPlanTask[] }>>(`/admin/requests/${id}/work-plan/suggest-tasks`, {
+      method: "POST",
+      body: JSON.stringify({ department, brief, tasks: tasks.map(({ title, description }) => ({ title, description })) }),
+    });
   },
   changeWorkPlan(id: number, payload: WorkPlanChange) {
     return request<Envelope<ServiceRequest> & { clickup_errors?: string[] }>(`/admin/requests/${id}/work-plan`, {

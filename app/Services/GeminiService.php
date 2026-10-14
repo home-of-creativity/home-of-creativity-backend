@@ -186,6 +186,72 @@ PROMPT;
         }
     }
 
+    /**
+     * One department's tasks, written from the package features and the request. Each task has a
+     * short title and a description the employee can work from. The current tasks are improved,
+     * not ignored. Without Gemini each feature becomes a task.
+     *
+     * @param  list<string>  $features
+     * @param  list<array{title: string, description: string}>  $current
+     * @return list<array{title: string, description: string}>
+     */
+    public function suggestDepartmentTasks(string $department, string $title, string $description, array $features, string $brief, array $current): array
+    {
+        $fallback = array_map(fn (string $feature): array => ['title' => mb_substr($feature, 0, 200), 'description' => ''], $features);
+        if (config('services.gemini.e2e_stub') || (! $this->usesVertex() && $this->apiKey() === '')) {
+            return $current !== [] ? $current : $fallback;
+        }
+
+        $featureList = $features === [] ? '(no catalog package)' : '- '.implode("\n- ", $features);
+        $currentList = $current === []
+            ? '(none yet)'
+            : implode("\n", array_map(fn (array $task): string => "- {$task['title']}: {$task['description']}", $current));
+        $prompt = <<<PROMPT
+You plan the {$department} department's work for a creative-agency request in Damascus.
+Write the tasks this department must deliver, one task per deliverable, in Arabic.
+Use the package features that belong to this department (design: visuals, logos, posts, stories, video editing; content: captions, scripts, calendars, copy; programming: websites, apps, integrations). Skip features of other departments.
+Keep quantities from the features (e.g. 12 posts stay one task "تصميم 12 بوست" unless the request asks for named items).
+Improve the current tasks: keep what is right, fix vague titles, add what is missing, order them in the sequence the work happens.
+Each title is short (under 80 characters). Each description says what to deliver, the format or size when known, and what the client must send first. No em dash.
+Return ONLY JSON: {"tasks":[{"title":"","description":""}]}
+
+Package features:
+{$featureList}
+Request title: {$title}
+Request description: {$description}
+Department brief: {$brief}
+Current tasks:
+{$currentList}
+PROMPT;
+
+        try {
+            $response = $this->generateJson($prompt, 45);
+        } catch (\Throwable $exception) {
+            Log::warning('Gemini department tasks exception.', ['error' => $exception->getMessage()]);
+
+            return $current !== [] ? $current : $fallback;
+        }
+        if (! $response->successful()) {
+            Log::warning('Gemini department tasks failed.', ['status' => $response->status()]);
+
+            return $current !== [] ? $current : $fallback;
+        }
+        $decoded = json_decode($this->extractJsonText($this->responseText($response)), true);
+        $tasks = [];
+        foreach ((is_array($decoded) ? ($decoded['tasks'] ?? []) : []) as $task) {
+            $name = is_array($task) ? trim(strip_tags((string) ($task['title'] ?? ''))) : '';
+            if ($name === '') {
+                continue;
+            }
+            $tasks[] = [
+                'title' => mb_substr($name, 0, 200),
+                'description' => mb_substr(trim(strip_tags((string) ($task['description'] ?? ''))), 0, 4000),
+            ];
+        }
+
+        return $tasks !== [] ? array_slice($tasks, 0, 40) : ($current !== [] ? $current : $fallback);
+    }
+
     public function classifyCompanyIndustry(string $companyName): ?string
     {
         $companyName = trim($companyName);

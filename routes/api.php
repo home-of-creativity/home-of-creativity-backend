@@ -4,6 +4,7 @@ use App\Http\Controllers\Admin\ArticleController as AdminArticleController;
 use App\Http\Controllers\Admin\ClientChannelController as AdminClientChannelController;
 use App\Http\Controllers\Admin\ClientController as AdminClientController;
 use App\Http\Controllers\Admin\ClientReportController as AdminClientReportController;
+use App\Http\Controllers\Admin\ClientReportSendController as AdminClientReportSendController;
 use App\Http\Controllers\Admin\CommentController as AdminCommentController;
 use App\Http\Controllers\Admin\ComplaintController as AdminComplaintController;
 use App\Http\Controllers\Admin\ContactChannelController as AdminContactChannelController;
@@ -145,6 +146,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
     Route::post('comments', [AdminCommentController::class, 'store'])->middleware('throttle:60,1');
     Route::patch('comments/{comment}', [AdminCommentController::class, 'update']);
     Route::delete('comments/{comment}', [AdminCommentController::class, 'destroy']);
+    Route::get('comments/{comment}/attachment', [AdminCommentController::class, 'attachment']);
 
     Route::middleware('ability:ops.overview')->group(function () {
         Route::get('overview', OverviewController::class);
@@ -237,6 +239,10 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::delete('report-deadlines/{report_deadline}', [ReportCalendarController::class, 'destroy']);
         Route::put('report-deadlines/{report_deadline}/occurrences/{date}', [ReportCalendarController::class, 'occurrence']);
     });
+    Route::middleware('ability:ops.reports.send')->group(function () {
+        Route::get('reports/{client_report}/sends', [AdminClientReportSendController::class, 'index']);
+        Route::post('reports/{client_report}/send', [AdminClientReportSendController::class, 'store'])->middleware('throttle:20,1');
+    });
     Route::middleware('ability:ops.report_calendars')->group(function () {
         Route::post('report-calendars', [ReportCalendarListController::class, 'store']);
         Route::put('report-calendars/{report_calendar}', [ReportCalendarListController::class, 'update']);
@@ -276,6 +282,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::post('requests/{service_request}/extend-schedule', [AdminWorkScheduleController::class, 'extendSchedule']);
         Route::get('requests/{service_request}/work-plan', [AdminWorkScheduleController::class, 'showPlan']);
         Route::put('requests/{service_request}/work-plan', [AdminWorkScheduleController::class, 'changePlan']);
+        Route::post('requests/{service_request}/work-plan/suggest-tasks', [AdminWorkScheduleController::class, 'suggestTasks'])->middleware('throttle:20,1');
     });
     Route::middleware('ability:ops.requests.integrations')->group(function () {
         Route::post('requests/{service_request}/retry-gemini', [AdminServiceRequestController::class, 'retryGemini']);

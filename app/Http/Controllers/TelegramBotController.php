@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Actions\ApplyClientRequestEdit;
 use App\Actions\ApproveDriveDelivery;
 use App\Actions\ApproveQuotation;
 use App\Actions\CancelClientRequest;
@@ -302,10 +303,11 @@ class TelegramBotController extends Controller
             'description' => ['sometimes', 'string', 'max:10000'],
         ]);
 
-        $serviceRequest->forceFill(array_filter([
-            'title' => $validated['title'] ?? null,
-            'description' => $validated['description'] ?? null,
-        ], fn ($value) => $value !== null))->save();
+        app(ApplyClientRequestEdit::class)->handle(
+            $serviceRequest,
+            $validated['title'] ?? null,
+            $validated['description'] ?? null,
+        );
 
         return ServiceRequestResource::make($serviceRequest->fresh('client'))
             ->additional(['message' => 'Updated.']);

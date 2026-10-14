@@ -11,6 +11,8 @@ use App\Models\Role;
 use App\Models\SocialPost;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -103,6 +105,53 @@ class CommentTest extends TestCase
         $row = $this->getJson('/api/admin/comments?'.http_build_query($event))->assertOk()->json('data.0');
         $this->assertTrue($row['can_delete']);
         $this->deleteJson("/api/admin/comments/{$row['id']}")->assertOk();
+    }
+
+    public function test_a_comment_carries_a_picture_or_a_voice_note(): void
+    {
+        Storage::fake('local');
+        $report = $this->report();
+        $writer = $this->staff([StaffAbility::OpsReports->value.'.view']);
+        Sanctum::actingAs($writer);
+        $target = ['subject' => 'report', 'id' => (string) $report->id];
+
+        $picture = $this->post('/api/admin/comments', $target + ['attachment' => UploadedFile::fake()->image('cover.png', 40, 40)], ['Accept' => 'application/json'])
+            ->assertCreated()
+            ->assertJsonPath('data.body', '')
+            ->assertJsonPath('data.attachment.kind', 'image')
+            ->assertJsonPath('data.attachment.name', 'cover.png')
+            ->json('data');
+        $voice = $this->post('/api/admin/comments', $target + ['body' => 'اسمعوا', 'parent_id' => $picture['id'], 'attachment' => UploadedFile::fake()->createWithContent('voice.wav', $this->silentWav())], ['Accept' => 'application/json'])
+            ->assertCreated()
+            ->assertJsonPath('data.attachment.kind', 'audio')
+            ->json('data');
+
+        $this->get("/api/admin/comments/{$picture['id']}/attachment")->assertOk()->assertHeader('Content-Type', 'image/png');
+        $this->get("/api/admin/comments/{$voice['id']}/attachment")->assertOk();
+
+        // Neither text nor a file is refused, and so is a file that is not a picture or audio.
+        $this->postJson('/api/admin/comments', $target)->assertUnprocessable();
+        $this->post('/api/admin/comments', $target + ['attachment' => UploadedFile::fake()->create('notes.pdf', 10, 'application/pdf')], ['Accept' => 'application/json'])
+            ->assertUnprocessable();
+
+        // A reader without the report cannot open the file.
+        Sanctum::actingAs($this->staff([StaffAbility::SocialContent->value]));
+        $this->get("/api/admin/comments/{$picture['id']}/attachment")->assertForbidden();
+
+        // Deleting the thread removes both files.
+        Sanctum::actingAs($writer);
+        $this->deleteJson("/api/admin/comments/{$picture['id']}")->assertOk();
+        $this->assertSame([], Storage::disk('local')->allFiles('comments'));
+    }
+
+    /** A tenth of a second of silence, 8 kHz mono. */
+    private function silentWav(): string
+    {
+        $samples = str_repeat("\x00\x00", 800);
+
+        return 'RIFF'.pack('V', 36 + strlen($samples)).'WAVE'
+            .'fmt '.pack('VvvVVvv', 16, 1, 1, 8000, 16000, 2, 16)
+            .'data'.pack('V', strlen($samples)).$samples;
     }
 
     /** @param  list<string>  $abilities */

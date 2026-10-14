@@ -72,6 +72,7 @@ class ChangeWorkPlan
                 'label' => self::LABELS[$department],
                 'included' => $operation !== null,
                 'brief' => (string) ($operation['brief'] ?? ''),
+                'tasks' => self::tasks($operation['tasks'] ?? []),
                 'hours' => (int) ($operation['hours'] ?? 0),
                 'priority' => (int) ($operation['priority'] ?? 3),
                 'employee_id' => $operation['employee_id'] ?? null,
@@ -100,11 +101,57 @@ class ChangeWorkPlan
                 'used' => $this->sessions->used($request),
             ],
             'client_due_at' => $request->client_due_at?->toIso8601String(),
+            'package_features' => self::packageFeatures($request),
         ];
     }
 
     /**
-     * @param  list<array{department: string, brief: string, hours: int, priority?: int|null, employee_id?: int|null}>  $lines
+     * The package's features in Arabic, the source the tasks are written from.
+     *
+     * @return list<string>
+     */
+    public static function packageFeatures(ServiceRequest $request): array
+    {
+        $request->loadMissing('pricingPackage');
+
+        return collect($request->pricingPackage?->features ?? [])
+            ->map(fn (mixed $feature): string => trim((string) (is_array($feature) ? ($feature['ar'] ?? $feature['en'] ?? '') : $feature)))
+            ->filter()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * A department's tasks as stored: a title, a description, and the ClickUp subtask once made.
+     *
+     * @return list<array{title: string, description: string, clickup_task_id: string|null}>
+     */
+    public static function tasks(mixed $tasks): array
+    {
+        if (! is_array($tasks)) {
+            return [];
+        }
+        $clean = [];
+        foreach ($tasks as $task) {
+            if (! is_array($task)) {
+                continue;
+            }
+            $title = trim((string) ($task['title'] ?? ''));
+            if ($title === '') {
+                continue;
+            }
+            $clean[] = [
+                'title' => mb_substr($title, 0, 200),
+                'description' => mb_substr(trim((string) ($task['description'] ?? '')), 0, 4000),
+                'clickup_task_id' => filled($task['clickup_task_id'] ?? null) ? (string) $task['clickup_task_id'] : null,
+            ];
+        }
+
+        return array_slice($clean, 0, 40);
+    }
+
+    /**
+     * @param  list<array{department: string, brief?: string|null, tasks?: list<array{title: string, description?: string|null, clickup_task_id?: string|null}>, hours: int, priority?: int|null, employee_id?: int|null}>  $lines
      * @return array{request: ServiceRequest, errors: list<string>}
      */
     public function handle(ServiceRequest $request, array $lines, int $photographySessions, string $actor): array
@@ -120,9 +167,19 @@ class ChangeWorkPlan
         }
 
         $start = Carbon::parse($request->plan_confirmed_at ?? now());
+        $previous = $this->previousTasks($request);
         $operations = [];
         foreach ($lines as $line) {
             $department = (string) $line['department'];
+            if (trim((string) ($line['brief'] ?? '')) === '' && self::tasks($line['tasks'] ?? []) === []) {
+                throw ValidationException::withMessages(['operations' => 'اكتب وصف قسم '.self::LABELS[$department].' أو مهمة واحدة على الأقل.']);
+            }
+            // Only a subtask this department already made keeps its id; any other id is dropped.
+            $known = collect($previous[$department] ?? [])->pluck('clickup_task_id')->filter()->all();
+            $tasks = array_map(
+                fn (array $task): array => in_array($task['clickup_task_id'], $known, true) ? $task : [...$task, 'clickup_task_id' => null],
+                self::tasks($line['tasks'] ?? []),
+            );
             $hours = max(1, (int) $line['hours']);
             $priority = max(1, min(4, (int) ($line['priority'] ?? 3)));
             $employee = filled($line['employee_id'] ?? null)
@@ -130,7 +187,8 @@ class ChangeWorkPlan
                 : null;
             $operations[] = [
                 'department' => $department,
-                'brief' => trim((string) $line['brief']),
+                'brief' => trim((string) ($line['brief'] ?? '')) ?: implode("\n", array_map(fn (array $task): string => '- '.$task['title'], $tasks)),
+                'tasks' => $tasks,
                 'hours' => $hours,
                 'priority' => $priority,
                 'priority_label' => self::PRIORITY_LABELS[$priority],
@@ -154,6 +212,8 @@ class ChangeWorkPlan
         $updated = $this->sessions->setCap($request->fresh() ?? $request, $photographySessions);
 
         $errors = $this->syncClickUp($updated->fresh(['briefs', 'client', 'clickupTasks']) ?? $updated, $operations);
+        $updated = $updated->fresh(['clickupTasks']) ?? $updated;
+        $errors = [...$errors, ...$this->syncSubtasks($updated, $previous)];
         $updated = $updated->fresh() ?? $updated;
         if ($updated->plan_confirmed_at === null) {
             $updated->forceFill(['plan_confirmed_at' => now()])->save();
@@ -229,6 +289,89 @@ class ChangeWorkPlan
                 $errors[] = self::LABELS[$department].': '.$exception->getMessage();
             }
         }
+
+        return $errors;
+    }
+
+    /**
+     * @return array<string, list<array{title: string, description: string, clickup_task_id: string|null}>>
+     */
+    private function previousTasks(ServiceRequest $request): array
+    {
+        $tasks = [];
+        foreach (data_get($request->work_plan, 'operations', []) as $operation) {
+            if (is_array($operation) && filled($operation['department'] ?? null)) {
+                $tasks[(string) $operation['department']] = self::tasks($operation['tasks'] ?? []);
+            }
+        }
+
+        return $tasks;
+    }
+
+    /**
+     * Each planned task is a subtask of its department's ClickUp task: a new one is created, an
+     * edited one renamed, and one taken off the plan closed. The ids are written back to the plan.
+     *
+     * @param  array<string, list<array{title: string, description: string, clickup_task_id: string|null}>>  $previous
+     * @return list<string> what ClickUp refused
+     */
+    private function syncSubtasks(ServiceRequest $request, array $previous): array
+    {
+        if (! $this->clickUp->configured()) {
+            return [];
+        }
+        $plan = is_array($request->work_plan) ? $request->work_plan : [];
+        $operations = is_array($plan['operations'] ?? null) ? $plan['operations'] : [];
+        $closed = (string) config('services.clickup.statuses.complete', 'complete');
+        $errors = [];
+
+        foreach ($operations as $index => $operation) {
+            if (! is_array($operation)) {
+                continue;
+            }
+            $department = (string) ($operation['department'] ?? '');
+            $parent = $this->taskFor($request, $department);
+            if ($parent === null || ! filled($parent->clickup_task_id)) {
+                continue;
+            }
+            $before = collect($previous[$department] ?? [])->keyBy('clickup_task_id');
+            $tasks = self::tasks($operation['tasks'] ?? []);
+            foreach ($tasks as $position => $task) {
+                try {
+                    if ($task['clickup_task_id'] === null) {
+                        $tasks[$position]['clickup_task_id'] = $this->clickUp->createSubtask(
+                            $this->clickUp->listIdForDepartment($department),
+                            (string) $parent->clickup_task_id,
+                            $task['title'],
+                            $task['description'],
+                        );
+                    } else {
+                        $old = $before->get($task['clickup_task_id']);
+                        if ($old === null || $old['title'] !== $task['title'] || $old['description'] !== $task['description']) {
+                            $this->clickUp->renameTask($task['clickup_task_id'], $task['title'], $task['description']);
+                        }
+                    }
+                } catch (Throwable $exception) {
+                    Log::warning('ClickUp subtask was not saved.', ['parent' => $parent->clickup_task_id, 'error' => $exception->getMessage()]);
+                    $errors[] = self::LABELS[$department].' · '.$task['title'].': '.$exception->getMessage();
+                }
+            }
+            $kept = collect($tasks)->pluck('clickup_task_id')->filter()->all();
+            foreach ($before->keys()->filter() as $id) {
+                if (in_array($id, $kept, true)) {
+                    continue;
+                }
+                try {
+                    $this->clickUp->updateTask((string) $id, $closed);
+                } catch (Throwable $exception) {
+                    Log::warning('ClickUp subtask taken off the plan stayed open.', ['task' => $id, 'error' => $exception->getMessage()]);
+                    $errors[] = self::LABELS[$department].': '.$exception->getMessage();
+                }
+            }
+            $operations[$index]['tasks'] = $tasks;
+        }
+
+        $request->forceFill(['work_plan' => [...$plan, 'operations' => $operations]])->save();
 
         return $errors;
     }

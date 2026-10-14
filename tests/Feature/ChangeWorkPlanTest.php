@@ -12,6 +12,7 @@ use App\Models\ServiceRequest;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -104,6 +105,74 @@ class ChangeWorkPlanTest extends TestCase
         Http::assertSent(fn (Request $sent): bool => $sent->method() === 'POST' && str_ends_with($sent->url(), '/list/list-programming/task'));
         Http::assertSent(fn (Request $sent): bool => $sent->method() === 'PUT' && str_ends_with($sent->url(), '/task/task-content') && ($sent['status'] ?? null) === 'complete');
         $this->assertSame('complete', ClickUpTask::query()->where('clickup_task_id', 'task-content')->value('status'));
+    }
+
+    public function test_department_tasks_become_clickup_subtasks_that_follow_the_plan(): void
+    {
+        $save = fn (array $tasks, string $brief = '') => $this->putJson("/api/admin/requests/{$this->request->id}/work-plan", [
+            'operations' => [
+                ['department' => 'design', 'brief' => $brief, 'tasks' => $tasks, 'hours' => 10],
+                ['department' => 'content', 'brief' => 'نصوص', 'hours' => 6],
+            ],
+            'photography_sessions' => 0,
+        ])->assertOk()->assertJsonPath('clickup_errors', []);
+
+        $save([['title' => 'تصميم 12 بوست', 'description' => 'مقاس 1080 مربع']]);
+        $design = $this->request->fresh()->work_plan['operations'][0];
+        $this->assertSame('- تصميم 12 بوست', $design['brief']);
+        $this->assertSame('task-new', $design['tasks'][0]['clickup_task_id']);
+        Http::assertSent(fn (Request $sent): bool => $sent->method() === 'POST'
+            && str_ends_with($sent->url(), '/list/list-design/task')
+            && ($sent['parent'] ?? null) === 'task-design'
+            && $sent['name'] === 'تصميم 12 بوست'
+            && $sent['description'] === 'مقاس 1080 مربع');
+
+        // An edited task is renamed in place, not created again.
+        $save([['title' => 'تصميم 12 بوست وستوري', 'description' => 'مقاس 1080 مربع', 'clickup_task_id' => 'task-new']]);
+
+        Http::assertSent(fn (Request $sent): bool => $sent->method() === 'PUT'
+            && str_ends_with($sent->url(), '/task/task-new')
+            && ($sent['name'] ?? null) === 'تصميم 12 بوست وستوري');
+        $this->assertSame('task-new', $this->request->fresh()->work_plan['operations'][0]['tasks'][0]['clickup_task_id']);
+
+        // A task taken off the plan is closed.
+        $save([], 'هوية بصرية');
+        Http::assertSent(fn (Request $sent): bool => $sent->method() === 'PUT'
+            && str_ends_with($sent->url(), '/task/task-new')
+            && ($sent['status'] ?? null) === 'complete');
+
+        // An id that was never this department's is dropped, so a new subtask is made instead.
+        $save([['title' => 'شعار', 'description' => '', 'clickup_task_id' => 'someone-else']]);
+        Http::assertNotSent(fn (Request $sent): bool => str_ends_with($sent->url(), '/task/someone-else'));
+        Http::assertSent(fn (Request $sent): bool => $sent->method() === 'POST' && ($sent['name'] ?? null) === 'شعار');
+
+        $plan = $this->getJson("/api/admin/requests/{$this->request->id}/work-plan")->assertOk()->json('data');
+        $this->assertSame('شعار', $plan['departments'][0]['tasks'][0]['title']);
+    }
+
+    public function test_extending_one_department_moves_the_client_date_only_when_it_ends_later(): void
+    {
+        $clientDue = $this->request->client_due_at->toIso8601String();
+
+        $this->postJson("/api/admin/requests/{$this->request->id}/extend-schedule", ['days' => 1, 'reason' => 'تأخر المصمم', 'departments' => ['design']])
+            ->assertOk();
+
+        $fresh = $this->request->fresh();
+        $this->assertSame($clientDue, $fresh->client_due_at->toIso8601String());
+        Http::assertSent(fn (Request $sent): bool => $sent->method() === 'PUT' && str_ends_with($sent->url(), '/task/task-design') && is_int($sent['due_date'] ?? null));
+        Http::assertNotSent(fn (Request $sent): bool => $sent->method() === 'PUT' && str_ends_with($sent->url(), '/task/task-content') && isset($sent['due_date']));
+        Http::assertNotSent(fn (Request $sent): bool => str_contains($sent->url(), 'sendMessage'));
+
+        $this->postJson("/api/admin/requests/{$this->request->id}/extend-schedule", ['days' => 10, 'reason' => 'تأخر المصمم', 'departments' => ['design']])
+            ->assertOk();
+        $fresh = $this->request->fresh();
+        $this->assertTrue($fresh->client_due_at->greaterThan($this->request->client_due_at));
+        $this->assertTrue(Carbon::parse($fresh->work_plan['operations'][0]['due_at'])->equalTo($fresh->client_due_at));
+        Http::assertSent(fn (Request $sent): bool => str_contains($sent->url(), 'sendMessage') && str_contains((string) $sent['text'], 'موعد التسليم الجديد'));
+
+        // A department outside the request is refused.
+        $this->postJson("/api/admin/requests/{$this->request->id}/extend-schedule", ['days' => 1, 'reason' => 'سبب', 'departments' => ['programming']])
+            ->assertUnprocessable();
     }
 
     public function test_extending_by_days_moves_clickup_and_tells_the_client(): void

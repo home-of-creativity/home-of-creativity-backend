@@ -1,11 +1,19 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { MessageSquare, Pencil, Reply, Send } from "lucide-react";
+import { Image as ImageIcon, Mic, MessageSquare, Paperclip, Pencil, Reply, Send, Square, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, type CommentSubject, type TeamComment } from "../api";
 import { copy, type Locale } from "../i18n";
+import { CommentAttachment } from "./CommentAttachment";
 import { ConfirmAction } from "./ConfirmAction";
 
 const REFRESH_MS = 30_000;
+const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024;
+/** Long voice notes stop on their own so the file stays under the upload limit. */
+const MAX_RECORDING_SECONDS = 300;
+
+function fill(template: string, values: Record<string, string | number>) {
+  return template.replace(/\{(\w+)\}/g, (_, key: string) => String(values[key] ?? ""));
+}
 
 function initials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -49,7 +57,12 @@ export function CommentsPanel({
   const [replyTo, setReplyTo] = useState<TeamComment | null>(null);
   const [editing, setEditing] = useState<{ id: number; body: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [attachment, setAttachment] = useState<File | null>(null);
+  const [recording, setRecording] = useState<number | null>(null);
   const box = useRef<HTMLTextAreaElement>(null);
+  const picker = useRef<HTMLInputElement>(null);
+  const recorder = useRef<MediaRecorder | null>(null);
+  const recordTimer = useRef<number | null>(null);
   const key = `${subject.type}:${subject.calendarId ?? ""}:${subject.id}`;
   const countRef = useRef(onCount);
   countRef.current = onCount;
@@ -80,18 +93,77 @@ export function CommentsPanel({
     return () => window.clearInterval(timer);
   }, [load]);
 
+  useEffect(() => () => {
+    if (recordTimer.current !== null) window.clearInterval(recordTimer.current);
+    recorder.current?.stream.getTracks().forEach((track) => track.stop());
+  }, []);
+
+  function pick(file: File | undefined) {
+    if (!file) return;
+    if (!/^(image|audio)\//.test(file.type)) {
+      toast.error(t(copy.commentsFileType));
+      return;
+    }
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      toast.error(t(copy.commentsFileTooBig));
+      return;
+    }
+    setAttachment(file);
+  }
+
+  async function startRecording() {
+    if (recording !== null || typeof MediaRecorder === "undefined") return;
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      toast.error(t(copy.commentsMicDenied));
+      return;
+    }
+    const media = new MediaRecorder(stream);
+    const chunks: Blob[] = [];
+    media.ondataavailable = (event) => {
+      if (event.data.size > 0) chunks.push(event.data);
+    };
+    media.onstop = () => {
+      stream.getTracks().forEach((track) => track.stop());
+      if (recordTimer.current !== null) window.clearInterval(recordTimer.current);
+      recordTimer.current = null;
+      recorder.current = null;
+      setRecording(null);
+      const type = (media.mimeType || "audio/webm").split(";")[0];
+      const blob = new Blob(chunks, { type });
+      if (blob.size > 0) pick(new File([blob], `voice-${Date.now()}.${type.includes("ogg") ? "ogg" : type.includes("mp4") ? "m4a" : "webm"}`, { type }));
+    };
+    recorder.current = media;
+    media.start();
+    setRecording(0);
+    recordTimer.current = window.setInterval(() => {
+      setRecording((seconds) => {
+        const next = (seconds ?? 0) + 1;
+        if (next >= MAX_RECORDING_SECONDS) recorder.current?.stop();
+        return next;
+      });
+    }, 1000);
+  }
+
+  function stopRecording() {
+    if (recorder.current?.state === "recording") recorder.current.stop();
+  }
+
   async function submit() {
     const text = body.trim();
-    if (!text || busy) return;
+    if ((!text && !attachment) || busy || recording !== null) return;
     setBusy(true);
     try {
-      const res = await api.addComment(subject, text, replyTo?.id);
+      const res = await api.addComment(subject, text, replyTo?.id, attachment);
       setRows((current) => {
         const next = [...current, res.data];
         countRef.current?.(next.length);
         return next;
       });
       setBody("");
+      setAttachment(null);
       setReplyTo(null);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t(copy.saveFailed));
@@ -158,8 +230,9 @@ export function CommentsPanel({
             </div>
           </div>
         ) : (
-          <p className="comment-body">{row.body}</p>
+          row.body ? <p className="comment-body">{row.body}</p> : null
         )}
+        {row.attachment ? <CommentAttachment comment={row} t={t} /> : null}
         {editing?.id === row.id ? null : (
           <div className="comment-actions">
             {reply ? null : (
@@ -227,9 +300,45 @@ export function CommentsPanel({
             onChange={(event) => setBody(event.target.value)}
             onKeyDown={onKey}
           />
-          <button type="button" className="btn btn-primary btn-sm" disabled={busy || body.trim() === ""} aria-busy={busy} onClick={() => void submit()}>
-            <Send size={14} aria-hidden="true" />{t(copy.commentsSend)}
-          </button>
+          {attachment ? (
+            <p className="comment-pending">
+              {attachment.type.startsWith("image/") ? <ImageIcon size={14} aria-hidden="true" /> : <Mic size={14} aria-hidden="true" />}
+              <span className="file-name">{attachment.type.startsWith("audio/") && attachment.name.startsWith("voice-") ? t(copy.commentsVoiceNote) : attachment.name}</span>
+              <small>{Math.ceil(attachment.size / 1024)} KB</small>
+              <button type="button" className="btn btn-ghost btn-icon btn-sm" aria-label={t(copy.commentsRemoveAttachment)} title={t(copy.commentsRemoveAttachment)} onClick={() => setAttachment(null)}>
+                <X size={14} aria-hidden="true" />
+              </button>
+            </p>
+          ) : null}
+          <div className="comment-compose-actions">
+            <input
+              ref={picker}
+              type="file"
+              accept="image/*,audio/*"
+              hidden
+              onChange={(event) => {
+                pick(event.target.files?.[0]);
+                event.target.value = "";
+              }}
+            />
+            <button type="button" className="btn btn-ghost btn-icon btn-sm" disabled={busy || recording !== null} aria-label={t(copy.commentsAttach)} title={t(copy.commentsAttach)} onClick={() => picker.current?.click()}>
+              <Paperclip size={15} aria-hidden="true" />
+            </button>
+            {typeof MediaRecorder !== "undefined" ? (
+              recording !== null ? (
+                <button type="button" className="btn btn-sm btn-danger comment-recording" aria-label={t(copy.commentsStopRecording)} onClick={stopRecording}>
+                  <Square size={13} aria-hidden="true" />{fill(t(copy.commentsRecording), { seconds: recording })}
+                </button>
+              ) : (
+                <button type="button" className="btn btn-ghost btn-icon btn-sm" disabled={busy} aria-label={t(copy.commentsRecord)} title={t(copy.commentsRecord)} onClick={() => void startRecording()}>
+                  <Mic size={15} aria-hidden="true" />
+                </button>
+              )
+            ) : null}
+            <button type="button" className="btn btn-primary btn-sm" disabled={busy || recording !== null || (body.trim() === "" && !attachment)} aria-busy={busy} onClick={() => void submit()}>
+              <Send size={14} aria-hidden="true" />{t(copy.commentsSend)}
+            </button>
+          </div>
         </div>
       ) : null}
     </section>

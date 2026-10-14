@@ -49,9 +49,10 @@ BTN_MY = "📋 طلباتي"
 BTN_PHOTO = "📷 حجز تصوير"
 BTN_COMPLAINT = "📣 شكوى"
 BTN_SUPPORT = "💬 دعم"
+BTN_PROFILE = "👤 بياناتي"
 SUPPORT_PHONE = "0947823488"
 BTN_SUBMIT = "✅ تم الإرسال"
-NAV_BUTTONS = {BTN_NEW, BTN_MY, BTN_PHOTO, BTN_COMPLAINT, BTN_SUPPORT}
+NAV_BUTTONS = {BTN_NEW, BTN_MY, BTN_PHOTO, BTN_COMPLAINT, BTN_SUPPORT, BTN_PROFILE}
 MAX_ATTACHMENTS = 5
 PERIOD_LABELS = {
     "monthly": "شهري",
@@ -74,6 +75,12 @@ PROFILE_REASONS = {
     "company_activity": "• نشاط الشركة — ليعرف الفريق مجال عملك قبل العرض.",
 }
 BTN_NO_EMAIL = "لا يوجد بريد"
+PROFILE_EDIT_PROMPTS = {
+    "name": "اكتب الاسم الجديد.",
+    "phone": "اكتب رقم الهاتف الجديد.",
+    "company_name": "اكتب اسم الشركة الجديد.",
+    "email": "اكتب البريد الإلكتروني، مثل: name@company.com",
+}
 REJECT_REASONS = {
     "rjprice": "السعر غالي",
     "rjdelay": "تأخير بالرد",
@@ -119,6 +126,7 @@ DRAFT_KEYS = {
     "reject_number",
     "receipt_number",
     "profile_field",
+    "profile_edit",
     "catalog_stack",
     "edit_number",
     "edit_title",
@@ -260,7 +268,7 @@ def welcome_text(user, *, missing: list[str]) -> str:
 
 def main_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-        [[KeyboardButton(BTN_NEW), KeyboardButton(BTN_MY)], [KeyboardButton(BTN_PHOTO), KeyboardButton(BTN_COMPLAINT)], [KeyboardButton(BTN_SUPPORT)]],
+        [[KeyboardButton(BTN_NEW), KeyboardButton(BTN_MY)], [KeyboardButton(BTN_PHOTO), KeyboardButton(BTN_COMPLAINT)], [KeyboardButton(BTN_SUPPORT), KeyboardButton(BTN_PROFILE)]],
         resize_keyboard=True,
     )
 
@@ -768,10 +776,61 @@ def profile_field_markup(field: str):
 
 async def ask_profile_field(message, context: ContextTypes.DEFAULT_TYPE, field: str, text: str | None = None) -> None:
     context.user_data["profile_field"] = field
+    editing = bool(context.user_data.get("profile_edit"))
+    prompts = PROFILE_EDIT_PROMPTS if editing else PROFILE_PROMPTS
     await message.reply_text(
-        text or PROFILE_PROMPTS.get(field, "أكمل بياناتك:"),
-        reply_markup=profile_field_markup(field),
+        text or prompts.get(field, "أكمل بياناتك:"),
+        reply_markup=main_keyboard() if editing else profile_field_markup(field),
     )
+
+
+def profile_card(me: dict) -> tuple[str, InlineKeyboardMarkup]:
+    email = me.get("email") or "غير مضاف"
+    text = (
+        "بياناتك:\n"
+        f"الاسم: {me.get('name') or '-'}\n"
+        f"الهاتف: {me.get('phone') or '-'}\n"
+        f"الشركة: {me.get('company_name') or '-'}\n"
+        f"البريد الإلكتروني: {email}\n"
+        "اختر ما تريد تعديله."
+    )
+    markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("تعديل الاسم", callback_data="pedit:name")],
+        [InlineKeyboardButton("تعديل الهاتف", callback_data="pedit:phone")],
+        [InlineKeyboardButton("تعديل الشركة", callback_data="pedit:company_name")],
+        [InlineKeyboardButton("تعديل البريد الإلكتروني" if me.get("email") else "إضافة بريد إلكتروني", callback_data="pedit:email")],
+    ])
+    return text, markup
+
+
+async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    message = update.message or (update.callback_query.message if update.callback_query else None)
+    if user is None or message is None:
+        return
+    try:
+        me = await fetch_me(user.id, user.full_name)
+    except (httpx.TimeoutException, httpx.HTTPStatusError, httpx.RequestError):
+        await notify_api_failure(message)
+        return
+    text, markup = profile_card(me)
+    await message.reply_text(text, reply_markup=markup)
+
+
+async def profile_edit_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if query is None or query.message is None:
+        return
+    try:
+        await query.answer()
+    except Exception:
+        pass
+    field = (query.data or "").split(":", 1)[-1]
+    if field not in PROFILE_EDIT_PROMPTS:
+        return
+    clear_pending_intents(context)
+    context.user_data["profile_edit"] = True
+    await ask_profile_field(query.message, context, field)
 
 
 async def notify_api_failure(message) -> None:
@@ -839,6 +898,12 @@ async def capture_profile_field(update: Update, context: ContextTypes.DEFAULT_TY
         except (httpx.TimeoutException, httpx.HTTPStatusError, httpx.RequestError):
             await notify_api_failure(update.message)
             return True
+    if context.user_data.pop("profile_edit", None):
+        context.user_data.pop("profile_field", None)
+        text, markup = profile_card(me)
+        await update.message.reply_text("تم تحديث بياناتك.", reply_markup=main_keyboard())
+        await update.message.reply_text(text, reply_markup=markup)
+        return True
     nxt = next_profile_field(me)
     if nxt:
         await ask_profile_field(update.message, context, nxt)
@@ -2001,6 +2066,8 @@ async def pending_callback_followup(update: Update, context: ContextTypes.DEFAUL
     text = update.message.text.strip() if update.message and update.message.text else ""
     if text in NAV_BUTTONS:
         clear_pending_intents(context)
+        if context.user_data.pop("profile_edit", None):
+            context.user_data.pop("profile_field", None)
         return
     if context.user_data.get("profile_field"):
         mark_text_handled(update, context)
@@ -2117,6 +2184,9 @@ async def route_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         return ConversationHandler.END
     if text == BTN_SUPPORT:
         return await support_start(update, context)
+    if text == BTN_PROFILE:
+        await show_profile(update, context)
+        return ConversationHandler.END
     if text == BTN_COMPLAINT:
         outcome = await complaint_chat(update.effective_user.id, text=text)
         if outcome != "handled" and update.message:
@@ -2209,6 +2279,7 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.Regex(r"^(?:\.|。|．|۔|نقطة|نقطه)$"), welcome_on_dot), group=-1)
     application.add_handler(CallbackQueryHandler(skip_email_callback, pattern=r"^noemail$"), group=-2)
+    application.add_handler(CallbackQueryHandler(profile_edit_callback, pattern=r"^pedit:"), group=-2)
     application.add_handler(
         CallbackQueryHandler(
             revision_callback,

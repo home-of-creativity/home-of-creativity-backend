@@ -924,7 +924,7 @@ class HandleWhatsAppInbound
         }
         if (str_starts_with($data, 'prof:')) {
             $field = substr($data, 5);
-            if (! in_array($field, ['name', 'phone', 'company_name'], true)) {
+            if (! in_array($field, ['name', 'phone', 'company_name', 'email'], true)) {
                 $this->showProfile($client, $chatId, $phone, $session);
 
                 return;
@@ -935,6 +935,7 @@ class HandleWhatsAppInbound
             $prompt = match ($field) {
                 'name' => $this->tx('شو الاسم الجديد؟', 'What is the new full name?'),
                 'phone' => $this->phonePrompt(),
+                'email' => $this->tx('ابعت الإيميل، مثل: name@company.com', 'Send the email address, e.g. name@company.com'),
                 default => $this->tx('شو اسم الشركة الجديد؟', 'What is the new company name?'),
             };
             $this->safeSend($chatId, $prompt);
@@ -1707,10 +1708,7 @@ class HandleWhatsAppInbound
 
             return;
         }
-        $item->forceFill([
-            'title' => (string) $session['edit_title'],
-            'description' => mb_substr($description, 0, 10000),
-        ])->save();
+        app(ApplyClientRequestEdit::class)->handle($item, (string) $session['edit_title'], $description);
         $session['step'] = 'idle';
         unset($session['edit_number'], $session['edit_title']);
         $this->putSession($phone, $session);
@@ -2397,6 +2395,21 @@ class HandleWhatsAppInbound
         }
 
         $fresh = $this->pushClientToOdoo->handle($client->fresh() ?? $client);
+        $this->pushClientLeadToOdoo->handle(
+            $fresh,
+            writeExisting: filled($fresh->odoo_lead_id),
+            classifyIndustry: false,
+        );
+    }
+
+    /** An edit overwrites the Odoo contact and opportunity that already exist. */
+    private function pushEditedClientToOdoo(Client $client): void
+    {
+        if (! $client->readyForOdoo() && ! filled($client->odoo_partner_id) && ! filled($client->odoo_lead_id)) {
+            return;
+        }
+
+        $fresh = $this->pushClientToOdoo->handle($client->fresh() ?? $client, writeExisting: true);
         $this->pushClientLeadToOdoo->handle(
             $fresh,
             writeExisting: filled($fresh->odoo_lead_id),
@@ -3677,6 +3690,10 @@ class HandleWhatsAppInbound
             || preg_match('/\b(my name|full name)\b/i', $text) === 1) {
             return 'name';
         }
+        if (preg_match('/(إيميل|ايميل|الإيميل|الايميل|بريد)/u', $text) === 1 && preg_match('/ضيف|أضيف|اضيف|إضافة|اضافة|غير|عدل|تعديل|بدل|حط|سجل/u', $text) === 1
+            || preg_match('/\b(add|change|edit|update)\b.*\b(e-?mail)\b/i', $text) === 1) {
+            return 'email';
+        }
         if (preg_match('/بياناتي|معلوماتي|ملفي|حسابي|بيانات العميل/u', $text) === 1
             || preg_match('/\b(my profile|my details|my account)\b/i', $text) === 1) {
             return 'card';
@@ -3707,16 +3724,18 @@ class HandleWhatsAppInbound
         $session['step'] = 'idle';
         unset($session['profile_field']);
         $this->putSession($phone, $session);
+        $email = filled($client->email) ? (string) $client->email : $this->tx('غير مضاف', 'not added');
         $this->telegram->sendInlineKeyboard(
             $chatId,
             $this->tx(
-                "بياناتك:\nالاسم: {$client->name}\nالهاتف: {$client->phone}\nالشركة: {$client->company_name}\nأي حقل بدك تعدله؟",
-                "Your details:\nName: {$client->name}\nPhone: {$client->phone}\nCompany: {$client->company_name}\nChoose the field to change.",
+                "بياناتك:\nالاسم: {$client->name}\nالهاتف: {$client->phone}\nالشركة: {$client->company_name}\nالإيميل: {$email}\nأي حقل بدك تعدله؟",
+                "Your details:\nName: {$client->name}\nPhone: {$client->phone}\nCompany: {$client->company_name}\nEmail: {$email}\nChoose the field to change.",
             ),
             [
                 [['text' => $this->tx('تعديل الاسم', 'Edit name'), 'callback_data' => 'prof:name']],
                 [['text' => $this->tx('تعديل الهاتف', 'Edit phone'), 'callback_data' => 'prof:phone']],
                 [['text' => $this->tx('تعديل الشركة', 'Edit company'), 'callback_data' => 'prof:company_name']],
+                [['text' => filled($client->email) ? $this->tx('تعديل الإيميل', 'Edit email') : $this->tx('إضافة إيميل', 'Add email'), 'callback_data' => 'prof:email']],
                 [['text' => $this->tx('القائمة', 'Menu'), 'callback_data' => 'menu:home']],
             ],
         );
@@ -3735,7 +3754,7 @@ class HandleWhatsAppInbound
 
         $field = (string) ($session['profile_field'] ?? '');
         $value = trim((string) $text);
-        if ($value === '' || ClientProfileValue::isKeyboardLabel($value) || ! in_array($field, ['name', 'phone', 'company_name'], true)) {
+        if ($value === '' || ClientProfileValue::isKeyboardLabel($value) || ! in_array($field, ['name', 'phone', 'company_name', 'email'], true)) {
             $this->safeSend($chatId, $this->tx('اكتب القيمة الجديدة.', 'Type the new value.'));
 
             return;
@@ -3746,6 +3765,19 @@ class HandleWhatsAppInbound
             return;
         }
         if ($this->answerUnclear($chatId, $phone, $session, $field, $value) !== null) {
+            return;
+        }
+
+        if ($field === 'email') {
+            $email = ClientProfileValue::usableEmail($value);
+            if ($email === null) {
+                $this->safeSend($chatId, $this->tx('الإيميل مو واضح. ابعته متل: name@company.com', 'That email is not valid. Send it like name@company.com'));
+
+                return;
+            }
+            $client->forceFill(['email' => $email, 'email_skipped_at' => null])->save();
+            $this->afterProfileEdit($client, $chatId, $phone, $session);
+
             return;
         }
 
@@ -3774,8 +3806,18 @@ class HandleWhatsAppInbound
         }
 
         $client->forceFill([$field => $stored])->save();
+        $this->afterProfileEdit($client, $chatId, $phone, $session);
+    }
+
+    /**
+     * A saved profile change reaches the Odoo contact and opportunity, then the client sees the card.
+     *
+     * @param  array<string, mixed>  $session
+     */
+    private function afterProfileEdit(Client $client, string $chatId, string $phone, array $session): void
+    {
         $fresh = $client->fresh() ?? $client;
-        $this->pushCompletedClientToOdoo($fresh);
+        $this->pushEditedClientToOdoo($fresh);
         $this->safeSend($chatId, $this->tx('تمام، حدّثنا بياناتك.', 'Your details were updated.'));
         if (filled($session['quote_ref'] ?? null)) {
             $this->safeSend($chatId, $this->tx(

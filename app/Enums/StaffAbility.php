@@ -69,7 +69,9 @@ enum StaffAbility: string
             self::OpsClients->value => $crud + [
                 'odoo' => ['ar' => 'Odoo: مزامنة واستيراد وعروض وفواتير', 'en' => 'Odoo: sync, import, quotations, invoices'],
             ],
-            self::OpsReports->value => $crud,
+            self::OpsReports->value => $crud + [
+                'send' => ['ar' => 'إرسال التقرير للعميل بالبريد أو واتساب', 'en' => 'Send the report by email or WhatsApp'],
+            ],
             self::OpsEmployees->value => $crud + [
                 'approve' => ['ar' => 'قبول ورفض الانضمام', 'en' => 'Approve and reject joins'],
                 'sync' => ['ar' => 'مزامنة Odoo', 'en' => 'Odoo sync'],

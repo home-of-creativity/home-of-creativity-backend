@@ -94,6 +94,31 @@ class ProvisionSalesClickUpTask
         }
     }
 
+    /** The sales task takes the request's edited title and description. */
+    public function syncEditedRequest(ServiceRequest $request): void
+    {
+        $request->loadMissing(['client', 'files', 'clickupTasks']);
+        $salesTask = $request->clickupTasks
+            ->first(fn ($task) => $task->task_type === ClickUpTaskType::Sales);
+        if (! $salesTask || ! filled($salesTask->clickup_task_id) || ! $this->clickUp->configured()) {
+            return;
+        }
+
+        try {
+            $this->clickUp->renameTask(
+                (string) $salesTask->clickup_task_id,
+                $request->number.' · '.$request->title,
+                $this->buildDescription($request),
+            );
+            $this->clickUp->addTaskComment((string) $salesTask->clickup_task_id, 'عدّل الزبون عنوان الطلب ووصفه.');
+        } catch (\Throwable $exception) {
+            Log::warning('ClickUp sales task did not take the edited request.', [
+                'request' => $request->number,
+                'error' => $exception->getMessage(),
+            ]);
+        }
+    }
+
     private function salesTaskExists(ServiceRequest $request): bool
     {
         return $request->clickupTasks

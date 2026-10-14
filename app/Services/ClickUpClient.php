@@ -182,6 +182,41 @@ class ClickUpClient
             ->throw();
     }
 
+    /** A subtask under a department task, in that task's list. Returns the new task id. */
+    public function createSubtask(string $listId, string $parentTaskId, string $name, string $description): string
+    {
+        $response = Http::timeout((int) config('services.clickup.timeout', 12))
+            ->connectTimeout(3)
+            ->retry(2, 200)
+            ->acceptJson()
+            ->withHeaders(['Authorization' => (string) config('services.clickup.token')])
+            ->post('https://api.clickup.com/api/v2/list/'.$listId.'/task', [
+                'name' => $name,
+                'description' => $description,
+                'parent' => $parentTaskId,
+                'tags' => ['hoc'],
+            ])
+            ->throw();
+
+        $taskId = $response->json('id');
+        if (! is_string($taskId) || $taskId === '') {
+            throw new RuntimeException('ClickUp did not return a task id.');
+        }
+
+        return $taskId;
+    }
+
+    public function renameTask(string $taskId, string $name, string $description): void
+    {
+        Http::timeout((int) config('services.clickup.timeout', 12))
+            ->connectTimeout(3)
+            ->retry(2, 200)
+            ->acceptJson()
+            ->withHeaders(['Authorization' => (string) config('services.clickup.token')])
+            ->put('https://api.clickup.com/api/v2/task/'.$taskId, ['name' => $name, 'description' => $description])
+            ->throw();
+    }
+
     public function addTaskToList(string $taskId, string $listId): void
     {
         if ($taskId === '' || $listId === '') {

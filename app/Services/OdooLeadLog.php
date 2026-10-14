@@ -46,6 +46,17 @@ class OdooLeadLog
         $this->record($request, $lines, 'request:'.$request->id);
     }
 
+    public function requestEdited(ServiceRequest $request, string $previousTitle): void
+    {
+        $lines = ['عدّل الزبون الطلب: '.$this->requestLine($request)];
+        if ($previousTitle !== '' && $previousTitle !== $request->title) {
+            $lines[] = 'العنوان السابق: '.$previousTitle;
+        }
+        $lines[] = 'الوصف: '.mb_substr((string) $request->description, 0, 1500);
+
+        $this->record($request, $lines);
+    }
+
     public function statusChanged(ServiceRequest $request, RequestStatus $to, ?string $actor, ?string $note, int $historyId): void
     {
         $lines = [

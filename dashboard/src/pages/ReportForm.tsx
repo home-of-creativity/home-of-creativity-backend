@@ -32,6 +32,7 @@ import { clearReportDraft, readReportDraft, writeReportDraft } from "../componen
 import { forgetReportTemplate, loadSavedTemplates } from "../components/report/templateStore";
 import { loadReportFonts, rememberReportFont, type StoredReportFont } from "../components/report/fontStore";
 import type { ReportDocHandle } from "../components/report/ReportDocEditor";
+import { ReportSendPanel } from "../components/report/ReportSendPanel";
 import { copy, type Locale } from "../i18n";
 
 // The Word editor is large; load it only on this page.
@@ -86,6 +87,7 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
   const templatesAllowed = canAbility(user, "ops.report_templates");
   const assistantAllowed = canAbility(user, "ops.report_gemini");
   const mediaAllowed = canAbility(user, "ops.report_media");
+  const sendAllowed = canAbility(user, "ops.reports.send");
   const navigate = useNavigate();
   const params = useParams();
   const clientId = params.clientId ? Number(params.clientId) : null;
@@ -795,6 +797,19 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
                     {report?.drive_url ? <a className="btn btn-ghost btn-sm" href={report.drive_url} target="_blank" rel="noreferrer"><ExternalLink size={15} aria-hidden="true" />{t(copy.reportOpenDrivePdf)}</a> : null}
                     <button type="button" className="btn btn-ghost btn-sm" onClick={() => setFolderOpen((open) => !open)}>{t(copy.driveFolder)}</button>
                   </div>
+                  {sendAllowed ? (
+                    <ReportSendPanel
+                      reportId={report?.id ?? null}
+                      client={client}
+                      locale={locale}
+                      t={t}
+                      beforeSend={() => save("leave")}
+                      onContactSaved={() => {
+                        if (!report) return;
+                        void api.clientReports(report.client_id).then((list) => setClient(list.client)).catch(() => undefined);
+                      }}
+                    />
+                  ) : null}
                   {folderOpen && client ? (
                     <DriveFolderPicker
                       client={client}

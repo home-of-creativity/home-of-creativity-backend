@@ -5,7 +5,7 @@ namespace App\Support;
 class ClientProfileValue
 {
     /** @var list<string> */
-    private const KEYBOARD_LABELS = ['طلب جديد', 'طلباتي', 'الدعم'];
+    private const KEYBOARD_LABELS = ['طلب جديد', 'طلباتي', 'الدعم', 'دعم', 'بياناتي', 'شكوى', 'حجز تصوير'];
 
     /** @var list<string> */
     private const NO_EMAIL_ANSWERS = ['لا يوجد', 'لايوجد', 'لا يوجد بريد', 'لا', 'ما في', 'ما عندي', 'ما عندي بريد', 'ليس لدي', 'ليس لدي بريد', 'no', 'none', '-'];
