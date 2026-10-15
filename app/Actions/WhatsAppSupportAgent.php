@@ -29,6 +29,7 @@ class WhatsAppSupportAgent
         private ClientAssistant $assistant,
         private NotifyEmployees $notifyEmployees,
         private TelegramNotifier $telegram,
+        private SupportAgentActions $actions,
     ) {}
 
     public function configured(): bool
@@ -99,6 +100,11 @@ class WhatsAppSupportAgent
 
         $this->say($chatId, $output['reply']);
         $turns[] = ['role' => 'assistant', 'text' => mb_substr($output['reply'], 0, 1000)];
+        $done = $output['action'] !== [] ? $this->actions->run($client, $chatId, $locale, $output['action']) : null;
+        if ($done !== null) {
+            $this->say($chatId, $done);
+            $turns[] = ['role' => 'assistant', 'text' => mb_substr($done, 0, 1000)];
+        }
         if ($output['handoff']) {
             $this->handoff($client, $chatId, $phone, $locale, $output['reason'] !== '' ? $output['reason'] : 'The support agent asked for the team.', $turns, false);
 
@@ -123,7 +129,7 @@ class WhatsAppSupportAgent
     }
 
     /**
-     * @return array{reply: string, handoff: bool, reason: string}|null
+     * @return array{reply: string, handoff: bool, reason: string, action: array<string, mixed>}|null
      */
     private function ask(Client $client, string $phone, string $locale, string $text, string $reason): ?array
     {
@@ -162,6 +168,7 @@ class WhatsAppSupportAgent
             'reply' => mb_substr($reply, 0, 1500),
             'handoff' => filter_var($output['handoff'] ?? false, FILTER_VALIDATE_BOOL),
             'reason' => trim((string) ($output['handoff_reason'] ?? '')),
+            'action' => is_array($output['action'] ?? null) ? $output['action'] : [],
         ];
     }
 

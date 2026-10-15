@@ -2,6 +2,7 @@
 
 namespace App\Support;
 
+use App\Models\Client;
 use App\Models\ServiceRequest;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 
@@ -16,6 +17,26 @@ class ResolveServiceRequest
         }
 
         return $number;
+    }
+
+    /** The client's own request by `#12`, `12`, or `REQ-2026-000012`; null when it is not theirs or hidden. */
+    public static function ownedBy(Client $client, string $reference): ?ServiceRequest
+    {
+        $reference = trim(ltrim(trim($reference), '#'));
+        if ($reference === '') {
+            return null;
+        }
+        $query = $client->requests();
+        if (str_starts_with(strtoupper($reference), 'REQ-')) {
+            $query->where('number', strtoupper($reference));
+        } elseif (ctype_digit($reference)) {
+            $query->where('number', 'like', '%-'.sprintf('%06d', (int) $reference));
+        } else {
+            return null;
+        }
+        $item = $query->latest('id')->first();
+
+        return $item instanceof ServiceRequest && ! $item->hiddenFromClient() ? $item : null;
     }
 
     public function byReference(string $reference): ServiceRequest

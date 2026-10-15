@@ -222,6 +222,12 @@ class HandleWhatsAppInbound
         }
         RateLimiter::hit('hoc:wa-flood:'.$phone, 60);
 
+        if (app(ManagementCancelApproval::class)->handleManagement($phone, $this->callbackId($message), $this->messageText($message))) {
+            $this->whatsApp->markRead($wamid);
+
+            return;
+        }
+
         if (! ClientChannelGate::whatsappEnabled()) {
             $this->whatsApp->markRead($wamid);
             $this->replyPausedOnce($phone);
@@ -2118,21 +2124,7 @@ class HandleWhatsAppInbound
     /** A request of this client named as #45, 45, or REQ-2026-000045. */
     private function ownedRequest(Client $client, string $ref): ?ServiceRequest
     {
-        $ref = trim(ltrim(trim($ref), '#'));
-        if ($ref === '') {
-            return null;
-        }
-        $query = $client->requests();
-        if (str_starts_with(strtoupper($ref), 'REQ-')) {
-            $query->where('number', strtoupper($ref));
-        } elseif (ctype_digit($ref)) {
-            $query->where('number', 'like', '%-'.sprintf('%06d', (int) $ref));
-        } else {
-            return null;
-        }
-        $item = $query->latest('id')->first();
-
-        return $item instanceof ServiceRequest && ! $item->hiddenFromClient() ? $item : null;
+        return ResolveServiceRequest::ownedBy($client, $ref);
     }
 
     private function isGreeting(string $text): bool

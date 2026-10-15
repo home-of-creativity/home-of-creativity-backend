@@ -3,7 +3,10 @@
 namespace Tests\Feature;
 
 use App\Actions\WhatsAppSupportAgent;
+use App\Enums\RequestStatus;
 use App\Models\Client;
+use App\Models\ServiceRequest;
+use App\Support\ResolveServiceRequest;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Carbon;
@@ -18,6 +21,8 @@ class WhatsAppSupportAgentTest extends TestCase
 
     private const AGENT = 'http://n8n.test/webhook/hoc-support-agent';
 
+    private const MANAGEMENT = '963944000900';
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -27,6 +32,7 @@ class WhatsAppSupportAgentTest extends TestCase
             'services.whatsapp.web_url' => 'http://wa-web.test',
             'services.whatsapp.web_secret' => 'web-secret',
             'services.whatsapp.support_numbers' => ['+963944000999'],
+            'services.whatsapp.management_numbers' => ['+963944000900'],
             'services.n8n.support_agent_url' => self::AGENT,
             'services.n8n.webhook_secret' => 'n8n-secret',
             'services.gemini.api_key' => '',
@@ -166,6 +172,85 @@ class WhatsAppSupportAgentTest extends TestCase
         $this->assertSame('+963944555666', Client::query()->where('telegram_user_id', 'wa:963922222222')->value('phone'));
     }
 
+    public function test_the_agent_opens_a_request_it_agreed_with_the_client(): void
+    {
+        $this->fakeAgent([
+            'reply' => 'تمام، لحظة.',
+            'handoff' => false,
+            'handoff_reason' => '',
+            'action' => ['type' => 'create_request', 'title' => 'باقة سوشيال ميديا كبيرة', 'description' => 'شركة Nour Co بدها باقة كبيرة: 20 بوست بالشهر وإدارة صفحتين.', 'request' => '', 'reason' => ''],
+        ]);
+
+        $this->send('بدي احكي مع موظف', 'c1');
+
+        $request = $this->client()->requests()->latest('id')->firstOrFail();
+        $this->assertSame('باقة سوشيال ميديا كبيرة', $request->title);
+        $this->assertSame(RequestStatus::Submitted, $request->status);
+        $this->assertSentToClient('فتحتلك الطلب #'.ResolveServiceRequest::displayNumber($request));
+
+        $this->send('تمام شكراً', 'c2');
+        $this->assertSame(1, $this->client()->requests()->count());
+    }
+
+    public function test_a_cancel_waits_for_management_then_cancels_and_relays_the_note(): void
+    {
+        $request = ServiceRequest::factory()->create(['client_id' => $this->client()->id, 'title' => 'تصميم لوغو']);
+        $ref = ResolveServiceRequest::displayNumber($request);
+        $this->fakeAgent($this->cancelOutput($ref));
+
+        $this->send('بدي احكي مع موظف', 'x1');
+
+        $this->assertSentToClient("بعتت طلب إلغاء الطلب #{$ref} للإدارة");
+        $this->assertSame(RequestStatus::Submitted, $request->fresh()->status);
+        $token = $this->approvalToken('cxok');
+
+        $this->sendButton(self::MANAGEMENT, 'cxok:'.$token, 'x2');
+
+        $this->assertSame(RequestStatus::Cancelled, $request->fresh()->status);
+        $this->assertSentToClient("الإدارة وافقت على إلغاء الطلب #{$ref}، وانلغى.");
+        $this->assertSentTo(self::MANAGEMENT, "انلغى الطلب #{$ref}");
+
+        $this->sendFrom(self::MANAGEMENT, 'العربون رح يرجعلك خلال يومين', 'x3');
+
+        $this->assertSentToClient('ملاحظة من الإدارة بخصوص الطلب #'.$ref);
+        $this->assertSentToClient('العربون رح يرجعلك خلال يومين');
+
+        $this->sendButton(self::MANAGEMENT, 'cxok:'.$token, 'x4');
+        $this->assertSentTo(self::MANAGEMENT, 'انحسم من قبل');
+    }
+
+    public function test_management_can_refuse_a_cancel(): void
+    {
+        $request = ServiceRequest::factory()->create(['client_id' => $this->client()->id]);
+        $ref = ResolveServiceRequest::displayNumber($request);
+        $this->fakeAgent($this->cancelOutput($ref));
+        $this->send('بدي احكي مع موظف', 'r1');
+
+        $this->sendButton(self::MANAGEMENT, 'cxno:'.$this->approvalToken('cxno'), 'r2');
+
+        $this->assertSame(RequestStatus::Submitted, $request->fresh()->status);
+        $this->assertSentToClient("الإدارة ما وافقت على إلغاء الطلب #{$ref}");
+    }
+
+    public function test_a_paid_request_goes_to_support_instead_of_management(): void
+    {
+        $request = ServiceRequest::factory()->create([
+            'client_id' => $this->client()->id,
+            'status' => RequestStatus::InProgress,
+            'paid_at' => now(),
+        ]);
+        $ref = ResolveServiceRequest::displayNumber($request);
+        $this->fakeAgent($this->cancelOutput($ref));
+
+        $this->send('بدي احكي مع موظف', 'p1');
+
+        $this->assertSentToClient("الطلب #{$ref} مدفوع");
+        $this->assertSentTo('963944000999', 'عميل بدو يلغي طلب مدفوع');
+        Http::assertNotSent(fn (Request $sent): bool => $sent->url() === 'http://wa-web.test/send'
+            && $sent['to'] === self::MANAGEMENT
+            && ($sent['kind'] ?? '') === 'list');
+    }
+
     public function test_the_person_phrases(): void
     {
         $this->assertTrue(WhatsAppSupportAgent::wantsHuman('بدي احكي مع موظف'));
@@ -199,8 +284,64 @@ class WhatsAppSupportAgentTest extends TestCase
 
     private function assertSentToClient(string $fragment): void
     {
+        $this->assertSentTo('963922222222', $fragment);
+    }
+
+    private function assertSentTo(string $to, string $fragment): void
+    {
         Http::assertSent(fn (Request $sent): bool => $sent->url() === 'http://wa-web.test/send'
-            && $sent['to'] === '963922222222'
+            && $sent['to'] === $to
             && str_contains((string) ($sent['text'] ?? ''), $fragment));
+    }
+
+    private function client(): Client
+    {
+        return Client::query()->where('telegram_user_id', 'wa:963922222222')->firstOrFail();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function cancelOutput(string $ref): array
+    {
+        return [
+            'reply' => 'تمام، رح أبعت طلب الإلغاء للإدارة.',
+            'handoff' => false,
+            'handoff_reason' => '',
+            'action' => ['type' => 'cancel_request', 'title' => '', 'description' => '', 'request' => '#'.$ref, 'reason' => 'ما عاد بدي ياه'],
+        ];
+    }
+
+    private function approvalToken(string $prefix): string
+    {
+        $token = '';
+        Http::assertSent(function (Request $sent) use ($prefix, &$token): bool {
+            if ($sent->url() !== 'http://wa-web.test/send' || $sent['to'] !== self::MANAGEMENT || ($sent['kind'] ?? '') !== 'list') {
+                return false;
+            }
+            foreach ((array) $sent['buttons'] as $button) {
+                if (str_starts_with((string) ($button['id'] ?? ''), $prefix.':')) {
+                    $token = substr((string) $button['id'], strlen($prefix) + 1);
+                }
+            }
+
+            return $token !== '' && str_contains((string) $sent['text'], 'طلب إلغاء من عميل');
+        });
+
+        return $token;
+    }
+
+    private function sendFrom(string $phone, string $text, string $id): void
+    {
+        $this->withHeaders(['X-Webhook-Secret' => 'web-secret'])
+            ->postJson('/api/bot/whatsapp/web', ['phone' => $phone, 'message_id' => $id, 'text' => $text])
+            ->assertOk();
+    }
+
+    private function sendButton(string $phone, string $buttonId, string $id): void
+    {
+        $this->withHeaders(['X-Webhook-Secret' => 'web-secret'])
+            ->postJson('/api/bot/whatsapp/web', ['phone' => $phone, 'message_id' => $id, 'button_id' => $buttonId])
+            ->assertOk();
     }
 }
