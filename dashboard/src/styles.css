@@ -8541,6 +8541,18 @@ html[dir="rtl"] .placement-tile-toggle[data-state="checked"] .placement-tile-tog
   touch-action: none;
 }
 
+.voucher-remaining-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.voucher-remaining-row .checkbox-row {
+  padding-bottom: 0.55rem;
+  white-space: nowrap;
+}
+
 .voucher-sign-tools {
   display: flex;
   flex-wrap: wrap;
@@ -8997,6 +9009,10 @@ html[dir="rtl"] .placement-tile-toggle[data-state="checked"] .placement-tile-tog
   .voucher-studio,
   .voucher-studio.has-signs-panel,
   .voucher-split {
+    grid-template-columns: 1fr;
+  }
+
+  .voucher-remaining-row {
     grid-template-columns: 1fr;
   }
 

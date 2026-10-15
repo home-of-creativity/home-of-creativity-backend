@@ -918,6 +918,9 @@ export const copy = {
   voucherSearch: { ar: "بحث بالرقم أو الجهة", en: "Search by number or party" },
   voucherKind: { ar: "القالب", en: "Template" },
   voucherAmount: { ar: "المبلغ", en: "Amount" },
+  voucherRemaining: { ar: "الباقي", en: "Remaining" },
+  voucherShowRemaining: { ar: "عرض الباقي على الورقة", en: "Show remaining on the sheet" },
+
   voucherOpen: { ar: "فتح", en: "Open" },
   voucherEdit: { ar: "تعديل", en: "Edit" },
   voucherEditing: { ar: "تعديل المستند: غيّر الحقول ثم احفظ التعديلات", en: "Editing: change the fields, then save the changes" },

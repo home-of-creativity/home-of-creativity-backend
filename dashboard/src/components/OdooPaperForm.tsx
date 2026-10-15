@@ -3,11 +3,14 @@ import * as Popover from "@radix-ui/react-popover";
 import { api, CLIENT_SEARCH_MIN, type Client, type OdooPaperLine, type OdooPaymentTerm, type OdooProduct, type OdooQuotation, type OdooTax, type PaperLineInput } from "../api";
 import { copy } from "../i18n";
 import { useCan } from "../lib/useCan";
+import { paperStatusIndex } from "../lib/paperStatusIndex";
 import { HtmlEditorField } from "./HtmlEditorField";
 import { InvoiceWizardDialog, type InvoiceDraft } from "./InvoiceWizardDialog";
 import { OdooPaperActivity } from "./OdooPaperActivity";
 import { OdooPaperPreview } from "./OdooPaperPreview";
 import { PaperDraftPreview, type DraftPaper } from "./PaperDraftPreview";
+
+export { paperStatusIndex } from "../lib/paperStatusIndex";
 
 type LineKind = "product" | "section" | "note";
 type Line = { id: string; kind: LineKind; title: string; amount: string; units: string; discount: string; taxIds: number[]; productId?: number; notes?: string };
@@ -27,6 +30,8 @@ export type PaperEditing = {
   notes?: string | null;
   /** Odoo state; a draft invoice gets «تأكيد». */
   state?: string;
+  /** Odoo payment_state for invoices (not_paid, partial, paid, …). */
+  paymentState?: string | null;
   /** The sales order a wizard invoice came from, so «تأكيد» continues its request. */
   quotationId?: number | null;
 };
@@ -526,7 +531,8 @@ export function OdooPaperForm({
   const showLines = kind === "quotation" || !quotationId;
   const steps = kind === "quotation"
     ? [copy.paperStatusQuotation, copy.paperStatusSent]
-    : [copy.paperStatusDraft, copy.paperStatusPosted];
+    : [copy.paperStatusDraft, copy.paperStatusPosted, copy.payPaid];
+  const currentStep = paperStatusIndex(kind, editing?.state, editing?.paymentState);
   const taxed = lines.map((line) => lineTax(line, taxes));
   const untaxed = taxed.reduce((sum, row) => sum + row.base, 0);
   const taxTotal = taxed.reduce((sum, row) => sum + row.tax, 0);
@@ -570,7 +576,7 @@ export function OdooPaperForm({
       <div className="odoo-paper-top">
         <nav className="odoo-statusbar" aria-label={t(copy.odooState)}>
           {steps.map((step, index) => (
-            <span key={step.ar} className={index === 0 ? "is-current" : undefined}>{t(step)}</span>
+            <span key={step.ar} className={index === currentStep ? "is-current" : undefined}>{t(step)}</span>
           ))}
         </nav>
         <h2 className="form-title">

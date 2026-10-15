@@ -18,5 +18,5 @@
     "noFallthroughCasesInSwitch": true
   },
   "include": ["src"],
-  "exclude": ["src/zz-*"]
+  "exclude": ["src/zz-*", "src/**/*.test.ts"]
 }

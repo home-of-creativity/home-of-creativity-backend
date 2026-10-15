@@ -145,6 +145,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
           paymentTermId: res.data.payment_term_id ?? null,
           lines: res.data.lines,
           state: res.data.state,
+          paymentState: kind === "invoice" ? (res.data as OdooInvoice).payment_state ?? null : null,
           notes,
         },
       });
@@ -192,6 +193,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
         paymentTermId: draft.payment_term_id ?? null,
         lines: draft.lines,
         state: draft.state,
+        paymentState: draft.payment_state ?? null,
         quotationId: draft.quotation_id,
       },
     });

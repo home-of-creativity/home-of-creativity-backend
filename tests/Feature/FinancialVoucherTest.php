@@ -355,6 +355,49 @@ class FinancialVoucherTest extends TestCase
         $this->assertSame(0, FinancialVoucherTemplate::query()->count());
     }
 
+    public function test_remaining_balance_is_optional_on_the_sheet(): void
+    {
+        Sanctum::actingAs(User::factory()->admin()->create());
+
+        $hidden = $this->postJson('/api/admin/vouchers', [
+            'kind' => 'receipt',
+            'party_name' => 'عميل',
+            'amount' => 500,
+            'remaining' => 150,
+            'show_remaining' => false,
+            'currency' => 'USD',
+            'issued_on' => '2026-10-15',
+        ])->assertCreated()->json('data');
+
+        $this->assertEquals(150, $hidden['remaining']);
+        $this->assertFalse($hidden['show_remaining']);
+
+        $shown = $this->putJson('/api/admin/vouchers/'.$hidden['id'], [
+            'kind' => 'receipt',
+            'party_name' => 'عميل',
+            'amount' => 500,
+            'remaining' => 120.5,
+            'show_remaining' => true,
+            'currency' => 'USD',
+            'issued_on' => '2026-10-15',
+        ])->assertOk()->json('data');
+
+        $this->assertEquals(120.5, $shown['remaining']);
+        $this->assertTrue($shown['show_remaining']);
+
+        $this->postJson('/api/admin/voucher-templates', [
+            'name' => 'قبض مع باقي',
+            'kind' => 'receipt',
+            'party_name' => 'عميل',
+            'amount' => 100,
+            'remaining' => 40,
+            'show_remaining' => true,
+            'currency' => 'USD',
+        ])->assertCreated()
+            ->assertJsonPath('data.data.remaining', 40)
+            ->assertJsonPath('data.data.show_remaining', true);
+    }
+
     public function test_document_numbers_increment_and_can_be_edited(): void
     {
         Sanctum::actingAs(User::factory()->admin()->create());

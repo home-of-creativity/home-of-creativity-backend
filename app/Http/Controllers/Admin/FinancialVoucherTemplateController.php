@@ -38,6 +38,8 @@ class FinancialVoucherTemplateController extends Controller
             'title' => ['nullable', 'string', 'max:120'],
             'party_name' => ['nullable', 'string', 'max:160'],
             'amount' => ['nullable', 'numeric', 'min:-100000000', 'max:100000000'],
+            'remaining' => ['nullable', 'numeric', 'min:-100000000', 'max:100000000'],
+            'show_remaining' => ['sometimes', 'boolean'],
             'currency' => ['required', 'string', Rule::in(FinancialVoucher::CURRENCIES)],
             'amount_words' => ['nullable', 'string', 'max:240'],
             'purpose' => ['nullable', 'string', 'max:2000'],
@@ -75,6 +77,10 @@ class FinancialVoucherTemplateController extends Controller
             'title' => $this->blank($validated['title'] ?? null),
             'party_name' => trim((string) ($validated['party_name'] ?? '')),
             'amount' => $amount,
+            'remaining' => array_key_exists('remaining', $validated) && $validated['remaining'] !== null
+                ? round((float) $validated['remaining'], 2)
+                : null,
+            'show_remaining' => (bool) ($validated['show_remaining'] ?? false),
             'currency' => $validated['currency'],
             'amount_words' => $this->blank($validated['amount_words'] ?? null),
             'purpose' => $this->blank($validated['purpose'] ?? null),

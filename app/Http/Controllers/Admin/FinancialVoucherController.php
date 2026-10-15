@@ -175,6 +175,8 @@ class FinancialVoucherController extends Controller
             'party_name' => ['required', 'string', 'max:160'],
             'serial' => ['nullable', 'string', 'max:24'],
             'amount' => ['nullable', 'numeric', 'min:-100000000', 'max:100000000'],
+            'remaining' => ['nullable', 'numeric', 'min:-100000000', 'max:100000000'],
+            'show_remaining' => ['sometimes', 'boolean'],
             'currency' => ['required', 'string', Rule::in(FinancialVoucher::CURRENCIES)],
             'amount_words' => ['nullable', 'string', 'max:240'],
             'issued_on' => ['required', 'date'],
@@ -253,6 +255,10 @@ class FinancialVoucherController extends Controller
             'title' => $this->blank($validated['title'] ?? null),
             'party_name' => trim($validated['party_name']),
             'amount' => $amount,
+            'remaining' => array_key_exists('remaining', $validated) && $validated['remaining'] !== null
+                ? round((float) $validated['remaining'], 2)
+                : null,
+            'show_remaining' => (bool) ($validated['show_remaining'] ?? false),
             'currency' => $validated['currency'],
             'amount_words' => $this->blank($validated['amount_words'] ?? null),
             'issued_on' => $validated['issued_on'],
@@ -358,6 +364,8 @@ class FinancialVoucherController extends Controller
         return [
             ...$this->summary($voucher),
             'amount_words' => $voucher->amount_words,
+            'remaining' => $voucher->remaining !== null ? (float) $voucher->remaining : null,
+            'show_remaining' => (bool) $voucher->show_remaining,
             'purpose' => $voucher->purpose,
             'reference' => $voucher->reference,
             'lines' => $voucher->lines ?? [],

@@ -45,6 +45,8 @@ type Draft = {
   title: string;
   party_name: string;
   amount: string;
+  remaining: string;
+  show_remaining: boolean;
   currency: "USD" | "SYP";
   amount_words: string;
   issued_on: string;
@@ -76,6 +78,8 @@ function emptyDraft(kind: VoucherKind): Draft {
     title: "",
     party_name: "",
     amount: "",
+    remaining: "",
+    show_remaining: false,
     currency: "USD",
     amount_words: "",
     issued_on: today(),
@@ -106,6 +110,8 @@ function fromTemplate(template: VoucherTemplate): Draft {
     title: data.title ?? "",
     party_name: data.party_name ?? "",
     amount: data.amount ? String(data.amount) : "",
+    remaining: data.remaining != null ? String(data.remaining) : "",
+    show_remaining: Boolean(data.show_remaining),
     currency: data.currency === "SYP" ? "SYP" : "USD",
     amount_words: data.amount_words ?? "",
     issued_on: today(),
@@ -192,6 +198,8 @@ function fromVoucher(voucher: FinancialVoucher): Draft {
     title: voucher.title ?? "",
     party_name: voucher.party_name,
     amount: voucher.amount ? String(voucher.amount) : "",
+    remaining: voucher.remaining != null ? String(voucher.remaining) : "",
+    show_remaining: Boolean(voucher.show_remaining),
     currency: voucher.currency,
     amount_words: voucher.amount_words ?? "",
     issued_on: voucher.issued_on ?? today(),
@@ -557,6 +565,8 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
         party_name: draft.party_name.trim(),
         serial: serial.trim(),
         amount: draft.kind === "journal" ? totals.debit : draft.kind === "delivery" ? deliveryAmount : amount,
+        remaining: draft.remaining.trim() === "" ? null : Number(draft.remaining),
+        show_remaining: draft.show_remaining,
         currency: draft.currency,
         amount_words: draft.amount_words.trim() || undefined,
         issued_on: draft.issued_on,
@@ -607,6 +617,8 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
         amount: draft.kind === "journal" || draft.kind === "delivery"
           ? (lineSum ? lineSum : Number(draft.amount) || 0)
           : Number(draft.amount) || 0,
+        remaining: draft.remaining.trim() === "" ? null : Number(draft.remaining),
+        show_remaining: draft.show_remaining,
         currency: draft.currency,
         amount_words: draft.amount_words.trim() || undefined,
         purpose: draft.purpose.trim() || undefined,
@@ -902,6 +914,28 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
               </label>
             </>
           )}
+          <div className="voucher-remaining-row">
+            <label className="field-label">
+              {t(copy.voucherRemaining)}
+              <input
+                className="field"
+                dir="ltr"
+                inputMode="decimal"
+                value={draft.remaining}
+                disabled={!canWrite}
+                onChange={(event) => patch({ remaining: event.target.value })}
+              />
+            </label>
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={draft.show_remaining}
+                disabled={!canWrite}
+                onChange={(event) => patch({ show_remaining: event.target.checked })}
+              />
+              <span>{t(copy.voucherShowRemaining)}</span>
+            </label>
+          </div>
           {draft.kind === "notes" ? null : draft.kind === "delivery" ? (
             <>
               <label className="field-label">
@@ -1068,6 +1102,9 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
                 ))}
               </ol>
               <p className="voucher-ack">{t(copy.voucherNotesAck)}</p>
+              {draft.show_remaining ? (
+                <p><span>{t(copy.voucherRemaining)}</span><strong dir="ltr">{figures(Number(draft.remaining) || 0, draft.currency)}</strong></p>
+              ) : null}
             </div>
           ) : draft.kind === "delivery" ? (
             <div className="voucher-copy">
@@ -1075,6 +1112,9 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
               <p><span>{t(copy.voucherGiver)}</span><strong>{[draft.counter_signer_name, draft.purpose].filter(Boolean).join(" / ") || "………………"}</strong></p>
               <p><span>{t(copy.voucherAmountDigits)}</span><strong dir="ltr">{figures(shownAmount, draft.currency)}</strong></p>
               <p><span>{t(copy.voucherAmountWords)}</span><strong>{draft.amount_words || "………………"}</strong></p>
+              {draft.show_remaining ? (
+                <p><span>{t(copy.voucherRemaining)}</span><strong dir="ltr">{figures(Number(draft.remaining) || 0, draft.currency)}</strong></p>
+              ) : null}
               <p className="voucher-statement-label">{t(copy.voucherStatement)}</p>
               <ul>
                 {draft.lines.filter((line) => line.memo || line.debit).map((line, index) => (
@@ -1087,29 +1127,39 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
               <p className="voucher-ack">{t(copy.voucherAck)}</p>
             </div>
           ) : draft.kind === "journal" ? (
-            <table className="voucher-table">
-              <thead>
-                <tr>
-                  <th>{t(copy.voucherMemo)}</th>
-                  <th>{t(copy.voucherDebit)}</th>
-                  <th>{t(copy.voucherCredit)}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {draft.lines.filter((line) => line.memo || line.debit || line.credit).map((line, index) => (
-                  <tr key={index}>
-                    <td>{line.memo || "—"}</td>
-                    <td dir="ltr">{line.debit ? money(Number(line.debit) || 0, draft.currency) : ""}</td>
-                    <td dir="ltr">{line.credit ? money(Number(line.credit) || 0, draft.currency) : ""}</td>
+            <>
+              <table className="voucher-table">
+                <thead>
+                  <tr>
+                    <th>{t(copy.voucherMemo)}</th>
+                    <th>{t(copy.voucherDebit)}</th>
+                    <th>{t(copy.voucherCredit)}</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {draft.lines.filter((line) => line.memo || line.debit || line.credit).map((line, index) => (
+                    <tr key={index}>
+                      <td>{line.memo || "—"}</td>
+                      <td dir="ltr">{line.debit ? money(Number(line.debit) || 0, draft.currency) : ""}</td>
+                      <td dir="ltr">{line.credit ? money(Number(line.credit) || 0, draft.currency) : ""}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {draft.show_remaining ? (
+                <div className="voucher-copy">
+                  <p><span>{t(copy.voucherRemaining)}</span><strong dir="ltr">{figures(Number(draft.remaining) || 0, draft.currency)}</strong></p>
+                </div>
+              ) : null}
+            </>
           ) : (
             <div className="voucher-copy">
               <p><span>{partyLabel}</span><strong>{draft.party_name || "………………"}</strong></p>
               <p><span>{t(copy.voucherAmountDigits)}</span><strong dir="ltr">{figures(shownAmount, draft.currency)}</strong></p>
               {draft.amount_words ? <p><span>{t(copy.voucherAmountWords)}</span><strong>{draft.amount_words}</strong></p> : null}
+              {draft.show_remaining ? (
+                <p><span>{t(copy.voucherRemaining)}</span><strong dir="ltr">{figures(Number(draft.remaining) || 0, draft.currency)}</strong></p>
+              ) : null}
               <p><span>{t(copy.voucherFor)}</span><strong>{draft.purpose || "………………"}</strong></p>
             </div>
           )}

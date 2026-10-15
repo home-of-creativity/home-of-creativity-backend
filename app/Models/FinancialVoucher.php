@@ -66,6 +66,8 @@ class FinancialVoucher extends Model
         'title',
         'party_name',
         'amount',
+        'remaining',
+        'show_remaining',
         'currency',
         'amount_words',
         'issued_on',
@@ -89,6 +91,8 @@ class FinancialVoucher extends Model
     {
         return [
             'amount' => 'decimal:2',
+            'remaining' => 'decimal:2',
+            'show_remaining' => 'boolean',
             'issued_on' => 'date:Y-m-d',
             'lines' => 'array',
             'signed_at' => 'datetime',

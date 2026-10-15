@@ -169,6 +169,8 @@ export type FinancialVoucherSummary = {
 
 export type FinancialVoucher = FinancialVoucherSummary & {
   amount_words: string | null;
+  remaining: number | null;
+  show_remaining: boolean;
   purpose: string | null;
   reference: string | null;
   lines: VoucherLine[];
@@ -193,6 +195,8 @@ export type VoucherTemplateData = {
   title?: string | null;
   party_name?: string | null;
   amount?: number | null;
+  remaining?: number | null;
+  show_remaining?: boolean;
   currency?: "USD" | "SYP";
   amount_words?: string | null;
   purpose?: string | null;
@@ -215,6 +219,8 @@ export type VoucherDraft = {
   party_name: string;
   serial?: string;
   amount: number;
+  remaining?: number | null;
+  show_remaining?: boolean;
   currency: "USD" | "SYP";
   amount_words?: string;
   issued_on: string;
@@ -236,6 +242,8 @@ export type VoucherTemplateDraft = {
   title?: string;
   party_name?: string;
   amount?: number;
+  remaining?: number | null;
+  show_remaining?: boolean;
   currency: "USD" | "SYP";
   amount_words?: string;
   purpose?: string;

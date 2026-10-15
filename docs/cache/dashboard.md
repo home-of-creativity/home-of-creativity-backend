@@ -1,6 +1,10 @@
 # Staff dashboard (Vite SPA)
 
-Last updated: 15 October 2026 (Voucher document number is editable: form field «رقم المستند», sent as `serial` on create/update; `GET /admin/vouchers/next-serial` suggests the next number from max suffix + 1, not row count, so deletes no longer reuse a lower number. Sheet shows `N####` from that serial.)
+Last updated: 15 October 2026 (Voucher «الباقي»: every kind has `remaining` + `show_remaining`; form row with amount and checkbox «عرض الباقي على الورقة»; the sheet shows الباقي only when checked. Kept on templates too.)
+
+Previous: 15 October 2026 (Invoice/quotation status bar follows Odoo: `paperStatusIndex` highlights Posted when `state=posted`, Paid when `payment_state` is paid/in_payment/reversed; it no longer always marks Draft.)
+
+Previous: 15 October 2026 (Voucher document number is editable: form field «رقم المستند», sent as `serial` on create/update; `GET /admin/vouchers/next-serial` suggests the next number from max suffix + 1, not row count, so deletes no longer reuse a lower number. Sheet shows `N####` from that serial.)
 
 Previous: 15 October 2026 (Voucher signature library: button «التوقيعات» on the voucher form opens a side panel (`voucher-signs-panel`) with upload + named list. `GET/POST/DELETE /admin/voucher-signatures` (`ops.vouchers` CRUD) stores PNG/JPEG/WebP as data URLs in `financial_voucher_signatures`. Clicking a saved image applies it to the chosen pad (signer or counter).)
 
