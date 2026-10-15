@@ -141,6 +141,31 @@ class WhatsAppSupportAgentTest extends TestCase
         $this->assertFalse(app(WhatsAppSupportAgent::class)->active('963922222222'));
     }
 
+    public function test_the_phone_step_explains_then_brings_in_the_agent_and_still_takes_the_number(): void
+    {
+        $this->fakeAgent(['reply' => 'اكتب رقم موبايلك مع مفتاح الدولة، متل +963944123456.', 'handoff' => false, 'handoff_reason' => '']);
+        Client::query()->where('telegram_user_id', 'wa:963922222222')->update(['phone' => null]);
+        Cache::put('hoc:wa-session:963922222222', ['step' => 'phone'], now()->addHour());
+
+        $this->send('اهلا فيك', 'p1');
+        $this->assertSentToClient('أهلين فيك.');
+
+        $this->send('اي رقم قمت بتسجيل من قبل', 'p2');
+        $this->assertSentToClient('ما عنا رقم موبايل واضح مسجل إلك.');
+        Http::assertNotSent(fn (Request $sent): bool => $sent->url() === self::AGENT);
+
+        $this->send('اي رقم؟', 'p3');
+        Http::assertSent(fn (Request $sent): bool => $sent->url() === self::AGENT
+            && $sent['message'] === 'اي رقم؟'
+            && str_contains((string) $sent['reason'], 'mobile number step'));
+        $this->assertTrue(app(WhatsAppSupportAgent::class)->active('963922222222'));
+
+        $this->send('+963 944 555 666', 'p4');
+        Http::assertNotSent(fn (Request $sent): bool => $sent->url() === self::AGENT && $sent['message'] === '+963 944 555 666');
+        $this->assertFalse(app(WhatsAppSupportAgent::class)->active('963922222222'));
+        $this->assertSame('+963944555666', Client::query()->where('telegram_user_id', 'wa:963922222222')->value('phone'));
+    }
+
     public function test_the_person_phrases(): void
     {
         $this->assertTrue(WhatsAppSupportAgent::wantsHuman('بدي احكي مع موظف'));

@@ -377,6 +377,51 @@ class AdminDashboardTest extends TestCase
         });
     }
 
+    public function test_client_edit_loads_by_id_past_the_first_page_and_clears_fields(): void
+    {
+        Http::preventStrayRequests();
+        $this->fakeOdooDocuments();
+        Http::fake($this->odooDocumentsHttpFake());
+
+        $admin = User::factory()->create();
+        $admin->forceFill(['is_admin' => true])->save();
+        Sanctum::actingAs($admin);
+
+        $client = Client::factory()->create([
+            'name' => 'Edit Me',
+            'company_name' => 'Old Co',
+            'company_activity' => 'Retail',
+            'email' => 'old@hoc.test',
+            'phone' => '+963944000111',
+            'telegram_user_id' => null,
+        ]);
+        Client::factory()->count(30)->create(['company_name' => 'Newer Co', 'telegram_user_id' => null]);
+
+        $this->getJson('/api/admin/clients?page=1')
+            ->assertOk()
+            ->assertJsonMissing(['id' => $client->id, 'name' => 'Edit Me']);
+        $this->getJson("/api/admin/clients?page=1&id={$client->id}")
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $client->id)
+            ->assertJsonPath('data.0.email', 'old@hoc.test');
+
+        $this->putJson("/api/admin/clients/{$client->id}", [
+            'name' => 'Edit Me',
+            'email' => null,
+            'phone' => '+963944000222',
+            'company_name' => 'Old Co',
+            'company_activity' => null,
+        ])->assertOk()
+            ->assertJsonPath('data.email', null)
+            ->assertJsonPath('data.company_activity', null)
+            ->assertJsonPath('data.phone', '+963944000222');
+
+        $client->refresh();
+        $this->assertNull($client->email);
+        $this->assertNull($client->company_activity);
+    }
+
     public function test_admin_delete_client_unlinks_odoo_crm_records(): void
     {
         Http::preventStrayRequests();

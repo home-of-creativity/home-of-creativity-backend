@@ -46,7 +46,7 @@ export function ClientForm({ t }: { locale: Locale; t: (c: { ar: string; en: str
     }
     setLoading(true);
     api
-      .clients(1)
+      .clients(1, { id: editingId })
       .then((res) => res.data.find((row) => row.id === editingId))
       .then((item) => {
         if (!item) {
@@ -69,15 +69,23 @@ export function ClientForm({ t }: { locale: Locale; t: (c: { ar: string; en: str
     setError("");
     setBusy(true);
     try {
-      const payload = {
-        name: values.name,
-        email: values.email || undefined,
-        phone: values.phone || undefined,
-        company_name: values.companyName || undefined,
-        company_activity: values.companyActivity || undefined,
-      };
-      if (editingId) await api.updateClient(editingId, payload);
-      else await api.createClient(payload);
+      if (editingId) {
+        await api.updateClient(editingId, {
+          name: values.name,
+          email: values.email || null,
+          phone: values.phone || null,
+          company_name: values.companyName || null,
+          company_activity: values.companyActivity || null,
+        });
+      } else {
+        await api.createClient({
+          name: values.name,
+          email: values.email || undefined,
+          phone: values.phone || undefined,
+          company_name: values.companyName || undefined,
+          company_activity: values.companyActivity || undefined,
+        });
+      }
       toast.success(t(copy.saveSuccess));
       navigate("/clients");
     } catch (err) {

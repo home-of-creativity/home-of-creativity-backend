@@ -257,9 +257,12 @@ class HandleWhatsAppInbound
                 return;
             }
             if ((! is_string($callback) || $callback === '') && is_string($text) && trim($text) !== '' && $this->supportAgent()->active($phone)) {
-                $this->continueSupportAgent($client, $chatId, $phone, $session, trim($text));
+                if (! $this->answersPhoneStep($session, trim($text))) {
+                    $this->continueSupportAgent($client, $chatId, $phone, $session, trim($text));
 
-                return;
+                    return;
+                }
+                $this->supportAgent()->end($phone);
             }
             $queuedPhoto = is_string($session['photo_queued'] ?? null) ? (string) $session['photo_queued'] : '';
             if ($queuedPhoto !== '') {
@@ -663,7 +666,7 @@ class HandleWhatsAppInbound
 
         $prompt = match ($field) {
             'name' => $this->tx('شو اسمك؟', 'What is your full name?'),
-            'phone' => $this->phonePrompt(),
+            'phone' => $this->phonePrompt(Client::whatsappPhoneFromKey($chatId)),
             default => $this->tx(
                 "شو اسم الشركة أو المحل؟ منحط العرض والفاتورة عاسمه.\n",
                 "We ask for the company name so the quotation and invoice use it.\nWhat is the company name?",
@@ -707,8 +710,15 @@ class HandleWhatsAppInbound
         return 'ask';
     }
 
-    private function phonePrompt(): string
+    private function phonePrompt(string $phone): string
     {
+        if (ClientPhone::fromCallerDigits($phone) === null) {
+            return $this->tx(
+                "ابعت رقم موبايلك مع مفتاح الدولة، مثل +963944123456.\nإذا الرقم بدون مفتاح، منسألك أي بلد.",
+                "Send your mobile number with its country code, such as +963944123456.\nIf it has no country code, we ask which country.",
+            );
+        }
+
         return $this->tx(
             "ابعت الرقم مع مفتاح الدولة، مثل +963944123456.\nإذا الرقم بدون مفتاح، منسألك أي بلد.\nوإذا بدك رقم الواتساب الحالي، اكتب: خذ رقمي الحالي.",
             "Send the number with its country code, such as +963944123456.\nIf it has no country code, we ask which country.\nTo keep this WhatsApp number, send: خذ رقمي الحالي.",
@@ -718,23 +728,30 @@ class HandleWhatsAppInbound
     /**
      * @param  array<string, mixed>  $session
      */
-    private function acceptTypedPhone(string $chatId, string $phone, array &$session, string $value, string $resume): ?string
+    private function acceptTypedPhone(Client $client, string $chatId, string $phone, array &$session, string $value, string $resume): ?string
     {
         $read = ClientPhone::interpret($value);
         if ($read['status'] === 'current') {
             $current = ClientPhone::fromCallerDigits($phone);
             if ($current === null) {
-                $this->safeSend($chatId, $this->tx('ما قدرنا ناخذ رقم الواتساب الحالي. ابعت الرقم.', 'Send the phone number.'));
+                $this->safeSend($chatId, $this->tx(
+                    'واتساب ما بيبعتلنا رقمك من هالمحادثة. اكتبه مع مفتاح الدولة، مثل +963944123456.',
+                    'WhatsApp does not share your number in this chat. Type it with the country code, such as +963944123456.',
+                ));
 
                 return null;
             }
+            $this->clearPhoneMisses($phone, $session);
 
             return $current;
         }
         if ($read['status'] === 'ready') {
+            $this->clearPhoneMisses($phone, $session);
+
             return $read['phone'];
         }
         if ($read['status'] === 'country') {
+            unset($session['phone_misses']);
             $session['step'] = 'phone_country';
             $session['phone_national'] = $read['national'];
             $session['phone_resume'] = $resume;
@@ -744,12 +761,67 @@ class HandleWhatsAppInbound
             return null;
         }
 
-        $this->safeSend($chatId, $this->tx(
-            'الرقم مو واضح. ابعت رقم الموبايل، أو اكتب خذ رقمي الحالي.',
-            'Send a mobile number, or send: خذ رقمي الحالي.',
-        ));
+        if ($this->isGreeting($value)) {
+            $this->safeSend($chatId, $this->tx('أهلين فيك.', 'Hello.')."\n".$this->phonePrompt($phone));
+
+            return null;
+        }
+
+        $session['phone_misses'] = (int) ($session['phone_misses'] ?? 0) + 1;
+        $this->putSession($phone, $session);
+        if ($session['phone_misses'] >= WhatsAppSupportAgent::MISSES_TO_HAND_OVER && $this->supportAgent()->configured()) {
+            unset($session['phone_misses']);
+            $this->startSupportAgent($client, $chatId, $phone, $session, $value, 'The client is stuck at the mobile number step and the bot did not understand twice. '
+                .'The bot needs their mobile number with the country code, for example +963944123456. Help them send it; when they type the number it is saved automatically.');
+
+            return null;
+        }
+
+        $this->safeSend($chatId, $this->phoneHelp($client, $phone));
 
         return null;
+    }
+
+    /**
+     * A number typed while the bot waits for one goes to the bot, even when the support agent has the chat.
+     *
+     * @param  array<string, mixed>  $session
+     */
+    private function answersPhoneStep(array $session, string $text): bool
+    {
+        $step = (string) ($session['step'] ?? '');
+        $waiting = $step === 'phone' || $step === 'phone_country'
+            || ($step === 'profile_edit' && ($session['profile_field'] ?? '') === 'phone');
+
+        return $waiting && (ClientProfileValue::looksLikePhone($text) || ClientPhone::wantsCurrentNumber($text));
+    }
+
+    /** Why the bot asks for a number, and what it holds now, for a client who did not follow the prompt. */
+    private function phoneHelp(Client $client, string $phone): string
+    {
+        $stored = $this->phoneUnreadable($client) ? null : (string) $client->phone;
+        $lines = [$this->tx(
+            'المقصود رقم موبايلك اللي منتواصل معك عليه ومنكتبه عالعرض والفاتورة.',
+            'We mean the mobile number we reach you on, the one printed on quotations and invoices.',
+        )];
+        $lines[] = $stored !== null
+            ? $this->tx('الرقم المسجل عنا هلق: '.$stored.'.', 'The number we have now: '.$stored.'.')
+            : $this->tx('ما عنا رقم موبايل واضح مسجل إلك.', 'We do not have a clear mobile number for you yet.');
+        $lines[] = $this->phonePrompt($phone);
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function clearPhoneMisses(string $phone, array &$session): void
+    {
+        if (! array_key_exists('phone_misses', $session)) {
+            return;
+        }
+        unset($session['phone_misses']);
+        $this->putSession($phone, $session);
     }
 
     /**
@@ -888,7 +960,7 @@ class HandleWhatsAppInbound
             return;
         }
         if ($field === 'phone') {
-            $stored = $this->acceptTypedPhone($chatId, $phone, $session, $value, 'profile');
+            $stored = $this->acceptTypedPhone($client, $chatId, $phone, $session, $value, 'profile');
             if ($stored === null) {
                 return;
             }
@@ -980,7 +1052,7 @@ class HandleWhatsAppInbound
             $this->putSession($phone, $session);
             $prompt = match ($field) {
                 'name' => $this->tx('شو الاسم الجديد؟', 'What is the new full name?'),
-                'phone' => $this->phonePrompt(),
+                'phone' => $this->phonePrompt($phone),
                 'email' => $this->tx('ابعت الإيميل، مثل: name@company.com', 'Send the email address, e.g. name@company.com'),
                 default => $this->tx('شو اسم الشركة الجديد؟', 'What is the new company name?'),
             };
@@ -4025,7 +4097,7 @@ class HandleWhatsAppInbound
         }
 
         if ($field === 'phone') {
-            $storedPhone = $this->acceptTypedPhone($chatId, $phone, $session, $value, 'edit');
+            $storedPhone = $this->acceptTypedPhone($client, $chatId, $phone, $session, $value, 'edit');
             if ($storedPhone === null) {
                 return;
             }
