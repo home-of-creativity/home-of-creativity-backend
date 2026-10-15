@@ -8,6 +8,7 @@ use App\Enums\PaymentMethod;
 use App\Enums\RequestStatus;
 use App\Mail\ClientDocumentMail;
 use App\Models\Client;
+use App\Models\OdooInvoice;
 use App\Models\Role;
 use App\Models\ServiceRequest;
 use App\Models\User;
@@ -119,7 +120,9 @@ class OdooPaperFlowTest extends TestCase
         ])->assertCreated();
         $request = ServiceRequest::query()->sole();
 
-        $this->deleteJson('/api/admin/odoo/quotations/880')->assertOk()->assertJsonPath('data.result', 'cancelled');
+        // Deleting needs the cancel first, as in Odoo.
+        $this->deleteJson('/api/admin/odoo/quotations/880')->assertStatus(422);
+        $this->postJson('/api/admin/odoo/quotations/880/cancel')->assertOk()->assertJsonPath('data.result', 'cancelled');
         $this->assertSame('cancel', $this->odoo['order']);
         $this->assertSame(RequestStatus::Cancelled, $request->fresh()->status);
         Http::assertSent(fn (Request $sent): bool => str_contains($sent->url(), 'api.telegram.org')
@@ -133,12 +136,81 @@ class OdooPaperFlowTest extends TestCase
         $second = ServiceRequest::query()->latest('id')->first();
         $this->assertSame(RequestStatus::AwaitingPayment, $second->status);
 
-        $this->deleteJson('/api/admin/odoo/invoices/990')->assertOk();
+        $this->deleteJson('/api/admin/odoo/invoices/990')->assertStatus(422);
+        $this->postJson('/api/admin/odoo/invoices/990/cancel')->assertOk();
         $this->assertSame('cancel', $this->odoo['move']);
         $second->refresh();
         $this->assertNull($second->odoo_invoice_id);
         $this->assertSame(RequestStatus::AwaitingPayment, $second->status);
         $this->assertSame('cancelled', $second->invoices()->first()->status);
+    }
+
+    public function test_a_cancelled_quotation_is_deleted_with_its_unpaid_request_and_the_number_comes_back(): void
+    {
+        $client = $this->botClient();
+        $this->postJson('/api/admin/odoo/quotations', [
+            'client_id' => $client->id, 'action' => 'send', 'deliver' => 'email',
+            'lines' => [['title' => 'شعار', 'amount' => 200, 'units' => 1]],
+        ])->assertCreated();
+        $request = ServiceRequest::query()->sole();
+
+        $this->postJson('/api/admin/odoo/quotations/880/cancel')->assertOk();
+        $this->postJson('/api/admin/odoo/quotations/880/cancel')->assertStatus(422);
+
+        // QN00041 and S00042 stay in Odoo, so the next quotation is QN00043 again.
+        $this->odoo['names'] = [['id' => 1, 'name' => 'QN00041'], ['id' => 2, 'name' => 'S00042']];
+        $this->deleteJson('/api/admin/odoo/quotations/880')
+            ->assertOk()
+            ->assertJsonPath('data.result', 'deleted')
+            ->assertJsonPath('data.requests.deleted.0', $request->number)
+            ->assertJsonPath('data.next_number', 'QN00043');
+
+        $this->assertSame('gone', $this->odoo['order']);
+        $this->assertNull($request->fresh());
+        $write = collect($this->odoo['payloads'])->first(fn (array $call): bool => $call[0] === 'ir.sequence' && $call[1] === 'write');
+        $this->assertSame(['number_next_actual' => 43], $write[2][1] ?? null);
+    }
+
+    public function test_an_invoice_goes_back_to_draft_then_is_deleted_and_leaves_finance_at_once(): void
+    {
+        $client = $this->botClient();
+        $this->postJson('/api/admin/odoo/invoices', [
+            'client_id' => $client->id, 'action' => 'post', 'deliver' => 'email',
+            'lines' => [['title' => 'تصوير', 'amount' => 150, 'units' => 1]],
+        ])->assertCreated();
+        $request = ServiceRequest::query()->sole();
+        $this->assertSame('posted', OdooInvoice::query()->where('odoo_id', 990)->value('state'), 'finance has it without a sync');
+
+        $this->deleteJson('/api/admin/odoo/invoices/990')->assertStatus(422);
+        $this->postJson('/api/admin/odoo/invoices/990/draft')->assertOk()->assertJsonPath('data.result', 'draft');
+        $this->assertSame('draft', $this->odoo['move']);
+        $this->assertSame('draft', OdooInvoice::query()->where('odoo_id', 990)->value('state'));
+
+        $this->deleteJson('/api/admin/odoo/invoices/990')->assertOk()->assertJsonPath('data.result', 'deleted');
+        $this->assertSame('gone', $this->odoo['move']);
+        $this->assertFalse(OdooInvoice::query()->where('odoo_id', 990)->exists());
+        $this->assertSame(0, $request->invoices()->count());
+        $this->assertNull($request->fresh()->odoo_invoice_id);
+        $this->getJson('/api/admin/finance')->assertOk()->assertJsonPath('data.meta.total', 0);
+    }
+
+    public function test_a_paid_invoice_does_not_go_back_to_draft_and_deleting_is_its_own_permission(): void
+    {
+        $client = $this->botClient();
+        $this->postJson('/api/admin/odoo/invoices', [
+            'client_id' => $client->id, 'action' => 'post', 'deliver' => 'email',
+            'lines' => [['title' => 'تصوير', 'amount' => 150, 'units' => 1]],
+        ])->assertCreated();
+        $this->odoo['paid'][990] = true;
+        $this->postJson('/api/admin/odoo/invoices/990/draft')->assertStatus(422);
+        $this->assertSame('posted', $this->odoo['move']);
+
+        $role = Role::query()->create(['name' => 'Sales', 'abilities' => ['ops.clients.view', 'ops.clients.odoo']]);
+        $staff = User::factory()->create(['is_admin' => false, 'role_id' => $role->id]);
+        Sanctum::actingAs($staff);
+        $this->postJson('/api/admin/odoo/invoices/990/cancel')->assertStatus(422);
+        $this->deleteJson('/api/admin/odoo/invoices/990')->assertForbidden();
+        $this->deleteJson('/api/admin/odoo/quotations/880')->assertForbidden();
     }
 
     public function test_a_quotation_may_carry_enough_lines_for_more_than_two_pages(): void
@@ -502,6 +574,14 @@ class OdooPaperFlowTest extends TestCase
                 'id' => 41, 'field_desc' => 'Status', 'old_value_char' => 'Quotation', 'new_value_char' => 'Quotation Sent',
             ]],
             $model === 'res.partner' && $method === 'search_read' => [['id' => 45, ...($this->odoo['parents'] ?? ['commercial_partner_id' => false, 'parent_id' => false])]],
+            $model === 'sale.order' && $method === 'unlink' => $this->setOrder('gone'),
+            // The numbers left after a delete, read to move the quotation sequence back.
+            $model === 'sale.order' && $method === 'search_read' && ($payload[0][0] ?? null) === '|' => $this->odoo['names'] ?? [],
+            $model === 'sale.order' && $method === 'search_read' && $this->odoo['order'] === 'gone' => [],
+            $model === 'ir.sequence' && $method === 'search_read' => [['id' => 5, 'prefix' => 'QN', 'padding' => 5, 'number_next_actual' => $this->odoo['sequence_next'] ?? 881]],
+            $model === 'ir.sequence' && $method === 'write' => true,
+            $model === 'account.move' && $method === 'unlink' => $this->setMove('gone'),
+            $model === 'account.move' && $method === 'search_read' && $this->odoo['move'] === 'gone' => [],
             $model === 'sale.order' && $method === 'search_read' => [[
                 'id' => 880, 'name' => 'S00880', 'partner_id' => $this->odoo['order_partner'] ?? [44, 'Damastech'], 'amount_total' => 300,
                 'currency_id' => [1, 'USD'], 'state' => $this->odoo['order'], 'client_order_ref' => 'DASH',

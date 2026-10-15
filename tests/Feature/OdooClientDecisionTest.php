@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Actions\ApproveQuotation;
 use App\Actions\SendQuotation;
 use App\Enums\RequestStatus;
 use App\Models\Client;
@@ -133,7 +134,7 @@ class OdooClientDecisionTest extends TestCase
     public function test_sales_cancel_a_confirmed_order_with_its_unpaid_invoice_but_not_a_paid_one(): void
     {
         $request = $this->invoicedRequest();
-        $this->deleteJson('/api/admin/odoo/quotations/880')->assertOk()->assertJsonPath('data.result', 'cancelled');
+        $this->postJson('/api/admin/odoo/quotations/880/cancel')->assertOk()->assertJsonPath('data.result', 'cancelled');
         $request->refresh();
         $this->assertSame('cancel', $this->move);
         $this->assertSame('cancel', $this->orders[880]);
@@ -142,7 +143,7 @@ class OdooClientDecisionTest extends TestCase
 
         $paid = $this->invoicedRequest(second: true);
         $this->postJson("/api/admin/requests/{$paid->id}/confirm-payment", ['payment_method' => 'cash', 'amount' => 200])->assertOk();
-        $this->deleteJson("/api/admin/odoo/quotations/{$paid->odoo_quotation_id}")->assertStatus(422);
+        $this->postJson("/api/admin/odoo/quotations/{$paid->odoo_quotation_id}/cancel")->assertStatus(422);
         $this->assertSame('sale', $this->orders[(int) $paid->odoo_quotation_id]);
     }
 
@@ -166,7 +167,7 @@ class OdooClientDecisionTest extends TestCase
         $request = $this->sentQuotation();
         $this->bot($request, 'approve')->assertOk();
         // The admin approves (sales order) before invoicing from the dashboard.
-        app(\App\Actions\ApproveQuotation::class)->markApproved($request->fresh(), 'admin', confirmOrder: true);
+        app(ApproveQuotation::class)->markApproved($request->fresh(), 'admin', confirmOrder: true);
         if ($second) {
             $this->move = null;
         }

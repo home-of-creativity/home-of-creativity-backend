@@ -2,15 +2,23 @@
 
 namespace App\Actions;
 
+use App\Contracts\WhatsAppMessenger;
 use App\Enums\EmployeeProfession;
 use App\Models\Employee;
 use App\Models\ServiceRequest;
 use App\Services\TelegramNotifier;
+use App\Support\ClientPhone;
 use Illuminate\Support\Facades\Log;
 
 class NotifyEmployees
 {
-    public function __construct(private TelegramNotifier $telegram) {}
+    /** Staff replies on the company number reach the client bot, so they are told not to answer. */
+    private const AUTOMATED = "\n\nرسالة آلية من النظام، لا داعي للرد.";
+
+    public function __construct(
+        private TelegramNotifier $telegram,
+        private WhatsAppMessenger $whatsApp,
+    ) {}
 
     /**
      * @param  list<array{text: string, callback_data: string}>|null  $inlineButtons
@@ -41,6 +49,91 @@ class NotifyEmployees
         }
 
         return $this->deliver((string) $employee->telegram_user_id, $text, 'employee:'.$employee->id, $inlineButtons);
+    }
+
+    /**
+     * The employee's own WhatsApp from the company number, or Telegram when they have no
+     * readable phone or WhatsApp is off.
+     */
+    public function toEmployeeWhatsApp(Employee $employee, string $text): bool
+    {
+        if (! $employee->isApproved()) {
+            return false;
+        }
+        $digits = ClientPhone::whatsappDigits($employee->phone);
+        if ($digits !== '' && $this->whatsApp->configured()) {
+            try {
+                $this->whatsApp->sendText($digits, $text.self::AUTOMATED);
+
+                return true;
+            } catch (\Throwable $exception) {
+                Log::warning('Employee WhatsApp notify failed.', [
+                    'employee_id' => $employee->id,
+                    'error' => $exception->getMessage(),
+                ]);
+            }
+        }
+
+        return $this->toEmployee($employee, $text);
+    }
+
+    /**
+     * Every approved employee of a profession on WhatsApp, Telegram for those without it.
+     */
+    public function professionWhatsApp(EmployeeProfession $profession, string $text): int
+    {
+        $sent = 0;
+        Employee::query()->approved()->where('profession', $profession)->get()
+            ->each(function (Employee $employee) use ($text, &$sent): void {
+                if ($this->toEmployeeWhatsApp($employee, $text)) {
+                    $sent++;
+                }
+            });
+
+        return $sent;
+    }
+
+    /**
+     * The management WhatsApp numbers, or each Telegram admin when none are set.
+     */
+    public function management(string $text): int
+    {
+        return $this->toNumbers((array) config('services.whatsapp.management_numbers', []), $text);
+    }
+
+    /**
+     * The support WhatsApp numbers, then the management ones, then the Telegram admins.
+     */
+    public function support(string $text): int
+    {
+        $numbers = (array) config('services.whatsapp.support_numbers', []);
+
+        return $this->toNumbers($numbers !== [] ? $numbers : (array) config('services.whatsapp.management_numbers', []), $text);
+    }
+
+    /**
+     * @param  array<int, mixed>  $configured
+     */
+    private function toNumbers(array $configured, string $text): int
+    {
+        $numbers = array_values(array_filter(array_map(
+            fn ($number): string => ClientPhone::whatsappDigits((string) $number),
+            $configured,
+        )));
+        if ($numbers === [] || ! $this->whatsApp->configured()) {
+            return $this->handleAdmins($text);
+        }
+        $sent = 0;
+        foreach ($numbers as $number) {
+            try {
+                $this->whatsApp->sendText($number, $text.self::AUTOMATED);
+                $sent++;
+            } catch (\Throwable $exception) {
+                Log::warning('Staff WhatsApp notify failed.', ['error' => $exception->getMessage()]);
+            }
+        }
+
+        return $sent > 0 ? $sent : $this->handleAdmins($text);
     }
 
     /**

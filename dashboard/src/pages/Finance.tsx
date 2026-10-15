@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useCan } from "../lib/useCan";
 import { Link, useSearchParams } from "react-router-dom";
-import { ArrowDown, ArrowUp, ExternalLink, Info, Pencil, RefreshCw, Search, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ExternalLink, Info, Pencil, Search, X } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmAction } from "../components/ConfirmAction";
 import { LoadingLottie } from "../components/LoadingLottie";
@@ -90,7 +90,6 @@ export function Finance({ locale, t }: { locale: Locale; t: (c: { ar: string; en
   const [data, setData] = useState<FinanceSummary | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [syncing, setSyncing] = useState(false);
   const [amount, setAmount] = useState("");
   const [category, setCategory] = useState("");
   const [note, setNote] = useState("");
@@ -161,21 +160,6 @@ export function Finance({ locale, t }: { locale: Locale; t: (c: { ar: string; en
       window.clearInterval(timer);
     };
   }, [filters, sort, dir, page, refresh, t]);
-
-  async function syncNow() {
-    setSyncing(true);
-    try {
-      const res = await api.syncFinance();
-      if (res.data.synced) toast.success(fill(t(copy.financeSyncDone), { n: res.data.changed }));
-      else toast.error(res.message ?? t(copy.saveFailed));
-      setRefresh((value) => value + 1);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t(copy.saveFailed));
-      setRefresh((value) => value + 1);
-    } finally {
-      setSyncing(false);
-    }
-  }
 
   async function addExpense(event: FormEvent) {
     event.preventDefault();
@@ -278,18 +262,7 @@ export function Finance({ locale, t }: { locale: Locale; t: (c: { ar: string; en
 
   return (
     <>
-      <PageHeader
-        title={t(copy.financeTitle)}
-        lede={t(copy.financeLede)}
-        actions={
-          sync?.configured && can("ops.finance.sync") ? (
-            <button type="button" className="btn" onClick={syncNow} disabled={syncing} aria-busy={syncing}>
-              <RefreshCw size={16} aria-hidden="true" className={syncing ? "spin" : undefined} />
-              {syncing ? t(copy.financeSyncing) : t(copy.financeSyncNow)}
-            </button>
-          ) : null
-        }
-      />
+      <PageHeader title={t(copy.financeTitle)} lede={t(copy.financeLede)} />
       {sync ? (
         <p className="finance-sync" role="status">
           <span className={`status-dot ${sync.error ? "is-dirty" : sync.synced_at ? "is-live" : ""}`}>

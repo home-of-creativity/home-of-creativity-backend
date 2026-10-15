@@ -8,6 +8,7 @@ import { OdooPaperActivity } from "../components/OdooPaperActivity";
 import { OdooPaperPreview } from "../components/OdooPaperPreview";
 import { ProformaDialog } from "../components/ProformaDialog";
 import { ConfirmAction } from "../components/ConfirmAction";
+import { OdooBulkBar, type BulkAction, type BulkStep } from "../components/OdooBulkBar";
 import { useCan } from "../lib/useCan";
 import { DriveFolderPicker } from "../components/DriveFolderPicker";
 import { LoadingTableRow } from "../components/LoadingTableRow";
@@ -27,6 +28,10 @@ const tabs: Tab[] = ["clients", "logos", "quotations", "invoices"];
 
 function readTab(value: string | null): Tab {
   return tabs.includes(value as Tab) ? (value as Tab) : "clients";
+}
+
+function fill(template: string, values: Record<string, string | number>) {
+  return template.replace(/\{(\w+)\}/g, (_, key: string) => String(values[key] ?? ""));
 }
 
 function formatMoney(amount: number, currency: string | null): string {
@@ -194,16 +199,67 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  async function removePaper(kind: "quotation" | "invoice", id: number) {
-    setPaperBusy(`${kind}:${id}`);
-    try {
-      const res = kind === "quotation" ? await api.deleteOdooQuotation(id) : await api.deleteOdooInvoice(id);
-      toast.success(res.message ?? t(copy.saved));
-      setRefresh((value) => value + 1);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t(copy.saveFailed));
-    } finally {
-      setPaperBusy("");
+  const [picked, setPicked] = useState<Set<number>>(() => new Set());
+  useEffect(() => setPicked(new Set()), [tab]);
+
+  function togglePick(ids: number[], on: boolean) {
+    setPicked((current) => {
+      const next = new Set(current);
+      for (const id of ids) {
+        if (on) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+  }
+
+  function paperCall(kind: "quotation" | "invoice", step: BulkStep, id: number) {
+    if (kind === "quotation") return step === "delete" ? api.deleteOdooQuotation(id) : api.cancelOdooQuotation(id);
+    if (step === "draft") return api.draftOdooInvoice(id);
+    return step === "delete" ? api.deleteOdooInvoice(id) : api.cancelOdooInvoice(id);
+  }
+
+  /** Odoo refuses to delete a draft invoice whose number is not the last one, so the highest goes first. */
+  function deleteOrder(kind: "quotation" | "invoice", ids: number[]) {
+    if (kind === "quotation") return ids;
+    const names = new Map(invoices.map((item) => [item.id, item.name]));
+    return [...ids].sort((a, b) => (names.get(b) ?? "").localeCompare(names.get(a) ?? "", "en", { numeric: true }) || b - a);
+  }
+
+  /** Runs one step on each paper in turn; a cancel or reset to draft then offers the delete. */
+  async function runPapers(kind: "quotation" | "invoice", step: BulkStep, ids: number[]) {
+    if (ids.length === 0) return;
+    const order = step === "delete" ? deleteOrder(kind, ids) : ids;
+    setPaperBusy(`${kind}:${order[0]}`);
+    const done: number[] = [];
+    const failed: string[] = [];
+    let message = "";
+    for (const id of order) {
+      try {
+        const res = await paperCall(kind, step, id);
+        done.push(id);
+        message = res.message ?? "";
+      } catch (err) {
+        failed.push(err instanceof Error ? err.message : t(copy.saveFailed));
+      }
+    }
+    setPaperBusy("");
+    togglePick(order, false);
+    setRefresh((value) => value + 1);
+
+    if (done.length > 0) {
+      toast.success(order.length === 1 && message ? message : fill(t(copy.bulkDone), { ok: done.length, total: order.length }));
+    }
+    if (failed.length > 0) {
+      toast.error(order.length === 1 ? failed[0] : fill(t(copy.bulkFailed), { n: failed.length, error: failed[0] }));
+    }
+
+    const deletable = (kind === "quotation" && step === "cancel") || (kind === "invoice" && step === "draft");
+    if (deletable && done.length > 0 && can("ops.clients.odoo_delete")) {
+      toast(fill(t(kind === "quotation" ? copy.paperDeleteNowQuotations : copy.paperDeleteNowInvoices), { n: done.length }), {
+        duration: 15000,
+        action: { label: t(copy.paperDeleteNow), onClick: () => void runPapers(kind, "delete", done) },
+      });
     }
   }
 
@@ -366,6 +422,23 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
       return [item.name, item.partner_name ?? "", item.invoice_origin ?? "", item.ref ?? ""].join(" ").toLowerCase().includes(needle);
     });
   }, [invoices, invoiceQuery, invoiceState, invoicePayment]);
+
+  const canOdoo = can("ops.clients.odoo");
+  const canDeletePaper = can("ops.clients.odoo_delete");
+  const pickCols = canOdoo ? 1 : 0;
+  const invoiceOpen = (item: OdooInvoice) => item.state === "posted" && item.payment_state === "not_paid";
+  const pickedQuotes = filteredQuotations.filter((item) => picked.has(item.id));
+  const pickedInvoices = filteredInvoices.filter((item) => picked.has(item.id));
+  const ids = (list: { id: number }[]) => list.map((item) => item.id);
+  const quoteBulk: BulkAction[] = [
+    { step: "cancel", label: t(copy.paperCancel), ids: ids(pickedQuotes.filter((item) => item.state !== "cancel")) },
+    ...(canDeletePaper ? [{ step: "delete" as const, label: t(copy.delete), ids: ids(pickedQuotes.filter((item) => item.state === "cancel")) }] : []),
+  ];
+  const invoiceBulk: BulkAction[] = [
+    { step: "draft", label: t(copy.paperToDraft), ids: ids(pickedInvoices.filter((item) => invoiceOpen(item) || item.state === "cancel")) },
+    { step: "cancel", label: t(copy.paperCancel), ids: ids(pickedInvoices.filter(invoiceOpen)) },
+    ...(canDeletePaper ? [{ step: "delete" as const, label: t(copy.delete), ids: ids(pickedInvoices.filter((item) => item.state === "draft")) }] : []),
+  ];
 
   const quoteStateLabel: Record<string, { ar: string; en: string }> = {
     draft: copy.quoteStateDraft,
@@ -699,10 +772,28 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
             <button type="button" className="btn btn-ghost" onClick={() => setTab("quotations")}>{t(copy.showAllPapers)}</button>
           </p>
         ) : null}
+        <OdooBulkBar
+          selected={pickedQuotes.length}
+          actions={quoteBulk}
+          busy={paperBusy !== ""}
+          t={t}
+          onRun={(step, chosen) => void runPapers("quotation", step, chosen)}
+          onClear={() => setPicked(new Set())}
+        />
         <div className="table-wrap">
           <table className="odoo-table">
             <thead>
               <tr>
+                {canOdoo ? (
+                  <th className="pick-cell">
+                    <input
+                      type="checkbox"
+                      aria-label={t(copy.bulkSelectAll)}
+                      checked={filteredQuotations.length > 0 && pickedQuotes.length === filteredQuotations.length}
+                      onChange={(event) => togglePick(ids(filteredQuotations), event.target.checked)}
+                    />
+                  </th>
+                ) : null}
                 <th>{t(copy.number)}</th>
                 <th>{t(copy.client)}</th>
                 <th className="money">{t(copy.odooAmount)}</th>
@@ -715,20 +806,30 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
             </thead>
             <tbody>
               {loading ? (
-                <LoadingTableRow colSpan={8} label={t(copy.loading)} />
+                <LoadingTableRow colSpan={8 + pickCols} label={t(copy.loading)} />
               ) : !odooReady ? (
                 <tr>
-                  <td colSpan={8}>{t(copy.odooNotConfigured)}</td>
+                  <td colSpan={8 + pickCols}>{t(copy.odooNotConfigured)}</td>
                 </tr>
               ) : filteredQuotations.length === 0 ? (
                 <tr>
-                  <td colSpan={8}>{quoteQuery || quoteState ? t(copy.noSearchResults) : t(copy.empty)}</td>
+                  <td colSpan={8 + pickCols}>{quoteQuery || quoteState ? t(copy.noSearchResults) : t(copy.empty)}</td>
                 </tr>
               ) : (
                 filteredQuotations.map((item) => {
                   const partner = partnerLines(item.partner_name);
                   return (
                   <tr key={item.id}>
+                    {canOdoo ? (
+                      <td className="pick-cell">
+                        <input
+                          type="checkbox"
+                          aria-label={fill(t(copy.bulkSelectRow), { name: item.name })}
+                          checked={picked.has(item.id)}
+                          onChange={(event) => togglePick([item.id], event.target.checked)}
+                        />
+                      </td>
+                    ) : null}
                     <td dir="ltr"><a className="table-link" href={item.odoo_url} target="_blank" rel="noreferrer">{item.name}</a></td>
                     <td className="cell-client">
                       <span className="client-name">{partner.title}</span>
@@ -740,23 +841,23 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                     <td className="nowrap">{formatOdooWhen(item.date_order, locale)}</td>
                     <td>{requestCell(item.request)}</td>
                     <td className="row-actions-cell">
-                      {can("ops.clients.odoo") && ["draft", "sent"].includes(item.state) ? (
+                      {canOdoo && ["draft", "sent"].includes(item.state) ? (
                         <>
                           <button type="button" className="btn btn-ghost btn-sm" disabled={paperBusy !== ""} onClick={() => void editPaper("quotation", item.id)}>
                             {t(copy.edit)}
                           </button>
                           <ConfirmAction
-                            label={item.state === "draft" ? t(copy.delete) : t(copy.paperCancel)}
-                            confirmLabel={item.request ? t(copy.paperCancelQuotationConfirm) : t(copy.confirmDelete)}
-                            yesLabel={item.state === "draft" ? t(copy.delete) : t(copy.paperCancel)}
+                            label={t(copy.paperCancel)}
+                            confirmLabel={item.request ? t(copy.paperCancelQuotationConfirm) : t(copy.paperCancelQuotationOnlyConfirm)}
+                            yesLabel={t(copy.paperCancel)}
                             noLabel={t(copy.cancel)}
                             className="btn btn-ghost btn-sm btn-danger"
                             disabled={paperBusy !== ""}
-                            onConfirm={() => void removePaper("quotation", item.id)}
+                            onConfirm={() => void runPapers("quotation", "cancel", [item.id])}
                           />
                         </>
                       ) : null}
-                      {can("ops.clients.odoo") && item.state === "sale" ? (
+                      {canOdoo && item.state === "sale" ? (
                         <ConfirmAction
                           label={t(copy.paperCancelOrder)}
                           confirmLabel={t(copy.paperCancelOrderConfirm)}
@@ -764,7 +865,18 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                           noLabel={t(copy.cancel)}
                           className="btn btn-ghost btn-sm btn-danger"
                           disabled={paperBusy !== ""}
-                          onConfirm={() => void removePaper("quotation", item.id)}
+                          onConfirm={() => void runPapers("quotation", "cancel", [item.id])}
+                        />
+                      ) : null}
+                      {canDeletePaper && item.state === "cancel" ? (
+                        <ConfirmAction
+                          label={t(copy.delete)}
+                          confirmLabel={t(copy.paperDeleteQuotationConfirm)}
+                          yesLabel={t(copy.delete)}
+                          noLabel={t(copy.cancel)}
+                          className="btn btn-ghost btn-sm btn-danger"
+                          disabled={paperBusy !== ""}
+                          onConfirm={() => void runPapers("quotation", "delete", [item.id])}
                         />
                       ) : null}
                       <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPaperView({ kind: "quotations", id: item.id, name: item.name, mode: "preview" })}>
@@ -856,10 +968,28 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
             <button type="button" className="btn btn-ghost" onClick={() => setTab("invoices")}>{t(copy.showAllPapers)}</button>
           </p>
         ) : null}
+        <OdooBulkBar
+          selected={pickedInvoices.length}
+          actions={invoiceBulk}
+          busy={paperBusy !== ""}
+          t={t}
+          onRun={(step, chosen) => void runPapers("invoice", step, chosen)}
+          onClear={() => setPicked(new Set())}
+        />
         <div className="table-wrap">
           <table className="odoo-table">
             <thead>
               <tr>
+                {canOdoo ? (
+                  <th className="pick-cell">
+                    <input
+                      type="checkbox"
+                      aria-label={t(copy.bulkSelectAll)}
+                      checked={filteredInvoices.length > 0 && pickedInvoices.length === filteredInvoices.length}
+                      onChange={(event) => togglePick(ids(filteredInvoices), event.target.checked)}
+                    />
+                  </th>
+                ) : null}
                 <th>{t(copy.number)}</th>
                 <th>{t(copy.client)}</th>
                 <th className="money">{t(copy.odooAmount)}</th>
@@ -873,20 +1003,30 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
             </thead>
             <tbody>
               {loading ? (
-                <LoadingTableRow colSpan={9} label={t(copy.loading)} />
+                <LoadingTableRow colSpan={9 + pickCols} label={t(copy.loading)} />
               ) : !odooReady ? (
                 <tr>
-                  <td colSpan={8}>{t(copy.odooNotConfigured)}</td>
+                  <td colSpan={9 + pickCols}>{t(copy.odooNotConfigured)}</td>
                 </tr>
               ) : filteredInvoices.length === 0 ? (
                 <tr>
-                  <td colSpan={9}>{invoiceQuery || invoiceState || invoicePayment ? t(copy.noSearchResults) : t(copy.empty)}</td>
+                  <td colSpan={9 + pickCols}>{invoiceQuery || invoiceState || invoicePayment ? t(copy.noSearchResults) : t(copy.empty)}</td>
                 </tr>
               ) : (
                 filteredInvoices.map((item) => {
                   const partner = partnerLines(item.partner_name);
                   return (
                   <tr key={item.id}>
+                    {canOdoo ? (
+                      <td className="pick-cell">
+                        <input
+                          type="checkbox"
+                          aria-label={fill(t(copy.bulkSelectRow), { name: item.name })}
+                          checked={picked.has(item.id)}
+                          onChange={(event) => togglePick([item.id], event.target.checked)}
+                        />
+                      </td>
+                    ) : null}
                     <td dir="ltr"><a className="table-link" href={item.odoo_url} target="_blank" rel="noreferrer">{item.name}</a></td>
                     <td className="cell-client">
                       <span className="client-name">{partner.title}</span>
@@ -902,21 +1042,43 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                     <td className="nowrap">{formatOdooWhen(item.invoice_date, locale)}</td>
                     <td>{requestCell(item.request)}</td>
                     <td className="row-actions-cell">
-                      {can("ops.clients.odoo") && item.state !== "cancel" && item.payment_state === "not_paid" ? (
-                        <>
-                          <button type="button" className="btn btn-ghost btn-sm" disabled={paperBusy !== ""} onClick={() => void editPaper("invoice", item.id)}>
-                            {t(copy.edit)}
-                          </button>
-                          <ConfirmAction
-                            label={t(copy.paperCancel)}
-                            confirmLabel={t(copy.paperCancelInvoiceConfirm)}
-                            yesLabel={t(copy.paperCancel)}
-                            noLabel={t(copy.cancel)}
-                            className="btn btn-ghost btn-sm btn-danger"
-                            disabled={paperBusy !== ""}
-                            onConfirm={() => void removePaper("invoice", item.id)}
-                          />
-                        </>
+                      {canOdoo && item.state !== "cancel" && item.payment_state === "not_paid" ? (
+                        <button type="button" className="btn btn-ghost btn-sm" disabled={paperBusy !== ""} onClick={() => void editPaper("invoice", item.id)}>
+                          {t(copy.edit)}
+                        </button>
+                      ) : null}
+                      {canOdoo && invoiceOpen(item) ? (
+                        <ConfirmAction
+                          label={t(copy.paperCancel)}
+                          confirmLabel={t(copy.paperCancelInvoiceConfirm)}
+                          yesLabel={t(copy.paperCancel)}
+                          noLabel={t(copy.cancel)}
+                          className="btn btn-ghost btn-sm btn-danger"
+                          disabled={paperBusy !== ""}
+                          onConfirm={() => void runPapers("invoice", "cancel", [item.id])}
+                        />
+                      ) : null}
+                      {canOdoo && (invoiceOpen(item) || item.state === "cancel") ? (
+                        <ConfirmAction
+                          label={t(copy.paperToDraft)}
+                          confirmLabel={t(copy.paperToDraftConfirm)}
+                          yesLabel={t(copy.paperToDraft)}
+                          noLabel={t(copy.cancel)}
+                          className="btn btn-ghost btn-sm"
+                          disabled={paperBusy !== ""}
+                          onConfirm={() => void runPapers("invoice", "draft", [item.id])}
+                        />
+                      ) : null}
+                      {canDeletePaper && item.state === "draft" ? (
+                        <ConfirmAction
+                          label={t(copy.delete)}
+                          confirmLabel={t(copy.paperDeleteInvoiceConfirm)}
+                          yesLabel={t(copy.delete)}
+                          noLabel={t(copy.cancel)}
+                          className="btn btn-ghost btn-sm btn-danger"
+                          disabled={paperBusy !== ""}
+                          onConfirm={() => void runPapers("invoice", "delete", [item.id])}
+                        />
                       ) : null}
                       <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPaperView({ kind: "invoices", id: item.id, name: item.name, mode: "preview" })}>
                         {t(copy.paperPreview)}

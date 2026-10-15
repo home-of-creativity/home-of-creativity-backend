@@ -69,6 +69,7 @@ enum StaffAbility: string
             ],
             self::OpsClients->value => $crud + [
                 'odoo' => ['ar' => 'Odoo: مزامنة واستيراد وعروض وفواتير', 'en' => 'Odoo: sync, import, quotations, invoices'],
+                'odoo_delete' => ['ar' => 'حذف عروض الأسعار الملغاة والفواتير المسودة من أودو', 'en' => 'Delete cancelled quotations and draft invoices from Odoo'],
                 'odoo_note' => ['ar' => 'رسالة داخلية على عرض السعر والفاتورة', 'en' => 'Internal note on quotations and invoices'],
                 'proforma' => ['ar' => 'الفاتورة الشكلية: معاينة وإرسال للعميل', 'en' => 'Pro-forma invoice: preview and send to the client'],
             ],
@@ -88,7 +89,6 @@ enum StaffAbility: string
                 'expense_create' => ['ar' => 'إضافة مصروف', 'en' => 'Add expense'],
                 'expense_update' => ['ar' => 'تعديل مصروف', 'en' => 'Edit expense'],
                 'expense_delete' => ['ar' => 'حذف مصروف', 'en' => 'Delete expense'],
-                'sync' => ['ar' => 'المزامنة مع Odoo', 'en' => 'Odoo sync'],
             ],
             self::OpsVouchers->value => $crud + [
                 'send' => ['ar' => 'إرسال المستند بالبريد أو واتساب', 'en' => 'Send by email or WhatsApp'],

@@ -111,7 +111,7 @@ class ClientProfileValue
                 : 'المقصود اسمك الكامل، الاسم والكنية، مش اسم المحل. اكتبه لحاله.',
             default => $english
                 ? 'Tell me the part that was not clear, in one sentence, and I will explain it.'
-                : 'احكيلي شو بدك نوضحه بجملة وحدة، وبشرحه إلك.',
+                : 'خبرني بجملة وحدة شو الشي اللي مو واضح، وبشرحه إلك.',
         };
     }
 

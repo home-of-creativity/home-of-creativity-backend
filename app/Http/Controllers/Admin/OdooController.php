@@ -11,7 +11,9 @@ use App\Actions\OpenRequestFromStaffInvoice;
 use App\Actions\PublishOdooPaper;
 use App\Actions\SendQuotation;
 use App\Actions\SyncOdooEmployees;
+use App\Actions\SyncOdooInvoices;
 use App\Actions\SyncOdooPartners;
+use App\Actions\SyncOdooQuotations;
 use App\Enums\RequestStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\ImportOdooCrmClientsExcelRequest;
@@ -426,22 +428,26 @@ class OdooController extends Controller
         return response()->json(['data' => $updated, 'message' => $message]);
     }
 
-    /** A quotation not approved yet: cancelled in Odoo (a draft is deleted) and its request closed. */
-    public function destroyQuotation(int $id, OdooClient $odoo, RequestStatusTransitionService $transitions, NotifyClientChannels $notify): JsonResponse
+    /**
+     * Step one, as in Odoo: a quotation (a draft too) is cancelled and its request closed;
+     * a confirmed sales order is cancelled with its unpaid invoices.
+     */
+    public function cancelQuotation(int $id, OdooClient $odoo, RequestStatusTransitionService $transitions, NotifyClientChannels $notify): JsonResponse
     {
         $snapshot = $this->paper($odoo, 'sale.order', $id);
         if (($snapshot['state'] ?? '') === 'sale') {
             return $this->cancelSalesOrder($id, $snapshot, $odoo, $transitions, $notify);
         }
-        abort_unless(in_array($snapshot['state'] ?? '', ['draft', 'sent', 'cancel'], true), 422, 'عرض السعر أصبح أمر بيع، فلا يُحذف من هنا.');
+        abort_if(($snapshot['state'] ?? '') === 'cancel', 422, 'عرض السعر ملغى أصلاً.');
+        abort_unless(in_array($snapshot['state'] ?? '', ['draft', 'sent'], true), 422, 'عرض السعر أصبح أمر بيع منتهياً، فلا يُلغى من هنا.');
 
         try {
-            $result = $odoo->removeQuotation($id);
+            $odoo->cancelQuotation($id);
         } catch (\Throwable $exception) {
             return response()->json(['message' => 'تعذر إلغاء عرض السعر في أودو: '.$exception->getMessage()], 502);
         }
 
-        $message = $result === 'deleted' ? 'حُذف عرض السعر من أودو.' : 'أُلغي عرض السعر في أودو.';
+        $message = 'أُلغي عرض السعر في أودو.';
         $linked = ServiceRequest::query()->with('client')->where('odoo_quotation_id', (string) $id)->latest('id')->first();
         if ($linked !== null && in_array($linked->status, [RequestStatus::Submitted, RequestStatus::QuotationSent, RequestStatus::QuotationRejected, RequestStatus::AwaitingAdminApproval], true)) {
             $transitions->transition($linked, RequestStatus::Cancelled, 'admin', 'Quotation cancelled from the dashboard.');
@@ -450,7 +456,47 @@ class OdooController extends Controller
             $message .= " وأُلغي الطلب {$linked->number}.";
         }
 
-        return response()->json(['data' => ['id' => $id, 'result' => $result], 'message' => $message]);
+        return response()->json(['data' => ['id' => $id, 'result' => 'cancelled', 'name' => $snapshot['name'] ?? null], 'message' => $message]);
+    }
+
+    /**
+     * Step two: only a cancelled quotation is deleted. Its unpaid request goes with it, a
+     * paid one stays, and the next quotation number follows the highest one left.
+     */
+    public function destroyQuotation(int $id, OdooClient $odoo, SyncOdooQuotations $sync): JsonResponse
+    {
+        $snapshot = $this->paper($odoo, 'sale.order', $id);
+        abort_unless(($snapshot['state'] ?? '') === 'cancel', 422, 'ألغِ عرض السعر أولاً، ثم احذفه.');
+
+        try {
+            $odoo->unlinkRecords('sale.order', [$id]);
+        } catch (\Throwable $exception) {
+            return response()->json(['message' => 'رفض أودو حذف عرض السعر: '.$exception->getMessage()], 422);
+        }
+
+        $requests = $sync->forgetQuotation($id);
+        $next = null;
+        try {
+            $next = $odoo->resequenceQuotations();
+        } catch (\Throwable $exception) {
+            Log::warning('Odoo quotation numbers were not moved back after a delete.', ['error' => $exception->getMessage()]);
+        }
+
+        $message = 'حُذف عرض السعر '.($snapshot['name'] ?? '').' من أودو.';
+        if ($requests['deleted'] !== []) {
+            $message .= ' وحُذف الطلب '.implode('، ', $requests['deleted']).'.';
+        }
+        if ($requests['kept'] !== []) {
+            $message .= ' وبقي الطلب المدفوع '.implode('، ', $requests['kept']).'.';
+        }
+        if ($next !== null) {
+            $message .= " الرقم التالي لعروض الأسعار: {$next}.";
+        }
+
+        return response()->json([
+            'data' => ['id' => $id, 'result' => 'deleted', 'requests' => $requests, 'next_number' => $next],
+            'message' => $message,
+        ]);
     }
 
     /**
@@ -470,6 +516,7 @@ class OdooController extends Controller
             return response()->json(['message' => 'تعذر إلغاء أمر البيع في أودو: '.$exception->getMessage()], 502);
         }
         abort_if($cancelled === null, 422, 'على أمر البيع فاتورة مدفوعة، فلا يُلغى.');
+        $this->refreshFinance($cancelled);
 
         $message = $cancelled === [] ? 'أُلغي أمر البيع في أودو.' : 'أُلغي أمر البيع في أودو مع فواتيره غير المدفوعة.';
         $open = [RequestStatus::Submitted, RequestStatus::QuotationSent, RequestStatus::QuotationRejected, RequestStatus::AwaitingAdminApproval, RequestStatus::AwaitingPayment];
@@ -533,6 +580,7 @@ class OdooController extends Controller
                 ? "عُدّلت الفاتورة وأُعيد إرسالها للعميل. الطلب {$linked->number} بانتظار الدفع."
                 : "عُدّلت الفاتورة وتعذر إعادة إرسالها للعميل. الطلب {$linked->number} بانتظار الدفع.";
         }
+        $this->refreshFinance([$id]);
 
         return response()->json(['data' => $updated, 'message' => $message]);
     }
@@ -561,10 +609,56 @@ class OdooController extends Controller
         }
     }
 
-    /** An unpaid invoice is cancelled in Odoo; its request keeps waiting for payment until a correct one is issued. */
-    public function destroyInvoice(int $id, OdooClient $odoo, NotifyClientChannels $notify): JsonResponse
+    /**
+     * «إعادة إلى مسودة»: an unpaid posted or cancelled invoice goes back to draft, the
+     * step before deleting it.
+     */
+    public function draftInvoice(int $id, OdooClient $odoo): JsonResponse
     {
         $snapshot = $this->paper($odoo, 'account.move', $id);
+        abort_if(($snapshot['state'] ?? '') === 'draft', 422, 'الفاتورة مسودة أصلاً.');
+        abort_unless(in_array($snapshot['payment_state'] ?? 'not_paid', ['not_paid'], true), 422, 'دُفعت الفاتورة كلها أو بعضها، فلا تعود إلى مسودة من هنا.');
+
+        try {
+            $odoo->invoiceToDraft($id);
+        } catch (\Throwable $exception) {
+            return response()->json(['message' => 'رفض أودو إعادة الفاتورة إلى مسودة: '.$exception->getMessage()], 422);
+        }
+        $this->refreshFinance([$id]);
+
+        return response()->json([
+            'data' => ['id' => $id, 'result' => 'draft', 'name' => $snapshot['name'] ?? null],
+            'message' => 'أُعيدت الفاتورة '.($snapshot['name'] ?? '').' إلى مسودة.',
+        ]);
+    }
+
+    /**
+     * Only a draft invoice is deleted, as in Odoo. It leaves the finance page with its
+     * local payment records now. Odoo refuses a number that is not the last one.
+     */
+    public function destroyInvoice(int $id, OdooClient $odoo, SyncOdooInvoices $sync): JsonResponse
+    {
+        $snapshot = $this->paper($odoo, 'account.move', $id);
+        abort_unless(($snapshot['state'] ?? '') === 'draft', 422, 'أعد الفاتورة إلى مسودة أولاً، ثم احذفها.');
+
+        try {
+            $odoo->unlinkRecords('account.move', [$id]);
+        } catch (\Throwable $exception) {
+            return response()->json(['message' => 'رفض أودو حذف الفاتورة: '.$exception->getMessage()], 422);
+        }
+        $sync->forget([$id]);
+
+        return response()->json([
+            'data' => ['id' => $id, 'result' => 'deleted'],
+            'message' => 'حُذفت الفاتورة '.($snapshot['name'] ?? '').' من أودو.',
+        ]);
+    }
+
+    /** An unpaid invoice is cancelled in Odoo; its request keeps waiting for payment until a correct one is issued. */
+    public function cancelInvoice(int $id, OdooClient $odoo, NotifyClientChannels $notify): JsonResponse
+    {
+        $snapshot = $this->paper($odoo, 'account.move', $id);
+        abort_if(($snapshot['state'] ?? '') === 'cancel', 422, 'الفاتورة ملغاة أصلاً.');
         abort_unless(in_array($snapshot['payment_state'] ?? 'not_paid', ['not_paid'], true), 422, 'دُفعت الفاتورة كلها أو بعضها، فلا تُلغى من هنا.');
 
         try {
@@ -572,6 +666,7 @@ class OdooController extends Controller
         } catch (\Throwable $exception) {
             return response()->json(['message' => 'تعذر إلغاء الفاتورة في أودو: '.$exception->getMessage()], 502);
         }
+        $this->refreshFinance([$id]);
 
         $message = 'أُلغيت الفاتورة في أودو.';
         $linked = ServiceRequest::query()->with('client')->where('odoo_invoice_id', (string) $id)->latest('id')->first();
@@ -586,6 +681,22 @@ class OdooController extends Controller
         }
 
         return response()->json(['data' => ['id' => $id], 'message' => $message]);
+    }
+
+    /**
+     * The finance page copy follows a change made here at once, not at the next sync.
+     *
+     * @param  list<int>  $invoiceIds
+     */
+    private function refreshFinance(array $invoiceIds): void
+    {
+        foreach ($invoiceIds as $invoiceId) {
+            try {
+                app(SyncOdooInvoices::class)->refreshOne((int) $invoiceId);
+            } catch (\Throwable $exception) {
+                Log::warning('Finance copy of an Odoo invoice waits for the next sync.', ['invoice' => $invoiceId, 'error' => $exception->getMessage()]);
+            }
+        }
     }
 
     /**
@@ -760,6 +871,7 @@ class OdooController extends Controller
                 $telegram,
             );
         }
+        $this->refreshFinance([(int) ($created['id'] ?? 0)]);
 
         return response()->json([
             'data' => $created,
@@ -900,6 +1012,7 @@ class OdooController extends Controller
             $transitions,
             $telegram,
         );
+        $this->refreshFinance([$id]);
 
         return response()->json(['data' => $created, 'message' => $message]);
     }

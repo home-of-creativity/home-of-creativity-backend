@@ -9,7 +9,9 @@ import {
   FileText,
   FileUp,
   Info,
+  Maximize2,
   MessageSquare,
+  Minimize2,
   PanelLeftClose,
   PanelLeftOpen,
   Paperclip,
@@ -109,6 +111,9 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
   const [removeIds, setRemoveIds] = useState<number[]>([]);
   const [commentCount, setCommentCount] = useState(0);
   const [panel, setPanel] = useState<PanelTab | null>(() => (window.matchMedia("(min-width: 1180px)").matches ? "gemini" : null));
+  const [focus, setFocus] = useState(false);
+  /** True while the browser is full screen because focus writing asked for it. */
+  const focusFullscreen = useRef(false);
   const [folderOpen, setFolderOpen] = useState(false);
   const [folderName, setFolderName] = useState<string | null>(null);
   const [extraFonts, setExtraFonts] = useState<StoredReportFont[]>([]);
@@ -357,6 +362,39 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
     document.addEventListener("visibilitychange", onHide);
     return () => document.removeEventListener("visibilitychange", onHide);
   }, []);
+
+  // Esc leaves browser full screen; leave focus writing with it.
+  useEffect(() => {
+    const onChange = () => {
+      if (document.fullscreenElement || !focusFullscreen.current) return;
+      focusFullscreen.current = false;
+      setFocus(false);
+    };
+    document.addEventListener("fullscreenchange", onChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", onChange);
+      if (focusFullscreen.current && document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+    };
+  }, []);
+
+  function toggleFocus() {
+    if (focus) {
+      setFocus(false);
+      if (focusFullscreen.current && document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+      focusFullscreen.current = false;
+      return;
+    }
+    setFocus(true);
+    setPanel(null);
+    if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+      // The layout still hides the menu and panel when the browser refuses full screen.
+      void document.documentElement.requestFullscreen()
+        .then(() => {
+          focusFullscreen.current = true;
+        })
+        .catch(() => undefined);
+    }
+  }
 
   useEffect(() => {
     if (!dirty && !autoSaving) return;
@@ -637,6 +675,16 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
       >
         {panel ? <PanelLeftClose size={17} aria-hidden="true" /> : <PanelLeftOpen size={17} aria-hidden="true" />}
       </button>
+      <button
+        type="button"
+        className={`btn btn-ghost btn-icon${focus ? " is-active" : ""}`}
+        aria-pressed={focus}
+        aria-label={focus ? t(copy.reportFocusOff) : t(copy.reportFocusOn)}
+        title={focus ? t(copy.reportFocusOff) : t(copy.reportFocusOn)}
+        onClick={toggleFocus}
+      >
+        {focus ? <Minimize2 size={17} aria-hidden="true" /> : <Maximize2 size={17} aria-hidden="true" />}
+      </button>
     </div>
   );
 
@@ -649,7 +697,7 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
   ];
 
   return (
-    <section className={`report-studio${panel ? " has-panel" : ""}`}>
+    <section className={`report-studio${panel ? " has-panel" : ""}${focus ? " is-focus" : ""}`}>
       {templateSaveOpen ? (
         <form className="report-template-save" onSubmit={(event) => void keepAsTemplate(event)}>
           <label className="field-label">

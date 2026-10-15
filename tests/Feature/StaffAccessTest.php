@@ -4,8 +4,11 @@ namespace Tests\Feature;
 
 use App\Enums\SocialInboxKind;
 use App\Enums\StaffAbility;
+use App\Models\Complaint;
 use App\Models\Employee;
+use App\Models\OpsExpense;
 use App\Models\Role;
+use App\Models\ServiceRequest;
 use App\Models\SocialAccount;
 use App\Models\SocialInboxItem;
 use App\Models\SocialPost;
@@ -196,7 +199,7 @@ class StaffAccessTest extends TestCase
         }
 
         $finance = $catalog->firstWhere('key', StaffAbility::OpsFinance->value);
-        $this->assertSame(['view', 'expense_create', 'expense_update', 'expense_delete', 'sync'], $finance['actions']);
+        $this->assertSame(['view', 'expense_create', 'expense_update', 'expense_delete'], $finance['actions']);
         $this->assertSame('إضافة مصروف', $finance['action_labels']['expense_create']['ar']);
         $requests = $catalog->firstWhere('key', StaffAbility::OpsRequests->value);
         $this->assertSame(['view', 'edit', 'quotation', 'approve_quotation', 'payments', 'work_plan', 'integrations', 'renew'], $requests['actions']);
@@ -209,21 +212,20 @@ class StaffAccessTest extends TestCase
             'abilities' => ['ops.finance.view', 'ops.finance.expense_create', 'ops.requests.view', 'ops.requests.quotation', 'ops.complaints.view'],
         ]);
         Sanctum::actingAs(User::factory()->create(['role_id' => $role->id]));
-        \Illuminate\Support\Facades\Http::fake();
-        $expense = \App\Models\OpsExpense::query()->create(['amount' => 10, 'category' => 'أخرى', 'spent_at' => now()]);
+        Http::fake();
+        $expense = OpsExpense::query()->create(['amount' => 10, 'category' => 'أخرى', 'spent_at' => now()]);
 
         $this->getJson('/api/admin/finance')->assertOk();
         $this->postJson('/api/admin/finance/expenses', ['amount' => 5, 'category' => 'أخرى'])->assertCreated();
         $this->putJson("/api/admin/finance/expenses/{$expense->id}", ['amount' => 5, 'category' => 'أخرى', 'spent_at' => '2026-10-01'])->assertForbidden();
         $this->deleteJson("/api/admin/finance/expenses/{$expense->id}")->assertForbidden();
-        $this->postJson('/api/admin/finance/sync')->assertForbidden();
 
-        $request = \App\Models\ServiceRequest::factory()->create();
+        $request = ServiceRequest::factory()->create();
         $this->getJson('/api/admin/requests')->assertOk();
         $this->postJson("/api/admin/requests/{$request->id}/confirm-payment")->assertForbidden();
         $this->postJson("/api/admin/requests/{$request->id}/renew")->assertForbidden();
 
-        $complaint = \App\Models\Complaint::query()->create(['client_id' => $request->client_id, 'title' => 'ت', 'description' => 'و', 'status' => 'open']);
+        $complaint = Complaint::query()->create(['client_id' => $request->client_id, 'title' => 'ت', 'description' => 'و', 'status' => 'open']);
         $this->getJson('/api/admin/complaints')->assertOk();
         $this->postJson("/api/admin/complaints/{$complaint->id}/replies", ['body' => 'x', 'channel' => 'note'])->assertForbidden();
         $this->patchJson("/api/admin/complaints/{$complaint->id}", ['status' => 'resolved'])->assertForbidden();

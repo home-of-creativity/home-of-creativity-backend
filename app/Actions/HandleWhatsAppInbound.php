@@ -256,6 +256,11 @@ class HandleWhatsAppInbound
             if ($this->heldByHuman($phone, $chatId, (string) $text)) {
                 return;
             }
+            if ((! is_string($callback) || $callback === '') && is_string($text) && trim($text) !== '' && $this->supportAgent()->active($phone)) {
+                $this->continueSupportAgent($client, $chatId, $phone, $session, trim($text));
+
+                return;
+            }
             $queuedPhoto = is_string($session['photo_queued'] ?? null) ? (string) $session['photo_queued'] : '';
             if ($queuedPhoto !== '') {
                 unset($session['photo_queued']);
@@ -846,7 +851,7 @@ class HandleWhatsAppInbound
             return;
         }
 
-        $this->sendMenu($chatId, $this->tx('تمام، سجلنا بياناتك. شو بدك نساوي؟', 'Your details are saved. Reply with the option number.'));
+        $this->sendMenu($chatId, $this->tx('تمام، سجلنا بياناتك. خبرني شو نساوي؟', 'Your details are saved. Reply with the option number.'));
     }
 
     /**
@@ -914,7 +919,7 @@ class HandleWhatsAppInbound
             return;
         }
 
-        $this->sendMenu($chatId, $this->tx('تمام، سجلنا بياناتك. شو بدك نساوي؟', 'Your details are saved. Reply with the option number.'));
+        $this->sendMenu($chatId, $this->tx('تمام، سجلنا بياناتك. خبرني شو نساوي؟', 'Your details are saved. Reply with the option number.'));
     }
 
     /**
@@ -922,6 +927,9 @@ class HandleWhatsAppInbound
      */
     private function handleCallback(Client $client, string $chatId, string $phone, array $session, string $data): void
     {
+        if (str_starts_with($data, 'rate') && app(SatisfactionSurvey::class)->answer($client, $chatId, $data)) {
+            return;
+        }
         if ($this->isNav($data, self::NAV_COMPLAINT) || $data === 'menu:complaint') {
             $this->resetCompose($session);
             $this->putSession($phone, $session);
@@ -940,7 +948,7 @@ class HandleWhatsAppInbound
             unset($session['profile_field']);
             $this->putSession($phone, $session);
             $this->sendMenu($chatId, $this->tx(
-                'شو بدك نساوي؟ فيك تطلب، تشوف طلباتك، تحجز تصوير، أو تجدد اشتراكك.',
+                'خبرني شو نساوي؟ فيك تطلب، تشوف طلباتك، تحجز تصوير، أو تجدد اشتراكك.',
                 'What do you need? You can request, check your orders, book a shoot, or renew.',
             ));
 
@@ -1811,9 +1819,21 @@ class HandleWhatsAppInbound
             if ($this->isGreeting($text)) {
                 return false;
             }
+            if ($this->supportAgent()->configured() && WhatsAppSupportAgent::wantsHuman($text)) {
+                $this->startSupportAgent($client, $chatId, $phone, $session, $text, 'The client asked for a person.');
+
+                return true;
+            }
             $decision = $this->askAssistant($client, $phone, $session, $text);
             if ($decision === null) {
                 return false;
+            }
+            $session['assist_misses'] = WhatsAppSupportAgent::missed($decision) ? (int) ($session['assist_misses'] ?? 0) + 1 : 0;
+            $this->putSession($phone, $session);
+            if ($this->supportAgent()->configured() && $session['assist_misses'] >= WhatsAppSupportAgent::MISSES_TO_HAND_OVER) {
+                $this->startSupportAgent($client, $chatId, $phone, $session, $text, 'The bot did not understand twice in a row. Last reason: '.$decision['reason']);
+
+                return true;
             }
             if ($this->runAssistantReply($client, $chatId, $phone, $session, $decision)) {
                 return true;
@@ -2217,7 +2237,7 @@ class HandleWhatsAppInbound
         $this->telegram->sendInlineKeyboard(
             $chatId,
             $this->tx(
-                "احكيلنا شو بدك.\nفيك تبعت نص أو صور أو ملفات (JPG, PNG, PDF).\nلما تخلص اكتب «تم الإرسال».",
+                "خبرني بطلبك.\nفيك تبعت نص أو صور أو ملفات (JPG, PNG, PDF).\nلما تخلص اكتب «تم الإرسال».",
                 "Describe what you need.\nYou can send text, photos, or files (JPG, PNG, PDF).\nWhen you finish, send “done”.",
             ),
             [[['text' => $this->tx('السابق', 'Back'), 'callback_data' => 'back']]],
@@ -3675,6 +3695,41 @@ class HandleWhatsAppInbound
         return true;
     }
 
+    private function supportAgent(): WhatsAppSupportAgent
+    {
+        return app(WhatsAppSupportAgent::class);
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function startSupportAgent(Client $client, string $chatId, string $phone, array $session, string $text, string $reason): void
+    {
+        $history = is_array($session['ask_history'] ?? null) ? $session['ask_history'] : [];
+        $session['assist_misses'] = 0;
+        $this->putSession($phone, $session);
+        if ($this->supportAgent()->start($client, $chatId, $phone, $this->replyLang, $text, $reason, $history)) {
+            $this->holdForHuman($phone);
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function continueSupportAgent(Client $client, string $chatId, string $phone, array $session, string $text): void
+    {
+        $this->rememberLanguage($text, $phone, $session, $client);
+        if (WhatsAppSupportAgent::leaving($text)) {
+            $this->supportAgent()->end($phone);
+            $this->sendMenu($chatId, $this->tx('رجعت معك. خبرني.', 'I am back. What do you need?'));
+
+            return;
+        }
+        if ($this->supportAgent()->relay($client, $chatId, $phone, $this->replyLang, $text)) {
+            $this->holdForHuman($phone);
+        }
+    }
+
     private function heldByHuman(string $phone, string $chatId, string $text): bool
     {
         if (! Cache::has($this->humanKey($phone))) {
@@ -3682,7 +3737,7 @@ class HandleWhatsAppInbound
         }
         if (preg_match('/رجوع\s*لل(?:بوت)|رجّع\s*البوت|return to (?:the )?bot/ui', $text) === 1) {
             Cache::forget($this->humanKey($phone));
-            $this->sendPlain($chatId, $this->tx('رجعت معك. شو بدك؟', 'I am back. What do you need?'));
+            $this->sendPlain($chatId, $this->tx('رجعت معك. خبرني.', 'I am back. What do you need?'));
 
             return true;
         }

@@ -103,7 +103,9 @@ class RejectQuotation
             $orderId = (int) ($request->odoo_quotation_id ?? 0);
             if ($orderId > 0) {
                 $this->odoo->messagePost('sale.order', $orderId, $html, true);
-                $this->odoo->removeQuotation($orderId);
+                if ($this->odoo->removeQuotation($orderId) === 'deleted') {
+                    $request->forceFill(['odoo_quotation_id' => null])->save();
+                }
             }
         } catch (\Throwable $exception) {
             if ((bool) config('services.telegram.strict')) {

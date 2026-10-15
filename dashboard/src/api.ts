@@ -1514,11 +1514,6 @@ export const api = {
   finance(filters: FinanceFilters = {}) {
     return request<Envelope<FinanceSummary>>(`/admin/finance${queryString({ ...filters })}`);
   },
-  syncFinance() {
-    return request<Envelope<{ synced: boolean; changed: number; removed: number }>>("/admin/finance/sync", {
-      method: "POST",
-    });
-  },
   updateExpense(id: number, payload: { amount: number; category: string; note?: string | null; spent_at: string }) {
     return request<Envelope<FinanceSummary>>(`/admin/finance/expenses/${id}`, {
       method: "PUT",
@@ -2120,14 +2115,23 @@ export const api = {
   updateOdooQuotation(id: number, payload: { lines: PaperLineInput[]; notes?: string; reference?: string; payment_term_id?: number; deliver?: "email" | "whatsapp" | "both" }) {
     return request<Envelope<OdooQuotation>>(`/admin/odoo/quotations/${id}`, { method: "PUT", body: JSON.stringify(payload) });
   },
+  cancelOdooQuotation(id: number) {
+    return request<Envelope<{ id: number; result: string }>>(`/admin/odoo/quotations/${id}/cancel`, { method: "POST" });
+  },
   deleteOdooQuotation(id: number) {
-    return request<Envelope<{ id: number; result: string }>>(`/admin/odoo/quotations/${id}`, { method: "DELETE" });
+    return request<Envelope<{ id: number; result: string; next_number: string | null }>>(`/admin/odoo/quotations/${id}`, { method: "DELETE" });
   },
   updateOdooInvoice(id: number, payload: { lines?: PaperLineInput[]; client_id?: number; reference?: string; payment_term_id?: number; deliver?: "email" | "whatsapp" | "both" }) {
     return request<Envelope<OdooInvoice>>(`/admin/odoo/invoices/${id}`, { method: "PUT", body: JSON.stringify(payload) });
   },
+  cancelOdooInvoice(id: number) {
+    return request<Envelope<{ id: number }>>(`/admin/odoo/invoices/${id}/cancel`, { method: "POST" });
+  },
+  draftOdooInvoice(id: number) {
+    return request<Envelope<{ id: number; result: string }>>(`/admin/odoo/invoices/${id}/draft`, { method: "POST" });
+  },
   deleteOdooInvoice(id: number) {
-    return request<Envelope<{ id: number }>>(`/admin/odoo/invoices/${id}`, { method: "DELETE" });
+    return request<Envelope<{ id: number; result: string }>>(`/admin/odoo/invoices/${id}`, { method: "DELETE" });
   },
   odooQuotations(partner?: string) {
     const query = partner ? `?partner=${encodeURIComponent(partner)}` : "";

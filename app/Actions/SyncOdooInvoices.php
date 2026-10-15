@@ -16,8 +16,8 @@ use Throwable;
 /**
  * Copies Odoo customer invoices into `odoo_invoices`. A normal run reads only the
  * invoices Odoo changed since the last run, so a payment, a cancel, or a reset to
- * draft in Odoo reaches the finance page within a minute. A full run also drops
- * invoices that were deleted in Odoo.
+ * draft in Odoo reaches the finance page within a minute. Every run also drops the
+ * invoices deleted in Odoo, with the local payment records that pointed at them.
  */
 class SyncOdooInvoices
 {
@@ -77,7 +77,7 @@ class SyncOdooInvoices
                 }
             }
 
-            if ($full && $complete) {
+            if ($complete || ! $full) {
                 $result['removed'] = $this->dropDeleted(array_keys($seen));
             }
             if ($latest !== null) {
@@ -260,28 +260,66 @@ class SyncOdooInvoices
     }
 
     /**
+     * Every invoice known here (copied, or on a local payment record) that this run did
+     * not read is asked for by id; the ones Odoo no longer has are removed.
+     *
      * @param  list<int>  $seen
      */
     private function dropDeleted(array $seen): int
     {
-        $missing = OdooInvoice::query()
-            ->when($seen !== [], fn ($query) => $query->whereNotIn('odoo_id', $seen))
-            ->pluck('odoo_id')
-            ->map(fn ($id): int => (int) $id)
-            ->all();
-        if ($missing === []) {
+        $known = array_merge(
+            OdooInvoice::query()->pluck('odoo_id')->all(),
+            Invoice::query()->whereNotNull('odoo_invoice_id')->pluck('odoo_invoice_id')->all(),
+        );
+        $candidates = array_values(array_diff(
+            array_unique(array_filter(array_map('intval', $known), fn (int $id): bool => $id > 0)),
+            $seen,
+        ));
+        if ($candidates === []) {
             return 0;
         }
 
-        // Ask Odoo once more so a page that moved during the walk does not drop a live invoice.
-        $still = $this->odoo->existingInvoiceIds($missing);
-        $gone = array_values(array_diff($missing, $still));
+        $still = $this->odoo->existingInvoiceIds($candidates);
+        if ($still === [] && $seen === [] && ! $this->odoo->hasAnyRecord('account.move')) {
+            return 0;
+        }
+        $gone = array_values(array_diff($candidates, $still));
         if ($gone === []) {
             return 0;
         }
 
-        Invoice::query()->whereIn('odoo_invoice_id', array_map('strval', $gone))->update(['status' => 'cancelled']);
+        $this->forget($gone);
 
-        return OdooInvoice::query()->whereIn('odoo_id', $gone)->delete();
+        return count($gone);
+    }
+
+    /** One invoice changed from the dashboard reaches the finance page now, not at the next run. */
+    public function refreshOne(int $odooId): void
+    {
+        $row = $this->odoo->invoiceSnapshot($odooId);
+        if ($row === null) {
+            $this->forget([$odooId]);
+
+            return;
+        }
+        $this->store($row);
+    }
+
+    /**
+     * Invoices deleted in Odoo leave the finance page with the local payment records that
+     * pointed at them; their requests lose the link.
+     *
+     * @param  list<int>  $odooIds
+     */
+    public function forget(array $odooIds): void
+    {
+        $ids = array_values(array_filter(array_map('intval', $odooIds), fn (int $id): bool => $id > 0));
+        if ($ids === []) {
+            return;
+        }
+        $asText = array_map('strval', $ids);
+        Invoice::query()->whereIn('odoo_invoice_id', $asText)->delete();
+        ServiceRequest::query()->whereIn('odoo_invoice_id', $asText)->update(['odoo_invoice_id' => null]);
+        OdooInvoice::query()->whereIn('odoo_id', $ids)->delete();
     }
 }

@@ -1,8 +1,8 @@
 import { Building, CalendarDays, Clock, Repeat, StickyNote, X } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
-import { api, type Client, type ReportCalendar, type ReportDeadlinePayload, type ReportDeadlineRow, type ReportRepeat } from "../../api";
-import type { Locale } from "../../i18n";
+import { api, CLIENT_SEARCH_MIN, type Client, type ReportCalendar, type ReportDeadlinePayload, type ReportDeadlineRow, type ReportRepeat } from "../../api";
+import { copy, type Locale } from "../../i18n";
 import { GOOGLE_COLORS } from "../photography/model";
 import { REPEATS, REPEAT_COPY, clientLabel } from "./model";
 
@@ -231,8 +231,14 @@ function ClientPicker({ locale, value, onChange }: { locale: Locale; value: Dead
   const [results, setResults] = useState<Client[]>([]);
   const [open, setOpen] = useState(false);
 
+  const searchReady = query.trim().length >= CLIENT_SEARCH_MIN;
+
   useEffect(() => {
     if (!open) return;
+    if (!searchReady) {
+      setResults([]);
+      return;
+    }
     let cancelled = false;
     const timer = window.setTimeout(() => {
       api
@@ -246,7 +252,7 @@ function ClientPicker({ locale, value, onChange }: { locale: Locale; value: Dead
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [query, open]);
+  }, [query, open, searchReady]);
 
   if (value && !open) {
     return (
@@ -272,7 +278,8 @@ function ClientPicker({ locale, value, onChange }: { locale: Locale; value: Dead
       />
       {open ? (
         <ul className="rc-client-results" role="listbox">
-          {results.length === 0 ? <li className="muted">{ar ? "لا نتائج" : "No results"}</li> : null}
+          {!searchReady ? <li className="muted">{copy.clientsSearchMin[locale]}</li> : null}
+          {searchReady && results.length === 0 ? <li className="muted">{ar ? "لا نتائج" : "No results"}</li> : null}
           {results.map((client) => (
             <li key={client.id}>
               <button

@@ -23,13 +23,10 @@ class NotifyClientChannels
     public function send(ServiceRequest $request, string $text, ?array $inlineButtons = null): bool
     {
         $request->loadMissing('client');
-        $preferred = Cache::get('hoc:client-reply:'.$request->client_id);
-        $chatId = is_string($preferred) && $preferred !== ''
-            ? $preferred
-            : $request->client?->telegram_user_id;
+        $chatId = $this->chatId($request);
 
         try {
-            if (is_string($chatId) && $chatId !== '' && $this->telegram->canReachClient($chatId)) {
+            if ($chatId !== null) {
                 if ($inlineButtons !== null && $inlineButtons !== []) {
                     $this->telegram->sendInlineActions($chatId, $text, $inlineButtons);
                 } else {
@@ -60,5 +57,18 @@ class NotifyClientChannels
         }
 
         return false;
+    }
+
+    /**
+     * The WhatsApp or Telegram chat the client last used, when it can still receive.
+     */
+    public function chatId(ServiceRequest $request): ?string
+    {
+        $preferred = Cache::get('hoc:client-reply:'.$request->client_id);
+        $chatId = is_string($preferred) && $preferred !== ''
+            ? $preferred
+            : $request->client?->telegram_user_id;
+
+        return is_string($chatId) && $chatId !== '' && $this->telegram->canReachClient($chatId) ? $chatId : null;
     }
 }

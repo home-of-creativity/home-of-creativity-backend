@@ -28,6 +28,8 @@ class OpsFollowUp extends Model
 
     public const KIND_TELEGRAM_FAIL = 'telegram_fail';
 
+    public const KIND_FINANCE_WEEKLY = 'finance_weekly';
+
     protected $fillable = [
         'kind',
         'dedupe_key',

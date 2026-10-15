@@ -20,7 +20,7 @@ use Throwable;
  */
 class CancelClientRequest
 {
-    private const PAID_STATUSES = [
+    public const PAID_STATUSES = [
         RequestStatus::PaymentConfirmed,
         RequestStatus::InProgress,
         RequestStatus::ReadyForReview,
@@ -112,6 +112,9 @@ class CancelClientRequest
                 return null;
             }
             $result = $this->odoo->removeQuotation($orderId);
+            if ($result === 'deleted') {
+                $request->forceFill(['odoo_quotation_id' => null])->save();
+            }
             if ($result !== 'sale') {
                 return null;
             }

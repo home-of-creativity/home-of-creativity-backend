@@ -2,9 +2,11 @@
 
 namespace Tests\Feature;
 
+use App\Actions\CancelClientRequest;
 use App\Enums\RequestStatus;
 use App\Mail\ClientDocumentMail;
 use App\Models\Client;
+use App\Models\Invoice;
 use App\Models\ServiceRequest;
 use App\Models\User;
 use App\Support\ResolveServiceRequest;
@@ -25,6 +27,8 @@ class OdooQuotationReplyTest extends TestCase
     use RefreshDatabase;
 
     private string $order = 'draft';
+
+    private bool $odooEmpty = false;
 
     protected function setUp(): void
     {
@@ -126,6 +130,66 @@ class OdooQuotationReplyTest extends TestCase
         $this->assertSame(RequestStatus::QuotationRejected, ServiceRequest::query()->sole()->status);
     }
 
+    public function test_a_quotation_deleted_in_odoo_deletes_its_unpaid_request_and_cancels_a_paid_one(): void
+    {
+        $client = $this->dashboardClient();
+        $unpaid = ServiceRequest::factory()->for($client)->create([
+            'status' => RequestStatus::AwaitingPayment,
+            'odoo_quotation_id' => '880',
+            'amount_paid' => 0,
+        ]);
+        Invoice::query()->create([
+            'request_id' => $unpaid->id,
+            'invoice_number' => 'INV-REQ-UNPAID',
+            'amount' => 200,
+            'kind' => 'full',
+            'status' => 'issued',
+            'issued_at' => now(),
+        ]);
+        $paid = ServiceRequest::factory()->for($client)->create([
+            'status' => RequestStatus::InProgress,
+            'odoo_quotation_id' => '880',
+            'amount_paid' => 150,
+        ]);
+        $this->order = 'gone';
+
+        $this->artisan('odoo:sync-quotations')->expectsOutputToContain('deleted=1 cancelled=1')->assertSuccessful();
+
+        $this->assertNull($unpaid->fresh());
+        $this->assertSame(0, Invoice::query()->where('invoice_number', 'INV-REQ-UNPAID')->count());
+        $this->assertSame(RequestStatus::Cancelled, $paid->fresh()->status);
+        $this->assertNull($paid->fresh()->odoo_quotation_id);
+    }
+
+    public function test_a_draft_the_dashboard_removed_from_odoo_keeps_its_request(): void
+    {
+        $request = ServiceRequest::factory()->for($this->dashboardClient())->create([
+            'status' => RequestStatus::QuotationSent,
+            'odoo_quotation_id' => '880',
+        ]);
+        $this->order = 'draft';
+
+        app(CancelClientRequest::class)->closeOdooPapers($request, 'admin');
+        $this->assertSame('gone', $this->order);
+        $this->assertNull($request->fresh()->odoo_quotation_id);
+
+        $this->artisan('odoo:sync-quotations')->expectsOutputToContain('deleted=0')->assertSuccessful();
+        $this->assertNotNull($request->fresh());
+    }
+
+    public function test_nothing_is_deleted_when_odoo_has_no_orders_at_all(): void
+    {
+        $request = ServiceRequest::factory()->for($this->dashboardClient())->create([
+            'status' => RequestStatus::AwaitingPayment,
+            'odoo_quotation_id' => '880',
+        ]);
+        $this->order = 'gone';
+        $this->odooEmpty = true;
+
+        $this->artisan('odoo:sync-quotations')->expectsOutputToContain('deleted=0')->assertSuccessful();
+        $this->assertNotNull($request->fresh());
+    }
+
     private function dashboardClient(): Client
     {
         return Client::factory()->create([
@@ -168,7 +232,9 @@ class OdooQuotationReplyTest extends TestCase
             $model === 'sale.order' && $method === 'action_cancel' => $this->setOrder('cancel'),
             $model === 'sale.order' && $method === 'unlink' => $this->setOrder('gone'),
             $model === 'sale.order' && $method === 'get_portal_url' => '/my/orders/880?access_token=abc',
-            $model === 'sale.order' && $method === 'search_read' => $this->order === 'gone' ? [] : [[
+            // Other orders stay in Odoo unless it is empty, so «any order at all» is still true.
+            $model === 'sale.order' && $method === 'search_read' && $this->order === 'gone' => ($args[5][0] ?? []) === [] && ! $this->odooEmpty ? [['id' => 1]] : [],
+            $model === 'sale.order' && $method === 'search_read' => [[
                 'id' => 880, 'name' => 'S00880', 'partner_id' => [44, 'Damastech'], 'amount_total' => 200,
                 'currency_id' => [1, 'USD'], 'state' => $this->order, 'client_order_ref' => 'DASH',
             ]],

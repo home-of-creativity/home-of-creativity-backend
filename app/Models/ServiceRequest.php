@@ -15,6 +15,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 
@@ -141,6 +142,11 @@ class ServiceRequest extends Model
     public function photographyBookings(): HasMany
     {
         return $this->hasMany(PhotographyBooking::class, 'request_id');
+    }
+
+    public function rating(): HasOne
+    {
+        return $this->hasOne(RequestRating::class, 'request_id');
     }
 
     public function client(): BelongsTo

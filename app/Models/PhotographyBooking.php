@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Carbon;
 
 class PhotographyBooking extends Model
 {
@@ -44,6 +45,7 @@ class PhotographyBooking extends Model
         'google_event_id',
         'proposed_starts_at',
         'reminded_at',
+        'hour_reminded_at',
         'period_key',
         'session_number',
         'waiting_since',
@@ -64,6 +66,7 @@ class PhotographyBooking extends Model
             'ends_at' => 'datetime',
             'proposed_starts_at' => 'datetime',
             'reminded_at' => 'datetime',
+            'hour_reminded_at' => 'datetime',
             'waiting_since' => 'datetime',
             'confirmed_at' => 'datetime',
             'charged_at' => 'datetime',
@@ -103,7 +106,7 @@ class PhotographyBooking extends Model
      * The start this row keeps off the calendar for everyone else: a hold, an
      * agreed time, or both ends of a move.
      *
-     * @return list<\Illuminate\Support\Carbon>
+     * @return list<Carbon>
      */
     public function heldStarts(bool $withHolds): array
     {

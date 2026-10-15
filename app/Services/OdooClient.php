@@ -245,6 +245,15 @@ class OdooClient
     }
 
     /**
+     * Whether Odoo holds any record of $model. An empty answer about known ids only
+     * means they were deleted when Odoo still answers with something here.
+     */
+    public function hasAnyRecord(string $model): bool
+    {
+        return $this->searchRead($model, [], ['id'], 1) !== [];
+    }
+
+    /**
      * @return array<string, mixed>|null
      */
     public function invoiceSnapshot(int $id): ?array
@@ -1775,6 +1784,54 @@ class OdooClient
         $this->callWithContext('sale.order', 'action_cancel', [$id], ['disable_cancel_warning' => true]);
 
         return $cancelled;
+    }
+
+    /** Odoo's «إلغاء» on a quotation not confirmed yet, a draft included. */
+    public function cancelQuotation(int $id): void
+    {
+        $this->callWithContext('sale.order', 'action_cancel', [$id], ['disable_cancel_warning' => true]);
+    }
+
+    /** Odoo's «إعادة إلى مسودة» on a posted or cancelled invoice. */
+    public function invoiceToDraft(int $id): void
+    {
+        $this->call('account.move', 'button_draft', ['ids' => [$id]]);
+    }
+
+    /**
+     * The next quotation number follows the highest one left (QN or S, same count), so
+     * deleting the last quotations gives their numbers back. The sequence only moves
+     * down; a number still in use is never handed out again.
+     *
+     * @return string|null the next quotation number, or null when nothing moved
+     */
+    public function resequenceQuotations(): ?string
+    {
+        $sequences = $this->searchRead('ir.sequence', [['code', '=', 'sale.order']], ['id', 'prefix', 'padding', 'number_next_actual'], 10, 0, 'id asc');
+        if ($sequences === []) {
+            return null;
+        }
+
+        $highest = 0;
+        $names = $this->searchRead('sale.order', ['|', ['name', '=like', self::QUOTATION_PREFIX.'%'], ['name', '=like', self::ORDER_PREFIX.'%']], ['name'], 10000);
+        $pattern = '/^(?:'.preg_quote(self::QUOTATION_PREFIX, '/').'|'.preg_quote(self::ORDER_PREFIX, '/').')(\d+)$/';
+        foreach ($names as $row) {
+            if (preg_match($pattern, (string) ($row['name'] ?? ''), $match) === 1) {
+                $highest = max($highest, (int) $match[1]);
+            }
+        }
+
+        $next = null;
+        foreach ($sequences as $sequence) {
+            $wanted = $highest + 1;
+            if ($wanted >= (int) ($sequence['number_next_actual'] ?? 0)) {
+                continue;
+            }
+            $this->writeRecord('ir.sequence', (int) $sequence['id'], ['number_next_actual' => $wanted]);
+            $next = ((string) ($sequence['prefix'] ?: '')).str_pad((string) $wanted, max(0, (int) ($sequence['padding'] ?? 0)), '0', STR_PAD_LEFT);
+        }
+
+        return $next;
     }
 
     /**

@@ -194,10 +194,16 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::post('odoo/quotations', [AdminOdooController::class, 'storeQuotation']);
         Route::post('odoo/invoices', [AdminOdooController::class, 'storeInvoice']);
         Route::put('odoo/quotations/{id}', [AdminOdooController::class, 'updateQuotation'])->whereNumber('id');
-        Route::delete('odoo/quotations/{id}', [AdminOdooController::class, 'destroyQuotation'])->whereNumber('id');
+        Route::post('odoo/quotations/{id}/cancel', [AdminOdooController::class, 'cancelQuotation'])->whereNumber('id');
         Route::put('odoo/invoices/{id}', [AdminOdooController::class, 'updateInvoice'])->whereNumber('id');
         Route::post('odoo/quotations/{id}/invoice', [AdminOdooController::class, 'invoiceQuotation'])->whereNumber('id');
         Route::post('odoo/invoices/{id}/post', [AdminOdooController::class, 'postInvoice'])->whereNumber('id');
+        Route::post('odoo/invoices/{id}/cancel', [AdminOdooController::class, 'cancelInvoice'])->whereNumber('id');
+        Route::post('odoo/invoices/{id}/draft', [AdminOdooController::class, 'draftInvoice'])->whereNumber('id');
+    });
+    // Deleting from Odoo is final: its own operation, a cancelled quotation or a draft invoice only.
+    Route::middleware('ability:ops.clients.odoo_delete')->group(function () {
+        Route::delete('odoo/quotations/{id}', [AdminOdooController::class, 'destroyQuotation'])->whereNumber('id');
         Route::delete('odoo/invoices/{id}', [AdminOdooController::class, 'destroyInvoice'])->whereNumber('id');
     });
 
@@ -309,8 +315,6 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
     Route::post('finance/expenses', [AdminFinanceController::class, 'storeExpense'])->middleware('ability:ops.finance.expense_create');
     Route::put('finance/expenses/{expense}', [AdminFinanceController::class, 'updateExpense'])->middleware('ability:ops.finance.expense_update');
     Route::delete('finance/expenses/{expense}', [AdminFinanceController::class, 'destroyExpense'])->middleware('ability:ops.finance.expense_delete');
-    Route::post('finance/sync', [AdminFinanceController::class, 'sync'])->middleware('ability:ops.finance.sync');
-
     Route::middleware('crud:ops.vouchers')->group(function () {
         Route::get('voucher-templates', [AdminFinancialVoucherTemplateController::class, 'index']);
         Route::post('voucher-templates', [AdminFinancialVoucherTemplateController::class, 'store']);

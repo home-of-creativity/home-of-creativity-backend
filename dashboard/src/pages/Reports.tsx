@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Search } from "lucide-react";
-import { api, type Client, type PageMeta } from "../api";
+import { api, CLIENT_SEARCH_MIN, type Client, type PageMeta } from "../api";
 import { DriveFolderPicker } from "../components/DriveFolderPicker";
 import { LoadingTableRow } from "../components/LoadingTableRow";
 import { PageHeader } from "../components/PageHeader";
@@ -33,7 +33,17 @@ export function Reports({ locale, t }: { locale: Locale; t: (c: { ar: string; en
     setPage(1);
   }, [debouncedQuery, reportsFilter, driveFilter]);
 
+  const searchReady = debouncedQuery.length >= CLIENT_SEARCH_MIN;
+
   useEffect(() => {
+    if (!searchReady) {
+      setItems([]);
+      setMeta(null);
+      setError("");
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
     setLoading(true);
     api.reportClients(page, {
       search: debouncedQuery,
@@ -41,12 +51,21 @@ export function Reports({ locale, t }: { locale: Locale; t: (c: { ar: string; en
       drive: driveFilter,
     })
       .then((res) => {
+        if (cancelled) return;
         setItems(res.data);
         setMeta(res.meta);
+        setError("");
       })
-      .catch((err) => setError(err instanceof Error ? err.message : t(copy.saveFailed)))
-      .finally(() => setLoading(false));
-  }, [page, debouncedQuery, reportsFilter, driveFilter, t]);
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : t(copy.saveFailed));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [page, debouncedQuery, searchReady, reportsFilter, driveFilter, t]);
 
   return (
     <section>
@@ -105,8 +124,13 @@ export function Reports({ locale, t }: { locale: Locale; t: (c: { ar: string; en
             </tr>
           </thead>
           <tbody>
-            {loading ? <LoadingTableRow colSpan={5} /> : null}
-            {!loading && items.length === 0 ? (
+            {!searchReady ? (
+              <tr>
+                <td colSpan={5} className="muted">{t(copy.clientsSearchMin)}</td>
+              </tr>
+            ) : null}
+            {searchReady && loading ? <LoadingTableRow colSpan={5} /> : null}
+            {searchReady && !loading && items.length === 0 ? (
               <tr>
                 <td colSpan={5}>{debouncedQuery || reportsFilter || driveFilter ? t(copy.noSearchResults) : t(copy.noReports)}</td>
               </tr>
@@ -127,7 +151,7 @@ export function Reports({ locale, t }: { locale: Locale; t: (c: { ar: string; en
           </tbody>
         </table>
       </div>
-      {meta ? <Pagination meta={meta} disabled={loading} onPage={setPage} t={t} /> : null}
+      {searchReady && meta ? <Pagination meta={meta} disabled={loading} onPage={setPage} t={t} /> : null}
       </>
       ) : null}
     </section>

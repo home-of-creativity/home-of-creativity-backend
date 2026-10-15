@@ -62,6 +62,8 @@ return [
         'webhook_url' => env('N8N_WEBHOOK_URL'),
         'webhook_secret' => env('N8N_WEBHOOK_SECRET'),
         'drive_webhook_url' => env('N8N_DRIVE_WEBHOOK_URL'),
+        // WhatsApp support agent webhook; empty keeps the bot's old escalation only.
+        'support_agent_url' => env('N8N_SUPPORT_AGENT_URL'),
         'timeout' => (int) env('N8N_TIMEOUT', 12),
     ],
 
@@ -181,8 +183,7 @@ return [
 
     // A client message the bot assistant cannot answer is emailed here.
     'client_assistant' => [
-        'escalation_email' => env('CLIENT_ASSISTANT_ESCALATION_EMAIL', 'developer@hoc.agency'),
-    ],
+        'escalation_email' => env('CLIENT_ASSISTANT_ESCALATION_EMAIL', 'developer@hoc.agency'),    ],
 
     'gemini' => [
         'api_key' => env('GEMINI_API_KEY', env('GOOGLE_API_KEY')),
@@ -230,6 +231,16 @@ return [
         'graph_base' => env('WHATSAPP_GRAPH_URL', env('META_GRAPH_URL', 'https://graph.facebook.com/v21.0')),
         'web_url' => env('WHATSAPP_WEB_URL'),
         'web_secret' => env('WHATSAPP_WEB_SECRET') ?: env('TELEGRAM_BOT_SECRET'),
+        // Management numbers for the weekly finance summary and low ratings; empty uses TELEGRAM_ADMIN_IDS.
+        'management_numbers' => array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) env('WHATSAPP_MANAGEMENT_NUMBERS', '')),
+        ))),
+        // Support numbers that take over a client from the n8n support agent; empty uses the management numbers.
+        'support_numbers' => array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) env('WHATSAPP_SUPPORT_NUMBERS', '')),
+        ))),
     ],
 
     'threads' => [

@@ -5,10 +5,10 @@ namespace App\Actions;
 use App\Enums\EmployeeProfession;
 use App\Enums\StaffAbility;
 use App\Models\Client;
-use App\Models\User;
 use App\Models\Employee;
 use App\Models\PhotographyBooking;
 use App\Models\ServiceRequest;
+use App\Models\User;
 use App\Services\GoogleCalendarClient;
 use App\Support\PhotographyActor;
 use App\Support\WorkCalendar;
@@ -33,6 +33,8 @@ use Throwable;
 class BookPhotographySlot
 {
     public const SHOOT_HOURS = 3;
+
+    public const REMIND_HOURS_BEFORE = 2;
 
     public const GAP_HOURS = 5;
 
@@ -702,9 +704,49 @@ class BookPhotographySlot
                 'Reminder: your shoot is tomorrow, '.$this->whenEn($row->starts_at).' ('.$this->ref($request).').',
             ));
             if ($row->employee instanceof Employee) {
-                $this->notifyEmployees->toEmployee($row->employee, 'تذكير: جلسة تصوير بكرا '.$this->when($row->starts_at).' للطلب #'.$request?->number.'.');
+                $this->notifyEmployees->toEmployeeWhatsApp($row->employee, 'تذكير: جلسة تصوير بكرا '.$this->when($row->starts_at).' للطلب #'.$request?->number.'.');
             }
             $row->forceFill(['reminded_at' => now()])->save();
+            $sent++;
+        }
+
+        return $sent;
+    }
+
+    /**
+     * A few hours before an agreed shoot. A time agreed or moved inside that window
+     * already carries a fresh message, so it is only marked as reminded.
+     */
+    public function sendHoursBeforeReminders(): int
+    {
+        $now = now('Asia/Damascus');
+        $rows = PhotographyBooking::query()
+            ->with(['request.client', 'employee'])
+            ->where('status', PhotographyBooking::CONFIRMED)
+            ->whereNull('hour_reminded_at')
+            ->where('starts_at', '>', $now->format('Y-m-d H:i:s'))
+            ->where('starts_at', '<=', $now->copy()->addHours(self::REMIND_HOURS_BEFORE)->format('Y-m-d H:i:s'))
+            ->get();
+        $sent = 0;
+        foreach ($rows as $row) {
+            $row->forceFill(['hour_reminded_at' => now()])->save();
+            if ($row->confirmed_at !== null && $row->confirmed_at->gte(now()->subHours(self::REMIND_HOURS_BEFORE))) {
+                continue;
+            }
+            $request = $row->request;
+            $client = $request?->client;
+            $this->sendClient($row, $this->say(
+                $client,
+                'تذكير: موعد التصوير اليوم '.$this->friendlyTime($row->starts_at).' ('.$this->ref($request).'). باقي حوالي ساعتين، جهّز المكان والأغراض.',
+                'Reminder: your shoot is today at '.$this->clock($row->starts_at)->format('g:i A').' ('.$this->ref($request).'), in about two hours.',
+            ));
+            $contact = $client ? ' العميل '.$client->name.(filled($client->phone) ? ' '.$client->phone : '').'.' : '';
+            $text = 'تذكير: جلسة تصوير بعد ساعتين، '.$this->friendlyTime($row->starts_at).' للطلب #'.$request?->number.'.'.$contact;
+            if ($row->employee instanceof Employee) {
+                $this->notifyEmployees->toEmployeeWhatsApp($row->employee, $text);
+            } else {
+                $this->notifyEmployees->professionWhatsApp(EmployeeProfession::Media, $text);
+            }
             $sent++;
         }
 
@@ -898,6 +940,7 @@ class BookPhotographySlot
                 'confirmed_at' => now(),
                 'waiting_since' => null,
                 'reminded_at' => null,
+                'hour_reminded_at' => null,
             ])->save();
         });
         $this->log($booking, 'confirmed', $actor, $from, 'خُصمت جلسة');
@@ -946,6 +989,7 @@ class BookPhotographySlot
             'google_event_id' => null,
             'waiting_since' => null,
             'reminded_at' => null,
+            'hour_reminded_at' => null,
             'confirmed_at' => now(),
         ])->save();
         $this->log($booking, 'moved', $actor, $from, 'من '.$this->when($oldStart));

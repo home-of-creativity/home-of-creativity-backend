@@ -35,16 +35,6 @@ class FinanceController extends Controller
         ]);
     }
 
-    public function sync(AdminBotDesk $desk): JsonResponse
-    {
-        $result = $desk->syncOdooInvoices();
-
-        return response()->json([
-            'data' => $result,
-            'message' => $result['synced'] ? 'تمت المزامنة مع أودو.' : 'تعذّرت المزامنة مع أودو الآن.',
-        ]);
-    }
-
     public function storeExpense(Request $request, AdminBotDesk $desk): JsonResponse
     {
         $validated = $request->validate([

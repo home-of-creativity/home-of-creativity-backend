@@ -9,12 +9,19 @@ class SyncOdooQuotationsCommand extends Command
 {
     protected $signature = 'odoo:sync-quotations';
 
-    protected $description = 'Bring quotations accepted or declined on the Odoo portal back to their requests.';
+    protected $description = 'Bring quotations accepted, declined, or deleted in Odoo back to their requests.';
 
     public function handle(SyncOdooQuotations $sync): int
     {
         $result = $sync->handle();
-        $this->line(sprintf('checked=%d approved=%d rejected=%d', $result['checked'], $result['approved'], $result['rejected']));
+        $this->line(sprintf(
+            'checked=%d approved=%d rejected=%d deleted=%d cancelled=%d',
+            $result['checked'],
+            $result['approved'],
+            $result['rejected'],
+            $result['deleted'],
+            $result['cancelled'],
+        ));
 
         return self::SUCCESS;
     }
