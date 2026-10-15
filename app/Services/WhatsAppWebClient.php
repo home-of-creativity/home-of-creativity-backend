@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Contracts\WhatsAppMessenger;
+use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -125,11 +126,14 @@ class WhatsAppWebClient implements WhatsAppMessenger
 
     public function sendText(string $to, string $text): string
     {
-        return $this->send([
+        $id = $this->send([
             'to' => $to,
             'kind' => 'text',
             'text' => $text,
         ]);
+        WhatsAppOutbox::record($to, 'text', $text);
+
+        return $id;
     }
 
     /**
@@ -163,9 +167,7 @@ class WhatsAppWebClient implements WhatsAppMessenger
         throw new RuntimeException('WhatsApp Web media is delivered with the inbound message.');
     }
 
-    public function markRead(string $messageId): void
-    {
-    }
+    public function markRead(string $messageId): void {}
 
     /**
      * @param  list<array{text: string, callback_data: string}>  $buttons
@@ -186,12 +188,18 @@ class WhatsAppWebClient implements WhatsAppMessenger
             return $this->sendText($to, $text);
         }
 
-        return $this->send([
+        $id = $this->send([
             'to' => $to,
             'kind' => 'list',
             'text' => $text,
             'buttons' => $rows,
         ]);
+        WhatsAppOutbox::record($to, 'choice', $text, array_map(
+            fn (array $row): array => ['text' => $row['title'], 'callback_data' => $row['id']],
+            $rows,
+        ));
+
+        return $id;
     }
 
     private function sendFile(string $to, string $absolutePath, string $kind, ?string $caption, string $filename): string
@@ -205,7 +213,7 @@ class WhatsAppWebClient implements WhatsAppMessenger
             throw new RuntimeException('WhatsApp media file could not be read.');
         }
 
-        return $this->send([
+        $id = $this->send([
             'to' => $to,
             'kind' => $kind,
             'caption' => $caption,
@@ -213,6 +221,9 @@ class WhatsAppWebClient implements WhatsAppMessenger
             'mime' => mime_content_type($absolutePath) ?: 'application/octet-stream',
             'data_base64' => base64_encode($binary),
         ]);
+        WhatsAppOutbox::record($to, $kind, $caption, [], $absolutePath, $filename);
+
+        return $id;
     }
 
     /**
@@ -239,7 +250,7 @@ class WhatsAppWebClient implements WhatsAppMessenger
         return is_string($id) && $id !== '' ? $id : 'ok';
     }
 
-    private function http(): \Illuminate\Http\Client\PendingRequest
+    private function http(): PendingRequest
     {
         return Http::timeout(25)
             ->connectTimeout(3)

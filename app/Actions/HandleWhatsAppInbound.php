@@ -12,9 +12,11 @@ use App\Models\PhotographyBooking;
 use App\Models\PricingPackage;
 use App\Models\RequestFile;
 use App\Models\ServiceRequest;
+use App\Models\WhatsAppOutboxMessage;
 use App\Services\GeminiService;
 use App\Services\RequestStatusTransitionService;
 use App\Services\TelegramNotifier;
+use App\Services\WhatsAppOutbox;
 use App\Support\BillingPeriod;
 use App\Support\ChatLanguage;
 use App\Support\ClientChannelGate;
@@ -262,6 +264,9 @@ class HandleWhatsAppInbound
                 if (trim((string) $text) === '' || $greeting) {
                     $text = $queuedPhoto;
                 }
+            }
+            if ((! is_string($callback) || $callback === '') && $this->resendLastMessages($client, $phone, $session, (string) $text)) {
+                return;
             }
             $media = $this->messageMedia($message);
             $voice = $this->voiceNote($message);
@@ -3633,6 +3638,43 @@ class HandleWhatsAppInbound
     }
 
     /** Staff typed on the company phone. The bot stays quiet until the client asks it back, or two hours pass. */
+    /**
+     * «ارجع آخر 3 رسائل»: the chat's last messages again, at most three.
+     */
+    private function resendLastMessages(Client $client, string $phone, array $session, string $text): bool
+    {
+        $asked = WhatsAppOutbox::requestedCount($text);
+        if ($asked === null) {
+            return false;
+        }
+
+        $this->rememberLanguage($text, $phone, $session, $client);
+        $en = $this->replyLang === 'en';
+        $count = min($asked, WhatsAppOutbox::MAX_RESEND);
+        $intro = match (true) {
+            $asked > WhatsAppOutbox::MAX_RESEND => $en
+                ? 'I can resend up to '.WhatsAppOutbox::MAX_RESEND.' messages. Here are the last '.$count.':'
+                : 'أقدر أعيد إرسال '.WhatsAppOutbox::MAX_RESEND.' رسائل بحد أقصى. هذه آخر '.$count.':',
+            $count === 1 => $en ? 'Here is my last message again:' : 'هذه آخر رسالة مرة ثانية:',
+            $count === 2 => $en ? 'Here are my last 2 messages again:' : 'هذه آخر رسالتين مرة ثانية:',
+            default => $en ? 'Here are my last '.$count.' messages again:' : 'هذه آخر '.$count.' رسائل مرة ثانية:',
+        };
+
+        $hasAny = WhatsAppOutboxMessage::query()->where('recipient', Client::normalizeWhatsAppPhone($phone))->exists();
+        if (! $hasAny) {
+            WhatsAppOutbox::quietly(fn () => $this->whatsApp->sendText($phone, $en
+                ? 'There are no earlier messages to resend.'
+                : 'ما في رسائل سابقة أعيد إرسالها.'));
+
+            return true;
+        }
+
+        WhatsAppOutbox::quietly(fn () => $this->whatsApp->sendText($phone, $intro));
+        WhatsAppOutbox::resend($this->whatsApp, $phone, $count);
+
+        return true;
+    }
+
     private function heldByHuman(string $phone, string $chatId, string $text): bool
     {
         if (! Cache::has($this->humanKey($phone))) {

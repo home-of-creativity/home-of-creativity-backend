@@ -2014,6 +2014,105 @@ class OdooClient
     }
 
     /**
+     * Invoices and refunds numbered with the journal's old code take the INV prefix and keep
+     * their numbers (الفات/2026/00013 → INV/2026/00013, Rالفات/… → RINV/…), so Odoo continues
+     * from INV. The payment reference follows the new name.
+     *
+     * @return list<array{id: int, from: string, to: string}>
+     */
+    public function renameInvoicesFromCode(string $fromCode, bool $dryRun = false): array
+    {
+        $fromCode = trim($fromCode);
+        if ($fromCode === '' || $fromCode === self::INVOICE_CODE) {
+            return [];
+        }
+        $rows = $this->searchRead('account.move', [
+            ['move_type', 'in', ['out_invoice', 'out_refund']],
+            '|', ['name', '=like', $fromCode.'/%'], ['name', '=like', 'R'.$fromCode.'/%'],
+        ], ['id', 'name', 'move_type'], 1000, 0, 'id asc');
+
+        $renamed = [];
+        foreach ($rows as $row) {
+            $from = (string) ($row['name'] ?? '');
+            $refund = str_starts_with($from, 'R'.$fromCode.'/');
+            $to = ($refund ? 'R' : '').self::INVOICE_CODE.substr($from, strlen(($refund ? 'R' : '').$fromCode));
+            if (! $dryRun) {
+                $vals = ['name' => $to];
+                if (($row['move_type'] ?? '') === 'out_invoice') {
+                    $vals['payment_reference'] = $to;
+                }
+                $this->writeRecord('account.move', (int) $row['id'], $vals);
+            }
+            $renamed[] = ['id' => (int) $row['id'], 'from' => $from, 'to' => $to];
+        }
+
+        return $renamed;
+    }
+
+    /**
+     * «دفع فوري» means due on the invoice date: its line is due after 0 days, and open invoices
+     * that carry it fall due on their invoice date.
+     *
+     * @return array{terms: list<int>, invoices: list<string>}
+     */
+    public function makeImmediateTermsImmediate(bool $dryRun = false): array
+    {
+        $terms = $this->searchRead('account.payment.term', [['name', 'in', ['دفع فوري', 'Immediate Payment']]], ['id', 'name'], 10);
+        $termIds = array_values(array_map(fn (array $term): int => (int) $term['id'], $terms));
+        if ($termIds === []) {
+            return ['terms' => [], 'invoices' => []];
+        }
+        if (! $dryRun) {
+            foreach ($this->searchRead('account.payment.term.line', [['payment_id', 'in', $termIds], ['nb_days', '!=', 0]], ['id'], 50) as $line) {
+                $this->writeRecord('account.payment.term.line', (int) $line['id'], ['nb_days' => 0]);
+            }
+            foreach ($terms as $term) {
+                $this->writeRecord('account.payment.term', (int) $term['id'], ['note' => '<p>شروط الدفع: دفع فوري</p>']);
+            }
+        }
+
+        $fixed = [];
+        $invoices = $this->searchRead('account.move', [
+            ['move_type', '=', 'out_invoice'],
+            ['invoice_payment_term_id', 'in', $termIds],
+            ['state', '=', 'posted'],
+            ['payment_state', 'in', ['not_paid', 'partial']],
+        ], ['id', 'name', 'invoice_date', 'invoice_date_due'], 500);
+        foreach ($invoices as $invoice) {
+            $date = (string) ($invoice['invoice_date'] ?? '');
+            if ($date === '' || $date === (string) ($invoice['invoice_date_due'] ?? '')) {
+                continue;
+            }
+            if (! $dryRun) {
+                $lines = $this->searchRead('account.move.line', [
+                    ['move_id', '=', (int) $invoice['id']],
+                    ['display_type', '=', 'payment_term'],
+                ], ['id'], 20);
+                foreach ($lines as $line) {
+                    $this->writeRecord('account.move.line', (int) $line['id'], ['date_maturity' => $date]);
+                }
+                $this->writeRecord('account.move', (int) $invoice['id'], ['invoice_date_due' => $date]);
+            }
+            $fixed[] = (string) ($invoice['name'] ?? $invoice['id']);
+        }
+
+        return ['terms' => $termIds, 'invoices' => $fixed];
+    }
+
+    /** The invoice print without the «التواصل بشأن الدفع» line. */
+    public function installInvoicePrintView(): void
+    {
+        $arch = <<<'XML'
+<data>
+    <xpath expr="//p[@name='payment_communication']/.." position="attributes">
+        <attribute name="t-if">False</attribute>
+    </xpath>
+</data>
+XML;
+        $this->upsertInheritedView('HOC invoice without payment communication', 'account.report_invoice_document', $arch);
+    }
+
+    /**
      * The proforma invoice prints «PF00041» (its order number with PF), and a confirmed order
      * is titled «رقم أمر البيع» instead of the quotation title.
      */
@@ -2045,6 +2144,55 @@ XML;
             Log::warning('Odoo invoice keeps the number Odoo gives it.', ['invoice' => $id, 'error' => $exception->getMessage()]);
         }
         $this->call('account.move', 'action_post', ['ids' => [$id]]);
+        try {
+            $this->issueInvoiceDocument($id);
+        } catch (Throwable $exception) {
+            Log::warning('Odoo invoice document not issued.', ['invoice' => $id, 'error' => $exception->getMessage()]);
+        }
+    }
+
+    /**
+     * Odoo prints a posted invoice that has no issued PDF as «Proforma Invoice». The «Send &
+     * Print» wizard with no sending method only issues that PDF and marks the invoice sent;
+     * the client gets the invoice from us, not from Odoo.
+     */
+    public function issueInvoiceDocument(int $id): void
+    {
+        $context = ['active_model' => 'account.move', 'active_ids' => [$id], 'active_id' => $id];
+        $created = $this->createWithContext('account.move.send.wizard', ['sending_methods' => []], $context);
+        $wizardId = (int) (is_array($created) ? ($created[0] ?? 0) : $created);
+        $this->call('account.move.send.wizard', 'action_send_and_print', ['ids' => [$wizardId], 'context' => $context]);
+    }
+
+    /**
+     * Posted customer invoices and refunds without an issued PDF, which Odoo prints as proforma.
+     *
+     * @return list<string>
+     */
+    public function issueMissingInvoiceDocuments(bool $dryRun = false): array
+    {
+        $rows = $this->searchRead('account.move', [
+            ['move_type', 'in', ['out_invoice', 'out_refund']],
+            ['state', '=', 'posted'],
+        ], ['id', 'name', 'invoice_pdf_report_id'], 1000, 0, 'id asc');
+        $issued = [];
+        foreach ($rows as $row) {
+            if (! empty($row['invoice_pdf_report_id'])) {
+                continue;
+            }
+            if (! $dryRun) {
+                try {
+                    $this->issueInvoiceDocument((int) $row['id']);
+                } catch (Throwable $exception) {
+                    Log::warning('Odoo invoice document not issued.', ['invoice' => $row['id'], 'error' => $exception->getMessage()]);
+
+                    continue;
+                }
+            }
+            $issued[] = (string) ($row['name'] ?? $row['id']);
+        }
+
+        return $issued;
     }
 
     private function numberFirstInvoice(int $id): void
@@ -3415,12 +3563,11 @@ XML;
             ]);
         }
 
-        if ($method === 'message_post') {
-            $ids = $payload['ids'] ?? [];
+        if (array_key_exists('ids', $payload)) {
             $kwargs = $payload;
             unset($kwargs['ids']);
 
-            return $this->executeKw($uid, $model, $method, [$ids], $kwargs);
+            return $this->executeKw($uid, $model, $method, [$payload['ids']], $kwargs);
         }
 
         return $this->execute($uid, $model, $method, [$payload]);

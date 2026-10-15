@@ -1,0 +1,164 @@
+# Testers' copy on the same VPS, fully apart from hoc-prod.
+#   Code:     /var/www/staging/backend (its own .env and storage)
+#   Database: its own MySQL container, database hoc_testing, user hoc_testing
+#   Network:  only "edge" joins hoc-prod_default, so the production Caddy can proxy
+#             staging.hoc.agency and staging-api.hoc.agency to it. The API, scheduler
+#             and bots sit on the staging network only and cannot reach the production MySQL.
+# Run through deploy/staging.sh, never by hand with the production .env.
+name: hoc-staging
+
+x-php: &php
+  build:
+    context: ../php
+  image: hoc-staging-php
+  restart: unless-stopped
+  working_dir: /var/www/hoc
+  volumes:
+    - ../../:/var/www/hoc
+    - hoc_staging_vendor:/var/www/hoc/vendor
+  env_file:
+    - ../../.env
+  environment: &php-env
+    APP_ENV: staging
+    APP_DEBUG: "false"
+    DB_CONNECTION: mysql
+    DB_HOST: mysql
+    DB_PORT: "3306"
+    DB_DATABASE: hoc_testing
+    DB_USERNAME: hoc_testing
+  networks:
+    - staging
+
+x-bot: &bot
+  image: python:3.12-slim
+  restart: unless-stopped
+  working_dir: /var/www/hoc/bot
+  volumes:
+    - ../../:/var/www/hoc
+  env_file:
+    - ../../.env
+  environment:
+    HOC_API_URL: http://edge/api
+    TELEGRAM_WEBHOOK_URL: ""
+  networks:
+    - staging
+  depends_on:
+    edge:
+      condition: service_started
+
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${STAGING_DB_ROOT_PASSWORD:?set by deploy/staging.sh init}
+      MYSQL_DATABASE: hoc_testing
+      MYSQL_USER: hoc_testing
+      MYSQL_PASSWORD: ${DB_PASSWORD:?set by deploy/staging.sh init}
+    volumes:
+      - hoc_staging_mysql:/var/lib/mysql
+    networks:
+      - staging
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$$MYSQL_ROOT_PASSWORD\" mysqladmin ping -h 127.0.0.1 -uroot"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  api:
+    <<: *php
+    command: >
+      sh -c "composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
+      && php artisan migrate --force
+      && if [ ! -e public/storage ]; then php artisan storage:link; fi
+      && php-fpm -F -R"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "php", "-r", "exit(@fsockopen('127.0.0.1', 9000)===false);"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 180s
+
+  scheduler:
+    <<: *php
+    command: php artisan schedule:work
+    depends_on:
+      api:
+        condition: service_healthy
+
+  edge:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../../:/var/www/hoc:ro
+    networks:
+      staging:
+      production-edge:
+        aliases:
+          - hoc-staging-edge
+    depends_on:
+      api:
+        condition: service_started
+
+  whatsapp-web:
+    image: node:22-bookworm
+    restart: unless-stopped
+    working_dir: /var/www/hoc/bot/whatsapp-web
+    volumes:
+      - ../../:/var/www/hoc
+    env_file:
+      - ../../.env
+    environment:
+      HOC_API_URL: http://edge/api
+      WHATSAPP_WEB_PORT: "8090"
+      WHATSAPP_WEB_AUTH_DIR: /var/www/hoc/storage/app/whatsapp-web
+      WHATSAPP_WEB_ADMIN_AUTH_DIR: /var/www/hoc/storage/app/whatsapp-web-admin
+    command: sh -c "npm install --omit=dev && node patch-baileys.js && node index.js"
+    networks:
+      - staging
+    depends_on:
+      edge:
+        condition: service_started
+
+  client-bot:
+    <<: *bot
+    profiles: ["telegram-client"]
+    command: sh -c "pip install --no-cache-dir -r requirements.txt && python main.py"
+
+  staff-bot:
+    <<: *bot
+    profiles: ["telegram-staff"]
+    command: sh -c "pip install --no-cache-dir -r requirements.txt && python staff.py"
+
+  admin-bot:
+    <<: *bot
+    profiles: ["telegram-admin"]
+    command: sh -c "pip install --no-cache-dir -r requirements.txt && python admin.py"
+
+  dashboard:
+    image: node:22-alpine
+    working_dir: /app
+    volumes:
+      - ../../dashboard:/app
+      - hoc_staging_dashboard_node_modules:/app/node_modules
+    environment:
+      VITE_API_URL: https://staging.hoc.agency/api
+      VITE_SENTRY_DSN: ""
+    profiles: ["tools"]
+    command: sh -c "npm install && npm run build"
+
+networks:
+  staging:
+  production-edge:
+    external: true
+    name: hoc-prod_default
+
+volumes:
+  hoc_staging_mysql:
+  hoc_staging_vendor:
+  hoc_staging_dashboard_node_modules:

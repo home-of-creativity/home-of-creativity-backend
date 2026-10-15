@@ -1,0 +1,59 @@
+# Staging edge. TLS ends at the production Caddy, which proxies staging.hoc.agency and
+# staging-api.hoc.agency here over the hoc-prod_default network.
+{
+	auto_https off
+	admin off
+}
+
+:80 {
+	header {
+		X-Robots-Tag "noindex, nofollow"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		X-Frame-Options SAMEORIGIN
+	}
+
+	handle /robots.txt {
+		header Content-Type "text/plain; charset=utf-8"
+		respond "User-agent: *
+Disallow: /
+" 200
+	}
+
+	@laravel path /api* /auth* /up /photography-alarm*
+	handle @laravel {
+		root * /var/www/hoc/public
+		encode zstd gzip
+		request_body {
+			max_size 512MB
+		}
+		php_fastcgi api:9000 {
+			env HTTPS on
+			dial_timeout 10s
+			read_timeout 10m
+			write_timeout 10m
+		}
+		file_server
+	}
+
+	handle /storage* {
+		root * /var/www/hoc/storage/app/public
+		uri strip_prefix /storage
+		encode zstd gzip
+		file_server
+	}
+
+	redir /dashboard /dashboard/ 308
+
+	handle_path /dashboard* {
+		root * /var/www/hoc/dashboard/dist
+		encode zstd gzip
+		header Cache-Control "no-cache"
+		try_files {path} /index.html
+		file_server
+	}
+
+	handle {
+		redir * /dashboard/ 302
+	}
+}

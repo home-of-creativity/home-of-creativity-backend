@@ -95,6 +95,7 @@ class FinanceOdooSyncTest extends TestCase
             ->assertJsonPath('data.sync.error', null);
         $this->assertSame($request->id, OdooInvoice::query()->where('odoo_id', 501)->value('request_id'));
         $this->assertSame($client->id, OdooInvoice::query()->where('odoo_id', 501)->value('client_id'));
+        $this->assertSame('INV/2026/0501', $local->fresh()->invoice_number, 'the payment record shows the number Odoo prints');
 
         // A partial payment registered in Odoo.
         $this->odooRows = [$this->invoice(501, 'Damastech', 1000, 400, 'posted', 'partial', '2026-10-01', '2026-10-20', '2026-10-10 09:01:00')];

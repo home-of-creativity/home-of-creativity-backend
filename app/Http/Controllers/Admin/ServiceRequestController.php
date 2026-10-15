@@ -32,6 +32,7 @@ use App\Models\ServiceRequest;
 use App\Services\ClickUpClient;
 use App\Services\RequestStatusTransitionService;
 use App\Support\ClientChannelGate;
+use App\Support\ClientPhone;
 use App\Support\ShamCashQr;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -67,13 +68,16 @@ class ServiceRequestController extends Controller
         $search = trim((string) $request->query('search', ''));
         if ($search !== '') {
             $like = '%'.addcslashes($search, '%_\\').'%';
-            $query->where(function ($inner) use ($like) {
+            $digits = ClientPhone::searchDigits($search);
+            $query->where(function ($inner) use ($like, $digits) {
                 $inner->where('number', 'like', $like)
                     ->orWhere('title', 'like', $like)
-                    ->orWhereHas('client', function ($client) use ($like) {
-                        $client->where('name', 'like', $like)
-                            ->orWhere('company_name', 'like', $like);
-                    });
+                    ->orWhereHas('client', fn ($client) => $client->where(function ($match) use ($like, $digits) {
+                        $match->where('name', 'like', $like)
+                            ->orWhere('company_name', 'like', $like)
+                            ->orWhere('phone', 'like', $like)
+                            ->when($digits !== null, fn ($phone) => $phone->orWherePhoneDigits($digits));
+                    }));
             });
         }
 

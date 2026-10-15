@@ -313,6 +313,22 @@ class Client extends Model
     }
 
     /**
+     * Or the phone (stored with spaces, dashes or +) or the WhatsApp chat holds these digits.
+     *
+     * @param  Builder<Client>  $query
+     * @return Builder<Client>
+     */
+    public function scopeOrWherePhoneDigits(Builder $query, string $digits): Builder
+    {
+        $like = '%'.$digits.'%';
+
+        return $query->orWhereRaw(
+            "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(phone, ''), ' ', ''), '-', ''), '+', ''), '(', ''), ')', ''), '.', '') LIKE ?",
+            [$like],
+        )->orWhere('telegram_user_id', 'like', self::WHATSAPP_PREFIX.$like);
+    }
+
+    /**
      * @return list<string>
      */
     public function missingProfileFields(): array

@@ -19,12 +19,15 @@ class WhatsAppCloudClient implements WhatsAppMessenger
 
     public function sendText(string $to, string $text): string
     {
-        return $this->postMessage([
+        $id = $this->postMessage([
             'messaging_product' => 'whatsapp',
             'to' => $to,
             'type' => 'text',
             'text' => ['preview_url' => false, 'body' => $text],
         ]);
+        WhatsAppOutbox::record($to, 'text', $text);
+
+        return $id;
     }
 
     /**
@@ -47,7 +50,7 @@ class WhatsAppCloudClient implements WhatsAppMessenger
             return $this->sendText($to, $text);
         }
 
-        return $this->postMessage([
+        $id = $this->postMessage([
             'messaging_product' => 'whatsapp',
             'to' => $to,
             'type' => 'interactive',
@@ -57,6 +60,9 @@ class WhatsAppCloudClient implements WhatsAppMessenger
                 'action' => ['buttons' => $payloadButtons],
             ],
         ]);
+        WhatsAppOutbox::record($to, 'choice', $text, array_slice($buttons, 0, 3));
+
+        return $id;
     }
 
     /**
@@ -76,7 +82,7 @@ class WhatsAppCloudClient implements WhatsAppMessenger
             return $this->sendText($to, $text);
         }
 
-        return $this->postMessage([
+        $id = $this->postMessage([
             'messaging_product' => 'whatsapp',
             'to' => $to,
             'type' => 'interactive',
@@ -92,6 +98,9 @@ class WhatsAppCloudClient implements WhatsAppMessenger
                 ],
             ],
         ]);
+        WhatsAppOutbox::record($to, 'choice', $text, array_slice($buttons, 0, 10));
+
+        return $id;
     }
 
     public function sendDocument(string $to, string $absolutePath, ?string $caption = null, ?string $filename = null): string
@@ -103,12 +112,15 @@ class WhatsAppCloudClient implements WhatsAppMessenger
             'caption' => filled($caption) ? $this->clip((string) $caption, 1024) : null,
         ], fn ($value) => $value !== null && $value !== '');
 
-        return $this->postMessage([
+        $id = $this->postMessage([
             'messaging_product' => 'whatsapp',
             'to' => $to,
             'type' => 'document',
             'document' => $document,
         ]);
+        WhatsAppOutbox::record($to, 'document', $caption, [], $absolutePath, $filename ?: basename($absolutePath));
+
+        return $id;
     }
 
     public function sendImage(string $to, string $absolutePath, ?string $caption = null): string
@@ -119,12 +131,15 @@ class WhatsAppCloudClient implements WhatsAppMessenger
             'caption' => filled($caption) ? $this->clip((string) $caption, 1024) : null,
         ], fn ($value) => $value !== null && $value !== '');
 
-        return $this->postMessage([
+        $id = $this->postMessage([
             'messaging_product' => 'whatsapp',
             'to' => $to,
             'type' => 'image',
             'image' => $image,
         ]);
+        WhatsAppOutbox::record($to, 'image', $caption, [], $absolutePath);
+
+        return $id;
     }
 
     /**

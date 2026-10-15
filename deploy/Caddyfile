@@ -305,3 +305,12 @@ hoc.agency {
 	}
 	import hoc_app
 }
+
+# Testers' copy (deploy/staging). Its own stack and database; 502 while it is stopped.
+staging.hoc.agency, staging-api.hoc.agency {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Robots-Tag "noindex, nofollow"
+	}
+	reverse_proxy hoc-staging-edge:80
+}

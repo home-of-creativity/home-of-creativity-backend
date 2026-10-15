@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Search } from "lucide-react";
 import { toast } from "sonner";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { api, type Client, type OdooInvoice, type OdooPaperKind, type OdooQuotation, type PageMeta, type PaperRequest } from "../api";
+import { api, CLIENT_SEARCH_MIN, type Client, type OdooInvoice, type OdooPaperKind, type OdooQuotation, type PageMeta, type PaperRequest } from "../api";
 import { type PaperEditing } from "../components/OdooPaperForm";
 import { OdooPaperActivity } from "../components/OdooPaperActivity";
 import { OdooPaperPreview } from "../components/OdooPaperPreview";
@@ -214,6 +214,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
     const timer = window.setTimeout(() => setDebouncedQuery(query.trim()), 300);
     return () => window.clearTimeout(timer);
   }, [query]);
+  const clientSearchReady = debouncedQuery.length >= CLIENT_SEARCH_MIN;
 
   useEffect(() => {
     api.odooStatus().then((res) => setOdooReady(res.data.configured)).catch(() => setOdooReady(false));
@@ -250,6 +251,13 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                 setOdooReady(true);
                 setError("");
               })
+            : !clientSearchReady
+              ? Promise.resolve().then(() => {
+                  if (cancelled) return;
+                  setItems([]);
+                  setMeta(null);
+                  setError("");
+                })
             : api.clients(page, {
                 search: debouncedQuery,
                 odoo: odooFilter,
@@ -294,7 +302,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [tab, page, debouncedQuery, odooFilter, companyFilter, phoneFilter, channelFilter, stageFilter, driveFilter, partnerFilter, papersUnlinked, refresh, t]);
+  }, [tab, page, debouncedQuery, clientSearchReady, odooFilter, companyFilter, phoneFilter, channelFilter, stageFilter, driveFilter, partnerFilter, papersUnlinked, refresh, t]);
 
   useEffect(() => {
     setPage(1);
@@ -312,9 +320,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
         .replace("{skipped}", String(res.data.skipped));
       setNotice(message);
       setPage(1);
-      const list = await api.clients(1);
-      setItems(list.data);
-      setMeta(list.meta);
+      setRefresh((value) => value + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : t(copy.saveFailed));
     } finally {
@@ -332,17 +338,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
       await api.deleteClient(id);
       setNotice(t(copy.deleted));
       toast.success(t(copy.deleteSuccess));
-      const list = await api.clients(page, {
-        search: debouncedQuery,
-        odoo: odooFilter,
-        company: companyFilter,
-        phone: phoneFilter,
-        channel: channelFilter,
-        stage: stageFilter,
-        drive: driveFilter,
-      });
-      setItems(list.data);
-      setMeta(list.meta);
+      setRefresh((value) => value + 1);
     } catch (err) {
       const message = err instanceof Error ? err.message : t(copy.saveFailed);
       setError(message);
@@ -551,7 +547,11 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                 </tr>
               </thead>
               <tbody>
-                {loading ? (
+                {!clientSearchReady ? (
+                  <tr>
+                    <td colSpan={9} className="muted">{t(copy.clientsSearchMin)}</td>
+                  </tr>
+                ) : loading ? (
                   <LoadingTableRow colSpan={9} label={t(copy.loading)} />
                 ) : items.length === 0 ? (
                   <tr>

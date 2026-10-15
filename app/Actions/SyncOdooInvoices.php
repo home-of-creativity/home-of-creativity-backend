@@ -177,11 +177,26 @@ class SyncOdooInvoices
             || abs((float) $existing->amount_total - $values['amount_total']) > 0.009;
 
         OdooInvoice::query()->updateOrCreate(['odoo_id' => $odooId], $values);
+        $this->followOdooName($odooId, $values['name']);
         if ($changed) {
             $this->followLocalInvoices($odooId, $values['state'], (string) $values['payment_state']);
         }
 
         return $changed;
+    }
+
+    /** A local payment record keeps the invoice number Odoo prints, also after a rename in Odoo. */
+    private function followOdooName(int $odooId, ?string $name): void
+    {
+        if ($name === null || $name === '' || $name === '/') {
+            return;
+        }
+        $rows = Invoice::query()->where('odoo_invoice_id', (string) $odooId)->get(['id', 'invoice_number']);
+        // invoice_number is unique: an older duplicate row keeps its own number.
+        if ($rows->count() !== 1 || $rows->first()->invoice_number === $name || Invoice::query()->where('invoice_number', $name)->exists()) {
+            return;
+        }
+        Invoice::query()->whereKey($rows->first()->id)->update(['invoice_number' => $name]);
     }
 
     /**

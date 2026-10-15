@@ -1422,6 +1422,9 @@ export type PhotographyAction =
   | "retry_calendar"
   | "retry_clickup";
 
+/** Clients stay hidden until a search has this many characters. */
+export const CLIENT_SEARCH_MIN = 3;
+
 export const api = {
   login(email: string, password: string) {
     return request<Envelope<{ token: string; user: User }>>("/auth/login", {

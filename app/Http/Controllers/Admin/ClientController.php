@@ -16,6 +16,7 @@ use App\Http\Requests\UpdateClientRequest;
 use App\Http\Resources\ClientResource;
 use App\Models\Client;
 use App\Services\OdooClient;
+use App\Support\ClientPhone;
 use Illuminate\Http\JsonResponse;
 
 class ClientController extends Controller
@@ -29,18 +30,20 @@ class ClientController extends Controller
 
         $search = trim((string) $request->query('search', ''));
         $like = $search === '' ? '' : '%'.addcslashes($search, '%_\\').'%';
+        $digits = ClientPhone::searchDigits($search);
 
         $paginator = Client::query()
             ->visibleOnDashboard()
             ->withCount('requests')
             ->when((int) $request->query('id') > 0, fn ($query) => $query->whereKey((int) $request->query('id')))
-            ->when($like !== '', function ($query) use ($like) {
-                $query->where(function ($inner) use ($like) {
+            ->when($like !== '', function ($query) use ($like, $digits) {
+                $query->where(function ($inner) use ($like, $digits) {
                     $inner->where('name', 'like', $like)
                         ->orWhere('email', 'like', $like)
                         ->orWhere('phone', 'like', $like)
                         ->orWhere('company_name', 'like', $like)
-                        ->orWhere('odoo_stage_name', 'like', $like);
+                        ->orWhere('odoo_stage_name', 'like', $like)
+                        ->when($digits !== null, fn ($phone) => $phone->orWherePhoneDigits($digits));
                 });
             })
             ->when($request->query('odoo') === 'linked', function ($query) {

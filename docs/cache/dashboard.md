@@ -1,6 +1,8 @@
 # Staff dashboard (Vite SPA)
 
-Last updated: 14 October 2026 (Pro-forma invoice: «فاتورة شكلية» on quotation rows in `Clients.tsx` and next to the quotation on `RequestDetail` (with `ops.clients.proforma`) opens `components/ProformaDialog.tsx`: Odoo's pro-forma PDF (`OdooPaperPreview` with `proforma`, print and download) and «إرسال للعميل» by email, WhatsApp, or both (`api.sendOdooProforma`). «إنشاء فاتورة» stays for real invoices only.)
+Last updated: 14 October 2026 (Clients hidden until a search: `Clients.tsx` lists no clients and asks for 3 characters (`CLIENT_SEARCH_MIN` in `api.ts`, copy `clientsSearchMin`) before calling `api.clients`; the `OdooPaperForm` client picker waits for the same 3 characters. The API itself is unchanged (pickers by `id` still work). Search placeholders for clients, requests and reports mention the mobile number.)
+
+Previous: 14 October 2026 (Pro-forma invoice: «فاتورة شكلية» on quotation rows in `Clients.tsx` and next to the quotation on `RequestDetail` (with `ops.clients.proforma`) opens `components/ProformaDialog.tsx`: Odoo's pro-forma PDF (`OdooPaperPreview` with `proforma`, print and download) and «إرسال للعميل» by email, WhatsApp, or both (`api.sendOdooProforma`). «إنشاء فاتورة» stays for real invoices only.)
 
 Previous: 14 October 2026 (Preview before and after saving: `OdooPaperForm` has «معاينة قبل الحفظ» on create and edit (`components/PaperDraftPreview.tsx`: the form as an Odoo-like A4 page in a sandboxed `srcDoc` iframe, «مسودة» watermark, «طباعة»). `onCreated` now passes the saved `{id, name}`; `Clients.tsx` shows the toast with «معاينة وطباعة» for 10 seconds, which opens Odoo's PDF in `OdooPaperPreview`.)
 

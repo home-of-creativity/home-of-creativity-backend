@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import * as Popover from "@radix-ui/react-popover";
-import { api, type Client, type OdooPaperLine, type OdooPaymentTerm, type OdooProduct, type OdooQuotation, type OdooTax, type PaperLineInput } from "../api";
+import { api, CLIENT_SEARCH_MIN, type Client, type OdooPaperLine, type OdooPaymentTerm, type OdooProduct, type OdooQuotation, type OdooTax, type PaperLineInput } from "../api";
 import { copy } from "../i18n";
 import { useCan } from "../lib/useCan";
 import { HtmlEditorField } from "./HtmlEditorField";
@@ -232,8 +232,13 @@ export function OdooPaperForm({
 
   useEffect(() => {
     let cancelled = false;
+    const search = clientQuery.trim();
+    if (search.length < CLIENT_SEARCH_MIN) {
+      setClients([]);
+      return;
+    }
     const timer = window.setTimeout(() => {
-      api.clients(1, { search: clientQuery.trim(), odoo: "linked", per_page: 50 })
+      api.clients(1, { search, odoo: "linked", per_page: 50 })
         .then((res) => {
           if (cancelled) return;
           setClients(res.data.filter((item) => item.odoo_partner_id));
@@ -612,7 +617,9 @@ export function OdooPaperForm({
               />
               {clientOpen ? (
                 <ul id={clientListId} className="paper-suggest-list" role="listbox">
-                  {clients.length === 0 ? (
+                  {clientQuery.trim().length < CLIENT_SEARCH_MIN ? (
+                    <li className="paper-suggest-empty">{t(copy.clientsSearchMin)}</li>
+                  ) : clients.length === 0 ? (
                     <li className="paper-suggest-empty">{t(copy.paperNoLinkedClients)}</li>
                   ) : clients.map((item, index) => (
                     <li key={item.id}>

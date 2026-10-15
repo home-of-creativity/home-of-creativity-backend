@@ -212,6 +212,34 @@ class ClientPhone
         return null;
     }
 
+    /**
+     * The digits a dashboard search looks for when it is a phone: without +, 00, the leading
+     * 0 or a full number's country code, so 0944…, +963 944… and ٠٩٤٤… find the same client.
+     * Null when the search has letters or fewer than 3 digits.
+     */
+    public static function searchDigits(?string $search): ?string
+    {
+        $ascii = trim(self::asciiDigits($search));
+        if ($ascii === '' || preg_match('/^[\d\s+\-().]+$/', $ascii) !== 1) {
+            return null;
+        }
+
+        $digits = preg_replace('/\D+/', '', $ascii) ?? '';
+        if (str_starts_with($digits, '00')) {
+            $digits = substr($digits, 2);
+        }
+        foreach (self::countriesByCodeLength() as [$code, $min, $max]) {
+            $national = substr($digits, strlen($code));
+            if (str_starts_with($digits, $code) && strlen($national) >= $min && strlen($national) <= $max) {
+                $digits = $national;
+                break;
+            }
+        }
+        $digits = ltrim($digits, '0');
+
+        return strlen($digits) >= 3 ? $digits : null;
+    }
+
     public static function matchInternational(string $digits): ?string
     {
         foreach (self::countriesByCodeLength() as $row) {

@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\ClientReportResource;
 use App\Http\Resources\ClientReportVersionResource;
 use App\Models\ClientReportVersion;
+use App\Support\ClientPhone;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
@@ -33,16 +34,20 @@ class ReportHistoryController extends Controller
         ]);
         $search = trim((string) ($data['search'] ?? ''));
         $like = '%'.addcslashes($search, '%_\\').'%';
+        $digits = ClientPhone::searchDigits($search);
 
         $versions = ClientReportVersion::query()
             ->with(['user', 'report', 'client'])
             ->when($data['client_id'] ?? null, fn ($query, $id) => $query->where('client_id', $id))
             ->when($data['report_id'] ?? null, fn ($query, $id) => $query->where('client_report_id', $id))
             ->when($data['event'] ?? null, fn ($query, $event) => $query->where('event', $event))
-            ->when($search !== '', fn ($query) => $query->where(function ($inner) use ($like): void {
+            ->when($search !== '', fn ($query) => $query->where(function ($inner) use ($like, $digits): void {
                 $inner->where('title', 'like', $like)
                     ->orWhereHas('user', fn ($user) => $user->where('name', 'like', $like))
-                    ->orWhereHas('client', fn ($client) => $client->where('name', 'like', $like)->orWhere('company_name', 'like', $like));
+                    ->orWhereHas('client', fn ($client) => $client->where(fn ($match) => $match->where('name', 'like', $like)
+                        ->orWhere('company_name', 'like', $like)
+                        ->orWhere('phone', 'like', $like)
+                        ->when($digits !== null, fn ($phone) => $phone->orWherePhoneDigits($digits))));
             }))
             ->orderByDesc('updated_at')
             ->orderByDesc('id')

@@ -14,10 +14,11 @@ use App\Models\Client;
 use App\Models\ClientReport;
 use App\Models\ClientReportAttachment;
 use App\Models\ClientReportVersion;
+use App\Support\ClientPhone;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Symfony\Component\HttpFoundation\Response;
 use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
@@ -35,15 +36,17 @@ class ClientReportController extends Controller
     {
         $search = trim((string) $request->query('search', ''));
         $like = $search === '' ? '' : '%'.addcslashes($search, '%_\\').'%';
+        $digits = ClientPhone::searchDigits($search);
 
         $clients = Client::query()
             ->visibleOnDashboard()
             ->withCount('reports')
-            ->when($like !== '', function ($query) use ($like) {
-                $query->where(function ($inner) use ($like) {
+            ->when($like !== '', function ($query) use ($like, $digits) {
+                $query->where(function ($inner) use ($like, $digits) {
                     $inner->where('name', 'like', $like)
                         ->orWhere('company_name', 'like', $like)
-                        ->orWhere('phone', 'like', $like);
+                        ->orWhere('phone', 'like', $like)
+                        ->when($digits !== null, fn ($phone) => $phone->orWherePhoneDigits($digits));
                 });
             })
             ->when($request->query('reports') === 'yes', fn ($query) => $query->has('reports'))

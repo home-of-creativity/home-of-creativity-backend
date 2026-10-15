@@ -43,11 +43,22 @@ class OdooDocumentNumbersTest extends TestCase
             ],
             'account.journal' => [1 => ['id' => 1, 'code' => 'الفات', 'type' => 'sale']],
             'account.move' => [
-                11 => ['id' => 11, 'name' => 'الفات/2026/00011', 'state' => 'posted', 'move_type' => 'out_invoice', 'journal_id' => [1, 'Sales'], 'invoice_date' => '2026-10-10', 'sequence_number' => 11],
+                11 => [
+                    'id' => 11, 'name' => 'الفات/2026/00011', 'state' => 'posted', 'move_type' => 'out_invoice', 'journal_id' => [1, 'Sales'],
+                    'invoice_date' => '2026-10-10', 'invoice_date_due' => '2026-10-31', 'sequence_number' => 11, 'payment_reference' => 'الفات/2026/00011',
+                    'invoice_payment_term_id' => [3, 'دفع فوري'], 'payment_state' => 'not_paid', 'invoice_pdf_report_id' => false,
+                ],
+                12 => ['id' => 12, 'name' => 'Rالفات/2026/00001', 'state' => 'posted', 'move_type' => 'out_refund', 'journal_id' => [1, 'Sales'], 'invoice_date' => '2026-10-11', 'sequence_number' => 1, 'invoice_pdf_report_id' => [900, 'R.pdf']],
                 20 => ['id' => 20, 'name' => false, 'state' => 'draft', 'move_type' => 'out_invoice', 'journal_id' => [1, 'Sales'], 'invoice_date' => '2026-10-14', 'sequence_number' => 0],
                 21 => ['id' => 21, 'name' => false, 'state' => 'draft', 'move_type' => 'out_invoice', 'journal_id' => [1, 'Sales'], 'invoice_date' => '2026-10-14', 'sequence_number' => 0],
             ],
-            'ir.ui.view' => [500 => ['id' => 500, 'key' => 'sale.report_saleorder_document', 'inherit_id' => false, 'name' => 'report_saleorder_document']],
+            'account.move.line' => [90 => ['id' => 90, 'move_id' => [11, 'الفات/2026/00011'], 'display_type' => 'payment_term', 'date_maturity' => '2026-10-31']],
+            'account.payment.term' => [3 => ['id' => 3, 'name' => 'دفع فوري', 'note' => '<p>Payment terms: 21 Days</p>']],
+            'account.payment.term.line' => [7 => ['id' => 7, 'payment_id' => [3, 'دفع فوري'], 'nb_days' => 21]],
+            'ir.ui.view' => [
+                500 => ['id' => 500, 'key' => 'sale.report_saleorder_document', 'inherit_id' => false, 'name' => 'report_saleorder_document'],
+                501 => ['id' => 501, 'key' => 'account.report_invoice_document', 'inherit_id' => false, 'name' => 'report_invoice_document'],
+            ],
         ];
         Http::preventStrayRequests();
         Http::fake(['https://odoo.test/jsonrpc' => fn (Request $request) => $this->answer($request)]);
@@ -59,6 +70,9 @@ class OdooDocumentNumbersTest extends TestCase
             ->expectsOutputToContain('order QN00041 → S00041 (dry run)')
             ->expectsOutputToContain('order QN00043 → S00043 (dry run)')
             ->expectsOutputToContain('invoices: journal code الفات → INV (dry run)')
+            ->expectsOutputToContain('invoice الفات/2026/00011 → INV/2026/00011 (dry run)')
+            ->expectsOutputToContain('invoice Rالفات/2026/00001 → RINV/2026/00001 (dry run)')
+            ->expectsOutputToContain('invoices issued as invoices, not proforma: 1 (dry run)')
             ->expectsOutputToContain('orders renamed: 2')
             ->assertSuccessful();
 
@@ -86,6 +100,28 @@ class OdooDocumentNumbersTest extends TestCase
         $this->assertSame(41, app(OdooClient::class)->saleOrderIdByName('QN00041'));
     }
 
+    public function test_earlier_invoices_take_inv_print_as_invoices_and_immediate_is_due_at_once(): void
+    {
+        $this->artisan('odoo:document-numbers')->assertSuccessful();
+
+        $invoice = $this->db['account.move'][11];
+        $this->assertSame('INV/2026/00011', $invoice['name']);
+        $this->assertSame('INV/2026/00011', $invoice['payment_reference']);
+        $this->assertSame('RINV/2026/00001', $this->db['account.move'][12]['name']);
+        $this->assertSame([950, 'invoice.pdf'], $invoice['invoice_pdf_report_id'], 'a posted invoice without its PDF prints as proforma');
+        $this->assertSame([900, 'R.pdf'], $this->db['account.move'][12]['invoice_pdf_report_id'], 'an issued PDF is left alone');
+        $wizard = collect($this->db['account.move.send.wizard'] ?? [])->first();
+        $this->assertSame([], $wizard['sending_methods'], 'nothing is emailed from Odoo');
+
+        $this->assertSame(0, $this->db['account.payment.term.line'][7]['nb_days']);
+        $this->assertSame('2026-10-10', $this->db['account.move.line'][90]['date_maturity']);
+        $this->assertSame('2026-10-10', $invoice['invoice_date_due']);
+
+        $view = collect($this->db['ir.ui.view'])->firstWhere('name', 'HOC invoice without payment communication');
+        $this->assertSame(501, $view['inherit_id']);
+        $this->assertStringContainsString("payment_communication']/..", $view['arch']);
+    }
+
     public function test_the_first_invoice_after_the_switch_continues_the_count_as_inv(): void
     {
         $odoo = app(OdooClient::class);
@@ -94,6 +130,7 @@ class OdooDocumentNumbersTest extends TestCase
         $odoo->postInvoice(20);
         $this->assertSame('INV/2026/00012', $this->db['account.move'][20]['name']);
         $this->assertSame('posted', $this->db['account.move'][20]['state']);
+        $this->assertTrue($this->db['account.move'][20]['is_move_sent'], 'a posted invoice is issued, not left as proforma');
 
         // From then on Odoo numbers them itself: no name is written.
         $writesBefore = count(array_filter($this->calls, fn (array $call): bool => $call === ['account.move', 'write', $call[2]]));
@@ -127,6 +164,8 @@ class OdooDocumentNumbersTest extends TestCase
             'create' => $this->create($model, $payload[0][0] ?? $payload[0] ?? []),
             'action_confirm' => $this->write('sale.order', (array) ($payload[0] ?? []), ['state' => 'sale']),
             'action_post' => $this->write('account.move', (array) ($payload[0] ?? []), ['state' => 'posted']),
+            // «Send & Print» with no sending method: the issued PDF only.
+            'action_send_and_print' => $this->write('account.move', (array) ($args[6]['context']['active_ids'] ?? []), ['invoice_pdf_report_id' => [950, 'invoice.pdf'], 'is_move_sent' => true]),
             default => [],
         };
 
@@ -147,7 +186,17 @@ class OdooDocumentNumbersTest extends TestCase
 
     private function rowMatches(array $row, array $domain): bool
     {
-        foreach ($domain as $term) {
+        $domain = array_values($domain);
+        for ($index = 0; $index < count($domain); $index++) {
+            if ($domain[$index] === '|') {
+                if (! $this->rowMatches($row, [$domain[$index + 1]]) && ! $this->rowMatches($row, [$domain[$index + 2]])) {
+                    return false;
+                }
+                $index += 2;
+
+                continue;
+            }
+            $term = $domain[$index];
             if (! is_array($term)) {
                 continue;
             }
