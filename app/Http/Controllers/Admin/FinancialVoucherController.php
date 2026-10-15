@@ -41,17 +41,33 @@ class FinancialVoucherController extends Controller
         return response()->json(['data' => $this->payload($voucher)]);
     }
 
+    public function nextSerial(): JsonResponse
+    {
+        return response()->json([
+            'data' => ['serial' => FinancialVoucher::nextSerial()],
+        ]);
+    }
+
     public function store(Request $request): JsonResponse
     {
         $validated = $this->validated($request);
 
         $voucher = DB::transaction(function () use ($request, $validated): FinancialVoucher {
-            $year = (int) now()->format('Y');
-            $count = FinancialVoucher::query()->whereYear('created_at', $year)->lockForUpdate()->count() + 1;
+            $serial = $validated['serial'] ?? null;
+            unset($validated['serial']);
+            if ($serial === null) {
+                // Lock this year's rows so two saves at once do not share one number.
+                FinancialVoucher::query()
+                    ->where('serial', 'like', sprintf('HOC-V-%d-%%', (int) now()->format('Y')))
+                    ->lockForUpdate()
+                    ->orderByDesc('serial')
+                    ->value('serial');
+                $serial = FinancialVoucher::nextSerial();
+            }
 
             return FinancialVoucher::query()->create([
                 ...$validated,
-                'serial' => sprintf('HOC-V-%d-%04d', $year, $count),
+                'serial' => $serial,
                 'user_id' => $request->user()?->id,
             ]);
         });
@@ -64,7 +80,8 @@ class FinancialVoucherController extends Controller
 
     public function update(Request $request, FinancialVoucher $voucher): JsonResponse
     {
-        $voucher->fill($this->validated($request, $voucher));
+        $validated = $this->validated($request, $voucher);
+        $voucher->fill($validated);
         $voucher->save();
 
         return response()->json([
@@ -156,6 +173,7 @@ class FinancialVoucherController extends Controller
             'kind' => ['required', 'string', Rule::in(FinancialVoucher::KINDS)],
             'title' => ['nullable', 'string', 'max:120'],
             'party_name' => ['required', 'string', 'max:160'],
+            'serial' => ['nullable', 'string', 'max:24'],
             'amount' => ['nullable', 'numeric', 'min:-100000000', 'max:100000000'],
             'currency' => ['required', 'string', Rule::in(FinancialVoucher::CURRENCIES)],
             'amount_words' => ['nullable', 'string', 'max:240'],
@@ -230,7 +248,7 @@ class FinancialVoucherController extends Controller
             $signedAt = now();
         }
 
-        return [
+        $data = [
             'kind' => $kind,
             'title' => $this->blank($validated['title'] ?? null),
             'party_name' => trim($validated['party_name']),
@@ -250,6 +268,28 @@ class FinancialVoucherController extends Controller
             'background' => $this->image($validated['background'] ?? null),
             'signed_at' => $signedAt,
         ];
+
+        $rawSerial = trim((string) ($validated['serial'] ?? ''));
+        if ($rawSerial !== '') {
+            $serial = FinancialVoucher::normalizeSerial($rawSerial);
+            if ($serial === '' || preg_match('/^HOC-V-\d{4}-\d{4}$/', $serial) !== 1) {
+                throw ValidationException::withMessages([
+                    'serial' => 'رقم المستند غير صالح. مثال: 7 أو N0007.',
+                ]);
+            }
+            $taken = FinancialVoucher::query()
+                ->where('serial', $serial)
+                ->when($existing !== null, fn ($query) => $query->where('id', '!=', $existing->id))
+                ->exists();
+            if ($taken) {
+                throw ValidationException::withMessages([
+                    'serial' => 'رقم المستند مستخدم مسبقاً.',
+                ]);
+            }
+            $data['serial'] = $serial;
+        }
+
+        return $data;
     }
 
     private function signature(?string $value, string $field): ?string

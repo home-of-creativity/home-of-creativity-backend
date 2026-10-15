@@ -355,6 +355,56 @@ class FinancialVoucherTest extends TestCase
         $this->assertSame(0, FinancialVoucherTemplate::query()->count());
     }
 
+    public function test_document_numbers_increment_and_can_be_edited(): void
+    {
+        Sanctum::actingAs(User::factory()->admin()->create());
+
+        $first = $this->postJson('/api/admin/vouchers', [
+            'kind' => 'receipt',
+            'party_name' => 'أ',
+            'amount' => 10,
+            'currency' => 'USD',
+            'issued_on' => '2026-10-15',
+        ])->assertCreated()->assertJsonPath('data.serial', 'HOC-V-2026-0001')->json('data');
+
+        $this->getJson('/api/admin/vouchers/next-serial')
+            ->assertOk()
+            ->assertJsonPath('data.serial', 'HOC-V-2026-0002');
+
+        $second = $this->postJson('/api/admin/vouchers', [
+            'kind' => 'receipt',
+            'party_name' => 'ب',
+            'amount' => 20,
+            'currency' => 'USD',
+            'issued_on' => '2026-10-15',
+            'serial' => '7',
+        ])->assertCreated()->assertJsonPath('data.serial', 'HOC-V-2026-0007')->json('data');
+
+        $this->putJson('/api/admin/vouchers/'.$second['id'], [
+            'kind' => 'receipt',
+            'party_name' => 'ب',
+            'amount' => 20,
+            'currency' => 'USD',
+            'issued_on' => '2026-10-15',
+            'serial' => 'N0009',
+        ])->assertOk()->assertJsonPath('data.serial', 'HOC-V-2026-0009');
+
+        $this->postJson('/api/admin/vouchers', [
+            'kind' => 'receipt',
+            'party_name' => 'ج',
+            'amount' => 5,
+            'currency' => 'USD',
+            'issued_on' => '2026-10-15',
+            'serial' => '9',
+        ])->assertUnprocessable()->assertJsonValidationErrors('serial');
+
+        $this->deleteJson('/api/admin/vouchers/'.$first['id'])->assertOk();
+        // After a delete, the next number follows the highest remaining serial, not the row count.
+        $this->getJson('/api/admin/vouchers/next-serial')
+            ->assertOk()
+            ->assertJsonPath('data.serial', 'HOC-V-2026-0010');
+    }
+
     public function test_staff_can_save_and_reuse_signature_images(): void
     {
         Sanctum::actingAs(User::factory()->admin()->create());

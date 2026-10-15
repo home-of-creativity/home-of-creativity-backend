@@ -325,6 +325,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::post('voucher-signatures', [AdminFinancialVoucherSignatureController::class, 'store']);
         Route::delete('voucher-signatures/{signature}', [AdminFinancialVoucherSignatureController::class, 'destroy']);
         Route::get('vouchers', [AdminFinancialVoucherController::class, 'index']);
+        Route::get('vouchers/next-serial', [AdminFinancialVoucherController::class, 'nextSerial']);
         Route::post('vouchers', [AdminFinancialVoucherController::class, 'store']);
         Route::get('vouchers/{voucher}', [AdminFinancialVoucherController::class, 'show']);
         Route::put('vouchers/{voucher}', [AdminFinancialVoucherController::class, 'update']);

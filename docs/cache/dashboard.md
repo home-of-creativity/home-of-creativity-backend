@@ -1,6 +1,8 @@
 # Staff dashboard (Vite SPA)
 
-Last updated: 15 October 2026 (Voucher signature library: button «التوقيعات» on the voucher form opens a side panel (`voucher-signs-panel`) with upload + named list. `GET/POST/DELETE /admin/voucher-signatures` (`ops.vouchers` CRUD) stores PNG/JPEG/WebP as data URLs in `financial_voucher_signatures`. Clicking a saved image applies it to the chosen pad (signer or counter).)
+Last updated: 15 October 2026 (Voucher document number is editable: form field «رقم المستند», sent as `serial` on create/update; `GET /admin/vouchers/next-serial` suggests the next number from max suffix + 1, not row count, so deletes no longer reuse a lower number. Sheet shows `N####` from that serial.)
+
+Previous: 15 October 2026 (Voucher signature library: button «التوقيعات» on the voucher form opens a side panel (`voucher-signs-panel`) with upload + named list. `GET/POST/DELETE /admin/voucher-signatures` (`ops.vouchers` CRUD) stores PNG/JPEG/WebP as data URLs in `financial_voucher_signatures`. Clicking a saved image applies it to the chosen pad (signer or counter).)
 
 Previous: 15 October 2026 (Report editor focus writing: the last title-bar button «الكتابة بكامل الشاشة» adds `.report-studio.is-focus`, which closes the side panel (Gemini, attachments, info, comments) and hides the dashboard sidebar and mobile bar via `.app-shell:has(...)`, then asks the browser for full screen. Esc (leaving browser full screen) or the same button restores everything. The panel button still opens the panel inside focus mode.)
 

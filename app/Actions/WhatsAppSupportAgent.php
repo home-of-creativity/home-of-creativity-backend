@@ -2,9 +2,11 @@
 
 namespace App\Actions;
 
+use App\Contracts\WhatsAppMessenger;
 use App\Models\Client;
 use App\Services\TelegramNotifier;
 use App\Support\ClientChannelGate;
+use App\Support\ClientPhone;
 use App\Support\ClientProfileValue;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -13,8 +15,8 @@ use Throwable;
 
 /**
  * When the WhatsApp bot does not understand twice in a row, or the client asks for a
- * person, the chat moves to the n8n support agent. A handoff from the agent, or an
- * agent that does not answer, brings in the support team.
+ * person, the chat moves to the n8n support agent. A handoff alerts staff while the
+ * agent keeps talking until a staff number writes that they are ready.
  */
 class WhatsAppSupportAgent
 {
@@ -25,11 +27,15 @@ class WhatsAppSupportAgent
 
     private const TURNS_KEPT = 8;
 
+    /** How long staff can still claim the chat after the first alert. */
+    private const STAFF_WAIT_HOURS = 2;
+
     public function __construct(
         private ClientAssistant $assistant,
         private NotifyEmployees $notifyEmployees,
         private TelegramNotifier $telegram,
         private SupportAgentActions $actions,
+        private WhatsAppMessenger $whatsApp,
     ) {}
 
     public function configured(): bool
@@ -62,7 +68,51 @@ class WhatsAppSupportAgent
     }
 
     /**
+     * Staff wrote that they are ready to take the client. True when this message was handled.
+     */
+    public function handleStaffReady(string $staffPhone, ?string $text): bool
+    {
+        if (! $this->isStaff($staffPhone)) {
+            return false;
+        }
+        $note = trim((string) $text);
+        if ($note === '' || ! $this->saysReady($note)) {
+            return false;
+        }
+
+        $pending = $this->openHandoffFor($staffPhone);
+        if (! is_array($pending)) {
+            $this->tellStaff($staffPhone, 'ما في محادثة بانتظارك هلق.');
+
+            return true;
+        }
+
+        $clientPhone = Client::normalizeWhatsAppPhone((string) ($pending['phone'] ?? ''));
+        $chatId = (string) ($pending['chat_id'] ?? '');
+        $locale = (string) ($pending['locale'] ?? 'ar');
+        if ($clientPhone === '' || $chatId === '') {
+            $this->forgetOpenHandoff($clientPhone);
+
+            return true;
+        }
+
+        $this->end($clientPhone);
+        $this->forgetOpenHandoff($clientPhone);
+        Cache::put($this->humanKey($clientPhone), 1, now()->addHours(self::STAFF_WAIT_HOURS));
+
+        $this->say($chatId, $this->tx(
+            $locale,
+            'موظف من الفريق جاهز ويكمل معك هون.',
+            'A team member is ready and will continue with you here.',
+        ));
+        $this->tellStaff($staffPhone, 'تمام، البوت وقف على هالمحادثة ساعتين. رد على العميل من رقم الشركة.');
+
+        return true;
+    }
+
+    /**
      * True when the agent handed the client to the team; the caller holds the bot.
+     * Soft handoffs (staff alerted, agent keeps talking) return false.
      *
      * @param  list<array{role: string, text: string}>  $history
      */
@@ -82,7 +132,7 @@ class WhatsAppSupportAgent
     }
 
     /**
-     * True when the agent handed the client to the team; the caller holds the bot.
+     * Soft handoffs keep the agent. Only a hard failure that already held the chat returns true.
      */
     public function relay(Client $client, string $chatId, string $phone, string $locale, string $text): bool
     {
@@ -93,9 +143,19 @@ class WhatsAppSupportAgent
 
         $output = $this->ask($client, $phone, $locale, $text, (string) ($state['reason'] ?? ''));
         if ($output === null) {
-            $this->handoff($client, $chatId, $phone, $locale, 'The support agent did not answer.', $turns, true);
+            $this->alertStaff($client, $chatId, $phone, $locale, 'The support agent did not answer.', $turns);
+            $support = ClientChannelGate::SUPPORT_PHONE;
+            $this->say($chatId, $this->tx(
+                $locale,
+                "خبرت فريق الدعم، ورح كمل معك هون لحد ما يجهز موظف.\nإذا مستعجل احكي معنا على {$support}.",
+                "I told the support team, and I will keep helping here until someone is ready.\nIf it is urgent, call {$support}.",
+            ));
+            Cache::put($this->key($phone), [
+                'reason' => $state['reason'] ?? '',
+                'turns' => array_slice($turns, -self::TURNS_KEPT),
+            ], now()->addMinutes(self::IDLE_MINUTES));
 
-            return true;
+            return false;
         }
 
         $this->say($chatId, $output['reply']);
@@ -106,9 +166,14 @@ class WhatsAppSupportAgent
             $turns[] = ['role' => 'assistant', 'text' => mb_substr($done, 0, 1000)];
         }
         if ($output['handoff']) {
-            $this->handoff($client, $chatId, $phone, $locale, $output['reason'] !== '' ? $output['reason'] : 'The support agent asked for the team.', $turns, false);
-
-            return true;
+            $this->alertStaff(
+                $client,
+                $chatId,
+                $phone,
+                $locale,
+                $output['reason'] !== '' ? $output['reason'] : 'The support agent asked for the team.',
+                $turns,
+            );
         }
         Cache::put($this->key($phone), [
             'reason' => $state['reason'] ?? '',
@@ -174,22 +239,31 @@ class WhatsAppSupportAgent
     }
 
     /**
+     * Alerts staff once per open handoff. The agent keeps talking until someone writes جاهز.
+     *
      * @param  list<array{role: string, text: string}>  $turns
      */
-    private function handoff(Client $client, string $chatId, string $phone, string $locale, string $reason, array $turns, bool $tellClient): void
+    private function alertStaff(Client $client, string $chatId, string $phone, string $locale, string $reason, array $turns): void
     {
-        $this->end($phone);
-        if ($tellClient) {
-            $support = ClientChannelGate::SUPPORT_PHONE;
-            $this->say($chatId, $this->tx(
-                $locale,
-                "حولتك لموظف من فريق الدعم، رح يرد عليك هون بأقرب وقت.\nإذا مستعجل احكي معنا على {$support}.",
-                "A member of our support team will reply to you here shortly.\nIf it is urgent, call {$support}.",
-            ));
+        $phone = Client::normalizeWhatsAppPhone($phone);
+        if ($phone === '') {
+            return;
+        }
+        if (! Cache::add($this->staffAlertKey($phone), 1, now()->addHours(self::STAFF_WAIT_HOURS))) {
+            return;
         }
 
+        $payload = [
+            'phone' => $phone,
+            'chat_id' => $chatId,
+            'locale' => $locale === 'en' ? 'en' : 'ar',
+            'client' => ($client->company_name ?: $client->name).' +'.$phone,
+            'at' => now()->timestamp,
+        ];
+        $this->rememberOpenHandoff($phone, $payload);
+
         $lines = [
-            'عميل بحاجة لموظف دعم على واتساب',
+            'عميل بحاجة لموظف على واتساب',
             'العميل: '.($client->company_name ?: $client->name).' +'.$phone,
             'السبب: '.$reason,
             '',
@@ -199,8 +273,116 @@ class WhatsAppSupportAgent
             $lines[] = (($turn['role'] ?? '') === 'user' ? 'العميل: ' : 'المساعد: ').mb_substr((string) ($turn['text'] ?? ''), 0, 300);
         }
         $lines[] = '';
-        $lines[] = 'رد عليه من رقم الشركة، والبوت متوقف على هالمحادثة ساعتين.';
+        $lines[] = 'المساعد لسا عم يرد على الزبون.';
+        $lines[] = 'لما تكون جاهز ترد عليه، ابعت هون كلمة: جاهز';
         $this->notifyEmployees->support(implode("\n", $lines));
+    }
+
+    public static function saysReady(string $text): bool
+    {
+        $folded = mb_strtolower(trim($text));
+        $folded = preg_replace('/\s+/u', ' ', $folded) ?? $folded;
+
+        return preg_match(
+            '/^(?:جاهز(?:\s+لل(?:رد|رد\s*عليه|محادثة|الزبون))?|انا\s+جاهز|أنا\s+جاهز|تسلمت|استلمت|بكمل\s+انا|بكمل\s+أنا|رح\s+اكمل|رح\s+أكمل|i\s*(?:am\s+)?ready|ready(?:\s+to\s+(?:reply|take\s+over))?|taking\s+over)\.?$/ui',
+            $folded,
+        ) === 1;
+    }
+
+    private function isStaff(string $phone): bool
+    {
+        $digits = preg_replace('/\D+/', '', $phone) ?? '';
+
+        return $digits !== '' && in_array($digits, $this->staffNumbers(), true);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function staffNumbers(): array
+    {
+        $support = (array) config('services.whatsapp.support_numbers', []);
+        $numbers = $support !== [] ? $support : (array) config('services.whatsapp.management_numbers', []);
+
+        return array_values(array_unique(array_filter(array_map(
+            function ($number): string {
+                $digits = ClientPhone::whatsappDigits((string) $number);
+                if ($digits !== '') {
+                    return $digits;
+                }
+
+                return preg_replace('/\D+/', '', (string) $number) ?? '';
+            },
+            $numbers,
+        ))));
+    }
+
+    /**
+     * @param  array{phone: string, chat_id: string, locale: string, client: string, at: int}  $payload
+     */
+    private function rememberOpenHandoff(string $clientPhone, array $payload): void
+    {
+        Cache::put($this->staffOpenKey($clientPhone), $payload, now()->addHours(self::STAFF_WAIT_HOURS));
+        $opens = Cache::get($this->staffOpensKey());
+        $opens = is_array($opens) ? $opens : [];
+        $opens[$clientPhone] = $payload;
+        Cache::put($this->staffOpensKey(), $opens, now()->addHours(self::STAFF_WAIT_HOURS));
+        foreach ($this->staffNumbers() as $number) {
+            Cache::put($this->staffPendingKey($number), $payload, now()->addHours(self::STAFF_WAIT_HOURS));
+        }
+    }
+
+    /**
+     * @return array{phone?: string, chat_id?: string, locale?: string, client?: string, at?: int}|null
+     */
+    private function openHandoffFor(string $staffPhone): ?array
+    {
+        $pending = Cache::get($this->staffPendingKey($staffPhone));
+        if (is_array($pending)) {
+            return $pending;
+        }
+        $opens = Cache::get($this->staffOpensKey());
+        if (! is_array($opens) || $opens === []) {
+            return null;
+        }
+        uasort($opens, fn (array $a, array $b): int => (int) ($b['at'] ?? 0) <=> (int) ($a['at'] ?? 0));
+
+        return array_values($opens)[0] ?? null;
+    }
+
+    private function forgetOpenHandoff(string $clientPhone): void
+    {
+        if ($clientPhone !== '') {
+            Cache::forget($this->staffAlertKey($clientPhone));
+            Cache::forget($this->staffOpenKey($clientPhone));
+        }
+        $opens = Cache::get($this->staffOpensKey());
+        if (is_array($opens)) {
+            unset($opens[$clientPhone]);
+            Cache::put($this->staffOpensKey(), $opens, now()->addHours(self::STAFF_WAIT_HOURS));
+        }
+        foreach ($this->staffNumbers() as $number) {
+            $pending = Cache::get($this->staffPendingKey($number));
+            if (is_array($pending) && (string) ($pending['phone'] ?? '') === $clientPhone) {
+                Cache::forget($this->staffPendingKey($number));
+            }
+        }
+    }
+
+    private function tellStaff(string $phone, string $text): void
+    {
+        try {
+            $digits = ClientPhone::whatsappDigits($phone);
+            if ($digits === '') {
+                $digits = preg_replace('/\D+/', '', $phone) ?? '';
+            }
+            if ($digits === '') {
+                return;
+            }
+            $this->whatsApp->sendText($digits, $text);
+        } catch (Throwable $exception) {
+            Log::warning('Staff ready reply failed.', ['error' => $exception->getMessage()]);
+        }
     }
 
     private function say(string $chatId, string $text): void
@@ -220,5 +402,35 @@ class WhatsAppSupportAgent
     private function key(string $phone): string
     {
         return 'hoc:wa-agent:'.$phone;
+    }
+
+    private function humanKey(string $phone): string
+    {
+        return 'hoc:wa-human:'.$phone;
+    }
+
+    private function staffAlertKey(string $phone): string
+    {
+        return 'hoc:wa-staff-alert:'.$phone;
+    }
+
+    private function staffOpenKey(string $phone): string
+    {
+        return 'hoc:wa-staff-open:'.$phone;
+    }
+
+    private function staffPendingKey(string $staffPhone): string
+    {
+        $digits = ClientPhone::whatsappDigits($staffPhone);
+        if ($digits === '') {
+            $digits = preg_replace('/\D+/', '', $staffPhone) ?? '';
+        }
+
+        return 'hoc:wa-staff-pending:'.$digits;
+    }
+
+    private function staffOpensKey(): string
+    {
+        return 'hoc:wa-staff-opens';
     }
 }

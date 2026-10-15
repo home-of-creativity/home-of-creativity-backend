@@ -222,6 +222,12 @@ class HandleWhatsAppInbound
         }
         RateLimiter::hit('hoc:wa-flood:'.$phone, 60);
 
+        if ($this->supportAgent()->handleStaffReady($phone, $this->messageText($message))) {
+            $this->whatsApp->markRead($wamid);
+
+            return;
+        }
+
         if (app(ManagementCancelApproval::class)->handleManagement($phone, $this->callbackId($message), $this->messageText($message))) {
             $this->whatsApp->markRead($wamid);
 

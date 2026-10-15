@@ -213,6 +213,7 @@ export type VoucherDraft = {
   kind: VoucherKind;
   title?: string;
   party_name: string;
+  serial?: string;
   amount: number;
   currency: "USD" | "SYP";
   amount_words?: string;
@@ -1541,6 +1542,9 @@ export const api = {
   },
   voucher(id: number) {
     return request<Envelope<FinancialVoucher>>(`/admin/vouchers/${id}`);
+  },
+  voucherNextSerial() {
+    return request<Envelope<{ serial: string }>>("/admin/vouchers/next-serial");
   },
   saveVoucher(payload: VoucherDraft, id?: number) {
     return request<Envelope<FinancialVoucher>>(id ? `/admin/vouchers/${id}` : "/admin/vouchers", {

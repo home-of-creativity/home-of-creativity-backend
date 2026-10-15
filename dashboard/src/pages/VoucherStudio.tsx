@@ -217,9 +217,16 @@ function figures(amount: number, currency: string) {
   return currency === "USD" ? `${value}$` : `${value} ${currency}`;
 }
 
+/** Sheet label from a stored serial (HOC-V-2026-0007 → N0007). */
 function shortSerial(serial: string) {
   const digits = serial.match(/(\d+)$/)?.[1] ?? "";
-  return digits ? `N${digits.slice(-4).padStart(4, "0")}` : "N0001";
+  return digits ? `N${digits.slice(-4).padStart(4, "0")}` : "—";
+}
+
+/** Digits shown in the edit field (HOC-V-2026-0007 → 7). */
+function serialInputValue(serial: string) {
+  const digits = serial.match(/(\d+)$/)?.[1] ?? "";
+  return digits ? String(Number(digits)) : "";
 }
 
 function showDate(value: string) {
@@ -383,10 +390,10 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
       if (templateId > 0) {
         let cancelled = false;
         setPhase("loading");
-        api.voucherTemplate(templateId)
-          .then((res) => {
+        Promise.all([api.voucherTemplate(templateId), api.voucherNextSerial()])
+          .then(([res, next]) => {
             if (cancelled) return;
-            setSerial("");
+            setSerial(next.data.serial);
             setDraft(fromTemplate(res.data));
             setTemplateName(res.data.name);
             setPhase("edit");
@@ -401,12 +408,22 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
         };
       }
       if (KINDS.includes(requestedKind as VoucherKind)) {
+        let cancelled = false;
         setDraft((current) => (current?.kind === requestedKind ? current : emptyDraft(requestedKind as VoucherKind)));
         setPhase("edit");
-      } else {
-        setDraft(null);
-        setPhase("template");
+        api.voucherNextSerial()
+          .then((next) => {
+            if (!cancelled) setSerial(next.data.serial);
+          })
+          .catch(() => {
+            if (!cancelled) setSerial("");
+          });
+        return () => {
+          cancelled = true;
+        };
       }
+      setDraft(null);
+      setPhase("template");
       return;
     }
     let cancelled = false;
@@ -527,6 +544,10 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
       setError(t(copy.voucherLineBalance));
       return;
     }
+    if (!serial.trim()) {
+      setError(t(copy.voucherSerialRequired));
+      return;
+    }
     setError("");
     setBusy(true);
     try {
@@ -534,6 +555,7 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
         kind: draft.kind,
         title: draft.title.trim() || undefined,
         party_name: draft.party_name.trim(),
+        serial: serial.trim(),
         amount: draft.kind === "journal" ? totals.debit : draft.kind === "delivery" ? deliveryAmount : amount,
         currency: draft.currency,
         amount_words: draft.amount_words.trim() || undefined,
@@ -733,6 +755,24 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
       <div className={`voucher-studio${signsOpen ? " has-signs-panel" : ""}`}>
         <form className="card voucher-editor" onSubmit={(event) => void save(event)}>
           <h2 className="form-title">{t(voucherKindCopy[draft.kind].name)}</h2>
+          <label className="field-label">
+            {t(copy.voucherSerialEdit)}
+            <input
+              className="field"
+              value={serialInputValue(serial)}
+              disabled={!canWrite}
+              inputMode="numeric"
+              maxLength={6}
+              placeholder="1"
+              dir="ltr"
+              onChange={(event) => {
+                const digits = event.target.value.replace(/\D/g, "").slice(0, 6);
+                const year = Number(serial.match(/HOC-V-(\d{4})-/)?.[1]) || new Date().getFullYear();
+                setSerial(digits ? `HOC-V-${year}-${digits.padStart(4, "0")}` : "");
+              }}
+            />
+          </label>
+          <p className="muted">{t(copy.voucherSerialHint)}</p>
           <label className="field-label">
             {t(copy.voucherTitle)}
             <input className="field" value={draft.title} disabled={!canWrite} maxLength={120} placeholder={t(voucherKindCopy[draft.kind].name)} onChange={(event) => patch({ title: event.target.value })} />

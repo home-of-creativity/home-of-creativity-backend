@@ -95,23 +95,47 @@ class WhatsAppSupportAgentTest extends TestCase
         $this->assertSentToClient('خليني فهم عليك أكتر.');
     }
 
-    public function test_a_handoff_alerts_support_with_the_conversation_and_holds_the_bot(): void
+    public function test_a_handoff_alerts_support_and_keeps_the_agent_until_staff_writes_ready(): void
     {
-        $this->fakeAgent(['reply' => 'رح يتواصل معك موظف من الفريق بخصوص السعر.', 'handoff' => true, 'handoff_reason' => 'Asks for a discount.']);
+        Http::fake([
+            self::AGENT => Http::sequence()
+                ->push(['output' => [
+                    'reply' => 'خبرت الفريق ورح كمل معك بخصوص السعر.',
+                    'handoff' => true,
+                    'handoff_reason' => 'Asks for a discount.',
+                ]])
+                ->push(['output' => [
+                    'reply' => 'لسا معك، خبرني شو بدك بالتفصيل.',
+                    'handoff' => false,
+                    'handoff_reason' => '',
+                ]]),
+            'http://wa-web.test/*' => Http::response(['id' => 'wa-1'], 200),
+        ]);
 
         $this->send('بدي موظف، بدي خصم على الباقة', 'm1');
 
-        $this->assertSentToClient('رح يتواصل معك موظف من الفريق بخصوص السعر.');
+        $this->assertSentToClient('خبرت الفريق ورح كمل معك بخصوص السعر.');
         Http::assertSent(fn (Request $sent): bool => $sent->url() === 'http://wa-web.test/send'
             && $sent['to'] === '963944000999'
             && str_contains((string) $sent['text'], 'Nour Co +963922222222')
             && str_contains((string) $sent['text'], 'Asks for a discount.')
-            && str_contains((string) $sent['text'], 'العميل: بدي موظف، بدي خصم على الباقة'));
+            && str_contains((string) $sent['text'], 'ابعت هون كلمة: جاهز'));
+        $this->assertTrue(app(WhatsAppSupportAgent::class)->active('963922222222'));
+        $this->assertFalse(Cache::has('hoc:wa-human:963922222222'));
+
+        $this->send('طيب شو في باقات؟', 'm2');
+        $this->assertSentToClient('لسا معك');
+        $this->assertTrue(app(WhatsAppSupportAgent::class)->active('963922222222'));
+
+        $this->sendFrom('963944000999', 'جاهز', 'm3');
+
+        $this->assertSentToClient('موظف من الفريق جاهز ويكمل معك هون.');
+        $this->assertSentTo('963944000999', 'البوت وقف على هالمحادثة');
         $this->assertFalse(app(WhatsAppSupportAgent::class)->active('963922222222'));
         $this->assertTrue(Cache::has('hoc:wa-human:963922222222'));
     }
 
-    public function test_an_agent_that_does_not_answer_hands_the_client_to_the_team(): void
+    public function test_an_agent_that_does_not_answer_alerts_staff_and_keeps_talking(): void
     {
         Http::fake([
             self::AGENT => Http::response(['message' => 'Workflow failed'], 500),
@@ -120,11 +144,24 @@ class WhatsAppSupportAgentTest extends TestCase
 
         $this->send('بدي احكي مع موظف', 'm1');
 
-        $this->assertSentToClient('حولتك لموظف من فريق الدعم');
+        $this->assertSentToClient('خبرت فريق الدعم، ورح كمل معك هون');
         Http::assertSent(fn (Request $sent): bool => $sent->url() === 'http://wa-web.test/send'
             && $sent['to'] === '963944000999'
-            && str_contains((string) $sent['text'], 'The support agent did not answer.'));
-        $this->assertTrue(Cache::has('hoc:wa-human:963922222222'));
+            && str_contains((string) $sent['text'], 'The support agent did not answer.')
+            && str_contains((string) $sent['text'], 'جاهز'));
+        $this->assertTrue(app(WhatsAppSupportAgent::class)->active('963922222222'));
+        $this->assertFalse(Cache::has('hoc:wa-human:963922222222'));
+    }
+
+    public function test_staff_ready_phrases(): void
+    {
+        $this->assertTrue(WhatsAppSupportAgent::saysReady('جاهز'));
+        $this->assertTrue(WhatsAppSupportAgent::saysReady('جاهز للرد'));
+        $this->assertTrue(WhatsAppSupportAgent::saysReady('أنا جاهز'));
+        $this->assertTrue(WhatsAppSupportAgent::saysReady('ready'));
+        $this->assertTrue(WhatsAppSupportAgent::saysReady('I am ready'));
+        $this->assertFalse(WhatsAppSupportAgent::saysReady('الزبون جاهز للدفع'));
+        $this->assertFalse(WhatsAppSupportAgent::saysReady('موافق على الإلغاء'));
     }
 
     public function test_back_to_bot_leaves_the_agent(): void

@@ -24,6 +24,42 @@ class FinancialVoucher extends Model
     /** @var list<string> */
     public const CURRENCIES = ['USD', 'SYP'];
 
+    /** Next unused HOC-V-{year}-{####} for this calendar year (max suffix + 1, not a row count). */
+    public static function nextSerial(?int $year = null): string
+    {
+        $year ??= (int) now()->format('Y');
+        $prefix = sprintf('HOC-V-%d-', $year);
+        $last = static::query()
+            ->where('serial', 'like', $prefix.'%')
+            ->orderByDesc('serial')
+            ->value('serial');
+        $n = 1;
+        if (is_string($last) && preg_match('/(\d+)$/', $last, $match) === 1) {
+            $n = ((int) $match[1]) + 1;
+        }
+
+        return sprintf('HOC-V-%d-%04d', $year, $n);
+    }
+
+    /**
+     * Turns "7", "N0007", or "HOC-V-2026-0007" into a stored serial for $year.
+     */
+    public static function normalizeSerial(string $value, ?int $year = null): string
+    {
+        $value = trim($value);
+        $year ??= (int) now()->format('Y');
+        if (preg_match('/^HOC-V-\d{4}-\d{1,6}$/i', $value) === 1) {
+            if (preg_match('/^HOC-V-(\d{4})-(\d+)$/i', $value, $match) === 1) {
+                return sprintf('HOC-V-%d-%04d', (int) $match[1], (int) $match[2]);
+            }
+        }
+        if (preg_match('/^N?0*(\d{1,6})$/i', $value, $match) === 1) {
+            return sprintf('HOC-V-%d-%04d', $year, (int) $match[1]);
+        }
+
+        return mb_substr($value, 0, 24);
+    }
+
     protected $fillable = [
         'serial',
         'kind',
