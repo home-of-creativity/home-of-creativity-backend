@@ -247,6 +247,13 @@ export type VoucherTemplateDraft = {
   background?: string;
 };
 
+export type VoucherSignature = {
+  id: number;
+  name: string;
+  image: string;
+  created_at?: string | null;
+};
+
 export type ClientChannels = {
   telegram_enabled: boolean;
   whatsapp_enabled: boolean;
@@ -1562,6 +1569,18 @@ export const api = {
   },
   deleteVoucherTemplate(id: number) {
     return request<Envelope<null>>(`/admin/voucher-templates/${id}`, { method: "DELETE" });
+  },
+  voucherSignatures() {
+    return request<Envelope<VoucherSignature[]>>("/admin/voucher-signatures");
+  },
+  saveVoucherSignature(payload: { name: string; image: string }) {
+    return request<Envelope<VoucherSignature>>("/admin/voucher-signatures", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  deleteVoucherSignature(id: number) {
+    return request<Envelope<null>>(`/admin/voucher-signatures/${id}`, { method: "DELETE" });
   },
   comments(subject: CommentSubject) {
     return request<Envelope<TeamComment[]>>(`/admin/comments?${commentQuery(subject).toString()}`);

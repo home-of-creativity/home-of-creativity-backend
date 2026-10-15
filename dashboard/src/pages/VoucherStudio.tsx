@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ArrowLeft, ArrowRight, Globe, Mail, MapPin, Phone, Printer } from "lucide-react";
+import { ArrowLeft, ArrowRight, Globe, Mail, MapPin, Phone, Printer, Upload, X } from "lucide-react";
 import { toast } from "sonner";
-import { api, canAbility, type FinancialVoucher, type VoucherKind, type VoucherLine, type VoucherTemplate, type VoucherTemplateSummary } from "../api";
+import { api, canAbility, type FinancialVoucher, type VoucherKind, type VoucherLine, type VoucherSignature, type VoucherTemplate, type VoucherTemplateSummary } from "../api";
 import { useAuth } from "../auth";
 import { ConfirmAction } from "../components/ConfirmAction";
 import { sheetToPdf } from "../components/voucherPdf";
@@ -148,6 +148,36 @@ function readBackground(file: File): Promise<string> {
     img.src = url;
   });
 }
+
+/** Keeps transparency so a scanned signature sits cleanly on the sheet. */
+function readSignatureImage(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const max = 900;
+      const scale = Math.min(1, max / Math.max(img.width, img.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(img.width * scale));
+      canvas.height = Math.max(1, Math.round(img.height * scale));
+      const ctx = canvas.getContext("2d");
+      URL.revokeObjectURL(url);
+      if (!ctx) {
+        reject(new Error("canvas"));
+        return;
+      }
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL("image/png"));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("image"));
+    };
+    img.src = url;
+  });
+}
+
+type SignTarget = "signature" | "counter_signature";
 
 function fromVoucher(voucher: FinancialVoucher): Draft {
   const lines = voucher.lines.length > 0
@@ -311,8 +341,33 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
   const [templateName, setTemplateName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [signsOpen, setSignsOpen] = useState(false);
+  const [signatures, setSignatures] = useState<VoucherSignature[]>([]);
+  const [signsLoading, setSignsLoading] = useState(false);
+  const [signName, setSignName] = useState("");
+  const [signTarget, setSignTarget] = useState<SignTarget>("signature");
+  const [signBusy, setSignBusy] = useState(false);
   const tRef = useRef(t);
   tRef.current = t;
+
+  useEffect(() => {
+    if (!signsOpen) return;
+    let cancelled = false;
+    setSignsLoading(true);
+    api.voucherSignatures()
+      .then((res) => {
+        if (!cancelled) setSignatures(res.data);
+      })
+      .catch(() => {
+        if (!cancelled) toast.error(tRef.current(copy.saveFailed));
+      })
+      .finally(() => {
+        if (!cancelled) setSignsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [signsOpen]);
 
   useEffect(() => {
     if (!voucherId && !templateQuery && !KINDS.includes(requestedKind as VoucherKind)) {
@@ -549,6 +604,42 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
     }
   }
 
+  async function uploadSignature(file: File | undefined) {
+    if (!file || !canWrite) return;
+    const name = signName.trim() || file.name.replace(/\.[^.]+$/, "").slice(0, 120);
+    if (name === "") {
+      toast.error(t(copy.voucherSignatureNameRequired));
+      return;
+    }
+    setSignBusy(true);
+    try {
+      const image = await readSignatureImage(file);
+      const res = await api.saveVoucherSignature({ name, image });
+      setSignatures((current) => [res.data, ...current]);
+      setSignName("");
+      toast.success(t(copy.voucherSignatureSaved));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t(copy.voucherSignatureInvalid));
+    } finally {
+      setSignBusy(false);
+    }
+  }
+
+  function applySignature(image: string) {
+    if (!canWrite) return;
+    patch({ [signTarget]: image });
+    toast.success(t(copy.voucherSignatureApplied));
+  }
+
+  function removeSignature(id: number) {
+    api.deleteVoucherSignature(id)
+      .then(() => {
+        setSignatures((current) => current.filter((row) => row.id !== id));
+        toast.success(t(copy.voucherSignatureDeleted));
+      })
+      .catch((err) => toast.error(err instanceof Error ? err.message : t(copy.saveFailed)));
+  }
+
   function removeTemplate(id: number) {
     api.deleteVoucherTemplate(id)
       .then(() => {
@@ -639,7 +730,7 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
         </button>
       </div>
       {error ? <p className="error">{error}</p> : null}
-      <div className="voucher-studio">
+      <div className={`voucher-studio${signsOpen ? " has-signs-panel" : ""}`}>
         <form className="card voucher-editor" onSubmit={(event) => void save(event)}>
           <h2 className="form-title">{t(voucherKindCopy[draft.kind].name)}</h2>
           <label className="field-label">
@@ -819,29 +910,40 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
           {draft.background ? (
             <button type="button" className="btn btn-ghost btn-sm" disabled={!canWrite} onClick={() => patch({ background: "" })}>{t(copy.voucherBackgroundClear)}</button>
           ) : null}
-          <p className="muted">{t(copy.voucherSignHint)}</p>
+          <div className="voucher-sign-tools">
+            <p className="muted">{t(copy.voucherSignHint)}</p>
+            <button
+              type="button"
+              className={`btn btn-sm${signsOpen ? " is-active" : ""}`}
+              aria-expanded={signsOpen}
+              aria-controls="voucher-signs-panel"
+              onClick={() => setSignsOpen((open) => !open)}
+            >
+              {t(copy.voucherSignatures)}
+            </button>
+          </div>
           {draft.kind === "delivery" || draft.kind === "notes" ? null : (
             <label className="field-label">
               {t(copy.voucherSignerName)}
-              <input className="field" value={draft.signer_name} disabled={!canWrite} maxLength={120} onChange={(event) => patch({ signer_name: event.target.value })} />
+              <input className="field" value={draft.signer_name} disabled={!canWrite} maxLength={120} onChange={(event) => patch({ signer_name: event.target.value })} onFocus={() => setSignTarget("signature")} />
             </label>
           )}
           <label className="field-label">
             {t(copy.voucherSignWord)}
-            <input className="field" value={draft.signer_title} disabled={!canWrite} maxLength={60} placeholder={t(signWord(draft.kind, "signer"))} onChange={(event) => patch({ signer_title: event.target.value })} />
+            <input className="field" value={draft.signer_title} disabled={!canWrite} maxLength={60} placeholder={t(signWord(draft.kind, "signer"))} onChange={(event) => patch({ signer_title: event.target.value })} onFocus={() => setSignTarget("signature")} />
           </label>
-          <SignaturePad label={signLabel(draft.kind, signerWord, t)} clearLabel={t(copy.voucherClearSign)} value={draft.signature} disabled={!canWrite} onChange={(signature) => patch({ signature })} />
+          <SignaturePad label={signLabel(draft.kind, signerWord, t)} clearLabel={t(copy.voucherClearSign)} value={draft.signature} disabled={!canWrite} onChange={(signature) => { setSignTarget("signature"); patch({ signature }); }} />
           {draft.kind === "delivery" ? null : (
             <label className="field-label">
               {t(copy.voucherSignerName)}
-              <input className="field" value={draft.counter_signer_name} disabled={!canWrite} maxLength={120} onChange={(event) => patch({ counter_signer_name: event.target.value })} />
+              <input className="field" value={draft.counter_signer_name} disabled={!canWrite} maxLength={120} onChange={(event) => patch({ counter_signer_name: event.target.value })} onFocus={() => setSignTarget("counter_signature")} />
             </label>
           )}
           <label className="field-label">
             {t(copy.voucherSignWord)}
-            <input className="field" value={draft.counter_signer_title} disabled={!canWrite} maxLength={60} placeholder={t(signWord(draft.kind, "counter"))} onChange={(event) => patch({ counter_signer_title: event.target.value })} />
+            <input className="field" value={draft.counter_signer_title} disabled={!canWrite} maxLength={60} placeholder={t(signWord(draft.kind, "counter"))} onChange={(event) => patch({ counter_signer_title: event.target.value })} onFocus={() => setSignTarget("counter_signature")} />
           </label>
-          <SignaturePad label={signLabel(draft.kind, counterWord, t)} clearLabel={t(copy.voucherClearSign)} value={draft.counter_signature} disabled={!canWrite} onChange={(counter_signature) => patch({ counter_signature })} />
+          <SignaturePad label={signLabel(draft.kind, counterWord, t)} clearLabel={t(copy.voucherClearSign)} value={draft.counter_signature} disabled={!canWrite} onChange={(counter_signature) => { setSignTarget("counter_signature"); patch({ counter_signature }); }} />
           {canWrite ? (
             <>
               <button className="btn btn-primary" type="submit" disabled={busy} aria-busy={busy}>{voucherId ? t(copy.voucherSaveChanges) : t(copy.voucherSave)}</button>
@@ -996,6 +1098,67 @@ export function VoucherStudio({ locale, t }: { locale: Locale; t: (c: { ar: stri
             <img src={`${import.meta.env.BASE_URL}hoc-site-qr.svg`} alt="hoc.agency" />
           </footer>
         </article>
+        {signsOpen ? (
+          <aside id="voucher-signs-panel" className="voucher-signs-panel" aria-label={t(copy.voucherSignaturesPanel)}>
+            <div className="voucher-signs-panel-head">
+              <h2>{t(copy.voucherSignaturesPanel)}</h2>
+              <button type="button" className="btn btn-ghost btn-icon" aria-label={t(copy.voucherSignaturesClose)} onClick={() => setSignsOpen(false)}>
+                <X size={17} aria-hidden="true" />
+              </button>
+            </div>
+            <label className="field-label">
+              {t(copy.voucherSignatureTarget)}
+              <select className="field" value={signTarget} onChange={(event) => setSignTarget(event.target.value as SignTarget)}>
+                <option value="signature">{signLabel(draft.kind, signerWord, t)}</option>
+                <option value="counter_signature">{signLabel(draft.kind, counterWord, t)}</option>
+              </select>
+            </label>
+            {canWrite ? (
+              <>
+                <label className="field-label">
+                  {t(copy.voucherSignatureName)}
+                  <input className="field" value={signName} maxLength={120} disabled={signBusy} placeholder={t(copy.voucherSignatureNamePh)} onChange={(event) => setSignName(event.target.value)} />
+                </label>
+                <label className="btn btn-primary btn-sm voucher-sign-upload">
+                  <Upload size={15} aria-hidden="true" />
+                  {t(copy.voucherSignatureUpload)}
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    hidden
+                    disabled={signBusy}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      event.target.value = "";
+                      void uploadSignature(file);
+                    }}
+                  />
+                </label>
+              </>
+            ) : null}
+            {signsLoading ? <LoadingLottie variant="inline" label={t(copy.loading)} /> : null}
+            {!signsLoading && signatures.length === 0 ? <p className="muted">{t(copy.voucherSignatureEmpty)}</p> : null}
+            <ul className="voucher-sign-list">
+              {signatures.map((row) => (
+                <li key={row.id}>
+                  <button type="button" className="voucher-sign-card" disabled={!canWrite} onClick={() => applySignature(row.image)} title={t(copy.voucherSignatureUse)}>
+                    <img src={row.image} alt="" />
+                    <strong>{row.name}</strong>
+                  </button>
+                  {canAbility(user, "ops.vouchers.delete") ? (
+                    <ConfirmAction
+                      label={t(copy.delete)}
+                      confirmLabel={t(copy.confirmDelete)}
+                      yesLabel={t(copy.delete)}
+                      noLabel={t(copy.cancel)}
+                      onConfirm={() => removeSignature(row.id)}
+                    />
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </aside>
+        ) : null}
       </div>
     </section>
   );

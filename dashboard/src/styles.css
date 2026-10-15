@@ -8541,6 +8541,117 @@ html[dir="rtl"] .placement-tile-toggle[data-state="checked"] .placement-tile-tog
   touch-action: none;
 }
 
+.voucher-sign-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.55rem;
+}
+
+.voucher-sign-tools .btn.is-active {
+  color: var(--brand-orange);
+  border-color: color-mix(in srgb, var(--brand-orange) 50%, var(--brand-line));
+}
+
+.voucher-sign-tools .muted {
+  flex: 1 1 12rem;
+  margin: 0;
+}
+
+.voucher-studio.has-signs-panel {
+  grid-template-columns: minmax(18rem, 22rem) minmax(0, 1fr) minmax(16rem, 20rem);
+}
+
+.voucher-signs-panel {
+  position: sticky;
+  top: 1rem;
+  display: grid;
+  gap: 0.85rem;
+  align-content: start;
+  max-height: calc(100svh - 2rem);
+  overflow: auto;
+  padding: 1rem;
+  border: 1px solid var(--brand-line);
+  border-radius: 1rem;
+  background: var(--tint-base, #fff);
+  box-shadow: var(--shadow);
+}
+
+.voucher-signs-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.voucher-signs-panel-head h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.voucher-sign-upload {
+  display: inline-flex;
+  cursor: pointer;
+}
+
+.voucher-sign-upload:has(input:disabled) {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.voucher-sign-list {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.voucher-sign-list li {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.voucher-sign-card {
+  display: grid;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.55rem;
+  border: 1px solid var(--brand-line);
+  border-radius: 0.85rem;
+  background: #fff;
+  text-align: start;
+  cursor: pointer;
+}
+
+.voucher-sign-card:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--brand-orange) 55%, var(--brand-line));
+}
+
+.voucher-sign-card:disabled {
+  cursor: default;
+}
+
+.voucher-sign-card img {
+  width: 100%;
+  height: 4.5rem;
+  object-fit: contain;
+  background:
+    linear-gradient(45deg, #f0f0f0 25%, transparent 25%),
+    linear-gradient(-45deg, #f0f0f0 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #f0f0f0 75%),
+    linear-gradient(-45deg, transparent 75%, #f0f0f0 75%);
+  background-size: 12px 12px;
+  background-position: 0 0, 0 6px, 6px -6px, -6px 0;
+  border-radius: 0.55rem;
+}
+
+.voucher-sign-card strong {
+  font-size: 0.88rem;
+  font-weight: 650;
+}
+
 .voucher-sheet {
   position: relative;
   isolation: isolate;
@@ -8884,12 +8995,15 @@ html[dir="rtl"] .placement-tile-toggle[data-state="checked"] .placement-tile-tog
 @media (max-width: 1100px) {
   .voucher-filters,
   .voucher-studio,
+  .voucher-studio.has-signs-panel,
   .voucher-split {
     grid-template-columns: 1fr;
   }
 
-  .voucher-editor {
+  .voucher-editor,
+  .voucher-signs-panel {
     position: static;
+    max-height: none;
   }
 }
 
@@ -8898,7 +9012,7 @@ html[dir="rtl"] .placement-tile-toggle[data-state="checked"] .placement-tile-tog
     background: #fff !important;
   }
 
-  body:has(.voucher-sheet) :is(.sidebar, .mobile-bar, .nav-backdrop, .skip-link, .voucher-editor, .voucher-toolbar, .error) {
+  body:has(.voucher-sheet) :is(.sidebar, .mobile-bar, .nav-backdrop, .skip-link, .voucher-editor, .voucher-toolbar, .voucher-signs-panel, .error) {
     display: none !important;
   }
 

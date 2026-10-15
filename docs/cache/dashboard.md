@@ -1,6 +1,8 @@
 # Staff dashboard (Vite SPA)
 
-Last updated: 15 October 2026 (Report editor focus writing: the last title-bar button «الكتابة بكامل الشاشة» adds `.report-studio.is-focus`, which closes the side panel (Gemini, attachments, info, comments) and hides the dashboard sidebar and mobile bar via `.app-shell:has(...)`, then asks the browser for full screen. Esc (leaving browser full screen) or the same button restores everything. The panel button still opens the panel inside focus mode.)
+Last updated: 15 October 2026 (Voucher signature library: button «التوقيعات» on the voucher form opens a side panel (`voucher-signs-panel`) with upload + named list. `GET/POST/DELETE /admin/voucher-signatures` (`ops.vouchers` CRUD) stores PNG/JPEG/WebP as data URLs in `financial_voucher_signatures`. Clicking a saved image applies it to the chosen pad (signer or counter).)
+
+Previous: 15 October 2026 (Report editor focus writing: the last title-bar button «الكتابة بكامل الشاشة» adds `.report-studio.is-focus`, which closes the side panel (Gemini, attachments, info, comments) and hides the dashboard sidebar and mobile bar via `.app-shell:has(...)`, then asks the browser for full screen. Esc (leaving browser full screen) or the same button restores everything. The panel button still opens the panel inside focus mode.)
 
 Previous: 15 October 2026 (Reports hide clients until a search too: `Reports.tsx` (clients tab) and the client picker in `reports/DeadlineDialog.tsx` call `api.reportClients` only after `CLIENT_SEARCH_MIN` (3) characters and show `clientsSearchMin` before that, like `/clients`.)
 

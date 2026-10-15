@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\StaffAbility;
 use App\Mail\ClientDocumentMail;
 use App\Models\FinancialVoucher;
+use App\Models\FinancialVoucherSignature;
 use App\Models\FinancialVoucherTemplate;
 use App\Models\Role;
 use App\Models\User;
@@ -352,5 +353,31 @@ class FinancialVoucherTest extends TestCase
 
         $this->deleteJson('/api/admin/voucher-templates/'.$id)->assertOk();
         $this->assertSame(0, FinancialVoucherTemplate::query()->count());
+    }
+
+    public function test_staff_can_save_and_reuse_signature_images(): void
+    {
+        Sanctum::actingAs(User::factory()->admin()->create());
+
+        $created = $this->postJson('/api/admin/voucher-signatures', [
+            'name' => 'توقيع المدير',
+            'image' => self::SIGNATURE,
+        ])->assertCreated()
+            ->assertJsonPath('data.name', 'توقيع المدير')
+            ->assertJsonPath('data.image', self::SIGNATURE)
+            ->json('data');
+
+        $this->getJson('/api/admin/voucher-signatures')
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $created['id'])
+            ->assertJsonPath('data.0.name', 'توقيع المدير');
+
+        $this->postJson('/api/admin/voucher-signatures', [
+            'name' => 'سيء',
+            'image' => 'not-an-image',
+        ])->assertUnprocessable()->assertJsonValidationErrors('image');
+
+        $this->deleteJson('/api/admin/voucher-signatures/'.$created['id'])->assertOk();
+        $this->assertSame(0, FinancialVoucherSignature::query()->count());
     }
 }
