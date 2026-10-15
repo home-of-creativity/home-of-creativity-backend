@@ -100,7 +100,7 @@ class WhatsAppSupportAgent
 
         $this->say($chatId, $output['reply']);
         $turns[] = ['role' => 'assistant', 'text' => mb_substr($output['reply'], 0, 1000)];
-        $done = $output['action'] !== [] ? $this->actions->run($client, $chatId, $locale, $output['action']) : null;
+        $done = $output['action'] !== [] ? $this->actions->run($client, $chatId, $locale, $output['action'], $phone) : null;
         if ($done !== null) {
             $this->say($chatId, $done);
             $turns[] = ['role' => 'assistant', 'text' => mb_substr($done, 0, 1000)];
@@ -143,6 +143,7 @@ class WhatsAppSupportAgent
                     'locale' => $locale === 'en' ? 'en' : 'ar',
                     'client_name' => (string) $client->name,
                     'records' => $this->assistant->records($client),
+                    'packages' => $this->assistant->packages(),
                     'reason' => $reason,
                     'support_phone' => ClientChannelGate::SUPPORT_PHONE,
                     'message' => mb_substr($text, 0, 2000),

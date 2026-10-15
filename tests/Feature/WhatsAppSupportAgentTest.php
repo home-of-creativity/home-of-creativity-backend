@@ -5,6 +5,9 @@ namespace Tests\Feature;
 use App\Actions\WhatsAppSupportAgent;
 use App\Enums\RequestStatus;
 use App\Models\Client;
+use App\Models\PricingCategory;
+use App\Models\PricingPackage;
+use App\Models\PricingSubcategory;
 use App\Models\ServiceRequest;
 use App\Support\ResolveServiceRequest;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -168,7 +171,8 @@ class WhatsAppSupportAgentTest extends TestCase
 
         $this->send('+963 944 555 666', 'p4');
         Http::assertNotSent(fn (Request $sent): bool => $sent->url() === self::AGENT && $sent['message'] === '+963 944 555 666');
-        $this->assertFalse(app(WhatsAppSupportAgent::class)->active('963922222222'));
+        $this->assertTrue(app(WhatsAppSupportAgent::class)->active('963922222222'));
+        $this->assertSentToClient('سجلت رقمك');
         $this->assertSame('+963944555666', Client::query()->where('telegram_user_id', 'wa:963922222222')->value('phone'));
     }
 
@@ -178,18 +182,85 @@ class WhatsAppSupportAgentTest extends TestCase
             'reply' => 'تمام، لحظة.',
             'handoff' => false,
             'handoff_reason' => '',
-            'action' => ['type' => 'create_request', 'title' => 'باقة سوشيال ميديا كبيرة', 'description' => 'شركة Nour Co بدها باقة كبيرة: 20 بوست بالشهر وإدارة صفحتين.', 'request' => '', 'reason' => ''],
+            'action' => [
+                'type' => 'create_request',
+                'title' => 'باقة سوشيال ميديا كبيرة',
+                'description' => 'شركة Nour Co بدها باقة كبيرة: 20 بوست بالشهر وإدارة صفحتين على فيسبوك وانستغرام، والهدف زيادة الطلبات.',
+                'request' => '',
+                'reason' => '',
+            ],
         ]);
 
         $this->send('بدي احكي مع موظف', 'c1');
 
+        Http::assertSent(fn (Request $sent): bool => $sent->url() === self::AGENT
+            && str_contains((string) $sent['packages'], 'Published packages'));
         $request = $this->client()->requests()->latest('id')->firstOrFail();
         $this->assertSame('باقة سوشيال ميديا كبيرة', $request->title);
         $this->assertSame(RequestStatus::Submitted, $request->status);
+        $this->assertNull($request->pricing_package_id);
         $this->assertSentToClient('فتحتلك الطلب #'.ResolveServiceRequest::displayNumber($request));
 
         $this->send('تمام شكراً', 'c2');
         $this->assertSame(1, $this->client()->requests()->count());
+    }
+
+    public function test_the_agent_opens_a_website_package_and_keeps_asking_for_the_phone(): void
+    {
+        $package = $this->seedPackage();
+        Client::query()->where('telegram_user_id', 'wa:963922222222')->update(['phone' => null]);
+        $this->fakeAgent([
+            'reply' => 'تمام، هلق بفتحلك الباقة.',
+            'handoff' => false,
+            'handoff_reason' => '',
+            'action' => [
+                'type' => 'create_package_request',
+                'package' => (string) $package->id,
+                'period' => 'monthly',
+                'title' => '',
+                'description' => 'بدنا نبلش الشهر الجاي',
+                'request' => '',
+                'reason' => '',
+            ],
+        ]);
+
+        $this->send('بدي احكي مع موظف', 'pkg1');
+
+        Http::assertSent(fn (Request $sent): bool => $sent->url() === self::AGENT
+            && str_contains((string) $sent['packages'], 'id:'.$package->id));
+        $request = $this->client()->requests()->latest('id')->firstOrFail();
+        $this->assertSame($package->id, $request->pricing_package_id);
+        $this->assertSame('monthly', $request->billing_period);
+        $this->assertSentToClient('فتحتلك الطلب #'.ResolveServiceRequest::displayNumber($request));
+        $this->assertSentToClient('خبرني برقم موبايلك');
+        $this->assertTrue(app(WhatsAppSupportAgent::class)->active('963922222222'));
+
+        $this->send('+963944111222', 'pkg2');
+
+        $this->assertSentToClient('سجلت رقمك');
+        $this->assertSame('+963944111222', $this->client()->fresh()->phone);
+        $this->assertTrue(app(WhatsAppSupportAgent::class)->active('963922222222'));
+    }
+
+    public function test_a_short_manual_brief_is_refused_until_the_notes_are_complete(): void
+    {
+        $this->fakeAgent([
+            'reply' => 'تمام.',
+            'handoff' => false,
+            'handoff_reason' => '',
+            'action' => [
+                'type' => 'create_request',
+                'title' => 'تصميم',
+                'description' => 'بدي لوغو',
+                'request' => '',
+                'reason' => '',
+            ],
+        ]);
+
+        $this->send('بدي احكي مع موظف', 'short1');
+
+        $this->assertSame(0, $this->client()->requests()->count());
+        $this->assertSentToClient('الملاحظات لسا ناقصة');
     }
 
     public function test_a_cancel_waits_for_management_then_cancels_and_relays_the_note(): void
@@ -343,5 +414,39 @@ class WhatsAppSupportAgentTest extends TestCase
         $this->withHeaders(['X-Webhook-Secret' => 'web-secret'])
             ->postJson('/api/bot/whatsapp/web', ['phone' => $phone, 'message_id' => $id, 'button_id' => $buttonId])
             ->assertOk();
+    }
+
+    private function seedPackage(): PricingPackage
+    {
+        $category = PricingCategory::query()->create([
+            'slug' => 'retainers-agent',
+            'name_en' => 'Retainers',
+            'name_ar' => 'اشتراكات',
+            'sort_order' => 1,
+            'is_published' => true,
+            'requires_full_payment' => false,
+            'allows_renewal' => true,
+        ]);
+        $sub = PricingSubcategory::query()->create([
+            'category_id' => $category->id,
+            'slug' => 'monthly-agent',
+            'name_en' => 'Monthly',
+            'name_ar' => 'شهري',
+            'sort_order' => 1,
+            'is_published' => true,
+        ]);
+
+        return PricingPackage::query()->create([
+            'subcategory_id' => $sub->id,
+            'slug' => 'startup-agent',
+            'name_en' => 'Startup',
+            'name_ar' => 'Startup',
+            'subtitle_en' => 'Small',
+            'subtitle_ar' => 'صغير',
+            'prices' => ['monthly' => 399],
+            'features' => [['ar' => '12 بوست', 'en' => '12 posts']],
+            'sort_order' => 1,
+            'is_published' => true,
+        ]);
     }
 }

@@ -5,6 +5,8 @@ namespace App\Actions;
 use App\Enums\RequestStatus;
 use App\Models\Client;
 use App\Models\DriveDelivery;
+use App\Models\PhotographyBooking;
+use App\Models\PricingPackage;
 use App\Models\ServiceRequest;
 use App\Services\GeminiService;
 use App\Services\SiteGuide;
@@ -254,6 +256,76 @@ If it is urgent, call {$phone}."
     }
 
     /**
+     * Published website packages the support agent may quote and open.
+     */
+    public function packages(): string
+    {
+        $lines = ['Published packages from the website (quote only these prices; use id when opening one):'];
+        $packages = PricingPackage::query()
+            ->where('is_published', true)
+            ->with('subcategory.category')
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->limit(40)
+            ->get();
+
+        foreach ($packages as $package) {
+            $prices = is_array($package->prices) ? $package->prices : [];
+            $periods = BillingPeriod::availableFromPrices($prices);
+            if ($periods === [] && $package->price_usd) {
+                $periods = ['one_time'];
+                $prices = ['one_time' => (float) $package->price_usd];
+            }
+            if ($periods === []) {
+                continue;
+            }
+            $name = trim(($package->name_ar ?: '').' / '.($package->name_en ?: ''), ' /');
+            $subtitle = trim((string) $package->subtitle_ar.' / '.(string) $package->subtitle_en, ' /');
+            $category = trim((string) ($package->subcategory?->category?->name_ar ?: '').' / '.(string) ($package->subcategory?->category?->name_en ?: ''), ' /');
+            $priceBits = [];
+            foreach ($periods as $period) {
+                $amount = isset($prices[$period]) && is_numeric($prices[$period])
+                    ? (float) $prices[$period]
+                    : (float) $package->price_usd;
+                if ($amount <= 0) {
+                    continue;
+                }
+                $priceBits[] = BillingPeriod::label($period, 'en').' '.$this->usd($amount);
+            }
+            if ($priceBits === []) {
+                continue;
+            }
+            $features = [];
+            foreach (array_slice(is_array($package->features) ? $package->features : [], 0, 8) as $feature) {
+                if (is_array($feature)) {
+                    $features[] = trim((string) ($feature['ar'] ?? $feature['en'] ?? ''));
+                } else {
+                    $features[] = trim((string) $feature);
+                }
+            }
+            $features = array_values(array_filter($features));
+            $line = 'id:'.$package->id.' | '.$name;
+            if ($subtitle !== '') {
+                $line .= ' | '.$subtitle;
+            }
+            if ($category !== '') {
+                $line .= ' | category '.$category;
+            }
+            $line .= ' | '.implode(', ', $priceBits);
+            if ($features !== []) {
+                $line .= ' | includes: '.implode('; ', $features);
+            }
+            $lines[] = $line;
+        }
+
+        if (count($lines) === 1) {
+            $lines[] = 'none published right now.';
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
      * What the bot can do for a client and the rules the team works by.
      */
     public function operations(): string
@@ -287,7 +359,7 @@ TEXT;
     }
 
     /**
-     * @param  iterable<\App\Models\PhotographyBooking>  $bookings
+     * @param  iterable<PhotographyBooking>  $bookings
      * @param  list<string>  $waiting
      * @return list<string>
      */

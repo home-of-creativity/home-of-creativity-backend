@@ -263,12 +263,9 @@ class HandleWhatsAppInbound
                 return;
             }
             if ((! is_string($callback) || $callback === '') && is_string($text) && trim($text) !== '' && $this->supportAgent()->active($phone)) {
-                if (! $this->answersPhoneStep($session, trim($text))) {
-                    $this->continueSupportAgent($client, $chatId, $phone, $session, trim($text));
+                $this->continueSupportAgent($client, $chatId, $phone, $session, trim($text));
 
-                    return;
-                }
-                $this->supportAgent()->end($phone);
+                return;
             }
             $queuedPhoto = is_string($session['photo_queued'] ?? null) ? (string) $session['photo_queued'] : '';
             if ($queuedPhoto !== '') {
@@ -3786,6 +3783,17 @@ class HandleWhatsAppInbound
         if (WhatsAppSupportAgent::leaving($text)) {
             $this->supportAgent()->end($phone);
             $this->sendMenu($chatId, $this->tx('رجعت معك. خبرني.', 'I am back. What do you need?'));
+
+            return;
+        }
+        $phoneReply = app(SupportAgentActions::class)->takeTypedPhone($client, $this->replyLang, $text, $phone);
+        if ($phoneReply !== null) {
+            $this->clearPhoneMisses($phone, $session);
+            if (($session['step'] ?? '') === 'phone' || ($session['step'] ?? '') === 'phone_country') {
+                unset($session['step'], $session['phone_national'], $session['phone_resume']);
+                $this->putSession($phone, $session);
+            }
+            $this->safeSend($chatId, $phoneReply);
 
             return;
         }
