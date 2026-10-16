@@ -93,6 +93,9 @@ class WorkCalendar
     {
         $local = ($moment ?? Carbon::now('Asia/Damascus'))->copy()->timezone('Asia/Damascus');
         [$open, $close] = $this->windowMinutes();
+        if ($open === 0 && $close >= (23 * 60 + 59)) {
+            return true;
+        }
         $minute = ($local->hour * 60) + $local->minute;
 
         if ($close > $open) {
