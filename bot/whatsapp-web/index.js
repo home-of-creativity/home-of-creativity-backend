@@ -24,6 +24,7 @@ let connected = false;
 let qrDataUrl = "";
 let linkedPhone = "";
 let generation = 0;
+let restartTimer = null;
 const jidByDigits = new Map();
 const menuByDigits = new Map();
 
@@ -32,6 +33,43 @@ let adminConnected = false;
 let adminQr = "";
 let adminPhone = "";
 let adminGeneration = 0;
+let adminRestartTimer = null;
+
+function socketOptions(version, state, browserName) {
+  return {
+    version,
+    auth: state,
+    logger,
+    printQRInTerminal: false,
+    browser: Browsers.macOS(browserName),
+    syncFullHistory: false,
+    markOnlineOnConnect: false,
+    defaultQueryTimeoutMs: 120_000,
+  };
+}
+
+function endSocket(current) {
+  try {
+    current?.end(undefined);
+  } catch {
+    // The socket is already closed.
+  }
+}
+
+function scheduleRestart(which, stillCurrent, begin, delay) {
+  const slot = which === "admin" ? adminRestartTimer : restartTimer;
+  clearTimeout(slot);
+  const timer = setTimeout(() => {
+    if (stillCurrent()) {
+      begin();
+    }
+  }, delay);
+  if (which === "admin") {
+    adminRestartTimer = timer;
+  } else {
+    restartTimer = timer;
+  }
+}
 
 fs.mkdirSync(authDir, { recursive: true });
 fs.mkdirSync(adminAuthDir, { recursive: true });
@@ -211,21 +249,18 @@ async function forwardMessage(msg) {
 
 async function start() {
   const mine = ++generation;
+  clearTimeout(restartTimer);
+  const previous = sock;
+  sock = null;
+  connected = false;
+  endSocket(previous);
   try {
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
     const { version } = await fetchLatestBaileysVersion();
     if (mine !== generation) {
       return;
     }
-    sock = makeWASocket({
-      version,
-      auth: state,
-      logger,
-      printQRInTerminal: false,
-      browser: Browsers.macOS("Home of Creativity"),
-      syncFullHistory: false,
-      markOnlineOnConnect: false,
-    });
+    sock = makeWASocket(socketOptions(version, state, "Home of Creativity"));
     sock.ev.on("creds.update", saveCreds);
     sock.ev.on("connection.update", async (update) => {
       if (mine !== generation) {
@@ -252,11 +287,8 @@ async function start() {
           fs.rmSync(authDir, { recursive: true, force: true });
           fs.mkdirSync(authDir, { recursive: true });
         }
-        setTimeout(() => {
-          if (mine === generation) {
-            start();
-          }
-        }, loggedOut ? 1000 : 4000);
+        logger.warn({ code }, "WhatsApp Web connection closed");
+        scheduleRestart("client", () => mine === generation, start, loggedOut ? 1000 : 4000);
       }
     });
     sock.ev.on("messages.upsert", async ({ messages, type }) => {
@@ -273,11 +305,7 @@ async function start() {
     });
   } catch (error) {
     logger.warn({ err: error }, "WhatsApp Web failed to start");
-    setTimeout(() => {
-      if (mine === generation) {
-        start();
-      }
-    }, 5000);
+    scheduleRestart("client", () => mine === generation, start, 5000);
   }
 }
 
@@ -336,21 +364,18 @@ async function sendToWhatsApp(body) {
 
 async function startAdmin() {
   const mine = ++adminGeneration;
+  clearTimeout(adminRestartTimer);
+  const previous = adminSock;
+  adminSock = null;
+  adminConnected = false;
+  endSocket(previous);
   try {
     const { state, saveCreds } = await useMultiFileAuthState(adminAuthDir);
     const { version } = await fetchLatestBaileysVersion();
     if (mine !== adminGeneration) {
       return;
     }
-    adminSock = makeWASocket({
-      version,
-      auth: state,
-      logger,
-      printQRInTerminal: false,
-      browser: Browsers.macOS("HOC Admin"),
-      syncFullHistory: false,
-      markOnlineOnConnect: false,
-    });
+    adminSock = makeWASocket(socketOptions(version, state, "HOC Admin"));
     adminSock.ev.on("creds.update", saveCreds);
     adminSock.ev.on("connection.update", async (update) => {
       if (mine !== adminGeneration) {
@@ -377,20 +402,13 @@ async function startAdmin() {
           fs.rmSync(adminAuthDir, { recursive: true, force: true });
           fs.mkdirSync(adminAuthDir, { recursive: true });
         }
-        setTimeout(() => {
-          if (mine === adminGeneration) {
-            startAdmin();
-          }
-        }, loggedOut ? 1000 : 4000);
+        logger.warn({ code }, "Admin WhatsApp connection closed");
+        scheduleRestart("admin", () => mine === adminGeneration, startAdmin, loggedOut ? 1000 : 4000);
       }
     });
   } catch (error) {
     logger.warn({ err: error }, "Admin WhatsApp failed to start");
-    setTimeout(() => {
-      if (mine === adminGeneration) {
-        startAdmin();
-      }
-    }, 5000);
+    scheduleRestart("admin", () => mine === adminGeneration, startAdmin, 5000);
   }
 }
 

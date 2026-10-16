@@ -4,6 +4,7 @@ import path from "node:path";
 const root = path.resolve("node_modules/@whiskeysockets/baileys/lib");
 const decodeFile = path.join(root, "Utils/decode-wa-message.js");
 const recvFile = path.join(root, "Socket/messages-recv.js");
+const processFile = path.join(root, "Utils/process-message.js");
 
 function patch(file, from, to, label) {
   const source = fs.readFileSync(file, "utf8");
@@ -43,4 +44,19 @@ patch(
   "logger.error({ error, node }, 'error in handling message');",
   "logger.error({ err: error }, 'error in handling message');",
   "error log",
+);
+
+patch(
+  processFile,
+  `placeholderResendCache?.del(response.stanzaId);
+                    // TODO: IMPLEMENT HISTORY SYNC ETC (sticker uploads etc.).
+                    const { peerDataOperationResult } = response;
+                    for (const result of peerDataOperationResult) {`,
+  `if (response.stanzaId) {
+                        placeholderResendCache?.del(response.stanzaId);
+                    }
+                    // TODO: IMPLEMENT HISTORY SYNC ETC (sticker uploads etc.).
+                    const peerDataOperationResult = response.peerDataOperationResult || [];
+                    for (const result of peerDataOperationResult) {`,
+  "stanza cache",
 );

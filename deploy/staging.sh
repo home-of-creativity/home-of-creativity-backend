@@ -287,6 +287,9 @@ recreate_with_env() {
     sleep 5
   done
   "${COMPOSE[@]}" exec -T api php artisan config:cache
+  # Edge sits on two networks. After the API container is recreated, its DNS
+  # lookup of "api" returns SERVFAIL until this proxy is restarted.
+  "${COMPOSE[@]}" restart edge
 }
 
 cmd_set() {
