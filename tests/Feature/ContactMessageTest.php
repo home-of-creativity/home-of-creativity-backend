@@ -51,6 +51,21 @@ class ContactMessageTest extends TestCase
         });
     }
 
+    public function test_a_phone_that_is_not_a_number_is_rejected(): void
+    {
+        Mail::fake();
+        config(['mail.mailers.contact.password' => 'secret']);
+
+        $this->postJson('/api/contact/messages', [
+            'name' => 'Omar',
+            'email' => 'omar@example.com',
+            'phone' => 'abc',
+            'message' => 'مرحبا',
+        ])->assertStatus(422)->assertJsonValidationErrors(['phone']);
+
+        Mail::assertNothingSent();
+    }
+
     public function test_send_is_refused_when_the_mailbox_password_is_empty(): void
     {
         config(['mail.mailers.contact.password' => '']);

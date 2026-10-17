@@ -19,7 +19,7 @@ class SendContactMessageRequest extends FormRequest
         return [
             'name' => ['required', 'string', 'max:120'],
             'email' => ['required', 'email', 'max:180'],
-            'phone' => ['nullable', 'string', 'max:40'],
+            'phone' => ['nullable', 'string', 'max:40', 'regex:/^[0-9+\s().-]{8,40}$/'],
             'interest' => ['nullable', 'string', 'max:80'],
             'interest_label' => ['nullable', 'string', 'max:120'],
             'message' => ['required', 'string', 'max:4000'],
