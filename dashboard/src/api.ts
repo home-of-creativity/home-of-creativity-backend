@@ -1193,7 +1193,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw err;
   }
-  if (response.status === 401) {
+  if (response.status === 401 || response.status === 419) {
     setToken(null);
   }
   if (!response.ok) {
@@ -1251,7 +1251,7 @@ async function submitForm<T>(
     };
 
     xhr.onload = () => {
-      if (xhr.status === 401) setToken(null);
+      if (xhr.status === 401 || xhr.status === 419) setToken(null);
       const body = parseXhrJson(xhr.responseText);
       if (xhr.status < 200 || xhr.status >= 300) {
         reject(new Error(apiErrorMessage(body, xhr.status)));

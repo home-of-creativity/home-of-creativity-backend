@@ -411,8 +411,16 @@ function Guarded({
   t: (c: Copy) => string;
   setLocale: (next: Locale) => void;
 }) {
-  const { user, ready } = useAuth();
+  const { user, ready, server, retry } = useAuth();
   const location = useLocation();
+  if (!ready && server !== "ok") {
+    return (
+      <section className="empty-state server-wait" role="status" aria-live="polite">
+        <p>{t(server === "down" ? copy.serverDown : copy.serverRetrying)}</p>
+        {server === "down" ? <button type="button" className="btn btn-primary" onClick={retry}>{t(copy.serverRetry)}</button> : null}
+      </section>
+    );
+  }
   if (!ready) return <LoadingLottie variant="page" label={copy.loading[readLocale()]} />;
   if (!user?.is_admin && !user?.role) {
     if (location.pathname === "/") {

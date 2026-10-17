@@ -502,6 +502,9 @@ export const copy = {
   pageOf: { ar: "صفحة {page} من {pages}", en: "Page {page} of {pages}" },
   showingRange: { ar: "{from}–{to} من {total}", en: "{from}–{to} of {total}" },
   loading: { ar: "جارٍ التحميل…", en: "Loading…" },
+  serverRetrying: { ar: "الخادم غير متاح، جارٍ إعادة المحاولة…", en: "The server is unavailable. Retrying…" },
+  serverDown: { ar: "الخادم غير متاح الآن. جلستك محفوظة.", en: "The server is unavailable right now. Your session is kept." },
+  serverRetry: { ar: "إعادة المحاولة", en: "Try again" },
   forbidden: { ar: "هذا الحساب ليس حساب فريق.", en: "This account is not a staff user." },
   failed: { ar: "تعذر تسجيل الدخول.", en: "Could not sign in." },
   apiUnreachable: {

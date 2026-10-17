@@ -3548,6 +3548,11 @@ html[dir="ltr"] .report-panel {
   text-align: center;
 }
 
+.server-wait {
+  min-height: 100svh;
+  align-content: center;
+}
+
 .empty-state h1,
 .empty-state h2 {
   margin: 0;
