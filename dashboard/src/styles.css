@@ -981,6 +981,18 @@ html[dir="rtl"] .btn-logout svg {
 .table-wrap {
   width: 100%;
   overflow: auto;
+  background:
+    linear-gradient(to left, rgb(20 12 40 / 0.16), transparent 1rem) right / 1rem 100% no-repeat,
+    linear-gradient(to right, rgb(20 12 40 / 0.16), transparent 1rem) left / 1rem 100% no-repeat;
+  background-attachment: scroll;
+}
+
+.table-wrap th:first-child,
+.table-wrap td:first-child {
+  position: sticky;
+  inset-inline-start: 0;
+  background: var(--brand-surface);
+  z-index: 1;
 }
 
 table {
