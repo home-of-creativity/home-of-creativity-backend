@@ -3946,6 +3946,12 @@ html[dir="ltr"] .report-panel {
     overflow: visible;
   }
 
+  /* Short pages must not hand the spare height to the mobile bar row. */
+  .app-shell {
+    grid-template-rows: auto minmax(0, 1fr);
+    align-content: start;
+  }
+
   .mobile-bar {
     display: flex;
   }
