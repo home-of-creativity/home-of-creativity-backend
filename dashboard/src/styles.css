@@ -1308,7 +1308,7 @@ td[colspan] {
 }
 
 .tab {
-  min-height: 2.4rem;
+  min-height: 2.75rem;
   padding: 0.4rem 1rem;
   border: 0;
   border-radius: 999px;
@@ -1929,11 +1929,13 @@ td[colspan] {
 .field {
   width: 100%;
   max-width: 100%;
+  min-height: 2.75rem;
   border: 1px solid var(--brand-line);
   border-radius: 0.9rem;
   background: var(--brand-surface);
   color: var(--brand-ink);
   padding: 0.68rem 0.95rem;
+  line-height: 1.4;
   transition: border-color var(--ease), box-shadow var(--ease);
 }
 
@@ -2060,6 +2062,11 @@ td[colspan] {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.65rem;
+}
+
+.pager-controls .btn {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
 }
 
 .filter-label {
@@ -9321,8 +9328,8 @@ html[dir="rtl"] .placement-tile-toggle[data-state="checked"] .placement-tile-tog
 .gcal-icon-btn {
   display: inline-grid;
   place-items: center;
-  width: 2.4rem;
-  height: 2.4rem;
+  width: 2.75rem;
+  height: 2.75rem;
   flex: none;
   border: 0;
   border-radius: 999px;
