@@ -205,7 +205,13 @@ class OdooPaperFlowTest extends TestCase
         $this->postJson('/api/admin/odoo/invoices/990/draft')->assertStatus(422);
         $this->assertSame('posted', $this->odoo['move']);
 
-        $role = Role::query()->create(['name' => 'Sales', 'abilities' => ['ops.clients.view', 'ops.clients.odoo']]);
+        $role = Role::query()->create(['name' => 'Sales', 'abilities' => [
+            'ops.clients.view',
+            'ops.clients.odoo',
+            'ops.clients.invoices_update',
+            'ops.clients.quotations_view',
+            'ops.clients.invoices_view',
+        ]]);
         $staff = User::factory()->create(['is_admin' => false, 'role_id' => $role->id]);
         Sanctum::actingAs($staff);
         $this->postJson('/api/admin/odoo/invoices/990/cancel')->assertStatus(422);
@@ -453,14 +459,14 @@ class OdooPaperFlowTest extends TestCase
 
     public function test_a_note_needs_its_own_permission(): void
     {
-        $role = Role::query()->create(['name' => 'Viewer', 'abilities' => ['ops.clients.view']]);
+        $role = Role::query()->create(['name' => 'Viewer', 'abilities' => ['ops.clients.view', 'ops.clients.invoices_view']]);
         $staff = User::factory()->create(['is_admin' => false, 'role_id' => $role->id]);
         Sanctum::actingAs($staff);
 
         $this->getJson('/api/admin/odoo/invoices/990/activity')->assertOk();
         $this->postJson('/api/admin/odoo/invoices/990/notes', ['body' => 'x'])->assertForbidden();
 
-        $role->forceFill(['abilities' => ['ops.clients.view', 'ops.clients.odoo_note']])->save();
+        $role->forceFill(['abilities' => ['ops.clients.view', 'ops.clients.invoices_view', 'ops.clients.odoo_note']])->save();
         Sanctum::actingAs($staff->fresh());
         $this->postJson('/api/admin/odoo/invoices/990/notes', ['body' => 'x'])->assertCreated();
     }
@@ -493,14 +499,18 @@ class OdooPaperFlowTest extends TestCase
     public function test_the_proforma_needs_its_own_permission(): void
     {
         $this->botClient();
-        $role = Role::query()->create(['name' => 'Sales', 'abilities' => ['ops.clients.view', 'ops.clients.odoo']]);
+        $role = Role::query()->create(['name' => 'Sales', 'abilities' => [
+            'ops.clients.view',
+            'ops.clients.odoo',
+            'ops.clients.quotations_view',
+        ]]);
         $staff = User::factory()->create(['is_admin' => false, 'role_id' => $role->id]);
         Sanctum::actingAs($staff);
 
         $this->get('/api/admin/odoo/quotations/880/pdf?proforma=1')->assertForbidden();
         $this->postJson('/api/admin/odoo/quotations/880/proforma', ['deliver' => 'email'])->assertForbidden();
 
-        $role->forceFill(['abilities' => ['ops.clients.view', 'ops.clients.proforma']])->save();
+        $role->forceFill(['abilities' => ['ops.clients.view', 'ops.clients.quotations_view', 'ops.clients.proforma']])->save();
         Sanctum::actingAs($staff->fresh());
         $this->get('/api/admin/odoo/quotations/880/pdf?proforma=1')->assertOk();
     }

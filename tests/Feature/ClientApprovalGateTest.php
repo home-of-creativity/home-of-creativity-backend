@@ -2,22 +2,28 @@
 
 namespace Tests\Feature;
 
+use App\Contracts\WhatsAppMessenger;
 use App\Enums\PaymentMethod;
 use App\Enums\RequestStatus;
 use App\Models\Client;
+use App\Models\OpsSetting;
 use App\Models\Quotation;
 use App\Models\Role;
 use App\Models\ServiceRequest;
 use App\Models\User;
+use App\Services\DevBeat;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 /**
  * A client's yes to a quotation sends the payment steps at once and waits for an admin out
- * of the client's sight; the admin's approval (or a confirmed payment) completes it.
+ * of the client's sight; support gets the Sham Cash QR; the admin's approval (or a
+ * confirmed payment) completes it.
  */
 class ClientApprovalGateTest extends TestCase
 {
@@ -84,6 +90,37 @@ class ClientApprovalGateTest extends TestCase
             && str_contains(json_encode($sent['reply_markup'], JSON_UNESCAPED_UNICODE) ?: '', 'qok:'));
     }
 
+    public function test_support_gets_the_sham_cash_qr_while_waiting_for_team_approval(): void
+    {
+        Storage::fake('local');
+        $this->app->forgetInstance(WhatsAppMessenger::class);
+        config([
+            'services.whatsapp.transport' => 'web',
+            'services.whatsapp.web_url' => 'http://wa-web.test',
+            'services.whatsapp.web_secret' => 'web-secret',
+            'services.whatsapp.support_numbers' => ['+963944000999'],
+        ]);
+        Http::fake([
+            'https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => ['message_id' => 1]], 200),
+            'http://wa-web.test/*' => Http::response(['id' => 'wa-1'], 200),
+        ]);
+
+        $qrPath = UploadedFile::fake()->image('sham-cash.png')->store('payment', 'local');
+        OpsSetting::setValue('sham_cash_qr_path', $qrPath);
+
+        $request = $this->quoted('tg-gate-qr');
+        $this->clientApproves($request, 'tg-gate-qr');
+
+        Http::assertSent(fn (Request $sent): bool => $sent->url() === 'http://wa-web.test/send'
+            && ($sent['to'] ?? null) === '963944000999'
+            && ($sent['kind'] ?? null) === 'image'
+            && str_contains((string) ($sent['caption'] ?? ''), 'بانتظار اعتماد الفريق')
+            && str_contains((string) ($sent['caption'] ?? ''), 'لا تذكر للزبون')
+            && filled($sent['data_base64'] ?? null));
+        Http::assertNotSent(fn (Request $sent): bool => str_contains($sent->url(), 'botclient-token/')
+            && str_contains((string) ($sent['caption'] ?? $sent['text'] ?? ''), 'اعتماد الفريق'));
+    }
+
     public function test_the_dashboard_approves_once(): void
     {
         $request = $this->quoted();
@@ -128,7 +165,7 @@ class ClientApprovalGateTest extends TestCase
 
     public function test_sales_entering_a_call_still_wait_for_the_admin(): void
     {
-        $this->mock(\App\Services\DevBeat::class, fn ($mock) => $mock->shouldReceive('ageSeconds')->andReturn(null));
+        $this->mock(DevBeat::class, fn ($mock) => $mock->shouldReceive('ageSeconds')->andReturn(null));
         $request = $this->quoted();
         $role = Role::query()->create(['name' => 'مبيعات', 'abilities' => ['ops.requests.view', 'ops.requests.quotation']]);
         Sanctum::actingAs(User::factory()->create(['role_id' => $role->id]));

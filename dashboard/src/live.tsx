@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { api, type LiveSnapshot } from "./api";
 import { copy, socialStatuses, statuses, type Locale } from "./i18n";
 
-const INTERVAL_MS = 4000;
+const INTERVAL_MS = 20000;
 
 type LiveContextValue = {
   snapshot: LiveSnapshot | null;
@@ -28,7 +28,6 @@ function toastKey(kind: string, id: number, status: string) {
 }
 
 export function LiveFeedProvider({
-  locale,
   t,
   children,
 }: {
@@ -40,8 +39,12 @@ export function LiveFeedProvider({
   const seen = useRef(new Set<string>());
   const primed = useRef(false);
 
+  const translate = useRef(t);
+  translate.current = t;
+
   const announce = useCallback(
     (next: LiveSnapshot) => {
+      const t = translate.current;
       if (!primed.current) {
         next.requests.forEach((item) => seen.current.add(toastKey("request", item.id, item.status)));
         next.posts.forEach((item) => seen.current.add(toastKey("post", item.id, item.status)));
@@ -78,7 +81,7 @@ export function LiveFeedProvider({
         }
       });
     },
-    [t],
+    [],
   );
 
   useEffect(() => {
@@ -107,7 +110,7 @@ export function LiveFeedProvider({
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [announce, locale]);
+  }, [announce]);
 
   return (
     <LiveContext.Provider

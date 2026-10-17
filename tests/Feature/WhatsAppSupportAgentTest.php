@@ -193,16 +193,16 @@ class WhatsAppSupportAgentTest extends TestCase
         Http::assertNotSent(fn (Request $sent): bool => str_contains((string) ($sent['text'] ?? ''), 'مرحبا'));
     }
 
-    public function test_back_to_bot_leaves_the_agent(): void
+    public function test_menu_leaves_the_agent(): void
     {
         $this->fakeAgent(['reply' => 'أكيد، تفضل.', 'handoff' => false, 'handoff_reason' => '']);
         $this->send('بدي احكي مع موظف', 'm1');
 
-        $this->send('رجوع للبوت', 'm2');
+        $this->send('القائمة', 'm2');
 
         $this->assertFalse(app(WhatsAppSupportAgent::class)->active('963922222222'));
         $this->assertSentToClient('رجعت معك');
-        Http::assertNotSent(fn (Request $sent): bool => $sent->url() === self::AGENT && $sent['message'] === 'رجوع للبوت');
+        Http::assertNotSent(fn (Request $sent): bool => $sent->url() === self::AGENT && $sent['message'] === 'القائمة');
     }
 
     public function test_without_the_agent_url_the_bot_keeps_its_old_escalation(): void

@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Client;
 use App\Models\User;
 use App\Services\GoogleDriveClient;
+use App\Support\ShrinkDocxImages;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -211,5 +212,116 @@ class ClientReportTest extends TestCase
 
         Storage::disk('local')->assertMissing("reports/{$id}/report.docx");
         $this->assertSame(0, $client->reports()->count());
+    }
+
+    public function test_a_slash_in_the_title_is_stored_as_a_space_and_the_file_still_downloads(): void
+    {
+        $client = Client::factory()->create();
+
+        $id = $this->post("/api/admin/clients/{$client->id}/reports", [
+            'title' => 'تقرير/الربع:الأول',
+            'document' => $this->docx(),
+        ])->assertCreated()
+            ->assertJsonPath('data.title', 'تقرير الربع الأول')
+            ->json('data.id');
+
+        $this->assertSame(1, $client->reports()->count());
+
+        $response = $this->get("/api/admin/reports/{$id}/document");
+        $response->assertOk();
+        $disposition = (string) $response->headers->get('content-disposition');
+        $this->assertStringNotContainsString('/', $disposition);
+        $this->assertStringContainsString('.docx', $disposition);
+    }
+
+    public function test_a_title_made_only_of_forbidden_characters_is_rejected(): void
+    {
+        $client = Client::factory()->create();
+
+        $this->post("/api/admin/clients/{$client->id}/reports", [
+            'title' => '///',
+            'document' => $this->docx(),
+        ], ['Accept' => 'application/json'])->assertStatus(422)->assertJsonValidationErrors('title');
+
+        $this->assertSame(0, $client->reports()->count());
+    }
+
+    public function test_an_older_copy_is_rejected_and_the_saved_file_stays(): void
+    {
+        $client = Client::factory()->create();
+        $id = $this->post("/api/admin/clients/{$client->id}/reports", [
+            'title' => 'تقرير',
+            'document' => $this->docx(),
+        ])->assertCreated()->json('data.id');
+        $first = $this->getJson("/api/admin/reports/{$id}")->json('data.updated_at');
+
+        $this->travel(5)->seconds();
+        $this->post("/api/admin/reports/{$id}", [
+            'title' => 'تقرير',
+            'document' => UploadedFile::fake()->createWithContent('report.docx', 'PK newer'),
+        ])->assertOk();
+
+        $this->post("/api/admin/reports/{$id}", [
+            'title' => 'تقرير قديم',
+            'document' => UploadedFile::fake()->createWithContent('report.docx', 'PK stale'),
+            'updated_at' => $first,
+        ])->assertStatus(409)->assertJsonPath('code', 'report_conflict');
+
+        $this->assertSame(1, $client->reports()->count());
+        $this->assertSame('تقرير', $client->reports()->first()?->title);
+        $this->assertSame('PK newer', Storage::disk('local')->get("reports/{$id}/report.docx"));
+    }
+
+    public function test_a_body_over_the_php_limit_is_a_clear_413(): void
+    {
+        config(['reports.max_body_bytes' => 100]);
+
+        $this->call('POST', '/api/admin/reports/1', [], [], [], [
+            'CONTENT_LENGTH' => '500',
+            'HTTP_ACCEPT' => 'application/json',
+        ])->assertStatus(413)
+            ->assertJsonPath('message', 'الملف أكبر من الحد. صغّر الصور ثم أعد المحاولة.');
+    }
+
+    public function test_shrinking_a_report_picture_keeps_a_backup_and_the_row(): void
+    {
+        if (! function_exists('imagecreatetruecolor')) {
+            $this->markTestSkipped('GD is not available.');
+        }
+
+        $client = Client::factory()->create();
+        $report = $client->reports()->create([
+            'title' => 'صور',
+            'body' => 'متن',
+            'document_path' => 'reports/shrink/report.docx',
+        ]);
+        Storage::disk('local')->put($report->document_path, $this->docxWithWideImage());
+
+        $this->assertTrue(app(ShrinkDocxImages::class)->shrink('local', $report->document_path));
+
+        Storage::disk('local')->assertExists($report->document_path);
+        Storage::disk('local')->assertExists($report->document_path.'.bak');
+        $this->assertNotNull($report->fresh());
+        $this->assertSame('صور', $report->fresh()?->title);
+    }
+
+    private function docxWithWideImage(): string
+    {
+        $image = imagecreatetruecolor(2100, 20);
+        ob_start();
+        imagejpeg($image, null, 90);
+        $jpeg = (string) ob_get_clean();
+        imagedestroy($image);
+
+        $path = tempnam(sys_get_temp_dir(), 'hoc-wide');
+        $zip = new \ZipArchive;
+        $zip->open($path, \ZipArchive::CREATE | \ZipArchive::OVERWRITE);
+        $zip->addFromString('[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"></Types>');
+        $zip->addFromString('word/media/image1.jpeg', $jpeg);
+        $zip->close();
+        $bytes = (string) file_get_contents($path);
+        @unlink($path);
+
+        return $bytes;
     }
 }

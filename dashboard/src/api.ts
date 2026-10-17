@@ -1163,15 +1163,23 @@ function queryString(params: Record<string, string | number | undefined>) {
   return query ? `?${query}` : "";
 }
 
-export function isNotFound(err: unknown) {
-  return Boolean(err && typeof err === "object" && "status" in err && (err as { status?: unknown }).status === 404);
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code: string | null;
+  /** Laravel 422 messages by field name. */
+  readonly errors: Record<string, string[]>;
+
+  constructor(message: string, status: number, code: string | null = null, errors: Record<string, string[]> = {}) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+    this.errors = errors;
+  }
 }
 
-function apiFailure(body: Record<string, unknown>, status: number) {
-  const error = new Error(apiErrorMessage(body, status)) as Error & { status: number; errors?: Record<string, string[]> };
-  error.status = status;
-  if (body.errors && typeof body.errors === "object") error.errors = body.errors as Record<string, string[]>;
-  return error;
+export function isNotFound(err: unknown) {
+  return Boolean(err && typeof err === "object" && "status" in err && (err as { status?: unknown }).status === 404);
 }
 
 function apiErrorMessage(body: Record<string, unknown>, status: number) {
@@ -1210,7 +1218,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-    throw apiFailure(body, response.status);
+    const code = typeof body.code === "string" ? body.code : null;
+    const errors = body.errors && typeof body.errors === "object" ? (body.errors as Record<string, string[]>) : {};
+    throw new ApiError(apiErrorMessage(body, response.status), response.status, code, errors);
   }
   return response.json() as Promise<T>;
 }
@@ -1369,6 +1379,21 @@ export type ComplaintRow = {
   company_name: string | null;
   phone: string | null;
   created_at: string | null;
+};
+
+export type BotFeedbackRow = {
+  id: number;
+  score: number | null;
+  reason: string | null;
+  reason_label: string | null;
+  source: string;
+  channel: string | null;
+  asked_at: string | null;
+  answered_at: string | null;
+  client_id: number;
+  client_name: string | null;
+  company_name: string | null;
+  phone: string | null;
 };
 
 export type PhotographyBoard = {
@@ -1779,6 +1804,9 @@ export const api = {
   complaints() {
     return request<Envelope<ComplaintRow[]>>("/admin/complaints");
   },
+  botFeedback() {
+    return request<Envelope<BotFeedbackRow[]>>("/admin/bot-feedback");
+  },
   complaint(id: number) {
     return request<Envelope<ComplaintDetail>>(`/admin/complaints/${id}`);
   },
@@ -1919,9 +1947,9 @@ export const api = {
   clientReport(id: number) {
     return request<Envelope<ClientReport>>(`/admin/reports/${id}`);
   },
-  saveClientReport(clientId: number, form: FormData, reportId?: number) {
+  saveClientReport(clientId: number, form: FormData, reportId?: number, keepalive = false) {
     const path = reportId ? `/admin/reports/${reportId}` : `/admin/clients/${clientId}/reports`;
-    return request<Envelope<ClientReport> & { drive_error?: string | null }>(path, { method: "POST", body: form });
+    return request<Envelope<ClientReport> & { drive_error?: string | null }>(path, { method: "POST", body: form, keepalive });
   },
   async reportFile(id: number, kind: "document" | "pdf") {
     const headers = new Headers({ Accept: "application/octet-stream" });

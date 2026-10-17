@@ -126,6 +126,25 @@ class ClientReportSendTest extends TestCase
         Mail::assertNothingSent();
     }
 
+    public function test_a_failed_whatsapp_send_does_not_mark_the_calendar_delivered(): void
+    {
+        $deadline = ReportDeadline::query()->create([
+            'client_id' => $this->report->client_id,
+            'title' => 'تقرير شهري',
+            'starts_on' => '2026-10-15',
+            'repeat' => 'none',
+        ]);
+        config(['services.whatsapp.web_url' => '']);
+        Sanctum::actingAs($this->staff([StaffAbility::OpsReports->value.'.send']));
+
+        $this->postJson("/api/admin/reports/{$this->report->id}/send", [
+            'email' => 'new@shop.com',
+            'phone' => '+963944000111',
+        ])->assertOk();
+
+        $this->assertNull(ReportDeadlineOccurrence::query()->where('report_deadline_id', $deadline->id)->first()?->done_at);
+    }
+
     public function test_a_failed_delivery_is_logged_and_reported(): void
     {
         config(['services.whatsapp.web_url' => '']);

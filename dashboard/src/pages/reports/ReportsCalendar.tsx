@@ -150,9 +150,8 @@ function deadlineColor(row: ReportDeadlineRow, calendarColor?: string | null) {
 export function ReportsCalendar({ locale, client }: { locale: Locale; client?: { id: number; name: string; company_name: string | null } }) {
   const ar = locale === "ar";
   const can = useCan();
-  const canCreateReports = can("ops.reports.create");
-  const canUpdate = can("ops.reports.update");
-  const canDelete = can("ops.reports.delete");
+  const canUpdate = can("ops.reports.calendar_update");
+  const canDelete = can("ops.reports.calendar_delete");
   const [prefs, setPrefsState] = useState<Prefs>(loadPrefs);
   const [range, setRange] = useState<{ from: string; to: string } | null>(null);
   const [deadlines, setDeadlines] = useState<ReportDeadlineRow[]>([]);
@@ -162,7 +161,7 @@ export function ReportsCalendar({ locale, client }: { locale: Locale; client?: {
   const [calendars, setCalendars] = useState<ReportCalendar[]>([]);
   const [canManageCalendars, setCanManageCalendars] = useState(false);
   const [mainVisible, setMainVisible] = useState(true);
-  const canCreate = canCreateReports && (mainVisible || calendars.length > 0);
+  const canCreate = can("ops.reports.calendar_create") && (mainVisible || calendars.length > 0);
   const [roles, setRoles] = useState<Array<{ id: number; name: string }>>([]);
   const [calendarDialog, setCalendarDialog] = useState<{ calendar: ReportCalendar | null } | null>(null);
   const [loading, setLoading] = useState(false);

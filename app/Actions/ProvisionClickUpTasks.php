@@ -384,7 +384,7 @@ class ProvisionClickUpTasks
                 ClickUpTaskType::Design => EmployeeProfession::Design,
                 ClickUpTaskType::Content => EmployeeProfession::Content,
                 ClickUpTaskType::Programming => EmployeeProfession::Web,
-                ClickUpTaskType::Photography => EmployeeProfession::Media,
+                ClickUpTaskType::Photography => EmployeeProfession::Photography,
                 default => null,
             };
 

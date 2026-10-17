@@ -10,6 +10,7 @@ use App\Models\ServiceRequest;
 use App\Services\OdooClient;
 use App\Services\RequestStatusTransitionService;
 use App\Support\ResolveServiceRequest;
+use App\Support\ShamCashQr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
@@ -157,10 +158,11 @@ class ApproveQuotation
     {
         $number = ResolveServiceRequest::displayNumber($request);
         $amount = (float) ($request->quotation_amount ?? $request->amount_total ?? 0);
+        $who = trim(($request->client?->name ?? '').($request->client?->company_name ? ' — '.$request->client->company_name : ''));
         $lines = array_filter([
             '🟡 وافق الزبون على عرض السعر وينتظر اعتمادك',
             "#{$number} — {$request->title}",
-            trim(($request->client?->name ?? '').($request->client?->company_name ? ' — '.$request->client->company_name : '')),
+            $who !== '' ? $who : null,
             $amount > 0 ? 'المبلغ: '.number_format($amount, 2).' USD' : null,
             'وصلت الزبون خطوات الدفع. بعد الاعتماد يتحول العرض إلى أمر بيع وتصله الفاتورة.',
         ]);
@@ -168,6 +170,16 @@ class ApproveQuotation
             ['text' => '✅ اعتماد', 'callback_data' => 'qok:'.$number],
             ['text' => '📋 فتح الطلب', 'url' => rtrim((string) config('app.url'), '/').'/dashboard/requests/'.$request->id],
         ]);
+
+        // Support gets the Sham Cash QR while the team decides. The client is never told about this hold.
+        $supportLines = array_filter([
+            '🟡 وافق الزبون على عرض السعر — بانتظار اعتماد الفريق',
+            "#{$number} — {$request->title}",
+            $who !== '' ? $who : null,
+            $amount > 0 ? 'المبلغ: '.number_format($amount, 2).' USD' : null,
+            'رمز شام كاش للمساعدة عند الحاجة. لا تذكر للزبون انتظار الاعتماد.',
+        ]);
+        $this->notifyEmployees->supportWithImage(implode("\n", $supportLines), ShamCashQr::absolutePath());
     }
 
     /** The approved Odoo quotation becomes a sales order; a failure leaves the approval standing. */

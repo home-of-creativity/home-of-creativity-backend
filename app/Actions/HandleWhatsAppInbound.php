@@ -6,6 +6,7 @@ use App\Contracts\WhatsAppMessenger;
 use App\Enums\ClickUpTaskType;
 use App\Enums\EmployeeProfession;
 use App\Enums\RequestStatus;
+use App\Models\BotFeedback;
 use App\Models\Client;
 use App\Models\DriveDelivery;
 use App\Models\PhotographyBooking;
@@ -271,7 +272,7 @@ class HandleWhatsAppInbound
 
                 return;
             }
-            if ($this->heldByHuman($phone, $chatId, (string) $text)) {
+            if ($this->heldByHuman($client, $phone, $chatId, (string) $text)) {
                 return;
             }
             if ((! is_string($callback) || $callback === '') && is_string($text) && trim($text) !== '' && $this->supportAgent()->active($phone)) {
@@ -1014,6 +1015,9 @@ class HandleWhatsAppInbound
      */
     private function handleCallback(Client $client, string $chatId, string $phone, array $session, string $data): void
     {
+        if (str_starts_with($data, 'botfb') && app(BotFeedbackSurvey::class)->answer($client, $chatId, $data, $this->replyLang)) {
+            return;
+        }
         if (str_starts_with($data, 'rate') && app(SatisfactionSurvey::class)->answer($client, $chatId, $data)) {
             return;
         }
@@ -2269,9 +2273,8 @@ class HandleWhatsAppInbound
             ->exists();
         if ($openShoot) {
             $displayNumber = ResolveServiceRequest::displayNumber($request);
-            $this->notifyEmployees->handle(
+            $this->notifyEmployees->photographers(
                 $request,
-                EmployeeProfession::Media,
                 "الزبون طلب إلغاء الطلب وفيه موعد تصوير.\n#{$displayNumber} — {$request->title}",
             );
             $this->sendPlain($chatId, $this->tx(
@@ -3770,8 +3773,8 @@ class HandleWhatsAppInbound
             'العميل '.($name !== '' ? $name : $phone).' ('.$phone.') أرسل 168 ويريد الحديث مع فريق الإدارة.',
         );
         $this->safeSend($chatId, $this->tx(
-            'رح يكمل معك فريق الإدارة هون. إذا بدك ترجع للقائمة اكتب: رجوع للبوت',
-            'The management team will continue with you here. To go back to the menu, write: return to the bot',
+            'رح يكمل معك فريق الإدارة هون. إذا بدك ترجع للقائمة اكتب: القائمة',
+            'The management team will continue with you here. To go back to the menu, write: menu',
         ));
     }
 
@@ -3840,6 +3843,7 @@ class HandleWhatsAppInbound
         if (WhatsAppSupportAgent::leaving($text)) {
             $this->supportAgent()->end($phone);
             $this->sendMenu($chatId, $this->tx('رجعت معك. خبرني.', 'I am back. What do you need?'));
+            app(BotFeedbackSurvey::class)->ask($client, $chatId, BotFeedback::SOURCE_SUPPORT_AGENT, $this->replyLang);
 
             return;
         }
@@ -3859,14 +3863,15 @@ class HandleWhatsAppInbound
         }
     }
 
-    private function heldByHuman(string $phone, string $chatId, string $text): bool
+    private function heldByHuman(Client $client, string $phone, string $chatId, string $text): bool
     {
         if (! Cache::has($this->humanKey($phone))) {
             return false;
         }
-        if (preg_match('/رجوع\s*لل(?:بوت)|رجّع\s*البوت|return to (?:the )?bot/ui', $text) === 1) {
+        if (WhatsAppSupportAgent::leaving($text)) {
             Cache::forget($this->humanKey($phone));
-            $this->sendPlain($chatId, $this->tx('رجعت معك. خبرني.', 'I am back. What do you need?'));
+            $this->sendMenu($chatId, $this->tx('رجعت معك. خبرني.', 'I am back. What do you need?'));
+            app(BotFeedbackSurvey::class)->ask($client, $chatId, BotFeedback::SOURCE_HUMAN_HOLD, $this->replyLang);
 
             return true;
         }
@@ -3901,9 +3906,8 @@ class HandleWhatsAppInbound
         foreach ($open as $row) {
             $request = $row->request;
             if ($request instanceof ServiceRequest) {
-                $this->notifyEmployees->handle(
+                $this->notifyEmployees->photographers(
                     $request,
-                    EmployeeProfession::Media,
                     "الزبون طلب إلغاء موعد التصوير #{$row->id}. الإلغاء من الفريق قبل بداية يوم الجلسة.",
                 );
             }

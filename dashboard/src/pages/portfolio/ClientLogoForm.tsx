@@ -98,7 +98,7 @@ export function ClientLogoForm({ t }: { locale: Locale; t: (c: { ar: string; en:
 
   return (
     <FormPage
-      ability={editingId ? ["site.projects.update", "ops.clients.update"] : ["site.projects.create", "ops.clients.create"]}
+      ability={editingId ? "ops.clients.logos_update" : "ops.clients.logos_create"}
       eyebrow={t(copy.portfolioTabClients)}
       title={editingId ? t(copy.edit) : t(copy.addShowcaseClient)}
       backTo="/clients?tab=logos"

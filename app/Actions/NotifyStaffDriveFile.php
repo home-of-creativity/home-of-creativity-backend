@@ -77,15 +77,17 @@ class NotifyStaffDriveFile
     private function professions(ServiceRequest $request): array
     {
         $map = [
-            'design' => EmployeeProfession::Design,
-            'content' => EmployeeProfession::Content,
-            'programming' => EmployeeProfession::Web,
-            'photography' => EmployeeProfession::Media,
+            'design' => [EmployeeProfession::Design],
+            'content' => [EmployeeProfession::Content],
+            'programming' => [EmployeeProfession::Web],
+            'photography' => EmployeeProfession::photographers(),
         ];
         $found = [EmployeeProfession::Sales];
         foreach ($request->plannedDepartments() as $department) {
-            if (isset($map[$department]) && ! in_array($map[$department], $found, true)) {
-                $found[] = $map[$department];
+            foreach ($map[$department] ?? [] as $profession) {
+                if (! in_array($profession, $found, true)) {
+                    $found[] = $profession;
+                }
             }
         }
 

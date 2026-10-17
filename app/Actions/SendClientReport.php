@@ -75,7 +75,11 @@ class SendClientReport
             @unlink($path);
         }
 
-        if (in_array(true, $delivered, true)) {
+        $askedWhatsapp = filled($phone);
+        $confirmed = $askedWhatsapp
+            ? ($delivered['whatsapp'] ?? false)
+            : in_array(true, $delivered, true);
+        if ($confirmed) {
             $this->deadlines->completeFor($report, $user);
             if ($saveContact && $report->client !== null) {
                 $this->keepContact(

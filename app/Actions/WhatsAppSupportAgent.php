@@ -124,8 +124,8 @@ class WhatsAppSupportAgent
         ], now()->addMinutes(self::IDLE_MINUTES));
         $this->say($chatId, $this->tx(
             $locale,
-            'رح يكمل معك مساعد الدعم هلق. إذا بدك ترجع للقائمة اكتب: رجوع للبوت',
-            'Our support assistant will continue with you now. To go back to the menu, write: back to bot',
+            'رح يكمل معك مساعد الدعم هلق. إذا بدك ترجع للقائمة اكتب: القائمة',
+            'Our support assistant will continue with you now. To go back to the menu, write: menu',
         ));
 
         return $this->relay($client, $chatId, $phone, $locale, $text);
@@ -190,7 +190,7 @@ class WhatsAppSupportAgent
 
     public static function leaving(string $text): bool
     {
-        return preg_match('/رجوع\s*لل(?:بوت)|رجّع\s*البوت|^\s*(?:القائمة|قائمة|menu)\s*$|back to (?:the )?bot/ui', $text) === 1;
+        return preg_match('/^\s*(?:القائمة|قائمة|menu)\s*$|رجوع\s*لل(?:بوت)|رجّع\s*البوت|back to (?:the )?bot/ui', $text) === 1;
     }
 
     /**

@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Admin;
 
 use App\Actions\BookPhotographySlot;
 use App\Actions\PhotographySessions;
-use App\Enums\EmployeeProfession;
 use App\Enums\StaffAbility;
 use App\Http\Controllers\Controller;
 use App\Models\PhotographyBooking;
@@ -84,7 +83,7 @@ class PhotographyController extends Controller
                 'needs_count' => $all ? $this->sessions->needingCount()->map(fn (ServiceRequest $item): array => $this->requestRow($item))->values()->all() : [],
                 'me' => [
                     'employee_id' => $employee?->id,
-                    'is_photographer' => $employee?->profession === EmployeeProfession::Media,
+                    'is_photographer' => $employee?->isPhotographer() ?? false,
                     'can_all' => $all,
                 ],
                 'settings' => [
@@ -205,7 +204,7 @@ class PhotographyController extends Controller
             'override_lead' => ['boolean'],
         ]);
         $all = $user->canAbility(StaffAbility::OpsPhotographyAll);
-        $photographer = $user->employee?->profession === EmployeeProfession::Media;
+        $photographer = $user->employee?->isPhotographer() ?? false;
         $confirm = (bool) ($validated['confirm'] ?? false);
         $override = (bool) ($validated['override_lead'] ?? false);
         // A photographer may agree a time for themself; everyone else needs the full ability.

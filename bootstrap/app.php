@@ -6,6 +6,7 @@ use App\Http\Middleware\EnsureAdmin;
 use App\Http\Middleware\EnsureAppClient;
 use App\Http\Middleware\EnsureClientTelegramEnabled;
 use App\Http\Middleware\EnsureCrudAbility;
+use App\Http\Middleware\RejectOversizedBody;
 use App\Http\Middleware\StripPoweredByHeader;
 use App\Http\Middleware\ThrottleBotSender;
 use App\Http\Middleware\VerifySentryWebhook;
@@ -14,6 +15,7 @@ use App\Http\Middleware\VerifyWhatsAppSignature;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Exceptions\PostTooLargeException;
 use Illuminate\Http\Request;
 
 return Application::configure(basePath: dirname(__DIR__))
@@ -26,6 +28,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->trustProxies(at: '*');
         $middleware->append(StripPoweredByHeader::class);
+        $middleware->prependToGroup('api', RejectOversizedBody::class);
         $middleware->prependToGroup('api', PromoteStaffCookie::class);
         // There is no web login page; an API guest gets 401 JSON instead of a redirect to route('login').
         $middleware->redirectGuestsTo(fn (Request $request) => $request->is('api/*') ? null : '/dashboard/');
@@ -43,4 +46,13 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(fn (Request $request) => $request->is('api/*') || $request->expectsJson());
+        $exceptions->render(function (PostTooLargeException $exception, Request $request) {
+            if ($request->is('api/*') || $request->expectsJson()) {
+                return response()->json([
+                    'message' => RejectOversizedBody::MESSAGE,
+                ], 413);
+            }
+
+            return null;
+        });
     })->create();

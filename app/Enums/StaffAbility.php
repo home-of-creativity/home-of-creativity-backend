@@ -23,6 +23,7 @@ enum StaffAbility: string
     case OpsPhotographyAll = 'ops.photography_all';
     case OpsPhotographyCalendars = 'ops.photography_calendars';
     case OpsComplaints = 'ops.complaints';
+    case OpsBotFeedback = 'ops.bot_feedback';
     case SiteProjects = 'site.projects';
     case SiteCategories = 'site.categories';
     case SiteReels = 'site.reels';
@@ -67,14 +68,38 @@ enum StaffAbility: string
                 'integrations' => ['ar' => 'ClickUp وDrive والذكاء وإعادة المحاولة', 'en' => 'ClickUp, Drive, AI and retries'],
                 'renew' => ['ar' => 'التجديد', 'en' => 'Renew'],
             ],
-            self::OpsClients->value => $crud + [
-                'odoo' => ['ar' => 'Odoo: مزامنة واستيراد وعروض وفواتير', 'en' => 'Odoo: sync, import, quotations, invoices'],
+            self::OpsClients->value => [
+                'view' => ['ar' => 'عرض قائمة العملاء', 'en' => 'View client list'],
+                'create' => ['ar' => 'إضافة عميل', 'en' => 'Add client'],
+                'update' => ['ar' => 'تعديل عميل', 'en' => 'Edit client'],
+                'delete' => ['ar' => 'حذف عميل', 'en' => 'Delete client'],
+                'logos_view' => ['ar' => 'عرض شعارات العملاء', 'en' => 'View client logos'],
+                'logos_create' => ['ar' => 'إضافة شعار عميل', 'en' => 'Add client logo'],
+                'logos_update' => ['ar' => 'تعديل شعار عميل', 'en' => 'Edit client logo'],
+                'logos_delete' => ['ar' => 'حذف شعار عميل', 'en' => 'Delete client logo'],
+                'quotations_view' => ['ar' => 'عرض عروض الأسعار', 'en' => 'View quotations'],
+                'quotations_create' => ['ar' => 'إنشاء عرض سعر', 'en' => 'Create quotation'],
+                'quotations_update' => ['ar' => 'تعديل عرض سعر', 'en' => 'Edit quotation'],
+                'invoices_view' => ['ar' => 'عرض الفواتير', 'en' => 'View invoices'],
+                'invoices_create' => ['ar' => 'إنشاء فاتورة', 'en' => 'Create invoice'],
+                'invoices_update' => ['ar' => 'تعديل فاتورة', 'en' => 'Edit invoice'],
+                'odoo' => ['ar' => 'Odoo: مزامنة واستيراد العملاء', 'en' => 'Odoo: sync and import clients'],
                 'odoo_delete' => ['ar' => 'حذف عروض الأسعار الملغاة والفواتير المسودة من أودو', 'en' => 'Delete cancelled quotations and draft invoices from Odoo'],
                 'odoo_note' => ['ar' => 'رسالة داخلية على عرض السعر والفاتورة', 'en' => 'Internal note on quotations and invoices'],
                 'proforma' => ['ar' => 'الفاتورة الشكلية: معاينة وإرسال للعميل', 'en' => 'Pro-forma invoice: preview and send to the client'],
             ],
-            self::OpsReports->value => $crud + [
+            self::OpsReports->value => [
+                'view' => ['ar' => 'عرض قائمة التقارير', 'en' => 'View report list'],
+                'create' => ['ar' => 'إضافة تقرير', 'en' => 'Add report'],
+                'update' => ['ar' => 'تعديل تقرير', 'en' => 'Edit report'],
+                'delete' => ['ar' => 'حذف تقرير', 'en' => 'Delete report'],
                 'send' => ['ar' => 'إرسال التقرير للعميل بالبريد أو واتساب', 'en' => 'Send the report by email or WhatsApp'],
+                'calendar_view' => ['ar' => 'عرض تقويم التقارير', 'en' => 'View reports calendar'],
+                'calendar_create' => ['ar' => 'إضافة موعد أو جدولة في التقويم', 'en' => 'Add a deadline or schedule on the calendar'],
+                'calendar_update' => ['ar' => 'تعديل مواعيد التقويم', 'en' => 'Edit calendar deadlines'],
+                'calendar_delete' => ['ar' => 'حذف مواعيد التقويم', 'en' => 'Delete calendar deadlines'],
+                'history_view' => ['ar' => 'عرض سجل التعديلات', 'en' => 'View edit history'],
+                'history_restore' => ['ar' => 'استعادة نسخة من السجل', 'en' => 'Restore a version from history'],
             ],
             self::OpsEmployees->value => $crud + [
                 'approve' => ['ar' => 'قبول ورفض الانضمام', 'en' => 'Approve and reject joins'],
@@ -145,7 +170,22 @@ enum StaffAbility: string
             'ops.requests.create' => ['ops.requests.quotation', 'ops.requests.payments', 'ops.requests.work_plan', 'ops.requests.integrations', 'ops.requests.renew'],
             'ops.requests.update' => ['ops.requests.edit', 'ops.requests.work_plan'],
             'ops.requests.delete' => [],
-            'ops.clients.create' => ['ops.clients.create', 'ops.clients.odoo'],
+            'ops.clients.create' => [
+                'ops.clients.create',
+                'ops.clients.odoo',
+                'ops.clients.logos_create',
+                'ops.clients.quotations_create',
+                'ops.clients.invoices_create',
+            ],
+            'ops.clients.odoo' => [
+                'ops.clients.odoo',
+                'ops.clients.quotations_view',
+                'ops.clients.quotations_create',
+                'ops.clients.quotations_update',
+                'ops.clients.invoices_view',
+                'ops.clients.invoices_create',
+                'ops.clients.invoices_update',
+            ],
             'ops.employees.create' => ['ops.employees.create', 'ops.employees.approve', 'ops.employees.sync'],
         ];
         $next = [];
@@ -200,6 +240,7 @@ enum StaffAbility: string
             self::OpsPhotographyAll => ['ar' => 'التصوير: كل المواعيد والإلغاء وضبط الجلسات', 'en' => 'Photography: all bookings, cancel, session counts'],
             self::OpsPhotographyCalendars => ['ar' => 'التصوير: إضافة التقاويم وصلاحياتها', 'en' => 'Photography: add calendars and their access'],
             self::OpsComplaints => ['ar' => 'الشكاوى', 'en' => 'Complaints'],
+            self::OpsBotFeedback => ['ar' => 'تقييم البوت', 'en' => 'Bot feedback'],
             self::SiteProjects => ['ar' => 'المشاريع', 'en' => 'Projects'],
             self::SiteCategories => ['ar' => 'التصنيفات', 'en' => 'Categories'],
             self::SiteReels => ['ar' => 'الريلز', 'en' => 'Reels'],

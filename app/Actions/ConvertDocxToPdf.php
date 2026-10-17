@@ -60,7 +60,7 @@ class ConvertDocxToPdf
             return is_file($configured) ? $configured : null;
         }
 
-        $finder = new ExecutableFinder();
+        $finder = new ExecutableFinder;
         if (PHP_OS_FAMILY === 'Windows') {
             return $this->windowsDefault()
                 ?: $finder->find('soffice.com')
@@ -101,11 +101,16 @@ class ConvertDocxToPdf
                 File::copy($from, $directory.DIRECTORY_SEPARATOR.$file);
             }
         }
+
+        $emoji = '/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf';
+        if (is_file($emoji)) {
+            File::copy($emoji, $directory.DIRECTORY_SEPARATOR.'NotoColorEmoji.ttf');
+        }
     }
 
     private function useGoogleSans(string $contents): string
     {
-        $zip = new \ZipArchive();
+        $zip = new \ZipArchive;
         $path = tempnam(sys_get_temp_dir(), 'hoc-font');
         if ($path === false) {
             return $contents;

@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "postinstall": "node scripts/patch-report-direction.cjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview"
   },

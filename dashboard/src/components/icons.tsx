@@ -182,6 +182,14 @@ export function IconComplaint(props: IconProps) {
   );
 }
 
+export function IconBotFeedback(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M12 4.5 13.8 9.2 18.8 9.6 15 13 16.2 18 12 15.2 7.8 18 9 13 5.2 9.6 10.2 9.2Z" />
+    </svg>
+  );
+}
+
 export function IconCamera(props: IconProps) {
   return (
     <svg {...base} {...props}>

@@ -7,6 +7,7 @@ use App\Http\Controllers\Admin\ClientReportController as AdminClientReportContro
 use App\Http\Controllers\Admin\ClientReportSendController as AdminClientReportSendController;
 use App\Http\Controllers\Admin\ClientReportSlotController as AdminClientReportSlotController;
 use App\Http\Controllers\Admin\CommentController as AdminCommentController;
+use App\Http\Controllers\Admin\BotFeedbackController as AdminBotFeedbackController;
 use App\Http\Controllers\Admin\ComplaintController as AdminComplaintController;
 use App\Http\Controllers\Admin\ContactChannelController as AdminContactChannelController;
 use App\Http\Controllers\Admin\DriveFolderController as AdminDriveFolderController;
@@ -54,7 +55,6 @@ use App\Http\Controllers\DevBotController;
 use App\Http\Controllers\GithubWebhookController;
 use App\Http\Controllers\GoogleDriveAccountController;
 use App\Http\Controllers\IntegrationController;
-use App\Http\Controllers\WhatsAppBridgeRepairController;
 use App\Http\Controllers\LandingReelController;
 use App\Http\Controllers\LegalPageController;
 use App\Http\Controllers\LinkedInOAuthController;
@@ -69,6 +69,7 @@ use App\Http\Controllers\SocialFeedController;
 use App\Http\Controllers\StaffBotController;
 use App\Http\Controllers\TelegramBotController;
 use App\Http\Controllers\ThreadsOAuthController;
+use App\Http\Controllers\WhatsAppBridgeRepairController;
 use App\Http\Controllers\WhatsAppWebController;
 use App\Http\Controllers\WhatsAppWebhookController;
 use App\Models\LegalPage;
@@ -168,25 +169,35 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::delete('contact/{contact_channel}', [AdminContactChannelController::class, 'destroy']);
     });
 
-    Route::post('clients/{client}/logo', [AdminClientController::class, 'logo'])
-        ->middleware('ability:ops.clients.update')->whereNumber('client');
     Route::middleware('crud:ops.clients')->group(function () {
         Route::get('clients', [AdminClientController::class, 'index']);
         Route::post('clients', [AdminClientController::class, 'store']);
         Route::get('clients/{client}', [AdminClientController::class, 'show'])->whereNumber('client');
         Route::put('clients/{client}', [AdminClientController::class, 'update']);
         Route::delete('clients/{client}', [AdminClientController::class, 'destroy']);
+    });
+    Route::post('clients/{client}/logo', [AdminClientController::class, 'logo'])
+        ->middleware('ability:ops.clients.update')->whereNumber('client');
+    Route::middleware('ability:ops.clients.quotations_view,ops.clients.quotations_create,ops.clients.invoices_view,ops.clients.invoices_create,ops.clients.odoo')->group(function () {
         Route::get('odoo/status', [AdminOdooController::class, 'status']);
         Route::get('odoo/products', [AdminOdooController::class, 'products']);
         Route::get('odoo/taxes', [AdminOdooController::class, 'taxes']);
         Route::get('odoo/payment-terms', [AdminOdooController::class, 'paymentTerms']);
-        Route::get('odoo/quotations', [AdminOdooController::class, 'quotations']);
-        Route::get('odoo/invoices', [AdminOdooController::class, 'invoices']);
-        Route::get('odoo/quotations/{id}', [AdminOdooController::class, 'showQuotation'])->whereNumber('id');
-        Route::get('odoo/invoices/{id}', [AdminOdooController::class, 'showInvoice'])->whereNumber('id');
-        Route::get('odoo/{kind}/{id}/pdf', [AdminOdooPaperController::class, 'pdf'])->whereIn('kind', ['quotations', 'invoices'])->whereNumber('id');
-        Route::get('odoo/{kind}/{id}/activity', [AdminOdooPaperController::class, 'activity'])->whereIn('kind', ['quotations', 'invoices'])->whereNumber('id');
     });
+    Route::middleware('ability:ops.clients.quotations_view')->group(function () {
+        Route::get('odoo/quotations', [AdminOdooController::class, 'quotations']);
+        Route::get('odoo/quotations/{id}', [AdminOdooController::class, 'showQuotation'])->whereNumber('id');
+    });
+    Route::middleware('ability:ops.clients.invoices_view')->group(function () {
+        Route::get('odoo/invoices', [AdminOdooController::class, 'invoices']);
+        Route::get('odoo/invoices/{id}', [AdminOdooController::class, 'showInvoice'])->whereNumber('id');
+    });
+    Route::get('odoo/{kind}/{id}/pdf', [AdminOdooPaperController::class, 'pdf'])
+        ->middleware('ability:ops.clients.quotations_view,ops.clients.invoices_view')
+        ->whereIn('kind', ['quotations', 'invoices'])->whereNumber('id');
+    Route::get('odoo/{kind}/{id}/activity', [AdminOdooPaperController::class, 'activity'])
+        ->middleware('ability:ops.clients.quotations_view,ops.clients.invoices_view')
+        ->whereIn('kind', ['quotations', 'invoices'])->whereNumber('id');
     Route::post('odoo/{kind}/{id}/notes', [AdminOdooPaperController::class, 'note'])
         ->middleware(['ability:ops.clients.odoo_note', 'throttle:30,1'])
         ->whereIn('kind', ['quotations', 'invoices'])->whereNumber('id');
@@ -197,12 +208,20 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::post('odoo/sync-partners', [AdminOdooController::class, 'syncPartners']);
         Route::post('odoo/import-crm-clients', [AdminOdooController::class, 'importCrmClients']);
         Route::post('odoo/import-crm-clients/excel', [AdminOdooController::class, 'importCrmClientsExcel']);
+    });
+    Route::middleware('ability:ops.clients.quotations_create')->group(function () {
         Route::post('odoo/quotations', [AdminOdooController::class, 'storeQuotation']);
-        Route::post('odoo/invoices', [AdminOdooController::class, 'storeInvoice']);
+    });
+    Route::middleware('ability:ops.clients.quotations_update')->group(function () {
         Route::put('odoo/quotations/{id}', [AdminOdooController::class, 'updateQuotation'])->whereNumber('id');
         Route::post('odoo/quotations/{id}/cancel', [AdminOdooController::class, 'cancelQuotation'])->whereNumber('id');
-        Route::put('odoo/invoices/{id}', [AdminOdooController::class, 'updateInvoice'])->whereNumber('id');
+    });
+    Route::middleware('ability:ops.clients.invoices_create')->group(function () {
+        Route::post('odoo/invoices', [AdminOdooController::class, 'storeInvoice']);
         Route::post('odoo/quotations/{id}/invoice', [AdminOdooController::class, 'invoiceQuotation'])->whereNumber('id');
+    });
+    Route::middleware('ability:ops.clients.invoices_update')->group(function () {
+        Route::put('odoo/invoices/{id}', [AdminOdooController::class, 'updateInvoice'])->whereNumber('id');
         Route::post('odoo/invoices/{id}/post', [AdminOdooController::class, 'postInvoice'])->whereNumber('id');
         Route::post('odoo/invoices/{id}/cancel', [AdminOdooController::class, 'cancelInvoice'])->whereNumber('id');
         Route::post('odoo/invoices/{id}/draft', [AdminOdooController::class, 'draftInvoice'])->whereNumber('id');
@@ -251,20 +270,31 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::get('reports/{client_report}', [AdminClientReportController::class, 'show']);
         Route::match(['put', 'post'], 'reports/{client_report}', [AdminClientReportController::class, 'update']);
         Route::delete('reports/{client_report}', [AdminClientReportController::class, 'destroy']);
+    });
+    Route::middleware('ability:ops.reports.calendar_view')->group(function () {
+        Route::get('report-calendar', [ReportCalendarController::class, 'index']);
         Route::get('report-slots', [AdminClientReportSlotController::class, 'index']);
-        Route::post('report-slots', [AdminClientReportSlotController::class, 'store']);
-        Route::match(['put', 'post'], 'report-slots/{slot}', [AdminClientReportSlotController::class, 'update']);
-        Route::delete('report-slots/{slot}', [AdminClientReportSlotController::class, 'destroy']);
         Route::get('report-slots/{slot}/images/{image}', [AdminClientReportSlotController::class, 'image']);
+    });
+    Route::middleware('ability:ops.reports.calendar_create')->group(function () {
+        Route::post('report-deadlines', [ReportCalendarController::class, 'store']);
+        Route::post('report-slots', [AdminClientReportSlotController::class, 'store']);
+    });
+    Route::middleware('ability:ops.reports.calendar_update')->group(function () {
+        Route::put('report-deadlines/{report_deadline}', [ReportCalendarController::class, 'update']);
+        Route::put('report-deadlines/{report_deadline}/occurrences/{date}', [ReportCalendarController::class, 'occurrence']);
+        Route::match(['put', 'post'], 'report-slots/{slot}', [AdminClientReportSlotController::class, 'update']);
+    });
+    Route::middleware('ability:ops.reports.calendar_delete')->group(function () {
+        Route::delete('report-deadlines/{report_deadline}', [ReportCalendarController::class, 'destroy']);
+        Route::delete('report-slots/{slot}', [AdminClientReportSlotController::class, 'destroy']);
+    });
+    Route::middleware('ability:ops.reports.history_view')->group(function () {
         Route::get('report-history', [ReportHistoryController::class, 'index']);
         Route::get('report-versions/{client_report_version}/document', [ReportHistoryController::class, 'document']);
-        Route::put('report-versions/{client_report_version}/restore', [ReportHistoryController::class, 'restore']);
-        Route::get('report-calendar', [ReportCalendarController::class, 'index']);
-        Route::post('report-deadlines', [ReportCalendarController::class, 'store']);
-        Route::put('report-deadlines/{report_deadline}', [ReportCalendarController::class, 'update']);
-        Route::delete('report-deadlines/{report_deadline}', [ReportCalendarController::class, 'destroy']);
-        Route::put('report-deadlines/{report_deadline}/occurrences/{date}', [ReportCalendarController::class, 'occurrence']);
     });
+    Route::put('report-versions/{client_report_version}/restore', [ReportHistoryController::class, 'restore'])
+        ->middleware('ability:ops.reports.history_restore');
     Route::middleware('ability:ops.reports.send')->group(function () {
         Route::get('reports/{client_report}/sends', [AdminClientReportSendController::class, 'index']);
         Route::post('reports/{client_report}/send', [AdminClientReportSendController::class, 'store'])->middleware('throttle:20,1');
@@ -364,6 +394,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::post('complaints/{complaint}/ticket', [AdminComplaintController::class, 'openTicket']);
         Route::post('complaints/{complaint}/replies', [AdminComplaintController::class, 'reply']);
     });
+    Route::get('bot-feedback', [AdminBotFeedbackController::class, 'index'])->middleware('ability:ops.bot_feedback');
 
     Route::middleware('ability:ops.photography')->group(function () {
         Route::get('photography', [AdminPhotographyController::class, 'index']);
@@ -419,13 +450,16 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::delete('portfolio/categories/{portfolio_category}', [AdminPortfolioCategoryController::class, 'destroy']);
     });
 
-    Route::middleware('crud:ops.clients,site.projects')->group(function () {
-        Route::get('portfolio/clients', [AdminShowcaseClientController::class, 'index']);
-        Route::post('portfolio/clients', [AdminShowcaseClientController::class, 'store']);
-        Route::delete('portfolio/clients/bulk', [AdminShowcaseClientController::class, 'destroyAll']);
-        Route::put('portfolio/clients/{showcase_client}', [AdminShowcaseClientController::class, 'update']);
-        Route::delete('portfolio/clients/{showcase_client}', [AdminShowcaseClientController::class, 'destroy']);
-    });
+    Route::get('portfolio/clients', [AdminShowcaseClientController::class, 'index'])
+        ->middleware('ability:ops.clients.logos_view');
+    Route::post('portfolio/clients', [AdminShowcaseClientController::class, 'store'])
+        ->middleware('ability:ops.clients.logos_create');
+    Route::delete('portfolio/clients/bulk', [AdminShowcaseClientController::class, 'destroyAll'])
+        ->middleware('ability:ops.clients.logos_delete');
+    Route::put('portfolio/clients/{showcase_client}', [AdminShowcaseClientController::class, 'update'])
+        ->middleware('ability:ops.clients.logos_update');
+    Route::delete('portfolio/clients/{showcase_client}', [AdminShowcaseClientController::class, 'destroy'])
+        ->middleware('ability:ops.clients.logos_delete');
 
     Route::middleware('crud:site.projects')->group(function () {
         Route::get('portfolio/projects', [AdminPortfolioProjectController::class, 'index']);

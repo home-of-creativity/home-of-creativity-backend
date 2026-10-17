@@ -15,6 +15,7 @@ RUN apt-get update \
         libxml2-dev \
         libreoffice-writer \
         fonts-noto-core \
+        fonts-noto-color-emoji \
     && docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
     && docker-php-ext-install -j$(nproc) pdo_mysql mbstring zip intl gd bcmath pcntl \
     && curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/bin --filename=composer \

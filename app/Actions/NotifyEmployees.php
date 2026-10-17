@@ -93,6 +93,45 @@ class NotifyEmployees
         return $sent;
     }
 
+    /** Photography and legacy media staff on WhatsApp (Telegram when a phone is missing). */
+    public function photographersWhatsApp(string $text): int
+    {
+        $sent = 0;
+        foreach (EmployeeProfession::photographers() as $profession) {
+            $sent += $this->professionWhatsApp($profession, $text);
+        }
+
+        return $sent;
+    }
+
+    /**
+     * @param  list<array{text: string, callback_data: string}>|null  $inlineButtons
+     * @param  array{path: string, mime?: string|null, name?: string|null}|null  $attachment
+     */
+    public function photographers(
+        ServiceRequest $request,
+        string $text,
+        ?array $inlineButtons = null,
+        ?array $attachment = null,
+    ): int {
+        $sent = 0;
+        foreach (EmployeeProfession::photographers() as $profession) {
+            $sent += $this->handle($request, $profession, $text, $inlineButtons, $attachment);
+        }
+
+        return $sent;
+    }
+
+    public function photographersPlain(string $text): int
+    {
+        $sent = 0;
+        foreach (EmployeeProfession::photographers() as $profession) {
+            $sent += $this->handlePlain($profession, $text);
+        }
+
+        return $sent;
+    }
+
     /**
      * The management WhatsApp numbers, or each Telegram admin when none are set.
      */
@@ -106,15 +145,27 @@ class NotifyEmployees
      */
     public function support(string $text): int
     {
+        return $this->supportWithImage($text, null);
+    }
+
+    /**
+     * Support numbers get an optional image (Sham Cash QR) with the caption; falls back to text then admins.
+     */
+    public function supportWithImage(string $text, ?string $absoluteImagePath): int
+    {
         $numbers = (array) config('services.whatsapp.support_numbers', []);
 
-        return $this->toNumbers($numbers !== [] ? $numbers : (array) config('services.whatsapp.management_numbers', []), $text);
+        return $this->toNumbers(
+            $numbers !== [] ? $numbers : (array) config('services.whatsapp.management_numbers', []),
+            $text,
+            $absoluteImagePath,
+        );
     }
 
     /**
      * @param  array<int, mixed>  $configured
      */
-    private function toNumbers(array $configured, string $text): int
+    private function toNumbers(array $configured, string $text, ?string $absoluteImagePath = null): int
     {
         $numbers = array_values(array_filter(array_map(
             fn ($number): string => ClientPhone::whatsappDigits((string) $number),
@@ -124,9 +175,14 @@ class NotifyEmployees
             return $this->handleAdmins($text);
         }
         $sent = 0;
+        $image = filled($absoluteImagePath) && is_file($absoluteImagePath) ? $absoluteImagePath : null;
         foreach ($numbers as $number) {
             try {
-                $this->whatsApp->sendText($number, $text.self::AUTOMATED);
+                if ($image !== null) {
+                    $this->whatsApp->sendImage($number, $image, $text.self::AUTOMATED);
+                } else {
+                    $this->whatsApp->sendText($number, $text.self::AUTOMATED);
+                }
                 $sent++;
             } catch (\Throwable $exception) {
                 Log::warning('Staff WhatsApp notify failed.', ['error' => $exception->getMessage()]);

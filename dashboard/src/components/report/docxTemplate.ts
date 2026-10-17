@@ -222,7 +222,7 @@ function templateBody(id: ReportTemplateId): Block[] {
 const STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:styles ${W}>
 <w:docDefaults>
-<w:rPrDefault><w:rPr><w:rFonts w:ascii="${REPORT_FONT}" w:hAnsi="${REPORT_FONT}" w:cs="${REPORT_FONT}" w:eastAsia="${REPORT_FONT}"/><w:color w:val="1A0838"/><w:sz w:val="24"/><w:szCs w:val="24"/><w:lang w:val="en-US" w:bidi="ar-SA"/></w:rPr></w:rPrDefault>
+<w:rPrDefault><w:rPr><w:rFonts w:ascii="${REPORT_FONT}" w:hAnsi="${REPORT_FONT}" w:cs="${REPORT_FONT}" w:eastAsia="${REPORT_FONT}"/><w:color w:val="1A0838"/><w:sz w:val="28"/><w:szCs w:val="28"/><w:lang w:val="en-US" w:bidi="ar-SA"/></w:rPr></w:rPrDefault>
 <w:pPrDefault><w:pPr><w:bidi/><w:spacing w:after="120" w:line="300" w:lineRule="auto"/></w:pPr></w:pPrDefault>
 </w:docDefaults>
 <w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style>

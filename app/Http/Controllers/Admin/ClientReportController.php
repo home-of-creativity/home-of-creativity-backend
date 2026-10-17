@@ -15,6 +15,8 @@ use App\Models\ClientReport;
 use App\Models\ClientReportAttachment;
 use App\Models\ClientReportVersion;
 use App\Support\ClientPhone;
+use App\Support\ReportTitle;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -98,9 +100,15 @@ class ClientReportController extends Controller
             ->setStatusCode(201);
     }
 
-    public function update(StoreClientReportRequest $request, ClientReport $clientReport, PublishClientReport $publish): ClientReportResource
+    public function update(StoreClientReportRequest $request, ClientReport $clientReport, PublishClientReport $publish): ClientReportResource|JsonResponse
     {
         $report = $clientReport;
+        if ($this->stale($request, $report)) {
+            return response()->json([
+                'message' => 'حُفظ هذا التقرير من مكان آخر.',
+                'code' => 'report_conflict',
+            ], 409);
+        }
         $report->fill([
             'title' => $request->validated('title'),
             'body' => (string) ($request->validated('body') ?? $report->body ?? ''),
@@ -138,7 +146,7 @@ class ClientReportController extends Controller
 
         return Storage::disk(self::DISK)->download(
             $clientReport->document_path,
-            $clientReport->title.'.docx',
+            $this->downloadName($clientReport, 'docx'),
             ['Content-Type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
         );
     }
@@ -165,7 +173,7 @@ class ClientReportController extends Controller
     {
         abort_unless(filled($clientReport->pdf_path) && Storage::disk(self::DISK)->exists($clientReport->pdf_path), 404);
 
-        return Storage::disk(self::DISK)->download($clientReport->pdf_path, $clientReport->title.'.pdf', ['Content-Type' => 'application/pdf']);
+        return Storage::disk(self::DISK)->download($clientReport->pdf_path, $this->downloadName($clientReport, 'pdf'), ['Content-Type' => 'application/pdf']);
     }
 
     public function destroy(Request $request, ClientReport $clientReport): JsonResponse
@@ -188,6 +196,24 @@ class ClientReportController extends Controller
             'data' => null,
             'message' => 'Deleted.',
         ]);
+    }
+
+    /** The client saved from a copy that is no longer the one on the server. */
+    private function stale(Request $request, ClientReport $report): bool
+    {
+        $sent = $request->input('updated_at');
+        if (! is_string($sent) || trim($sent) === '' || $report->updated_at === null) {
+            return false;
+        }
+
+        return $report->updated_at->format('Y-m-d H:i:s') !== Carbon::parse($sent)->format('Y-m-d H:i:s');
+    }
+
+    private function downloadName(ClientReport $report, string $extension): string
+    {
+        $title = ReportTitle::clean($report->title);
+
+        return ($title !== '' ? $title : 'report-'.$report->id).'.'.$extension;
     }
 
     /**

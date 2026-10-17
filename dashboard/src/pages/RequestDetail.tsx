@@ -379,8 +379,11 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
   const showClientFallback = item.client_bot_reachable === false && (quoteDecisionOpen || revisionOpen || completionOpen) && can("ops.requests.quotation");
   const paperState = (state: string) => t(paperStateLabels[state] ?? { ar: state, en: state });
   const payState = (state: string) => t(payStateLabels[state] ?? { ar: state, en: state });
-  const paperButtons = (kind: OdooPaperKind, paperId: number) =>
-    can("ops.clients.view") ? (
+  const paperButtons = (kind: OdooPaperKind, paperId: number) => {
+    const canViewPaper = kind === "quotations" ? can("ops.clients.quotations_view") : can("ops.clients.invoices_view");
+    if (!canViewPaper) return null;
+
+    return (
       <span className="paper-inline-actions" dir="auto">
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPaperView({ kind, id: paperId, mode: "preview" })}>
           {t(copy.paperPreview)}
@@ -394,7 +397,8 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
           </button>
         ) : null}
       </span>
-    ) : null;
+    );
+  };
 
   return (
     <div className="detail">

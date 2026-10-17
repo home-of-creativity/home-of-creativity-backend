@@ -39,7 +39,7 @@ export function ReportHistory({
   onRestored?: (report: ClientReport) => void;
 }) {
   const ar = locale === "ar";
-  const mayRestore = useCan()("ops.reports.update");
+  const mayRestore = useCan()("ops.reports.history_restore");
   const [rows, setRows] = useState<ReportVersion[]>([]);
   const [page, setPage] = useState(1);
   const [lastPage, setLastPage] = useState(1);

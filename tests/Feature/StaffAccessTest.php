@@ -203,6 +203,71 @@ class StaffAccessTest extends TestCase
         $this->assertSame('إضافة مصروف', $finance['action_labels']['expense_create']['ar']);
         $requests = $catalog->firstWhere('key', StaffAbility::OpsRequests->value);
         $this->assertSame(['view', 'edit', 'quotation', 'approve_quotation', 'payments', 'work_plan', 'integrations', 'renew'], $requests['actions']);
+        $clients = $catalog->firstWhere('key', StaffAbility::OpsClients->value);
+        $this->assertSame([
+            'view', 'create', 'update', 'delete',
+            'logos_view', 'logos_create', 'logos_update', 'logos_delete',
+            'quotations_view', 'quotations_create', 'quotations_update',
+            'invoices_view', 'invoices_create', 'invoices_update',
+            'odoo', 'odoo_delete', 'odoo_note', 'proforma',
+        ], $clients['actions']);
+        $this->assertSame('عرض شعارات العملاء', $clients['action_labels']['logos_view']['ar']);
+        $this->assertSame('عرض عروض الأسعار', $clients['action_labels']['quotations_view']['ar']);
+        $this->assertSame('عرض الفواتير', $clients['action_labels']['invoices_view']['ar']);
+        $reports = $catalog->firstWhere('key', StaffAbility::OpsReports->value);
+        $this->assertSame([
+            'view', 'create', 'update', 'delete', 'send',
+            'calendar_view', 'calendar_create', 'calendar_update', 'calendar_delete',
+            'history_view', 'history_restore',
+        ], $reports['actions']);
+        $this->assertSame('عرض تقويم التقارير', $reports['action_labels']['calendar_view']['ar']);
+        $this->assertSame('عرض سجل التعديلات', $reports['action_labels']['history_view']['ar']);
+    }
+
+    public function test_report_calendar_and_history_are_separate_from_the_list(): void
+    {
+        $calendar = Role::query()->create([
+            'name' => 'تقويم تقارير',
+            'abilities' => ['ops.reports.calendar_view'],
+        ]);
+        Sanctum::actingAs(User::factory()->create(['role_id' => $calendar->id]));
+        Http::fake();
+
+        $this->assertNotSame(403, $this->getJson('/api/admin/report-calendar?from=2026-10-01&to=2026-10-31')->status());
+        $this->getJson('/api/admin/report-history')->assertForbidden();
+        $this->getJson('/api/admin/reports')->assertForbidden();
+
+        $history = Role::query()->create([
+            'name' => 'سجل تقارير',
+            'abilities' => ['ops.reports.history_view'],
+        ]);
+        Sanctum::actingAs(User::factory()->create(['role_id' => $history->id]));
+        $this->getJson('/api/admin/report-history')->assertOk();
+        $this->getJson('/api/admin/report-calendar?from=2026-10-01&to=2026-10-31')->assertForbidden();
+    }
+
+    public function test_client_tab_abilities_gate_papers_and_logos(): void
+    {
+        $role = Role::query()->create([
+            'name' => 'عروض فقط',
+            'abilities' => ['ops.clients.quotations_view'],
+        ]);
+        Sanctum::actingAs(User::factory()->create(['role_id' => $role->id]));
+        Http::fake();
+
+        // Ability passes; Odoo itself may answer 422 when not configured.
+        $this->assertNotSame(403, $this->getJson('/api/admin/odoo/quotations')->status());
+        $this->getJson('/api/admin/odoo/invoices')->assertForbidden();
+        $this->getJson('/api/admin/clients')->assertForbidden();
+        $this->getJson('/api/admin/portfolio/clients')->assertForbidden();
+
+        $logos = Role::query()->create([
+            'name' => 'شعارات',
+            'abilities' => ['ops.clients.logos_view', 'ops.clients.logos_create'],
+        ]);
+        Sanctum::actingAs(User::factory()->create(['role_id' => $logos->id]));
+        $this->getJson('/api/admin/portfolio/clients')->assertOk();
+        $this->getJson('/api/admin/odoo/quotations')->assertForbidden();
     }
 
     public function test_each_operation_is_its_own_permission(): void
@@ -234,7 +299,22 @@ class StaffAccessTest extends TestCase
     public function test_old_role_grants_become_the_operations_they_covered(): void
     {
         $this->assertSame(
-            ['ops.requests.view', 'ops.requests.quotation', 'ops.requests.payments', 'ops.requests.work_plan', 'ops.requests.integrations', 'ops.requests.renew', 'ops.requests.edit', 'ops.clients.create', 'ops.clients.odoo', 'ops.photography_all', 'ops.photography_calendars'],
+            [
+                'ops.requests.view',
+                'ops.requests.quotation',
+                'ops.requests.payments',
+                'ops.requests.work_plan',
+                'ops.requests.integrations',
+                'ops.requests.renew',
+                'ops.requests.edit',
+                'ops.clients.create',
+                'ops.clients.odoo',
+                'ops.clients.logos_create',
+                'ops.clients.quotations_create',
+                'ops.clients.invoices_create',
+                'ops.photography_all',
+                'ops.photography_calendars',
+            ],
             StaffAbility::upgradeLegacy(['ops.requests.view', 'ops.requests.create', 'ops.requests.update', 'ops.clients.create', 'ops.photography_all']),
         );
     }

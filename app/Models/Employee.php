@@ -69,6 +69,11 @@ class Employee extends Model
         return $this->profession === EmployeeProfession::Sales;
     }
 
+    public function isPhotographer(): bool
+    {
+        return $this->profession?->isPhotographer() ?? false;
+    }
+
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);

@@ -1042,7 +1042,7 @@ class GoogleDriveClient
         $owner = $this->storageOwner($serviceToken, $context['meta']);
         $token = $owner !== null ? $this->auth->accessTokenFor($owner) : null;
         if ($token === null) {
-            return $this->fail('The service account has no Drive storage. Set GOOGLE_DRIVE_OAUTH_CLIENT_ID, GOOGLE_DRIVE_OAUTH_CLIENT_SECRET, and GOOGLE_DRIVE_REFRESH_TOKEN in the server environment, then publish again.');
+            return $this->fail('مساحة Drive غير متاحة لهذا الحساب. اطلب ربط حساب Google ثم أعد النشر.');
         }
 
         return $token;
@@ -1341,7 +1341,7 @@ class GoogleDriveClient
             return $message;
         }
 
-        return $message.' The service account has no Drive storage. Set GOOGLE_DRIVE_REFRESH_TOKEN in the server environment.';
+        return 'مساحة Drive غير متاحة لهذا الحساب. اطلب ربط حساب Google ثم أعد النشر.';
     }
 
     /**

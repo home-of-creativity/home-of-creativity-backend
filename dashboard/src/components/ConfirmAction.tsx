@@ -9,6 +9,7 @@ export function ConfirmAction({
   noLabel,
   onConfirm,
   className,
+  yesClassName,
   disabled,
 }: {
   label: string;
@@ -17,6 +18,7 @@ export function ConfirmAction({
   noLabel: string;
   onConfirm: () => void;
   className?: string;
+  yesClassName?: string;
   disabled?: boolean;
 }) {
   const [confirming, setConfirming] = useState(false);
@@ -49,7 +51,7 @@ export function ConfirmAction({
           {confirmLabel ? <span className="confirm-action-label">{confirmLabel}</span> : null}
           <button
             type="button"
-            className="btn btn-ghost btn-confirm-yes"
+            className={yesClassName ?? "btn btn-ghost btn-confirm-yes"}
             onClick={() => {
               cancel();
               onConfirm();

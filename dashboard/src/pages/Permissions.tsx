@@ -405,7 +405,7 @@ export function Permissions({ locale, t }: { locale: Locale; t: (c: { ar: string
                 <button type="button" className="btn btn-ghost" onClick={() => setDraft({ id: role.id, name: role.name, abilities: expandAbilities(role.abilities, groups) })}>
                   {role.name}
                 </button>
-                <small> · {role.users_count ?? 0}</small>
+                <small>{role.users_count ?? 0}</small>
                 <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void removeRole(role)}>
                   {t(copy.deletePermission)}
                 </button>

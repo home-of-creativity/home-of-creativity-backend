@@ -11,6 +11,7 @@ import { BrandLockup } from "./components/BrandLockup";
 import { CommandPalette, type CommandItem } from "./components/CommandPalette";
 import { ClientChannelsPage } from "./pages/ClientChannels";
 import { PhotographyPage } from "./pages/Photography";
+import { BotFeedbackPage } from "./pages/BotFeedback";
 import { ComplaintsPage } from "./pages/Complaints";
 import { ClientForm } from "./pages/ClientForm";
 import { Clients } from "./pages/Clients";
@@ -65,6 +66,7 @@ import {
   IconArticles,
   IconCamera,
   IconChannels,
+  IconBotFeedback,
   IconComplaint,
   IconOverview,
   IconPricing,
@@ -143,6 +145,7 @@ function Shell({
     { id: "channels", label: t(copy.navChannels), to: "/channels", icon: <IconChannels aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
     { id: "photography", label: t(copy.navPhotography), to: "/photography", icon: <IconCamera aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
     { id: "complaints", label: t(copy.navComplaints), to: "/complaints", icon: <IconComplaint aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
+    { id: "bot-feedback", label: t(copy.navBotFeedback), to: "/bot-feedback", icon: <IconBotFeedback aria-hidden width={18} height={18} />, group: t(copy.commandGroupPages) },
     { id: "add-employee", label: t(copy.addEmployee), to: "/employees/new", icon: <IconEmployees aria-hidden width={18} height={18} />, group: t(copy.commandGroupActions) },
     { id: "add-client", label: t(copy.addClient), to: "/clients/new", icon: <IconClients aria-hidden width={18} height={18} />, group: t(copy.commandGroupActions) },
     { id: "add-reel", label: t(copy.addReel), to: "/reels/new", icon: <IconReels aria-hidden width={18} height={18} />, group: t(copy.commandGroupActions) },
@@ -218,13 +221,13 @@ function Shell({
             </span>
           </NavLink>
           ) : null}
-          {canAbility(user, "ops.clients.view") ? (
+          {canAbility(user, "ops.clients.view") || canAbility(user, "ops.clients.logos_view") || canAbility(user, "ops.clients.quotations_view") || canAbility(user, "ops.clients.invoices_view") || canAbility(user, "ops.clients.logos_create") || canAbility(user, "ops.clients.quotations_create") || canAbility(user, "ops.clients.invoices_create") ? (
           <NavLink to="/clients">
             <IconClients aria-hidden />
             <span>{t(copy.clients)}</span>
           </NavLink>
           ) : null}
-          {canAbility(user, "ops.reports.view") ? (
+          {canAbility(user, "ops.reports.view") || canAbility(user, "ops.reports.calendar_view") || canAbility(user, "ops.reports.history_view") || canAbility(user, "ops.reports.create") || canAbility(user, "ops.reports.calendar_create") ? (
           <NavLink to="/reports">
             <IconClients aria-hidden />
             <span>{t(copy.reportsTitle)}</span>
@@ -270,6 +273,12 @@ function Shell({
           <NavLink to="/complaints">
             <IconComplaint aria-hidden />
             <span>{t(copy.navComplaints)}</span>
+          </NavLink>
+          ) : null}
+          {canAbility(user, "ops.bot_feedback") ? (
+          <NavLink to="/bot-feedback">
+            <IconBotFeedback aria-hidden />
+            <span>{t(copy.navBotFeedback)}</span>
           </NavLink>
           ) : null}
           <p className="nav-group-label">{t(copy.navSite)}</p>
@@ -531,6 +540,7 @@ export function App() {
           <Route path="/channels" element={<ClientChannelsPage locale={locale} t={t} />} />
           <Route path="/photography" element={<PhotographyPage locale={locale} t={t} />} />
           <Route path="/complaints" element={<ComplaintsPage locale={locale} t={t} />} />
+          <Route path="/bot-feedback" element={<BotFeedbackPage locale={locale} t={t} />} />
           <Route path="/client-logos" element={<Navigate to="/clients?tab=logos" replace />} />
           <Route path="/projects" element={<PortfolioProjects locale={locale} t={t} />} />
           <Route path="/projects/new" element={<PortfolioProjectForm locale={locale} t={t} />} />
@@ -605,6 +615,7 @@ const commandAbility: Record<string, StaffAbility | "social" | "owner"> = {
   channels: "ops.channels",
   photography: "ops.photography",
   complaints: "ops.complaints",
+  "bot-feedback": "ops.bot_feedback",
   "add-employee": "ops.employees",
   "add-client": "ops.clients",
   "add-reel": "site.reels",
@@ -632,10 +643,35 @@ function pathAllowed(user: User | null, pathname: string) {
   if (pathname === "/permissions") return user.is_admin;
   if (user.is_admin && !user.role) return true;
   const verb = pathname.includes("/new") ? "create" : pathname.includes("/edit") ? "update" : "view";
-  if (pathname.startsWith("/reports")) return canAbility(user, `ops.reports.${verb}`);
+  if (pathname.startsWith("/reports")) {
+    if (pathname.includes("/new")) return canAbility(user, "ops.reports.create");
+    if (pathname.includes("/edit")) return canAbility(user, "ops.reports.update");
+    return canAbility(user, "ops.reports.view")
+      || canAbility(user, "ops.reports.calendar_view")
+      || canAbility(user, "ops.reports.history_view")
+      || canAbility(user, "ops.reports.create")
+      || canAbility(user, "ops.reports.calendar_create")
+      || canAbility(user, "ops.reports.send");
+  }
   if (pathname.startsWith("/requests")) return canAbility(user, `ops.requests.${verb}`);
   if (pathname.startsWith("/employees")) return canAbility(user, `ops.employees.${verb}`);
-  if (pathname.startsWith("/clients")) return canAbility(user, `ops.clients.${verb}`);
+  if (pathname.startsWith("/clients/logos")) {
+    if (pathname.includes("/new")) return canAbility(user, "ops.clients.logos_create");
+    if (pathname.includes("/edit")) return canAbility(user, "ops.clients.logos_update");
+    return canAbility(user, "ops.clients.logos_view") || canAbility(user, "ops.clients.logos_create") || canAbility(user, "ops.clients.logos_update");
+  }
+  if (pathname.startsWith("/clients")) {
+    if (pathname.includes("/new")) return canAbility(user, "ops.clients.create");
+    if (pathname.includes("/edit")) return canAbility(user, "ops.clients.update");
+    return canAbility(user, "ops.clients.view")
+      || canAbility(user, "ops.clients.logos_view")
+      || canAbility(user, "ops.clients.quotations_view")
+      || canAbility(user, "ops.clients.invoices_view")
+      || canAbility(user, "ops.clients.create")
+      || canAbility(user, "ops.clients.logos_create")
+      || canAbility(user, "ops.clients.quotations_create")
+      || canAbility(user, "ops.clients.invoices_create");
+  }
   if (pathname.startsWith("/payments")) return canAbility(user, "ops.payments");
   if (pathname.startsWith("/finance")) return canAbility(user, "ops.finance");
   if (pathname.startsWith("/vouchers")) {
@@ -646,6 +682,7 @@ function pathAllowed(user: User | null, pathname: string) {
   if (pathname.startsWith("/channels")) return canAbility(user, "ops.channels");
   if (pathname.startsWith("/photography")) return canAbility(user, "ops.photography");
   if (pathname.startsWith("/complaints")) return canAbility(user, "ops.complaints");
+  if (pathname.startsWith("/bot-feedback")) return canAbility(user, "ops.bot_feedback");
   if (pathname.startsWith("/projects")) return canAbility(user, `site.projects.${verb}`);
   if (pathname.startsWith("/reels")) return canAbility(user, `site.reels.${verb}`);
   if (pathname.startsWith("/articles")) return canAbility(user, `site.articles.${verb}`);
@@ -662,6 +699,6 @@ function pathAllowed(user: User | null, pathname: string) {
 }
 
 function homeFor(user: User) {
-  const candidates = ["/", "/requests", "/employees", "/clients", "/reports", "/social", "/payments", "/finance", "/vouchers", "/channels", "/photography", "/complaints", "/projects", "/reels", "/articles", "/categories", "/pricing", "/contact", "/profile-pdf", "/privacy", "/permissions"];
+  const candidates = ["/", "/requests", "/employees", "/clients", "/reports", "/social", "/payments", "/finance", "/vouchers", "/channels", "/photography", "/complaints", "/bot-feedback", "/projects", "/reels", "/articles", "/categories", "/pricing", "/contact", "/profile-pdf", "/privacy", "/permissions"];
   return candidates.find((path) => pathAllowed(user, path)) ?? "/";
 }

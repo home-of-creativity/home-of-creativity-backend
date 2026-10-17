@@ -59,6 +59,11 @@ export function ReportSendPanel({
       toast.error(t(copy.reportSendNeedOne));
       return;
     }
+    if (phone.trim()) {
+      const who = client?.company_name || client?.name || "";
+      const question = t(copy.reportSendConfirm).replace("{name}", who).replace("{phone}", phone.trim());
+      if (!window.confirm(question)) return;
+    }
     setBusy(true);
     try {
       const saved = await beforeSend();

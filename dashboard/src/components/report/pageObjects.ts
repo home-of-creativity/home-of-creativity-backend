@@ -102,6 +102,154 @@ export function addBlankPage(docx: Uint8Array, paraId: string): Uint8Array | nul
   return next ? pack(doc.files, next) : null;
 }
 
+/**
+ * Set or clear right-to-left on one paragraph. Other paragraphs stay as they are.
+ * `null` when that paragraph is not in the file.
+ */
+export function setParagraphDirection(docx: Uint8Array, paraId: string, direction: "rtl" | "ltr"): Uint8Array | null {
+  const doc = unpack(docx);
+  if (!doc) return null;
+  const start = doc.xml.search(new RegExp(`<w:p\\b[^>]*w14:paraId="${paraId}"`));
+  if (start < 0) return null;
+  const end = paragraphEnd(doc.xml, start);
+  if (end < 0) return null;
+  const paragraph = doc.xml.slice(start, end);
+  const next = direction === "rtl" ? withBidi(paragraph) : withoutBidi(paragraph);
+  if (next === paragraph) return docx;
+  return pack(doc.files, doc.xml.slice(0, start) + next + doc.xml.slice(end));
+}
+
+function withBidi(paragraph: string) {
+  if (/<w:bidi\b/.test(paragraph)) return paragraph.replace(/<w:bidi\b[^>]*\/>/, "<w:bidi/>");
+  const properties = paragraph.match(/<w:pPr\b[^>]*>/);
+  if (!properties) return paragraph.replace(/^(<w:p\b[^>]*>)/, "$1<w:pPr><w:bidi/></w:pPr>");
+  return paragraph.replace(properties[0], `${properties[0]}<w:bidi/>`);
+}
+
+function withoutBidi(paragraph: string) {
+  return paragraph.replace(/<w:bidi\b[^>]*\/>/, "");
+}
+
+function paragraphBounds(xml: string, paraId: string) {
+  const start = xml.search(new RegExp(`<w:p\\b[^>]*w14:paraId="${paraId}"`));
+  if (start < 0) return null;
+  const end = paragraphEnd(xml, start);
+  return end < 0 ? null : { start, end };
+}
+
+/** Heading 1, 2, or 3 on one paragraph. The style ids match the report template. */
+export function setParagraphStyle(docx: Uint8Array, paraId: string, style: "Heading1" | "Heading2" | "Heading3"): Uint8Array | null {
+  const doc = unpack(docx);
+  if (!doc) return null;
+  const bounds = paragraphBounds(doc.xml, paraId);
+  if (!bounds) return null;
+  const tag = `<w:pStyle w:val="${style}"/>`;
+  let paragraph = doc.xml.slice(bounds.start, bounds.end);
+  if (/<w:pStyle\b/.test(paragraph)) paragraph = paragraph.replace(/<w:pStyle\b[^>]*\/>/, tag);
+  else if (/<w:pPr\b[^>]*>/.test(paragraph)) paragraph = paragraph.replace(/(<w:pPr\b[^>]*>)/, `$1${tag}`);
+  else paragraph = paragraph.replace(/^(<w:p\b[^>]*>)/, `$1<w:pPr>${tag}</w:pPr>`);
+  return pack(doc.files, doc.xml.slice(0, bounds.start) + paragraph + doc.xml.slice(bounds.end));
+}
+
+/** A single line under the caret's paragraph. Pressing it again leaves the same line. */
+export function setHorizontalRule(docx: Uint8Array, paraId: string): Uint8Array | null {
+  const doc = unpack(docx);
+  if (!doc) return null;
+  const bounds = paragraphBounds(doc.xml, paraId);
+  if (!bounds) return null;
+  const rule = '<w:pBdr><w:bottom w:val="single" w:sz="12" w:space="1" w:color="1A1224"/></w:pBdr>';
+  let paragraph = doc.xml.slice(bounds.start, bounds.end);
+  if (/<w:pBdr\b/.test(paragraph)) {
+    if (/<w:bottom\b/.test(paragraph)) return docx;
+    paragraph = paragraph.replace(/<w:pBdr\b[^>]*>/, (open) => `${open}<w:bottom w:val="single" w:sz="12" w:space="1" w:color="1A1224"/>`);
+  } else if (/<w:pPr\b[^>]*>/.test(paragraph)) {
+    paragraph = paragraph.replace(/(<w:pPr\b[^>]*>)/, `$1${rule}`);
+  } else {
+    paragraph = paragraph.replace(/^(<w:p\b[^>]*>)/, `$1<w:pPr>${rule}</w:pPr>`);
+  }
+  return pack(doc.files, doc.xml.slice(0, bounds.start) + paragraph + doc.xml.slice(bounds.end));
+}
+
+/** A page break after the caret's paragraph. The following text starts on the next page. */
+export function insertPageBreak(docx: Uint8Array, paraId: string): Uint8Array | null {
+  const doc = unpack(docx);
+  if (!doc) return null;
+  const next = insertAfterParagraph(doc.xml, paraId, PAGE_BREAK);
+  return next ? pack(doc.files, next) : null;
+}
+
+const COLUMN_MIN_TWIPS = 720;
+
+/**
+ * Drag one column wider or narrower. The neighbor takes the difference, so the table
+ * stays the same width. `columnIndex` is the cell's place in its row, starting at 0.
+ */
+export function resizeTableColumn(docx: Uint8Array, paraId: string, columnIndex: number, deltaTwips: number): Uint8Array | null {
+  const doc = unpack(docx);
+  if (!doc || columnIndex < 0 || deltaTwips === 0) return null;
+  const bounds = paragraphBounds(doc.xml, paraId);
+  if (!bounds) return null;
+  const tableStart = tableOpenBefore(doc.xml, bounds.start);
+  if (tableStart < 0) return null;
+  const tableEnd = tableClose(doc.xml, tableStart);
+  if (tableEnd < 0) return null;
+  let table = doc.xml.slice(tableStart, tableEnd);
+  const cols = [...table.matchAll(/<w:gridCol\b[^>]*\/>/g)];
+  if (columnIndex >= cols.length) return null;
+  const widthOf = (tag: string) => Number(tag.match(/\bw:w="(\d+)"/)?.[1] ?? 0);
+  const neighbor = columnIndex + 1 < cols.length ? columnIndex + 1 : columnIndex > 0 ? columnIndex - 1 : -1;
+  const left = widthOf(cols[columnIndex][0]);
+  const right = neighbor >= 0 ? widthOf(cols[neighbor][0]) : 0;
+  let nextLeft = left + deltaTwips;
+  let nextRight = neighbor >= 0 ? right - deltaTwips : 0;
+  if (neighbor < 0) nextLeft = Math.max(COLUMN_MIN_TWIPS, nextLeft);
+  else {
+    if (nextLeft < COLUMN_MIN_TWIPS) {
+      nextRight -= COLUMN_MIN_TWIPS - nextLeft;
+      nextLeft = COLUMN_MIN_TWIPS;
+    }
+    if (nextRight < COLUMN_MIN_TWIPS) {
+      nextLeft -= COLUMN_MIN_TWIPS - nextRight;
+      nextRight = COLUMN_MIN_TWIPS;
+    }
+    if (nextLeft < COLUMN_MIN_TWIPS || nextRight < COLUMN_MIN_TWIPS) return null;
+  }
+  table = replaceGridWidth(table, columnIndex, nextLeft);
+  if (neighbor >= 0) table = replaceGridWidth(table, neighbor, nextRight);
+  const sum = [...table.matchAll(/<w:gridCol\b[^>]*\bw:w="(\d+)"[^>]*\/>/g)].reduce((total, match) => total + Number(match[1]), 0);
+  if (/<w:tblW\b[^>]*w:type="dxa"/.test(table) && sum > 0) {
+    table = table.replace(/(<w:tblW\b[^>]*\bw:w=")(\d+)(")/, `$1${sum}$3`);
+  }
+  if (table === doc.xml.slice(tableStart, tableEnd)) return null;
+  return pack(doc.files, doc.xml.slice(0, tableStart) + table + doc.xml.slice(tableEnd));
+}
+
+function replaceGridWidth(table: string, index: number, width: number) {
+  let seen = 0;
+  return table.replace(/<w:gridCol\b[^>]*\/>/g, (tag) => {
+    if (seen++ !== index) return tag;
+    return tag.includes('w:w="') ? tag.replace(/\bw:w="\d+"/, `w:w="${width}"`) : tag.replace("/>", ` w:w="${width}"/>`);
+  });
+}
+
+function tableOpenBefore(xml: string, at: number) {
+  const marks = /<w:tbl(?=[\s>])/g;
+  let last = -1;
+  for (let match = marks.exec(xml); match && match.index < at; match = marks.exec(xml)) last = match.index;
+  return last;
+}
+
+function tableClose(xml: string, start: number) {
+  const marks = /<w:tbl(?=[\s>])|<\/w:tbl>/g;
+  marks.lastIndex = start;
+  let depth = 0;
+  for (let match = marks.exec(xml); match; match = marks.exec(xml)) {
+    depth += match[0] === "</w:tbl>" ? -1 : 1;
+    if (depth === 0) return match.index + match[0].length;
+  }
+  return -1;
+}
+
 /** Insert `block` after the body paragraph with this `w14:paraId`; null when it is not found. */
 function insertAfterParagraph(xml: string, paraId: string, block: string) {
   const start = xml.search(new RegExp(`<w:p\\b[^>]*w14:paraId="${paraId}"`));

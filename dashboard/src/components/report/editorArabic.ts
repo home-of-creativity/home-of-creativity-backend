@@ -138,6 +138,39 @@ export const editorArabic: Translations = {
     noColor: "بلا لون",
     automatic: "تلقائي",
     themeColors: "ألوان السمة",
+    theme: {
+      background1: "خلفية 1",
+      text1: "نص 1",
+      background2: "خلفية 2",
+      text2: "نص 2",
+      accent1: "تمييز 1",
+      accent2: "تمييز 2",
+      accent3: "تمييز 3",
+      accent4: "تمييز 4",
+      accent5: "تمييز 5",
+      accent6: "تمييز 6",
+      darker1: "أغمق 1",
+      darker2: "أغمق 2",
+      darker3: "أغمق 3",
+      darker4: "أغمق 4",
+      darker5: "أغمق 5",
+      lighter1: "أفتح 1",
+      lighter2: "أفتح 2",
+      lighter3: "أفتح 3",
+      lighter4: "أفتح 4",
+      lighter5: "أفتح 5",
+    } as {
+      background1: string;
+      text1: string;
+      background2: string;
+      text2: string;
+      accent1: string;
+      accent2: string;
+      accent3: string;
+      accent4: string;
+      accent5: string;
+      accent6: string;
+    },
     standardColors: "ألوان قياسية",
     apply: "تطبيق",
     colors: {

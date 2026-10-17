@@ -9,6 +9,7 @@ import {
   FileText,
   FileUp,
   Info,
+  MessageSquare,
   Maximize2,
   Minimize2,
   PanelLeftClose,
@@ -19,7 +20,7 @@ import {
   LayoutTemplate,
 } from "lucide-react";
 import { toast } from "sonner";
-import { api, canAbility, type Client, type ClientReport, type ClientReportAttachment, type ReportTemplateFile } from "../api";
+import { ApiError, api, canAbility, type Client, type ClientReport, type ClientReportAttachment, type ReportTemplateFile } from "../api";
 import { useAuth } from "../auth";
 import { ConfirmAction } from "../components/ConfirmAction";
 import { DriveFolderPicker } from "../components/DriveFolderPicker";
@@ -27,26 +28,36 @@ import { FileDropzone } from "../components/FileDropzone";
 import { LoadingLottie } from "../components/LoadingLottie";
 import { ReportGemini } from "../components/ReportGemini";
 import { addParagraphFontStyle, buildDocxFromParagraphs, buildReportDocx, legacyHtmlToParagraphs, type ReportTemplateId } from "../components/report/docxTemplate";
+import { pdfPageCount } from "../components/report/pdfPages";
 import { addBodyBackground } from "../components/report/pictureLayout";
 import { clearReportDraft, readReportDraft, writeReportDraft } from "../components/report/draftStore";
 import { forgetReportTemplate, loadSavedTemplates } from "../components/report/templateStore";
 import { loadReportFonts, rememberReportFont, type StoredReportFont } from "../components/report/fontStore";
 import type { ReportDocHandle } from "../components/report/ReportDocEditor";
+import { CommentsPanel } from "../components/CommentsPanel";
 import { ReportSendPanel } from "../components/report/ReportSendPanel";
 import { copy, type Locale } from "../i18n";
 
 // The Word editor is large; load it only on this page.
 const ReportDocEditor = lazy(() => import("../components/report/ReportDocEditor").then((module) => ({ default: module.ReportDocEditor })));
 
-function failureMessage(err: unknown, fallback: string, capture: string): string {
+function failureMessage(err: unknown, fallback: string, capture: string, offline = fallback): string {
   if (!(err instanceof Error)) return fallback;
   if (err.message === "pdf-capture") return capture;
+  if (err.message === "api_unreachable") return offline;
   return err.message || fallback;
+}
+
+function fileMark(bytes: Uint8Array, title: string) {
+  let hash = bytes.length;
+  const step = Math.max(1, Math.floor(bytes.length / 48));
+  for (let index = 0; index < bytes.length; index += step) hash = (hash + bytes[index] * (index + 1)) % 10000019;
+  return `${title}\n${hash}`;
 }
 
 type Phase = "loading" | "template" | "editing" | "error";
 type Busy = null | "saving" | "rendering" | "publishing";
-type PanelTab = "gemini" | "files" | "info";
+type PanelTab = "gemini" | "files" | "info" | "comments";
 /**
  * auto: the timer after an edit; skipped when the server is current, retried when it fails.
  * leave: leaving the editor; skipped when the server is current.
@@ -94,6 +105,7 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
   const reportId = params.reportId ? Number(params.reportId) : null;
 
   const editor = useRef<ReportDocHandle>(null);
+  const uploaded = useRef("");
   const [phase, setPhase] = useState<Phase>("loading");
   const [report, setReport] = useState<ClientReport | null>(null);
   const [client, setClient] = useState<Client | null>(null);
@@ -108,6 +120,7 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
   const [existing, setExisting] = useState<ClientReportAttachment[]>([]);
   const [removeIds, setRemoveIds] = useState<number[]>([]);
   const [panel, setPanel] = useState<PanelTab | null>(() => (window.matchMedia("(min-width: 1180px)").matches ? "gemini" : null));
+  const [commentCount, setCommentCount] = useState<number | null>(null);
   const [focus, setFocus] = useState(false);
   /** True while the browser is full screen because focus writing asked for it. */
   const focusFullscreen = useRef(false);
@@ -209,13 +222,23 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
 
     try {
       const docx = await snapshot.docx;
-      if (current) {
-        void writeReportDraft({ reportId: current.id, bytes: docx, title: name, base: current.updated_at ?? null, savedAt: Date.now() });
+      const draftId = current?.id ?? (ownerKey ? -ownerKey : 0);
+      if (draftId !== 0) {
+        await writeReportDraft({ reportId: draftId, bytes: docx, title: name, base: current?.updated_at ?? null, savedAt: Date.now() });
+      }
+      // A new report stays in this browser until the first real save, or until it has text.
+      if (!current && snapshot.text.trim() === "" && mode !== "manual" && mode !== "publish") {
+        return true;
+      }
+      const mark = fileMark(docx, name);
+      if ((mode === "auto" || mode === "leave") && mark === uploaded.current && added.length === 0 && removed.length === 0) {
+        return true;
       }
       const form = new FormData();
       form.set("title", name.trim() || tr(copy.reportTemplateBlank));
       form.set("body", snapshot.text.slice(0, 190000));
       form.set("document", new File([docx as BlobPart], "report.docx", { type: DOCX_MIME }));
+      if (current?.updated_at) form.set("updated_at", current.updated_at);
       if (mode === "publish") {
         form.set("publish", "1");
         setBusy("publishing");
@@ -223,7 +246,7 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
       added.forEach((file) => form.append("attachments[]", file));
       removed.forEach((id) => form.append("remove_attachment_ids[]", String(id)));
 
-      const res = await api.saveClientReport(ownerKey, form, current?.id);
+      const res = await api.saveClientReport(ownerKey, form, current?.id, mode === "leave");
       savedSeq.current = Math.max(savedSeq.current, seq);
       latest.current = { ...latest.current, report: res.data };
       failureShown.current = false;
@@ -233,9 +256,11 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
       setRemoveIds((list) => list.filter((id) => !removed.includes(id)));
       setLegacy(false);
       setAutoFailed(false);
+      uploaded.current = mark;
       if (changeSeq.current === seq) {
         setDirty(false);
         void clearReportDraft(res.data.id);
+        if (ownerKey) void clearReportDraft(-ownerKey);
       }
       if (!current) {
         loadedId.current = res.data.id;
@@ -257,7 +282,17 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
       }
       return true;
     } catch (err) {
-      const message = failureMessage(err, tr(copy.saveFailed), tr(copy.reportCaptureFailed));
+      if (err instanceof ApiError && err.status === 409 && current) {
+        if (background && document.visibilityState === "hidden") return false;
+        const asNew = window.confirm(tr(copy.reportConflict));
+        if (!asNew) {
+          window.location.reload();
+          return false;
+        }
+        latest.current = { ...latest.current, report: null };
+        return upload(mode === "auto" ? "manual" : mode);
+      }
+      const message = failureMessage(err, tr(copy.saveFailed), tr(copy.reportCaptureFailed), tr(copy.apiUnreachable));
       if (mode === "auto") {
         setAutoFailed(true);
         if (!failureShown.current) toast.error(message);
@@ -286,6 +321,15 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
           const res = await api.clientReports(Number(clientId));
           if (cancelled) return;
           setClient(res.client);
+          const pending = await readReportDraft(-Number(clientId));
+          if (pending) {
+            setTitle(pending.title);
+            setBytes(pending.bytes);
+            setPhase("editing");
+            toast.info(t(copy.reportRecovered));
+            markChanged();
+            return;
+          }
           setPhase("template");
           return;
         }
@@ -356,8 +400,15 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
     const onHide = () => {
       if (document.visibilityState === "hidden" && changeSeq.current !== savedSeq.current) void saveRef.current("auto");
     };
+    const onPageHide = () => {
+      if (changeSeq.current !== savedSeq.current) void saveRef.current("leave");
+    };
     document.addEventListener("visibilitychange", onHide);
-    return () => document.removeEventListener("visibilitychange", onHide);
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      document.removeEventListener("visibilitychange", onHide);
+      window.removeEventListener("pagehide", onPageHide);
+    };
   }, []);
 
   // Esc leaves browser full screen; leave focus writing with it.
@@ -533,6 +584,27 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
     navigate(backTo);
   }
 
+  async function discardDraft() {
+    if (!window.confirm(t(copy.reportDiscardConfirm))) return;
+    if (ownerId) await clearReportDraft(-ownerId);
+    const empty = report
+      && !report.published_at
+      && !report.has_document
+      && !(report.body ?? "").trim()
+      && (report.attachments ?? []).length === 0;
+    if (empty && report) {
+      try {
+        await api.deleteClientReport(report.id);
+      } catch (err) {
+        toast.error(failureMessage(err, t(copy.saveFailed), t(copy.reportCaptureFailed)));
+        return;
+      }
+    }
+    changeSeq.current = savedSeq.current;
+    setDirty(false);
+    navigate(backTo);
+  }
+
   async function downloadWord() {
     const docx = await editor.current?.save();
     if (docx) download(docx, `${title || "report"}.docx`, DOCX_MIME);
@@ -542,7 +614,10 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
     if (!editor.current || busy) return;
     setBusy("rendering");
     try {
+      const shown = editor.current.pageCount();
       const pdf = await editor.current.pdf();
+      const pages = pdfPageCount(pdf);
+      if (pages > 0 && pages !== shown) toast.warning(fill(t(copy.reportPdfPages), { pdf: pages, editor: shown }));
       download(pdf, `${title || "report"}.pdf`, "application/pdf");
     } catch (err) {
       toast.error(failureMessage(err, t(copy.saveFailed), t(copy.reportCaptureFailed)));
@@ -657,10 +732,15 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
         <LayoutTemplate size={15} aria-hidden="true" /><span className="btn-label">{t(copy.reportSaveTemplate)}</span>
       </button>
       ) : null}
-      <button type="button" className="btn btn-sm" disabled={busy !== null} onClick={() => void save("manual")} title="Ctrl+S">
+      {!report ? (
+        <button type="button" className="btn btn-sm" disabled={busy !== null} onClick={() => void discardDraft()}>
+          <span className="btn-label">{t(copy.reportDiscard)}</span>
+        </button>
+      ) : null}
+      <button type="button" className="btn btn-primary btn-sm" disabled={busy !== null} onClick={() => void save("manual")} title="Ctrl+S">
         <Save size={15} aria-hidden="true" /><span className="btn-label">{t(copy.reportSaveDraft)}</span>
       </button>
-      <button type="button" className="btn btn-primary btn-sm" disabled={busy !== null} onClick={publish} title={t(copy.reportPublish)}>
+      <button type="button" className="btn btn-sm" disabled={busy !== null} onClick={publish} title={t(copy.reportPublish)}>
         <CloudUpload size={15} aria-hidden="true" /><span className="btn-label">{t(copy.reportPublish)}</span>
       </button>
       <button
@@ -689,6 +769,7 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
     { id: "gemini", label: t(copy.reportGemini), icon: Sparkles },
     { id: "files", label: `${t(copy.reportPanelFiles)}${existing.length - removeIds.length + files.length > 0 ? ` (${existing.length - removeIds.length + files.length})` : ""}`, icon: Paperclip },
     { id: "info", label: t(copy.reportPanelInfo), icon: Info },
+    { id: "comments", label: `${t(copy.comments)}${commentCount ? ` (${commentCount})` : ""}`, icon: MessageSquare },
   ];
 
   return (
@@ -880,6 +961,18 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
                     />
                   ) : null}
                 </div>
+              ) : null}
+              {panel === "comments" ? (
+                report ? (
+                  <CommentsPanel
+                    subject={{ type: "report", id: String(report.id) }}
+                    locale={locale}
+                    t={t}
+                    onCount={setCommentCount}
+                  />
+                ) : (
+                  <p className="muted">{t(copy.reportSendNeedSave)}</p>
+                )
               ) : null}
             </div>
           </aside>

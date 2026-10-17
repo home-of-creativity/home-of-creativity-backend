@@ -168,7 +168,7 @@ class ResolveWorkPlan
             'design' => EmployeeProfession::Design,
             'content' => EmployeeProfession::Content,
             'programming' => EmployeeProfession::Web,
-            'photography' => EmployeeProfession::Media,
+            'photography' => EmployeeProfession::Photography,
             default => null,
         };
     }

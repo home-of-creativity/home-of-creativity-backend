@@ -184,9 +184,7 @@ class BookPhotographySlot
                 $this->log($booking, 'client_refused', $actor, $from);
                 $this->effect(function () use ($booking): void {
                     $request = $booking->request;
-                    $this->notifyEmployees->handle(
-                        $request,
-                        EmployeeProfession::Media,
+                    $this->notifyEmployees->photographers($request,
                         "العميل رفض الوقت المقترح للطلب #{$request->number} (موعد #{$booking->id}). أرسل وقتاً يناسبك.",
                         [
                             ['text' => 'وقت آخر', 'callback_data' => 'phototime:'.$booking->id],
@@ -449,9 +447,7 @@ class BookPhotographySlot
                     'Your shoot on '.$this->whenEn($booking->starts_at).' ('.$this->ref($request).') is cancelled.'
                         .($refunded ? ' The session is back in your balance.' : ''),
                 ));
-                $this->notifyEmployees->handle(
-                    $request,
-                    EmployeeProfession::Media,
+                $this->notifyEmployees->photographers($request,
                     "أُلغي موعد التصوير #{$booking->id} للطلب #{$request->number} يوم ".$this->when($booking->starts_at).'.',
                 );
                 $this->sessions->settle($request);
@@ -610,9 +606,7 @@ class BookPhotographySlot
                 && (! $request instanceof ServiceRequest || ! $this->sessions->isPaidOpen($request));
             if (! $stale && ! $ineligible && $request instanceof ServiceRequest && $row->waiting_since !== null && $row->waiting_since->lte(now()->subHours(self::REPLY_HOURS - 1))) {
                 if (Cache::add('hoc:photo-late:'.$row->id, 1, now()->addHours(3))) {
-                    $this->notifyEmployees->handle(
-                        $request,
-                        EmployeeProfession::Media,
+                    $this->notifyEmployees->photographers($request,
                         "موعد تصوير متأخر #{$row->id} للطلب #{$request->number}. ينتهي خلال ساعة إن لم يُرد عليه.",
                     );
                 }
@@ -663,9 +657,7 @@ class BookPhotographySlot
             if (! $request instanceof ServiceRequest) {
                 continue;
             }
-            $this->notifyEmployees->handle(
-                $request,
-                EmployeeProfession::Media,
+            $this->notifyEmployees->photographers($request,
                 "جلسة التصوير #{$row->id} للطلب #{$request->number} خلصت. علّمها تم أو لم يحضر من تاب التصوير. الخصم ما بيرجع إلا بزر لم يحضر.",
             );
             $sent++;
@@ -745,7 +737,7 @@ class BookPhotographySlot
             if ($row->employee instanceof Employee) {
                 $this->notifyEmployees->toEmployeeWhatsApp($row->employee, $text);
             } else {
-                $this->notifyEmployees->professionWhatsApp(EmployeeProfession::Media, $text);
+                $this->notifyEmployees->photographersWhatsApp($text);
             }
             $sent++;
         }
@@ -950,9 +942,7 @@ class BookPhotographySlot
             $booking = $booking->fresh(['request.client', 'employee']) ?? $booking;
             $request = $booking->request;
             $this->sendClient($booking, $this->confirmedText($booking));
-            $this->notifyEmployees->handle(
-                $request,
-                EmployeeProfession::Media,
+            $this->notifyEmployees->photographers($request,
                 "اتفقنا على موعد التصوير للطلب #{$request->number} يوم ".$this->when($booking->starts_at)
                     .'. '.$this->sessionLabel($booking).($booking->employee ? '، المصور '.$booking->employee->name : '').'.',
             );
@@ -1002,9 +992,7 @@ class BookPhotographySlot
             $this->sendClient($booking, $this->movedText($booking, $oldStart));
             $this->calendarCreate($booking);
             $this->clickUpSync($booking);
-            $this->notifyEmployees->handle(
-                $request,
-                EmployeeProfession::Media,
+            $this->notifyEmployees->photographers($request,
                 "نُقل موعد التصوير #{$booking->id} للطلب #{$request->number} من ".$this->when($oldStart).' إلى '.$this->when($booking->starts_at).'.',
             );
             if ($previousEmployee !== null && $previousEmployee !== $booking->employee_id) {
@@ -1035,9 +1023,7 @@ class BookPhotographySlot
                 'Your shoot ('.$this->ref($request).') stays on '.$this->whenEn($booking->starts_at).'.',
             ));
             if ($action === 'kept' && $request instanceof ServiceRequest) {
-                $this->notifyEmployees->handle(
-                    $request,
-                    EmployeeProfession::Media,
+                $this->notifyEmployees->photographers($request,
                     "العميل تراجع عن تعديل موعد التصوير #{$booking->id}. الموعد بقي ".$this->when($booking->starts_at).'.',
                 );
             }
@@ -1190,9 +1176,7 @@ class BookPhotographySlot
         $request = $booking->request;
         $client = $request?->client?->name ?: 'العميل';
         if ($booking->status === PhotographyBooking::RESCHEDULING) {
-            $this->notifyEmployees->handle(
-                $request,
-                EmployeeProfession::Media,
+            $this->notifyEmployees->photographers($request,
                 "طلب تعديل موعد التصوير #{$booking->id} ({$client} — ".$this->ref($request).'): من '.$this->when($booking->starts_at).' إلى '.$this->when($booking->proposed_starts_at).'. الوقت القديم محجوز لحين ردك.',
                 [
                     ['text' => 'قبول', 'callback_data' => 'photook:'.$booking->id],
@@ -1202,9 +1186,7 @@ class BookPhotographySlot
 
             return;
         }
-        $this->notifyEmployees->handle(
-            $request,
-            EmployeeProfession::Media,
+        $this->notifyEmployees->photographers($request,
             "موعد تصوير بانتظار القبول #{$booking->id}: {$client} — ".$this->ref($request).' يوم '.$this->when($booking->starts_at)
                 .'. الحضور '.self::SHOOT_HOURS.' ساعات، وبين موعدين '.self::GAP_HOURS.' ساعات.',
             [
@@ -1653,7 +1635,7 @@ class BookPhotographySlot
 
     private function solePhotographer(): ?Employee
     {
-        $photographers = Employee::query()->approved()->where('profession', EmployeeProfession::Media)->limit(2)->get();
+        $photographers = Employee::query()->approved()->whereIn('profession', EmployeeProfession::photographerValues())->limit(2)->get();
 
         return $photographers->count() === 1 ? $photographers->first() : null;
     }

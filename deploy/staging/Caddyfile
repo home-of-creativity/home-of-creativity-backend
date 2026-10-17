@@ -24,6 +24,7 @@ Disallow: /
 	handle @laravel {
 		root * /var/www/hoc/public
 		encode zstd gzip
+		# Match php post_max_size and upload_max_filesize in deploy/php/uploads.ini.
 		request_body {
 			max_size 512MB
 		}

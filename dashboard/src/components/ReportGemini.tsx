@@ -149,9 +149,9 @@ export function ReportGemini({
   onApply: (text: string, page: number | null) => boolean | Promise<boolean>;
   /** Replace the whole document with the new text. */
   onApplyDocument: (text: string) => boolean | Promise<boolean>;
-  onInsertImage: (bytes: Uint8Array, placement: ImagePlacement) => Promise<"ok" | "unsupported" | "refused">;
-  onInsertCover: (bytes: Uint8Array) => Promise<"ok" | "unsupported" | "refused">;
-  onInsertClosingPage: (bytes: Uint8Array) => Promise<"ok" | "unsupported" | "refused">;
+  onInsertImage: (bytes: Uint8Array, placement: ImagePlacement) => Promise<"ok" | "unsupported" | "refused" | "slow">;
+  onInsertCover: (bytes: Uint8Array) => Promise<"ok" | "unsupported" | "refused" | "slow">;
+  onInsertClosingPage: (bytes: Uint8Array) => Promise<"ok" | "unsupported" | "refused" | "slow">;
   onInsertTextBox: (options: { kind: TextBoxShape; text: string }) => Promise<boolean>;
   fonts: Array<{ family: string }>;
   onInstallFont: (family: string, file: File) => Promise<void>;
@@ -248,6 +248,7 @@ export function ReportGemini({
       const result = await onInsertImage(new Uint8Array(await file.arrayBuffer()), placement());
       if (result === "ok") toast.success(t(copy.reportImageInserted));
       else if (result === "unsupported") toast.error(t(copy.reportImageUnsupported));
+      else if (result === "slow") toast.error(t(copy.reportImageSlow));
       else toast.error(t(copy.reportImageRefused));
     } finally {
       setBusy(false);
@@ -272,6 +273,7 @@ export function ReportGemini({
       const result = await onInsertCover(new Uint8Array(await file.arrayBuffer()));
       if (result === "ok") toast.success(t(copy.reportCoverAdded));
       else if (result === "unsupported") toast.error(t(copy.reportImageUnsupported));
+      else if (result === "slow") toast.error(t(copy.reportImageSlow));
       else toast.error(t(copy.reportCoverFailed));
     } finally {
       setBusy(false);
@@ -285,6 +287,7 @@ export function ReportGemini({
       const result = await onInsertClosingPage(new Uint8Array(await file.arrayBuffer()));
       if (result === "ok") toast.success(t(copy.reportClosingPageAdded));
       else if (result === "unsupported") toast.error(t(copy.reportImageUnsupported));
+      else if (result === "slow") toast.error(t(copy.reportImageSlow));
       else toast.error(t(copy.reportClosingPageFailed));
     } finally {
       setBusy(false);
@@ -307,6 +310,7 @@ export function ReportGemini({
       const result = await onInsertImage(png, placement());
       if (result === "ok") toast.success(t(copy.reportImageGenerated));
       else if (result === "unsupported") toast.error(t(copy.reportImageUnsupported));
+      else if (result === "slow") toast.error(t(copy.reportImageSlow));
       else toast.error(t(copy.reportImageRefused));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t(copy.saveFailed));

@@ -28,8 +28,23 @@ type ClientSortKey = "name" | "company_name";
 
 const tabs: Tab[] = ["clients", "logos", "quotations", "invoices"];
 
-function readTab(value: string | null): Tab {
-  return tabs.includes(value as Tab) ? (value as Tab) : "clients";
+function tabAllowed(tab: Tab, can: (ability: string) => boolean): boolean {
+  switch (tab) {
+    case "logos":
+      return can("ops.clients.logos_view") || can("ops.clients.logos_create") || can("ops.clients.logos_update") || can("ops.clients.logos_delete");
+    case "quotations":
+      return can("ops.clients.quotations_view") || can("ops.clients.quotations_create") || can("ops.clients.quotations_update");
+    case "invoices":
+      return can("ops.clients.invoices_view") || can("ops.clients.invoices_create") || can("ops.clients.invoices_update");
+    default:
+      return can("ops.clients.view") || can("ops.clients.create") || can("ops.clients.update") || can("ops.clients.delete");
+  }
+}
+
+function readTab(value: string | null, can: (ability: string) => boolean): Tab {
+  const requested = tabs.includes(value as Tab) ? (value as Tab) : null;
+  if (requested && tabAllowed(requested, can)) return requested;
+  return tabs.find((tab) => tabAllowed(tab, can)) ?? "clients";
 }
 
 function fill(template: string, values: Record<string, string | number>) {
@@ -86,12 +101,14 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
   const can = useCan();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab = readTab(searchParams.get("tab"));
+  const visibleTabs = tabs.filter((key) => tabAllowed(key, can));
+  const tab = readTab(searchParams.get("tab"), can);
   const partnerFilter = searchParams.get("partner") ?? "";
   const clientLabel = searchParams.get("client") ?? "";
   const papersUnlinked = searchParams.get("unlinked") === "1";
 
   function setTab(next: Tab) {
+    if (!tabAllowed(next, can)) return;
     if (next === "clients") {
       setSearchParams({});
       return;
@@ -446,20 +463,23 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
     });
   }, [invoices, invoiceQuery, invoiceState, invoicePayment]);
 
-  const canOdoo = can("ops.clients.odoo");
+  const canEditQuotes = can("ops.clients.quotations_update");
+  const canEditInvoices = can("ops.clients.invoices_update");
   const canDeletePaper = can("ops.clients.odoo_delete");
-  const pickCols = canOdoo ? 1 : 0;
+  const pickCols = (tab === "quotations" && canEditQuotes) || (tab === "invoices" && canEditInvoices) ? 1 : 0;
   const invoiceOpen = (item: OdooInvoice) => item.state === "posted" && item.payment_state === "not_paid";
   const pickedQuotes = filteredQuotations.filter((item) => picked.has(item.id));
   const pickedInvoices = filteredInvoices.filter((item) => picked.has(item.id));
   const ids = (list: { id: number }[]) => list.map((item) => item.id);
   const quoteBulk: BulkAction[] = [
-    { step: "cancel", label: t(copy.paperCancel), ids: ids(pickedQuotes.filter((item) => item.state !== "cancel")) },
+    ...(canEditQuotes ? [{ step: "cancel" as const, label: t(copy.paperCancel), ids: ids(pickedQuotes.filter((item) => item.state !== "cancel")) }] : []),
     ...(canDeletePaper ? [{ step: "delete" as const, label: t(copy.delete), ids: ids(pickedQuotes.filter((item) => item.state === "cancel")) }] : []),
   ];
   const invoiceBulk: BulkAction[] = [
-    { step: "draft", label: t(copy.paperToDraft), ids: ids(pickedInvoices.filter((item) => invoiceOpen(item) || item.state === "cancel")) },
-    { step: "cancel", label: t(copy.paperCancel), ids: ids(pickedInvoices.filter(invoiceOpen)) },
+    ...(canEditInvoices ? [
+      { step: "draft" as const, label: t(copy.paperToDraft), ids: ids(pickedInvoices.filter((item) => invoiceOpen(item) || item.state === "cancel")) },
+      { step: "cancel" as const, label: t(copy.paperCancel), ids: ids(pickedInvoices.filter(invoiceOpen)) },
+    ] : []),
     ...(canDeletePaper ? [{ step: "delete" as const, label: t(copy.delete), ids: ids(pickedInvoices.filter((item) => item.state === "draft")) }] : []),
   ];
 
@@ -519,11 +539,11 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                 {t(copy.signupCta)}
               </a>
             </>
-          ) : tab === "quotations" && odooReady && can("ops.clients.odoo") ? (
+          ) : tab === "quotations" && odooReady && can("ops.clients.quotations_create") ? (
             <button type="button" className="btn btn-primary" onClick={() => setPaper({ kind: "quotation" })}>
               {t(copy.createQuotation)}
             </button>
-          ) : tab === "invoices" && odooReady && can("ops.clients.odoo") ? (
+          ) : tab === "invoices" && odooReady && can("ops.clients.invoices_create") ? (
             <button type="button" className="btn btn-primary" onClick={() => setPaper({ kind: "invoice" })}>
               {t(copy.createInvoice)}
             </button>
@@ -539,7 +559,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
           setError("");
         }}
         ariaLabel={t(copy.clients)}
-        items={tabs.map((key) => ({ value: key, label: tabLabel(key, t) }))}
+        items={visibleTabs.map((key) => ({ value: key, label: tabLabel(key, t) }))}
       />
 
       {tab !== "logos" && notice ? <p className="notice">{notice}</p> : null}
@@ -807,7 +827,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
           <table className="odoo-table">
             <thead>
               <tr>
-                {canOdoo ? (
+                {(tab === "quotations" ? canEditQuotes : canEditInvoices) ? (
                   <th className="pick-cell">
                     <input
                       type="checkbox"
@@ -843,7 +863,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                   const partner = partnerLines(item.partner_name);
                   return (
                   <tr key={item.id}>
-                    {canOdoo ? (
+                    {(tab === "quotations" ? canEditQuotes : canEditInvoices) ? (
                       <td className="pick-cell">
                         <input
                           type="checkbox"
@@ -864,7 +884,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                     <td className="nowrap">{formatOdooWhen(item.date_order, locale)}</td>
                     <td>{requestCell(item.request)}</td>
                     <td className="row-actions-cell">
-                      {canOdoo && ["draft", "sent"].includes(item.state) ? (
+                      {canEditQuotes && ["draft", "sent"].includes(item.state) ? (
                         <>
                           <button type="button" className="btn btn-ghost btn-sm" disabled={paperBusy !== ""} onClick={() => void editPaper("quotation", item.id)}>
                             {t(copy.edit)}
@@ -880,7 +900,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                           />
                         </>
                       ) : null}
-                      {canOdoo && item.state === "sale" ? (
+                      {canEditQuotes && item.state === "sale" ? (
                         <ConfirmAction
                           label={t(copy.paperCancelOrder)}
                           confirmLabel={t(copy.paperCancelOrderConfirm)}
@@ -916,7 +936,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                       <button
                         type="button"
                         className="btn btn-ghost"
-                        hidden={item.state === "cancel" || !can("ops.clients.odoo")}
+                        hidden={item.state === "cancel" || !can("ops.clients.invoices_create")}
                         onClick={() => {
                           const params: Record<string, string> = { tab: "invoices" };
                           if (item.partner_id) params.partner = String(item.partner_id);
@@ -1003,7 +1023,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
           <table className="odoo-table">
             <thead>
               <tr>
-                {canOdoo ? (
+                {(tab === "quotations" ? canEditQuotes : canEditInvoices) ? (
                   <th className="pick-cell">
                     <input
                       type="checkbox"
@@ -1040,7 +1060,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                   const partner = partnerLines(item.partner_name);
                   return (
                   <tr key={item.id}>
-                    {canOdoo ? (
+                    {(tab === "quotations" ? canEditQuotes : canEditInvoices) ? (
                       <td className="pick-cell">
                         <input
                           type="checkbox"
@@ -1065,12 +1085,12 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                     <td className="nowrap">{formatOdooWhen(item.invoice_date, locale)}</td>
                     <td>{requestCell(item.request)}</td>
                     <td className="row-actions-cell">
-                      {canOdoo && item.state !== "cancel" && item.payment_state === "not_paid" ? (
+                      {canEditInvoices && item.state !== "cancel" && item.payment_state === "not_paid" ? (
                         <button type="button" className="btn btn-ghost btn-sm" disabled={paperBusy !== ""} onClick={() => void editPaper("invoice", item.id)}>
                           {t(copy.edit)}
                         </button>
                       ) : null}
-                      {canOdoo && invoiceOpen(item) ? (
+                      {canEditInvoices && invoiceOpen(item) ? (
                         <ConfirmAction
                           label={t(copy.paperCancel)}
                           confirmLabel={t(copy.paperCancelInvoiceConfirm)}
@@ -1081,7 +1101,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                           onConfirm={() => void runPapers("invoice", "cancel", [item.id])}
                         />
                       ) : null}
-                      {canOdoo && (invoiceOpen(item) || item.state === "cancel") ? (
+                      {canEditInvoices && (invoiceOpen(item) || item.state === "cancel") ? (
                         <ConfirmAction
                           label={t(copy.paperToDraft)}
                           confirmLabel={t(copy.paperToDraftConfirm)}

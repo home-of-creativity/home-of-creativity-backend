@@ -25,6 +25,7 @@ class OdooPaperController extends Controller
 
     public function pdf(Request $request, string $kind, int $id, OdooClient $odoo): Response
     {
+        $this->assertPaperView($request, $kind);
         $model = $this->model($kind, $odoo);
         $snapshot = $this->snapshot($odoo, $model, $id);
         $proforma = $model === 'sale.order' && $request->boolean('proforma');
@@ -45,8 +46,9 @@ class OdooPaperController extends Controller
         ]);
     }
 
-    public function activity(string $kind, int $id, OdooClient $odoo): JsonResponse
+    public function activity(Request $request, string $kind, int $id, OdooClient $odoo): JsonResponse
     {
+        $this->assertPaperView($request, $kind);
         $model = $this->model($kind, $odoo);
         $this->snapshot($odoo, $model, $id);
         try {
@@ -122,6 +124,16 @@ class OdooPaperController extends Controller
         }
 
         return response()->json(['data' => ['id' => $id, 'name' => $name], 'message' => "أُرسلت الفاتورة الشكلية {$name} للعميل."]);
+    }
+
+    private function assertPaperView(Request $request, string $kind): void
+    {
+        $ability = match ($kind) {
+            'quotations' => StaffAbility::OpsClients->value.'.quotations_view',
+            'invoices' => StaffAbility::OpsClients->value.'.invoices_view',
+            default => null,
+        };
+        abort_unless($ability !== null && $request->user()?->canAbility($ability), 403);
     }
 
     private function model(string $kind, OdooClient $odoo): string

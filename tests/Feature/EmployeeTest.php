@@ -70,6 +70,22 @@ class EmployeeTest extends TestCase
         ])->assertUnprocessable();
     }
 
+    public function test_admin_can_create_a_photographer(): void
+    {
+        Sanctum::actingAs($this->admin());
+
+        $this->postJson('/api/admin/employees', [
+            'name' => 'نور المصورة',
+            'phone' => '+963 944 111 222',
+            'profession' => EmployeeProfession::Photography->value,
+        ])->assertCreated()
+            ->assertJsonPath('data.profession', 'photography');
+
+        $this->assertTrue(
+            Employee::query()->where('profession', EmployeeProfession::Photography)->first()?->isPhotographer(),
+        );
+    }
+
     public function test_new_request_notifies_sales_employees(): void
     {
         Http::preventStrayRequests();

@@ -199,10 +199,11 @@ export function ClientReports({ locale, t }: { locale: Locale; t: (c: { ar: stri
                       </button>
                       {can("ops.reports.delete") ? (<ConfirmAction
                         label={t(copy.delete)}
-                        confirmLabel={t(copy.confirmDelete)}
+                        confirmLabel={locale === "ar" ? `حذف ${report.title}؟` : `Delete ${report.title}?`}
                         yesLabel={t(copy.delete)}
                         noLabel={t(copy.cancel)}
-                        className="btn btn-ghost btn-sm btn-danger"
+                        className="btn btn-ghost btn-sm btn-danger report-row-delete"
+                        yesClassName="btn btn-danger btn-sm"
                         onConfirm={() => void remove(report.id)}
                       />) : null}
                     </td>

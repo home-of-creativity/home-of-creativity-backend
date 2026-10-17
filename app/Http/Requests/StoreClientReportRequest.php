@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Support\ReportTitle;
 use Illuminate\Foundation\Http\FormRequest;
 
 class StoreClientReportRequest extends FormRequest
@@ -13,9 +14,26 @@ class StoreClientReportRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
+        if ($this->exists('title')) {
+            $this->merge(['title' => ReportTitle::clean($this->input('title'))]);
+        }
         if (is_string($this->input('body'))) {
             $this->merge(['body' => self::cleanHtml($this->string('body')->toString())]);
         }
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        $tooBig = 'الملف أكبر من الحد. صغّر الصور ثم أعد المحاولة.';
+
+        return [
+            'document.max' => $tooBig,
+            'pdf.max' => $tooBig,
+            'attachments.*.max' => $tooBig,
+        ];
     }
 
     /**

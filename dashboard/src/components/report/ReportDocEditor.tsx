@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { DocxEditor, normalizeImageBytes, useFonts, type DocxEditorRef } from "@docx-editor.dev/react";
 import { setHarfBuzzWasmUrl } from "@docx-editor.dev/core/layout";
 import harfbuzzWasm from "@docx-editor.dev/core/harfbuzz.wasm?url";
@@ -8,12 +8,24 @@ import type { Locale } from "../../i18n";
 import { editorArabic } from "./editorArabic";
 import { TableLayoutChrome } from "./TableLayoutChrome";
 import { TextBoxChrome } from "./TextBoxChrome";
-import { addBlankPage, addClosingPage, addCover, addTextBox, type TextBoxShape } from "./pageObjects";
+import { ImageContextMenu } from "./ImageContextMenu";
+import { addBlankPage, addClosingPage, addCover, addTextBox, insertPageBreak, resizeTableColumn, setHorizontalRule, setParagraphDirection, setParagraphStyle, type TextBoxShape } from "./pageObjects";
+import { copy } from "../../i18n";
 import { addBodyBackground } from "./pictureLayout";
 import { reportFontConfiguration, type ExtraFont } from "./fonts";
+import { shrinkImage } from "./shrinkImage";
+import { cleanPastedHtml } from "./pasteHtml";
 
 // The text shaper is WebAssembly; point it at the copy Vite emits so dev and production both find it.
 setHarfBuzzWasmUrl(harfbuzzWasm);
+
+async function preparePicture(bytes: Uint8Array): Promise<Uint8Array | "slow"> {
+  try {
+    return await shrinkImage(bytes);
+  } catch {
+    return "slow";
+  }
+}
 
 export type ReportDocHandle = {
   /** The document is loaded and painted, so `save()` returns it and not an empty one. */
@@ -35,13 +47,13 @@ export type ReportDocHandle = {
   /** Put plain text at the start of a page. */
   insertOnPage(page: number, text: string): Promise<boolean>;
   /** Insert a picture as a full-page background or at the caret (see `ImagePlacement`). */
-  insertImage(bytes: Uint8Array, placement: ImagePlacement): Promise<"ok" | "unsupported" | "refused">;
+  insertImage(bytes: Uint8Array, placement: ImagePlacement): Promise<"ok" | "unsupported" | "refused" | "slow">;
   /** A floating text box on the page. The editor drags it and resizes it from its handles. */
   insertTextBox(options: { kind: TextBoxShape; text: string }): Promise<boolean>;
   /** A new first page with the picture behind it, one text box per line and no header or footer. */
-  insertCover(bytes: Uint8Array, lines: string[]): Promise<"ok" | "unsupported" | "refused">;
+  insertCover(bytes: Uint8Array, lines: string[]): Promise<"ok" | "unsupported" | "refused" | "slow">;
   /** A last page covered by the picture; a second call replaces that picture. */
-  insertClosingPage(bytes: Uint8Array): Promise<"ok" | "unsupported" | "refused">;
+  insertClosingPage(bytes: Uint8Array): Promise<"ok" | "unsupported" | "refused" | "slow">;
   focus(): void;
 };
 
@@ -130,6 +142,12 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
   const fontKey = extraFonts.map((font) => font.family).join("|");
   const theme = useDashboardTheme();
   const insertPageRef = useRef<() => Promise<boolean>>(async () => false);
+  const paragraphEdit = useRef<(edit: (docx: Uint8Array, paraId: string) => Uint8Array | null) => void>(() => {});
+  const indentTwips = useRef(0);
+  const [nav, setNav] = useState<{ open: boolean; tab: "headings" | "find" }>({ open: false, tab: "headings" });
+  const [replaceOpen, setReplaceOpen] = useState(false);
+  const [findText, setFindText] = useState("");
+  const [replaceText, setReplaceText] = useState("");
   const wordToPdf = useCallback(async () => {
     const buffer = await editor.current?.save();
     if (!buffer) throw new Error("editor not ready");
@@ -146,6 +164,12 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
         <DocxEditor.Menu.Insert>
           <DocxEditor.Menu.Row onSelect={() => { void insertPageRef.current(); }}>
             {locale === "ar" ? "صفحة جديدة" : "New page"}
+          </DocxEditor.Menu.Row>
+          <DocxEditor.Menu.Row onSelect={() => paragraphEdit.current((docx, paraId) => insertPageBreak(docx, paraId))}>
+            {locale === "ar" ? copy.reportPageBreak.ar : copy.reportPageBreak.en}
+          </DocxEditor.Menu.Row>
+          <DocxEditor.Menu.Row onSelect={() => paragraphEdit.current((docx, paraId) => setHorizontalRule(docx, paraId))}>
+            {locale === "ar" ? copy.reportRule.ar : copy.reportRule.en}
           </DocxEditor.Menu.Row>
         </DocxEditor.Menu.Insert>
       ),
@@ -254,10 +278,107 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
     current?.scrollToPage(page + 1);
     return true;
   };
+  paragraphEdit.current = (edit) => {
+    void rewriteAtCaret(edit).then((ok) => {
+      if (!ok) return;
+      onChange();
+      editor.current?.focus();
+    });
+  };
 
   useEffect(() => {
     const host = root.current;
     if (!host) return;
+    const onDirectionKey = (event: KeyboardEvent) => {
+      if (event.metaKey) return;
+      const field = event.target instanceof HTMLElement && event.target.closest("input, textarea, .report-replace");
+      if (field) return;
+      if (event.ctrlKey && event.shiftKey && !event.altKey && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+        event.preventDefault();
+        // ArrowLeft is the Arabic paragraph. ArrowRight is the Latin one.
+        const direction = event.key === "ArrowLeft" ? "rtl" : "ltr";
+        paragraphEdit.current((docx, paraId) => setParagraphDirection(docx, paraId, direction));
+        return;
+      }
+      if (!event.ctrlKey) return;
+      const code = event.code;
+      const align = !event.shiftKey && !event.altKey
+        ? code === "KeyL" ? "left" : code === "KeyE" ? "center" : code === "KeyR" ? "right" : code === "KeyJ" ? "justify" : null
+        : null;
+      if (align) {
+        event.preventDefault();
+        runEditor({ type: "setAlignment", align });
+        return;
+      }
+      if (!event.shiftKey && !event.altKey && code === "KeyF") {
+        event.preventDefault();
+        setNav({ open: true, tab: "find" });
+        return;
+      }
+      if (!event.shiftKey && !event.altKey && code === "KeyH") {
+        event.preventDefault();
+        setReplaceOpen(true);
+        return;
+      }
+      if (!event.shiftKey && !event.altKey && code === "Equal") {
+        event.preventDefault();
+        runEditor({ type: "toggleMark", mark: "subscript" });
+        return;
+      }
+      if (!event.altKey && code === "KeyM") {
+        event.preventDefault();
+        indentTwips.current = Math.max(0, Math.min(2880, indentTwips.current + (event.shiftKey ? -720 : 720)));
+        runEditor({ type: "setIndent", left: indentTwips.current === 0 ? null : indentTwips.current });
+        return;
+      }
+      if (event.altKey && !event.shiftKey && (code === "Digit1" || code === "Digit2" || code === "Digit3")) {
+        event.preventDefault();
+        const style = code === "Digit1" ? "Heading1" : code === "Digit2" ? "Heading2" : "Heading3";
+        paragraphEdit.current((docx, paraId) => setParagraphStyle(docx, paraId, style));
+        return;
+      }
+      if (event.altKey && !event.shiftKey && code === "KeyF") {
+        event.preventDefault();
+        runEditor({ type: "insertNote", noteKind: "footnote" });
+        return;
+      }
+      if (!event.shiftKey && !event.altKey && code === "Enter") {
+        event.preventDefault();
+        paragraphEdit.current((docx, paraId) => insertPageBreak(docx, paraId));
+        return;
+      }
+      if (!event.altKey && event.shiftKey && code === "Minus") {
+        event.preventDefault();
+        paragraphEdit.current((docx, paraId) => setHorizontalRule(docx, paraId));
+      }
+    };
+    const runEditor = (command: Parameters<NonNullable<ReturnType<DocxEditorRef["getEditor"]>>["exec"]>[0]) => {
+      const current = editor.current?.getEditor();
+      if (!current) return;
+      try {
+        if (!current.can(command).ok) return;
+      } catch {
+        return;
+      }
+      if (!current.exec(command).ok) return;
+      onChange();
+      current.focus();
+    };
+    const onPaste = (event: ClipboardEvent) => {
+      const html = event.clipboardData?.getData("text/html") ?? "";
+      if (!html) return;
+      const cleaned = cleanPastedHtml(html);
+      if (cleaned === html) return;
+      const text = event.clipboardData?.getData("text/plain") ?? "";
+      const current = editor.current?.getEditor();
+      if (!current) return;
+      event.preventDefault();
+      event.stopPropagation();
+      current.exec({ type: "paste", text, html: cleaned });
+      onChange();
+    };
+    host.addEventListener("keydown", onDirectionKey, true);
+    host.addEventListener("paste", onPaste, true);
     const onPointerDown = (event: PointerEvent) => {
       const control = event.target instanceof Element
         ? event.target.closest("button, [role='menuitem']")
@@ -280,10 +401,78 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
     };
     host.addEventListener("pointerdown", onPointerDown, true);
     return () => {
+      host.removeEventListener("keydown", onDirectionKey, true);
+      host.removeEventListener("paste", onPaste, true);
       host.removeEventListener("pointerdown", onPointerDown, true);
       window.alert = previousAlert;
     };
-  }, [locale, placeCaret]);
+  }, [locale, onChange, placeCaret, rewriteAtCaret]);
+
+  useEffect(() => {
+    const host = root.current;
+    if (!host) return;
+    let drag: { paraId: string; column: number; startX: number; pointerId: number } | null = null;
+    const onDown = (event: PointerEvent) => {
+      if (event.button !== 0) return;
+      const target = event.target instanceof Element ? event.target : null;
+      if (!target || target.closest(".docx-column-separator, .docx-table-resize-preview, .table-layout-chrome, .report-dir, button")) return;
+      const cell = target.closest<HTMLElement>(".docx-table-cell");
+      if (!cell || !host.contains(cell)) return;
+      const box = cell.getBoundingClientRect();
+      if (event.clientX < box.right - 7) return;
+      const paraId = cell.querySelector<HTMLElement>("[data-paragraph-id]")?.dataset.paragraphId;
+      const row = cell.parentElement;
+      if (!paraId || !row) return;
+      const column = [...row.children].filter((node) => node instanceof HTMLElement && node.classList.contains("docx-table-cell")).indexOf(cell);
+      if (column < 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      drag = { paraId, column, startX: event.clientX, pointerId: event.pointerId };
+    };
+    const onUp = (event: PointerEvent) => {
+      const current = drag;
+      drag = null;
+      if (!current || event.pointerId !== current.pointerId) return;
+      const delta = Math.round((event.clientX - current.startX) * 15);
+      if (Math.abs(delta) < 80) return;
+      void (async () => {
+        const handle = editor.current;
+        const saved = await handle?.save();
+        if (!handle || !saved) return;
+        const next = resizeTableColumn(new Uint8Array(saved), current.paraId, current.column, delta);
+        if (!next) return;
+        await reload(next, handle.getEditor()?.getCurrentPage("viewport") ?? 1);
+        onChange();
+        handle.focus();
+      })();
+    };
+    host.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      host.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [onChange, reload]);
+
+  const replaceFind = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (replaceOpen) replaceFind.current?.focus();
+  }, [replaceOpen]);
+
+  function replaceAll(event: FormEvent) {
+    event.preventDefault();
+    const current = editor.current?.getEditor();
+    if (!current || !findText) return;
+    const command = { type: "replaceAllMatches" as const, query: findText, text: replaceText };
+    try {
+      if (!current.can(command).ok || !current.exec(command).ok) return;
+    } catch {
+      return;
+    }
+    onChange();
+    setReplaceOpen(false);
+    current.focus();
+  }
 
   useImperativeHandle(ref, () => ({
     ready() {
@@ -346,7 +535,9 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
       const host = editor.current;
       const current = host?.getEditor();
       if (!host || !current) return "refused";
-      const normalized = normalizeImageBytes(bytes);
+      const prepared = await preparePicture(bytes);
+      if (prepared === "slow") return "slow";
+      const normalized = normalizeImageBytes(prepared);
       if (!normalized.ok) return "unsupported";
       const background = placement.mode === "background";
       const setup = current.getPageSetup();
@@ -414,7 +605,9 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
       const host = editor.current;
       const current = host?.getEditor();
       if (!host || !current) return "refused";
-      const normalized = normalizeImageBytes(bytes);
+      const prepared = await preparePicture(bytes);
+      if (prepared === "slow") return "slow";
+      const normalized = normalizeImageBytes(prepared);
       if (!normalized.ok) return "unsupported";
       const mime = normalized.mime;
       if (mime !== "image/png" && mime !== "image/jpeg" && mime !== "image/gif") return "unsupported";
@@ -438,7 +631,9 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
       const host = editor.current;
       const current = host?.getEditor();
       if (!host || !current) return "refused";
-      const normalized = normalizeImageBytes(bytes);
+      const prepared = await preparePicture(bytes);
+      if (prepared === "slow") return "slow";
+      const normalized = normalizeImageBytes(prepared);
       if (!normalized.ok) return "unsupported";
       const mime = normalized.mime;
       if (mime !== "image/png" && mime !== "image/jpeg" && mime !== "image/gif") return "unsupported";
@@ -467,6 +662,77 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
     // The editor positions right-to-left words itself and assumes a left-to-right host; inside an
     // RTL page the browser would reverse them again, so the host box stays dir="ltr".
     <div ref={root} className="report-doc" dir="ltr">
+      <div className="report-dir" dir={locale === "ar" ? "rtl" : "ltr"}>
+        <button
+          type="button"
+          className="btn btn-sm"
+          title={locale === "ar" ? "Ctrl+Shift+سهم لليسار" : "Ctrl+Shift+Left"}
+          onClick={() => {
+            void rewriteAtCaret((docx, paraId) => setParagraphDirection(docx, paraId, "rtl")).then((ok) => {
+              if (ok) onChange();
+            });
+          }}
+        >
+          {locale === "ar" ? copy.reportDirRtl.ar : copy.reportDirRtl.en}
+        </button>
+        <button
+          type="button"
+          className="btn btn-sm"
+          title={locale === "ar" ? "Ctrl+Shift+سهم لليمين" : "Ctrl+Shift+Right"}
+          onClick={() => paragraphEdit.current((docx, paraId) => setParagraphDirection(docx, paraId, "ltr"))}
+        >
+          {locale === "ar" ? copy.reportDirLtr.ar : copy.reportDirLtr.en}
+        </button>
+        <button
+          type="button"
+          className="btn btn-sm"
+          title="Ctrl+M"
+          onClick={() => {
+            indentTwips.current = Math.min(2880, indentTwips.current + 720);
+            editor.current?.getEditor()?.exec({ type: "setIndent", left: indentTwips.current });
+            onChange();
+            editor.current?.focus();
+          }}
+        >
+          {locale === "ar" ? copy.reportIndentMore.ar : copy.reportIndentMore.en}
+        </button>
+        <button
+          type="button"
+          className="btn btn-sm"
+          title="Ctrl+Shift+M"
+          onClick={() => {
+            indentTwips.current = Math.max(0, indentTwips.current - 720);
+            editor.current?.getEditor()?.exec({ type: "setIndent", left: indentTwips.current === 0 ? null : indentTwips.current });
+            onChange();
+            editor.current?.focus();
+          }}
+        >
+          {locale === "ar" ? copy.reportIndentLess.ar : copy.reportIndentLess.en}
+        </button>
+        <button type="button" className="btn btn-sm" title="Ctrl+Shift+-" onClick={() => paragraphEdit.current((docx, paraId) => setHorizontalRule(docx, paraId))}>
+          {locale === "ar" ? copy.reportRule.ar : copy.reportRule.en}
+        </button>
+        <button type="button" className="btn btn-sm" title="Ctrl+Enter" onClick={() => paragraphEdit.current((docx, paraId) => insertPageBreak(docx, paraId))}>
+          {locale === "ar" ? copy.reportPageBreak.ar : copy.reportPageBreak.en}
+        </button>
+      </div>
+      {replaceOpen ? (
+        <form className="report-replace" dir={locale === "ar" ? "rtl" : "ltr"} onSubmit={replaceAll}>
+          <input ref={replaceFind} className="field" aria-label={locale === "ar" ? copy.reportReplaceFind.ar : copy.reportReplaceFind.en} value={findText} onChange={(event) => setFindText(event.target.value)} />
+          <input className="field" aria-label={locale === "ar" ? copy.reportReplaceWith.ar : copy.reportReplaceWith.en} value={replaceText} onChange={(event) => setReplaceText(event.target.value)} />
+          <button type="submit" className="btn btn-sm btn-primary">{locale === "ar" ? copy.reportReplaceAll.ar : copy.reportReplaceAll.en}</button>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => {
+              setReplaceOpen(false);
+              editor.current?.focus();
+            }}
+          >
+            {locale === "ar" ? copy.reportReplaceClose.ar : copy.reportReplaceClose.en}
+          </button>
+        </form>
+      ) : null}
       <DocxEditor
         key={fontKey}
         ref={editor}
@@ -483,9 +749,16 @@ export const ReportDocEditor = forwardRef<ReportDocHandle, Props>(function Repor
         colorMode={theme}
         locale={locale === "ar" ? "ar-SA" : "en-US"}
         i18n={locale === "ar" ? editorArabic : undefined}
+        navigation={{
+          open: nav.open,
+          tab: nav.tab,
+          onOpenChange: (open) => setNav((current) => ({ ...current, open })),
+          onTabChange: (tab) => setNav((current) => ({ ...current, tab })),
+        }}
         renderTitleBarLeft={titleBarStart}
         renderTitleBarRight={titleBarEnd}
       />
+      <ImageContextMenu editor={editor} host={root} locale={locale} onChange={onChange} />
       <TableLayoutChrome editor={editor} host={root} locale={locale} />
       <TextBoxChrome
         host={root}

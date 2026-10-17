@@ -68,10 +68,10 @@ export function ClientLogosPanel({ t }: { locale: Locale; t: (c: { ar: string; e
   return (
     <>
       <div className="toolbar">
-        {can("site.projects.create") || can("ops.clients.create") ? (<Link className="btn btn-primary" to="/clients/logos/new">
+        {can("ops.clients.logos_create") ? (<Link className="btn btn-primary" to="/clients/logos/new">
           {t(copy.addShowcaseClient)}
         </Link>) : null}
-        {can("site.projects.delete") || can("ops.clients.delete") ? (<button type="button" className="btn btn-ghost" onClick={() => void removeAll()} disabled={clients.length === 0}>
+        {can("ops.clients.logos_delete") ? (<button type="button" className="btn btn-ghost" onClick={() => void removeAll()} disabled={clients.length === 0}>
           {t(copy.deleteAll)}
         </button>) : null}
       </div>
@@ -136,10 +136,12 @@ export function ClientLogosPanel({ t }: { locale: Locale; t: (c: { ar: string; e
                   <td>{item.sort_order}</td>
                   <td>{item.is_published ? t(copy.published) : t(copy.inactive)}</td>
                   <td className="actions-cell">
-                    <Link className="btn btn-ghost" to={`/clients/logos/${item.id}/edit`}>
-                      {t(copy.edit)}
-                    </Link>
-                    {can("site.projects.delete") || can("ops.clients.delete") ? (<ConfirmAction
+                    {can("ops.clients.logos_update") ? (
+                      <Link className="btn btn-ghost" to={`/clients/logos/${item.id}/edit`}>
+                        {t(copy.edit)}
+                      </Link>
+                    ) : null}
+                    {can("ops.clients.logos_delete") ? (<ConfirmAction
                       label={t(copy.delete)}
                       yesLabel={t(copy.delete)}
                       noLabel={t(copy.cancel)}
