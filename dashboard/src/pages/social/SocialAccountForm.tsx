@@ -5,6 +5,7 @@ import { z } from "zod";
 import { FormPage } from "../../components/FormPage";
 import { FormSection } from "../../components/FormSection";
 import { LoadingLottie } from "../../components/LoadingLottie";
+import { NotFound } from "../../components/NotFound";
 import { useZodForm } from "../../lib/useZodForm";
 import { api } from "../../api";
 import { copy, type Locale } from "../../i18n";
@@ -20,6 +21,7 @@ export function SocialAccountForm({ t }: { locale: Locale; t: (c: { ar: string; 
   const [loading, setLoading] = useState(Boolean(editingId));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [missing, setMissing] = useState(false);
 
   const schema = useMemo(
     () =>
@@ -53,7 +55,7 @@ export function SocialAccountForm({ t }: { locale: Locale; t: (c: { ar: string; 
     const item = accounts.find((row) => row.id === editingId);
     if (!item) {
       if (accounts.length === 0) return;
-      setError(t(copy.saveFailed));
+      setMissing(true);
       setLoading(false);
       return;
     }
@@ -101,6 +103,7 @@ export function SocialAccountForm({ t }: { locale: Locale; t: (c: { ar: string; 
   }
 
   if (loading) return <LoadingLottie variant="page" label={t(copy.loading)} />;
+  if (missing) return <NotFound t={t} />;
 
   return (
     <FormPage

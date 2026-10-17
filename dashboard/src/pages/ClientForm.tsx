@@ -5,8 +5,9 @@ import { z } from "zod";
 import { FormPage } from "../components/FormPage";
 import { FormSection } from "../components/FormSection";
 import { LoadingLottie } from "../components/LoadingLottie";
+import { NotFound } from "../components/NotFound";
 import { useZodForm } from "../lib/useZodForm";
-import { api } from "../api";
+import { api, isNotFound } from "../api";
 import { copy, type Locale } from "../i18n";
 
 type FieldName = "name" | "email" | "phone" | "companyName" | "companyActivity";
@@ -27,6 +28,7 @@ export function ClientForm({ t }: { locale: Locale; t: (c: { ar: string; en: str
   const [loading, setLoading] = useState(Boolean(editingId));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [missing, setMissing] = useState(false);
 
   const schema = useMemo(
     () =>
@@ -57,13 +59,9 @@ export function ClientForm({ t }: { locale: Locale; t: (c: { ar: string; en: str
     }
     setLoading(true);
     api
-      .clients(1, { id: editingId })
-      .then((res) => res.data.find((row) => row.id === editingId))
-      .then((item) => {
-        if (!item) {
-          setError(t(copy.saveFailed));
-          return;
-        }
+      .client(editingId)
+      .then((res) => {
+        const item = res.data;
         reset({
           name: item.name,
           email: item.email ?? "",
@@ -72,7 +70,7 @@ export function ClientForm({ t }: { locale: Locale; t: (c: { ar: string; en: str
           companyActivity: item.company_activity ?? "",
         });
       })
-      .catch(() => setError(t(copy.saveFailed)))
+      .catch((err) => (isNotFound(err) ? setMissing(true) : setError(t(copy.saveFailed))))
       .finally(() => setLoading(false));
   }, [editingId, reset, t]);
 
@@ -114,6 +112,7 @@ export function ClientForm({ t }: { locale: Locale; t: (c: { ar: string; en: str
   }
 
   if (loading) return <LoadingLottie variant="page" label={t(copy.loading)} />;
+  if (missing) return <NotFound t={t} />;
 
   return (
     <FormPage

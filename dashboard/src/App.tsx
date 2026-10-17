@@ -47,6 +47,7 @@ import { PortfolioCategoryForm } from "./pages/portfolio/PortfolioCategoryForm";
 import { PortfolioProjectForm } from "./pages/portfolio/PortfolioProjectForm";
 import { PortfolioProjects } from "./pages/portfolio/PortfolioProjects";
 import { LoadingLottie } from "./components/LoadingLottie";
+import { NotFound } from "./components/NotFound";
 import { RequestDetail } from "./pages/RequestDetail";
 import { Requests } from "./pages/Requests";
 import { Payments } from "./pages/Payments";
@@ -574,6 +575,7 @@ export function App() {
           <Route path="/portfolio/clients" element={<Navigate to="/clients?tab=logos" replace />} />
           <Route path="/portfolio/categories" element={<Navigate to="/categories" replace />} />
           <Route path="/portfolio/*" element={<Navigate to="/projects" replace />} />
+          <Route path="*" element={<NotFound t={t} />} />
         </Route>
       </Routes>
     </AuthProvider>

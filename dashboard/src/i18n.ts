@@ -505,6 +505,9 @@ export const copy = {
   serverRetrying: { ar: "الخادم غير متاح، جارٍ إعادة المحاولة…", en: "The server is unavailable. Retrying…" },
   serverDown: { ar: "الخادم غير متاح الآن. جلستك محفوظة.", en: "The server is unavailable right now. Your session is kept." },
   serverRetry: { ar: "إعادة المحاولة", en: "Try again" },
+  notFoundTitle: { ar: "الصفحة غير موجودة", en: "Page not found" },
+  notFoundLede: { ar: "الرابط غير صحيح، أو أن العنصر حُذف.", en: "The link is wrong, or the item was deleted." },
+  notFoundBack: { ar: "العودة إلى الرئيسية", en: "Back to overview" },
   forbidden: { ar: "هذا الحساب ليس حساب فريق.", en: "This account is not a staff user." },
   failed: { ar: "تعذر تسجيل الدخول.", en: "Could not sign in." },
   apiUnreachable: {

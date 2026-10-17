@@ -7,8 +7,9 @@ import { FormPage } from "../components/FormPage";
 import { FormSection } from "../components/FormSection";
 import { HtmlEditorField } from "../components/HtmlEditorField";
 import { LoadingLottie } from "../components/LoadingLottie";
+import { NotFound } from "../components/NotFound";
 import { useZodForm } from "../lib/useZodForm";
-import { api, type ArticlePayload } from "../api";
+import { api, isNotFound, type ArticlePayload } from "../api";
 import { copy, type Locale } from "../i18n";
 
 export function ArticleForm({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
@@ -19,6 +20,7 @@ export function ArticleForm({ locale, t }: { locale: Locale; t: (c: { ar: string
   const [loading, setLoading] = useState(Boolean(editingId));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [missing, setMissing] = useState(false);
 
   const schema = useMemo(
     () =>
@@ -79,7 +81,7 @@ export function ArticleForm({ locale, t }: { locale: Locale; t: (c: { ar: string
           is_published: item.is_published,
         });
       })
-      .catch(() => setError(t(copy.savePortfolioFailed)))
+      .catch((err) => (isNotFound(err) ? setMissing(true) : setError(t(copy.savePortfolioFailed))))
       .finally(() => setLoading(false));
   }, [editingId, reset, t]);
 
@@ -113,6 +115,7 @@ export function ArticleForm({ locale, t }: { locale: Locale; t: (c: { ar: string
   }
 
   if (loading) return <LoadingLottie variant="page" label={t(copy.loading)} />;
+  if (missing) return <NotFound t={t} />;
 
   return (
     <FormPage

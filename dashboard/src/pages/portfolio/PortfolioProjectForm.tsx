@@ -8,6 +8,7 @@ import { FormPage } from "../../components/FormPage";
 import { FormSection } from "../../components/FormSection";
 import { HtmlEditorField } from "../../components/HtmlEditorField";
 import { LoadingLottie } from "../../components/LoadingLottie";
+import { NotFound } from "../../components/NotFound";
 import { useZodForm } from "../../lib/useZodForm";
 import { api, type PortfolioCategory, type PortfolioProject } from "../../api";
 import { copy, type Locale } from "../../i18n";
@@ -45,6 +46,7 @@ export function PortfolioProjectForm({ locale, t }: { locale: Locale; t: (c: { a
   const [loading, setLoading] = useState(Boolean(editingId));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [missing, setMissing] = useState(false);
 
   const schema = useMemo(
     () =>
@@ -121,7 +123,7 @@ export function PortfolioProjectForm({ locale, t }: { locale: Locale; t: (c: { a
       .then((item) => {
         if (!active || !editingId) return;
         if (!item) {
-          setError(t(copy.savePortfolioFailed));
+          setMissing(true);
           return;
         }
         reset({
@@ -211,6 +213,7 @@ export function PortfolioProjectForm({ locale, t }: { locale: Locale; t: (c: { a
   }
 
   if (loading) return <LoadingLottie variant="page" label={t(copy.loading)} />;
+  if (missing) return <NotFound t={t} />;
 
   return (
     <FormPage
