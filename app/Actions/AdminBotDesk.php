@@ -109,6 +109,10 @@ class AdminBotDesk
      * partial, open, overdue, draft, cancelled), client, currency, from, to (invoice
      * date), amount_min, amount_max, category (expenses), sort, dir, page, per_page.
      *
+     * Totals: revenue_open is the residual of every open, partial and overdue invoice.
+     * revenue_overdue is the overdue part of that same sum, so it is never added on top.
+     * invoiced is the full amount of every invoice except draft and cancelled.
+     *
      * @param  array<string, mixed>  $filters
      * @return array<string, mixed>
      */

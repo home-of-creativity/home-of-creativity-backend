@@ -731,7 +731,7 @@ export const copy = {
   financeSyncNever: { ar: "لم تُنسخ فواتير أودو بعد.", en: "No Odoo invoices copied yet." },
   financeSyncError: { ar: "آخر مزامنة لم تكتمل: {error}", en: "The last sync did not finish: {error}" },
   financeSyncOff: { ar: "أودو غير مربوط، فالأرقام من سجل اللوحة.", en: "Odoo is not connected, so the figures come from the dashboard records." },
-  financeRevenueOverdue: { ar: "متأخر السداد", en: "Overdue" },
+  financeRevenueOverdue: { ar: "منه متأخر السداد", en: "Overdue, part of open" },
   financeInvoiced: { ar: "إجمالي الفواتير", en: "Invoiced" },
   financeStatePaid: { ar: "مدفوعة", en: "Paid" },
   financeStatePartial: { ar: "مدفوعة جزئياً", en: "Partly paid" },

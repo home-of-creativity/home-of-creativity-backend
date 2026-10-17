@@ -174,6 +174,22 @@ class FinanceOdooSyncTest extends TestCase
             ->assertJsonPath('data.state_counts.overdue', 0);
     }
 
+    public function test_overdue_is_the_part_of_open_past_its_due_date(): void
+    {
+        $this->odooRows = [
+            $this->invoice(510, 'Nour Co', 200, 200, 'posted', 'not_paid', '2026-10-01', '2026-10-30'),
+            $this->invoice(511, 'Nour Co', 499, 499, 'posted', 'not_paid', '2026-09-01', '2026-09-20'),
+        ];
+
+        $this->getJson('/api/admin/finance')
+            ->assertOk()
+            ->assertJsonPath('data.revenue_open', 699)
+            ->assertJsonPath('data.revenue_overdue', 499)
+            ->assertJsonPath('data.invoiced', 699)
+            ->assertJsonPath('data.state_counts.open', 1)
+            ->assertJsonPath('data.state_counts.overdue', 1);
+    }
+
     public function test_an_invoice_deleted_in_odoo_leaves_the_finance_page_within_a_minute(): void
     {
         $client = Client::factory()->create(['company_name' => 'Damastech', 'odoo_partner_id' => '44']);
