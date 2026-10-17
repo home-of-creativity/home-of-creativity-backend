@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { api, getToken, setToken, type User } from "./api";
+import { api, setToken, type User } from "./api";
 
 /** Waits before each retry of /auth/me while the server is down. After the last one, staff retry by hand. */
 const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000];
@@ -25,11 +25,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const check = useCallback((attempt: number) => {
     window.clearTimeout(timer.current);
-    if (!getToken()) {
-      setServer("ok");
-      setReady(true);
-      return;
-    }
+    setToken(null);
     api
       .me()
       .then((res) => {
@@ -37,9 +33,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setServer("ok");
         setReady(true);
       })
-      .catch(() => {
-        // The request layer drops the token on 401 or 419. Anything else keeps the session.
-        if (!getToken()) {
+      .catch((err: unknown) => {
+        const status = err && typeof err === "object" && "status" in err ? Number((err as { status?: number }).status) : 0;
+        // 401 and 419 end the session. A 5xx or a network failure keeps it and retries.
+        if (status === 401 || status === 419) {
           setUser(null);
           setServer("ok");
           setReady(true);
@@ -71,10 +68,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       async login(email, password) {
         const res = await api.login(email, password);
         if (!res.data.user.is_admin && !res.data.user.role) {
-          setToken(null);
+          await api.logout();
           throw new Error("forbidden");
         }
-        setToken(res.data.token);
+        setToken(null);
         setUser(res.data.user);
       },
       async logout() {

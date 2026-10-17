@@ -35,6 +35,6 @@ export async function mockApi(page: Page, handler: Handler = () => false) {
 export async function signedIn(page: Page) {
   await page.addInitScript(() => {
     localStorage.setItem("hoc-dash-locale", "en");
-    localStorage.setItem("hoc-staff-token", "qa-mock-token");
+    localStorage.removeItem("hoc-staff-token");
   });
 }

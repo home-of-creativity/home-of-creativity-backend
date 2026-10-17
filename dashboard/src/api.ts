@@ -1197,7 +1197,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   let response: Response;
   try {
-    response = await fetch(`${API_URL}${path}`, { ...init, headers });
+    response = await fetch(`${API_URL}${path}`, { ...init, headers, credentials: "include" });
   } catch (err) {
     if (err instanceof TypeError) {
       throw new Error("api_unreachable");
@@ -1245,6 +1245,7 @@ async function submitForm<T>(
   return new Promise<T>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${API_URL}${path}`);
+    xhr.withCredentials = true;
     xhr.responseType = "text";
     xhr.setRequestHeader("Accept", "application/json");
     const token = getToken();
@@ -1647,7 +1648,7 @@ export const api = {
     const headers = new Headers();
     const token = getToken();
     if (token) headers.set("Authorization", `Bearer ${token}`);
-    const response = await fetch(`${API_URL}/admin/comments/${id}/attachment`, { headers });
+    const response = await fetch(`${API_URL}/admin/comments/${id}/attachment`, { headers, credentials: "include" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return response.blob();
   },
@@ -1726,7 +1727,7 @@ export const api = {
     const headers = new Headers({ Accept: "image/*" });
     const token = getToken();
     if (token) headers.set("Authorization", `Bearer ${token}`);
-    return fetch(`${API_URL}/admin/ops-settings/sham-cash-qr`, { headers }).then(async (response) => {
+    return fetch(`${API_URL}/admin/ops-settings/sham-cash-qr`, { headers, credentials: "include" }).then(async (response) => {
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return response.blob();
     });
@@ -1799,7 +1800,7 @@ export const api = {
     const headers = new Headers({ Accept: "application/octet-stream" });
     const token = getToken();
     if (token) headers.set("Authorization", `Bearer ${token}`);
-    const response = await fetch(`${API_URL}/admin/complaints/${id}/${kind}`, { headers });
+    const response = await fetch(`${API_URL}/admin/complaints/${id}/${kind}`, { headers, credentials: "include" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return response.blob();
   },
@@ -1868,7 +1869,7 @@ export const api = {
     const headers = new Headers({ Accept: "application/octet-stream" });
     const token = getToken();
     if (token) headers.set("Authorization", `Bearer ${token}`);
-    const response = await fetch(`${API_URL}/admin/requests/${requestId}/files/${fileId}/receipt`, { headers });
+    const response = await fetch(`${API_URL}/admin/requests/${requestId}/files/${fileId}/receipt`, { headers, credentials: "include" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return response.blob();
   },
@@ -1925,7 +1926,7 @@ export const api = {
     const headers = new Headers({ Accept: "application/octet-stream" });
     const token = getToken();
     if (token) headers.set("Authorization", `Bearer ${token}`);
-    const response = await fetch(`${API_URL}/admin/reports/${id}/${kind}`, { headers });
+    const response = await fetch(`${API_URL}/admin/reports/${id}/${kind}`, { headers, credentials: "include" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return new Uint8Array(await response.arrayBuffer());
   },
@@ -1946,7 +1947,7 @@ export const api = {
     const headers = new Headers({ Accept: "image/*" });
     const token = getToken();
     if (token) headers.set("Authorization", `Bearer ${token}`);
-    const response = await fetch(`${API_URL}/admin/report-slots/${slotId}/images/${imageId}`, { headers });
+    const response = await fetch(`${API_URL}/admin/report-slots/${slotId}/images/${imageId}`, { headers, credentials: "include" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return response.blob();
   },
@@ -1964,7 +1965,7 @@ export const api = {
     const headers = new Headers({ Accept: "application/octet-stream" });
     const token = getToken();
     if (token) headers.set("Authorization", `Bearer ${token}`);
-    const response = await fetch(`${API_URL}/admin/report-versions/${id}/document`, { headers });
+    const response = await fetch(`${API_URL}/admin/report-versions/${id}/document`, { headers, credentials: "include" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return response.blob();
   },
@@ -2017,7 +2018,7 @@ export const api = {
     const headers = new Headers({ Accept: "application/octet-stream" });
     const token = getToken();
     if (token) headers.set("Authorization", `Bearer ${token}`);
-    const response = await fetch(`${API_URL}/admin/report-templates/${id}/document`, { headers });
+    const response = await fetch(`${API_URL}/admin/report-templates/${id}/document`, { headers, credentials: "include" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return new Uint8Array(await response.arrayBuffer());
   },
@@ -2067,7 +2068,7 @@ export const api = {
     const headers = new Headers({ Accept: "application/pdf" });
     const token = getToken();
     if (token) headers.set("Authorization", `Bearer ${token}`);
-    const response = await fetch(`${API_URL}/admin/reports/to-pdf`, { method: "POST", headers, body: form });
+    const response = await fetch(`${API_URL}/admin/reports/to-pdf`, { method: "POST", headers, body: form, credentials: "include" });
     if (!response.ok) {
       const body = await response.json().catch(() => ({}));
       throw new Error(apiErrorMessage(body as Record<string, unknown>, response.status));
@@ -2178,7 +2179,7 @@ export const api = {
     const headers = new Headers({ Accept: "application/pdf" });
     const token = getToken();
     if (token) headers.set("Authorization", `Bearer ${token}`);
-    const response = await fetch(`${API_URL}/admin/odoo/${kind}/${id}/pdf${proforma ? "?proforma=1" : ""}`, { headers });
+    const response = await fetch(`${API_URL}/admin/odoo/${kind}/${id}/pdf${proforma ? "?proforma=1" : ""}`, { headers, credentials: "include" });
     if (!response.ok) {
       const body = await response.json().catch(() => null) as { message?: string } | null;
       throw new Error(body?.message || `HTTP ${response.status}`);

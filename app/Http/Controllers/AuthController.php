@@ -9,6 +9,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpFoundation\Cookie;
 
 class AuthController extends Controller
 {
@@ -30,13 +31,15 @@ class AuthController extends Controller
             ]);
         }
 
+        $token = $user->createToken('dashboard')->plainTextToken;
+
         return response()->json([
             'data' => [
-                'token' => $user->createToken('api')->plainTextToken,
+                'token' => $token,
                 'user' => UserResource::make($user),
             ],
             'message' => 'ok',
-        ]);
+        ])->cookie($this->staffCookie($request, $token));
     }
 
     public function logout(Request $request): JsonResponse
@@ -46,7 +49,18 @@ class AuthController extends Controller
         return response()->json([
             'data' => null,
             'message' => 'Logged out.',
-        ]);
+        ])->withoutCookie('hoc_staff');
+    }
+
+    private function staffCookie(Request $request, string $token): Cookie
+    {
+        return Cookie::create('hoc_staff')
+            ->withValue($token)
+            ->withExpires(now()->addHours(12))
+            ->withPath('/')
+            ->withSecure($request->isSecure())
+            ->withHttpOnly(true)
+            ->withSameSite('lax');
     }
 
     public function me(Request $request): UserResource

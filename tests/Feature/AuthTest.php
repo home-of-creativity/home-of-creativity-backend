@@ -28,10 +28,14 @@ class AuthTest extends TestCase
             'password' => 'password',
         ]);
 
-        $this->postJson('/api/auth/login', [
+        $login = $this->postJson('/api/auth/login', [
             'email' => 'ammar@example.com',
             'password' => 'password',
-        ])->assertOk()->assertJsonStructure(['data' => ['token', 'user']]);
+        ])->assertOk()->assertJsonStructure(['data' => ['token', 'user']])->assertCookie('hoc_staff');
+
+        $this->call('GET', '/api/auth/me', [], ['hoc_staff' => (string) $login->json('data.token')], [], [
+            'HTTP_ACCEPT' => 'application/json',
+        ])->assertOk()->assertJsonPath('data.email', 'ammar@example.com');
     }
 
     public function test_login_rejects_bad_password(): void

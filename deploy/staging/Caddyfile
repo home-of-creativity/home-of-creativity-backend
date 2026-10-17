@@ -49,6 +49,7 @@ Disallow: /
 		root * /var/www/hoc/dashboard/dist
 		encode zstd gzip
 		header Cache-Control "no-cache"
+		header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self'; font-src 'self' data:; frame-src 'self'; object-src 'none'; base-uri 'self'"
 		try_files {path} /index.html
 		file_server
 	}

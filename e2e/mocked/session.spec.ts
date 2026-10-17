@@ -20,7 +20,7 @@ for (const status of [502, 503]) {
     await expect(page.getByText("The server is unavailable. Retrying…")).toBeVisible();
     await expect.poll(() => calls).toBeGreaterThanOrEqual(3);
     await expect(page.locator('input[type="password"]')).toHaveCount(0);
-    expect(await page.evaluate(() => localStorage.getItem("hoc-staff-token"))).toBe("qa-mock-token");
+    expect(await page.evaluate(() => localStorage.getItem("hoc-staff-token"))).toBeNull();
   });
 }
 
@@ -40,7 +40,7 @@ test("a network error on /auth/me keeps the session", async ({ page }) => {
   await page.goto("./");
   await expect.poll(() => calls).toBeGreaterThanOrEqual(2);
   await expect(page.locator('input[type="password"]')).toHaveCount(0);
-  expect(await page.evaluate(() => localStorage.getItem("hoc-staff-token"))).toBe("qa-mock-token");
+  expect(await page.evaluate(() => localStorage.getItem("hoc-staff-token"))).toBeNull();
 });
 
 test("a 401 from /auth/me signs out", async ({ page }) => {
