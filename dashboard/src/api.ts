@@ -35,6 +35,7 @@ export type StaffModule =
   | "ops.photography_all"
   | "ops.photography_calendars"
   | "ops.complaints"
+  | "ops.bot_feedback"
   | "ops.report_gemini"
   | "ops.report_templates"
   | "ops.report_media"
