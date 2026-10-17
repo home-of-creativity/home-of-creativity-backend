@@ -2205,6 +2205,10 @@ td[colspan] {
   gap: 0.75rem;
 }
 
+.detail-description {
+  white-space: pre-line;
+}
+
 .overview-layout,
 .detail-layout {
   display: grid;

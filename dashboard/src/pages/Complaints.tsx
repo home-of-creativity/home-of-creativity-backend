@@ -107,7 +107,7 @@ export function ComplaintsPage({ locale, t }: { locale: Locale; t: (c: { ar: str
             </label>
           </div>
           {visible.length === 0 ? (
-            <p className="muted">{rows.length === 0 ? (ar ? "ما في شكاوى بعد." : "No complaints yet.") : t(copy.noSearchResults)}</p>
+            <p className="muted">{rows.length === 0 ? t(copy.complaintsEmpty) : t(copy.noSearchResults)}</p>
           ) : (
             <div className="table-wrap">
               <table className="complaint-table">
@@ -353,7 +353,7 @@ function ComplaintTicket({
                     ))}
                   </ol>
                 ) : (
-                  <p className="muted complaint-empty">{ar ? "لا ردود بعد. أول رد يفتح تذكرة ويصل العميل." : "No replies yet. The first reply opens a ticket and reaches the client."}</p>
+                  <p className="muted complaint-empty">{t(copy.complaintsNoReplies)}</p>
                 )}
 
                 {canReply ? <div className="complaint-reply">

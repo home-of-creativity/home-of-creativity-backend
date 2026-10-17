@@ -13,6 +13,15 @@ import { copy, type Copy, type Locale } from "../i18n";
 
 const STATES: FinanceInvoiceState[] = ["paid", "partial", "open", "overdue", "draft", "cancelled"];
 
+const EXPENSE_COPY: Record<string, Copy> = {
+  "رواتب": copy.expenseSalaries,
+  "إعلانات": copy.expenseAds,
+  "برامج": copy.expenseSoftware,
+  "مكتب": copy.expenseOffice,
+  "تنقل": copy.expenseTransport,
+  "أخرى": copy.expenseOther,
+};
+
 const STATE_COPY: Record<FinanceInvoiceState, Copy> = {
   paid: copy.financeStatePaid,
   partial: copy.financeStatePartial,
@@ -368,7 +377,7 @@ export function Finance({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                   <option value="">{t(copy.all)}</option>
                   {(data.currencies ?? []).map((item) => (
                     <option key={item} value={item}>
-                      {item}
+                      {EXPENSE_COPY[item] ? t(EXPENSE_COPY[item]) : item}
                     </option>
                   ))}
                 </select>
@@ -380,7 +389,7 @@ export function Finance({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                 <option value="">{t(copy.all)}</option>
                 {data.categories.map((item) => (
                   <option key={item} value={item}>
-                    {item}
+                    {EXPENSE_COPY[item] ? t(EXPENSE_COPY[item]) : item}
                   </option>
                 ))}
               </select>
@@ -532,7 +541,7 @@ export function Finance({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                             <td>
                               <select className="field" aria-label={t(copy.financeCategory)} value={editing.category} onChange={(event) => setEditing({ ...editing, category: event.target.value })}>
                                 {data.categories.map((item) => (
-                                  <option key={item} value={item}>{item}</option>
+                                  <option key={item} value={item}>{EXPENSE_COPY[item] ? t(EXPENSE_COPY[item]) : item}</option>
                                 ))}
                               </select>
                             </td>
@@ -554,7 +563,7 @@ export function Finance({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                         ) : (
                           <tr key={row.id}>
                             <td dir="ltr" className="nowrap">{money(row.amount)}</td>
-                            <td>{row.category}</td>
+                            <td>{EXPENSE_COPY[row.category] ? t(EXPENSE_COPY[row.category]) : row.category}</td>
                             <td>{row.note ?? "—"}</td>
                             <td className="nowrap">{row.spent_at ?? "—"}</td>
                             <td className="row-actions nowrap">
@@ -607,7 +616,7 @@ export function Finance({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                 <select className="field" value={category} onChange={(event) => setCategory(event.target.value)}>
                   {data.categories.map((item) => (
                     <option key={item} value={item}>
-                      {item}
+                      {EXPENSE_COPY[item] ? t(EXPENSE_COPY[item]) : item}
                     </option>
                   ))}
                 </select>

@@ -419,7 +419,7 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
       <div className="detail-layout">
       <div className="detail-main">
       <section className="card detail-card">
-        <p>{item.description}</p>
+        <p className="detail-description" dir="auto">{item.description}</p>
         <dl className="meta-grid">
           <div>
             <dt>{t(copy.client)}</dt>
@@ -848,10 +848,10 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
           {canWorkPlan ? (
             <>
               <button className="btn" type="button" onClick={() => setPlanOpen(true)}>
-                تغيير الخطة
+                {t(copy.changePlan)}
               </button>
               <button className="btn" type="button" onClick={() => setExtendOpen(true)}>
-                تمديد المدة
+                {t(copy.extendDuration)}
               </button>
             </>
           ) : null}
@@ -874,16 +874,14 @@ export function RequestDetail({ locale, t }: { locale: Locale; t: (c: { ar: stri
       </section>
       {item.admin_approval_pending ? (
         <section className="card action-card approval-gate" aria-labelledby="approval-gate-title">
-          <h2 className="form-title" id="approval-gate-title">وافق الزبون على العرض وينتظر اعتمادك</h2>
+          <h2 className="form-title" id="approval-gate-title">{t(copy.approvalGateTitle)}</h2>
           <p className="muted">
-            {canApproveQuotation
-              ? "وصلت الزبون خطوات الدفع ولا يعلم بهذه الخطوة. بعد الاعتماد يتحول العرض إلى أمر بيع في أودو وتصله الفاتورة. تأكيد الدفع يعتمد الطلب تلقائياً."
-              : "ينتظر هذا الطلب اعتماد الإدارة. تأكيد الدفع يعتمده تلقائياً."}
+            {canApproveQuotation ? t(copy.approvalGateHelp) : t(copy.approvalGateWaiting)}
           </p>
           {canApproveQuotation ? (
             <div className="toolbar">
               <button className="btn btn-teal" type="button" disabled={recordingDecision} onClick={() => void approveRequest()}>
-                اعتماد الطلب
+                {t(copy.approveRequest)}
               </button>
             </div>
           ) : null}
