@@ -9,6 +9,16 @@ import { copy, type Locale } from "../i18n";
 
 const defaults: ClientChannels = { telegram_enabled: true, whatsapp_enabled: true };
 
+/** Display only. A stored 12-digit Syrian number reads as +963 9XX XXX XXX. */
+function formatChannelPhone(raw: string) {
+  const digits = raw.replace(/\D/g, "");
+  if (digits.length === 12 && digits.startsWith("963")) {
+    const local = digits.slice(3);
+    return `+963 ${local.slice(0, 3)} ${local.slice(3, 6)} ${local.slice(6)}`;
+  }
+  return raw.startsWith("+") ? raw : `+${digits || raw}`;
+}
+
 export function ClientChannelsPage({ locale, t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
   const can = useCan();
   const [channels, setChannels] = useState<ClientChannels>(defaults);
@@ -204,7 +214,7 @@ export function ClientChannelsPage({ locale, t }: { locale: Locale; t: (c: { ar:
               <div className="channels-link-row">
                 <div>
                   <p className="channels-link-kicker">{t(copy.channelsWhatsappPhone)}</p>
-                  {link.phone ? <p className="channels-phone" dir="ltr">+{link.phone}</p> : null}
+                  {link.phone ? <p className="channels-phone" dir="ltr">{formatChannelPhone(link.phone)}</p> : null}
                   <p className="muted">{t(copy.channelsWhatsappLinked)}</p>
                 </div>
                 {can("ops.channels.whatsapp") ? (
@@ -236,7 +246,7 @@ export function ClientChannelsPage({ locale, t }: { locale: Locale; t: (c: { ar:
             {adminLink?.connected ? (
               <div className="channels-link-row">
                 <div>
-                  {adminLink.phone ? <p className="channels-phone" dir="ltr">+{adminLink.phone}</p> : null}
+                  {adminLink.phone ? <p className="channels-phone" dir="ltr">{formatChannelPhone(adminLink.phone)}</p> : null}
                   <p className="muted">{t(copy.channelsAdminWhatsappLinked)}</p>
                 </div>
                 {can("ops.channels.whatsapp") ? (
