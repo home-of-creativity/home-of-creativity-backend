@@ -18,6 +18,9 @@ use App\Models\Client;
 use App\Services\OdooClient;
 use App\Support\ClientPhone;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 
 class ClientController extends Controller
 {
@@ -26,6 +29,13 @@ class ClientController extends Controller
         PushClientToOdoo $pushClient,
         PushClientLeadToOdoo $pushLead,
     ) {
+        $order = $request->validate([
+            'sort' => ['nullable', Rule::in(['name', 'company_name', 'created_at'])],
+            'dir' => ['nullable', Rule::in(['asc', 'desc'])],
+        ]);
+        $sort = $order['sort'] ?? null;
+        $dir = $order['dir'] ?? ($sort === 'created_at' ? 'desc' : 'asc');
+
         $this->pushPendingTelegramLeads($pushClient, $pushLead);
 
         $search = trim((string) $request->query('search', ''));
@@ -81,7 +91,11 @@ class ClientController extends Controller
             ->when($request->query('drive') === 'no', function ($query) {
                 $query->where(fn ($inner) => $inner->whereNull('google_drive_folder_id')->orWhere('google_drive_folder_id', ''));
             })
-            ->latest('id')
+            ->when(
+                $sort !== null,
+                fn ($query) => $query->orderBy($sort, $dir)->orderBy('id', $dir),
+                fn ($query) => $query->latest('id'),
+            )
             ->paginate($request->perPage());
 
         $stages = Client::query()
@@ -135,6 +149,25 @@ class ClientController extends Controller
             ])
             ->response()
             ->setStatusCode(201);
+    }
+
+    public function show(Client $client): ClientResource
+    {
+        return ClientResource::make($client->loadCount('requests'))->additional(['message' => 'ok']);
+    }
+
+    public function logo(Request $request, Client $client): ClientResource
+    {
+        $request->validate([
+            'logo' => ['required', 'file', 'mimes:png,jpg,jpeg,webp', 'mimetypes:image/png,image/jpeg,image/webp', 'max:4096'],
+        ]);
+        $previous = $client->logo_path;
+        $client->update(['logo_path' => $request->file('logo')->store('client-logos/'.$client->id, 'public')]);
+        if (filled($previous)) {
+            Storage::disk('public')->delete($previous);
+        }
+
+        return ClientResource::make($client->loadCount('requests'))->additional(['message' => 'Logo saved.']);
     }
 
     public function update(UpdateClientRequest $request, Client $client, UpdateClient $updateClient): ClientResource

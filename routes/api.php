@@ -168,9 +168,12 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::delete('contact/{contact_channel}', [AdminContactChannelController::class, 'destroy']);
     });
 
+    Route::post('clients/{client}/logo', [AdminClientController::class, 'logo'])
+        ->middleware('ability:ops.clients.update')->whereNumber('client');
     Route::middleware('crud:ops.clients')->group(function () {
         Route::get('clients', [AdminClientController::class, 'index']);
         Route::post('clients', [AdminClientController::class, 'store']);
+        Route::get('clients/{client}', [AdminClientController::class, 'show'])->whereNumber('client');
         Route::put('clients/{client}', [AdminClientController::class, 'update']);
         Route::delete('clients/{client}', [AdminClientController::class, 'destroy']);
         Route::get('odoo/status', [AdminOdooController::class, 'status']);

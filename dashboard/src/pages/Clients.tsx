@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Search } from "lucide-react";
+import { ArrowDown, ArrowUp, Search } from "lucide-react";
 import { toast } from "sonner";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, CLIENT_SEARCH_MIN, type Client, type OdooInvoice, type OdooPaperKind, type OdooQuotation, type PageMeta, type PaperRequest } from "../api";
@@ -23,6 +23,8 @@ import { ClientLogosPanel } from "./portfolio/ClientLogosPanel";
 const TELEGRAM_BOT = import.meta.env.VITE_TELEGRAM_BOT ?? "pro_design_perfect_bot";
 
 type Tab = "clients" | "logos" | "quotations" | "invoices";
+
+type ClientSortKey = "name" | "company_name";
 
 const tabs: Tab[] = ["clients", "logos", "quotations", "invoices"];
 
@@ -116,6 +118,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
   const [stageFilter, setStageFilter] = useState("");
   const [driveFilter, setDriveFilter] = useState("");
   const [stages, setStages] = useState<string[]>([]);
+  const [clientSort, setClientSort] = useState<{ sort: ClientSortKey | ""; dir: "asc" | "desc" }>({ sort: "", dir: "desc" });
   const [quoteQuery, setQuoteQuery] = useState("");
   const [quoteState, setQuoteState] = useState("");
   const [invoiceQuery, setInvoiceQuery] = useState("");
@@ -324,6 +327,8 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                 channel: channelFilter,
                 stage: stageFilter,
                 drive: driveFilter,
+                sort: clientSort.sort || undefined,
+                dir: clientSort.sort ? clientSort.dir : undefined,
               }).then((res) => {
                 if (cancelled) return;
                 setItems(res.data);
@@ -360,11 +365,27 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [tab, page, debouncedQuery, clientSearchReady, odooFilter, companyFilter, phoneFilter, channelFilter, stageFilter, driveFilter, partnerFilter, papersUnlinked, refresh, t]);
+  }, [tab, page, debouncedQuery, clientSearchReady, odooFilter, companyFilter, phoneFilter, channelFilter, stageFilter, driveFilter, clientSort, partnerFilter, papersUnlinked, refresh, t]);
 
   useEffect(() => {
     setPage(1);
-  }, [debouncedQuery, odooFilter, companyFilter, phoneFilter, channelFilter, stageFilter, driveFilter]);
+  }, [debouncedQuery, odooFilter, companyFilter, phoneFilter, channelFilter, stageFilter, driveFilter, clientSort]);
+
+  function sortClients(key: ClientSortKey) {
+    setClientSort((current) => ({ sort: key, dir: current.sort === key && current.dir === "asc" ? "desc" : "asc" }));
+  }
+
+  function clientSortHeader(label: string, key: ClientSortKey) {
+    const active = clientSort.sort === key;
+    return (
+      <th aria-sort={active ? (clientSort.dir === "asc" ? "ascending" : "descending") : "none"}>
+        <button type="button" className="th-sort" onClick={() => sortClients(key)} title={t(copy.financeSortHint)}>
+          {label}
+          {active ? clientSort.dir === "asc" ? <ArrowUp size={13} aria-hidden="true" /> : <ArrowDown size={13} aria-hidden="true" /> : null}
+        </button>
+      </th>
+    );
+  }
 
   async function importCrmExcel(file: File) {
     setError("");
@@ -610,8 +631,8 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
             <table>
               <thead>
                 <tr>
-                  <th>{t(copy.client)}</th>
-                  <th>{t(copy.company)}</th>
+                  {clientSortHeader(t(copy.client), "name")}
+                  {clientSortHeader(t(copy.company), "company_name")}
                   <th>{t(copy.odooStage)}</th>
                   <th>{t(copy.email)}</th>
                   <th>{t(copy.phone)}</th>

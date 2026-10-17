@@ -1871,6 +1871,8 @@ export const api = {
     drive?: string;
     per_page?: number;
     id?: number;
+    sort?: "name" | "company_name" | "created_at";
+    dir?: "asc" | "desc";
   } = {}) {
     return request<Paginated<Client> & { stages?: string[] }>(`/admin/clients${queryString({
       page,
@@ -1883,7 +1885,12 @@ export const api = {
       channel: filters.channel,
       stage: filters.stage,
       drive: filters.drive,
+      sort: filters.sort,
+      dir: filters.dir,
     })}`);
+  },
+  client(id: number) {
+    return request<Envelope<Client>>(`/admin/clients/${id}`);
   },
   reportClients(page = 1, filters: { search?: string; reports?: string; drive?: string } = {}) {
     return request<Paginated<Client>>(`/admin/reports${queryString({
