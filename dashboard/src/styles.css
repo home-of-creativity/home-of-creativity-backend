@@ -6598,6 +6598,11 @@ html[dir="rtl"] .breadcrumb-sep {
 .stat-card {
   display: grid;
   gap: 0.2rem;
+  min-width: 0;
+}
+
+.stat-card strong {
+  overflow-wrap: anywhere;
 }
 
 .donut-stat {
@@ -6679,7 +6684,7 @@ html[dir="rtl"] .breadcrumb-sep {
 }
 
 .donut-stat-legend-item strong {
-    margin-inline-start: auto;
+  margin-inline-start: 0.35rem;
   color: var(--brand-ink);
 }
 
