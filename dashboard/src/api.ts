@@ -1162,6 +1162,17 @@ function queryString(params: Record<string, string | number | undefined>) {
   return query ? `?${query}` : "";
 }
 
+export function isNotFound(err: unknown) {
+  return Boolean(err && typeof err === "object" && "status" in err && (err as { status?: unknown }).status === 404);
+}
+
+function apiFailure(body: Record<string, unknown>, status: number) {
+  const error = new Error(apiErrorMessage(body, status)) as Error & { status: number; errors?: Record<string, string[]> };
+  error.status = status;
+  if (body.errors && typeof body.errors === "object") error.errors = body.errors as Record<string, string[]>;
+  return error;
+}
+
 function apiErrorMessage(body: Record<string, unknown>, status: number) {
   if (typeof body.message === "string" && body.message.length > 0) {
     return body.message;
@@ -1198,7 +1209,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-    throw new Error(apiErrorMessage(body, response.status));
+    throw apiFailure(body, response.status);
   }
   return response.json() as Promise<T>;
 }

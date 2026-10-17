@@ -9,6 +9,16 @@ import { useZodForm } from "../lib/useZodForm";
 import { api } from "../api";
 import { copy, type Locale } from "../i18n";
 
+type FieldName = "name" | "email" | "phone" | "companyName" | "companyActivity";
+
+const FIELD_NAMES: Record<string, FieldName> = {
+  name: "name",
+  email: "email",
+  phone: "phone",
+  company_name: "companyName",
+  company_activity: "companyActivity",
+};
+
 export function ClientForm({ t }: { locale: Locale; t: (c: { ar: string; en: string }) => string }) {
   const navigate = useNavigate();
   const params = useParams();
@@ -34,6 +44,7 @@ export function ClientForm({ t }: { locale: Locale; t: (c: { ar: string; en: str
     register,
     handleSubmit,
     reset,
+    setError: setFieldError,
     formState: { errors },
   } = useZodForm(schema, {
     defaultValues: { name: "", email: "", phone: "", companyName: "", companyActivity: "" },
@@ -90,7 +101,13 @@ export function ClientForm({ t }: { locale: Locale; t: (c: { ar: string; en: str
       navigate("/clients");
     } catch (err) {
       const message = err instanceof Error ? err.message : t(copy.saveFailed);
-      setError(message);
+      const raw = err && typeof err === "object" && "errors" in err ? (err as { errors?: Record<string, string[]> }).errors : undefined;
+      const fields = raw ? Object.entries(raw) : [];
+      for (const [key, lines] of fields) {
+        const name = FIELD_NAMES[key];
+        if (name && lines[0]) setFieldError(name, { type: "server", message: lines[0] });
+      }
+      if (!fields.some(([key]) => FIELD_NAMES[key])) setError(message);
       toast.error(message);
       setBusy(false);
     }
@@ -124,15 +141,18 @@ export function ClientForm({ t }: { locale: Locale; t: (c: { ar: string; en: str
         </label>
         <label className="field-label">
           {t(copy.phone)}
-          <input className="field" dir="ltr" {...register("phone")} />
+          <input className={errors.phone ? "field has-error" : "field"} type="tel" inputMode="tel" dir="ltr" {...register("phone")} />
+          {errors.phone ? <p className="field-error">{errors.phone.message}</p> : null}
         </label>
         <label className="field-label">
           {t(copy.company)}
-          <input className="field" {...register("companyName")} />
+          <input className={errors.companyName ? "field has-error" : "field"} {...register("companyName")} />
+          {errors.companyName ? <p className="field-error">{errors.companyName.message}</p> : null}
         </label>
         <label className="field-label">
           {t(copy.companyActivity)}
-          <input className="field" maxLength={60} {...register("companyActivity")} />
+          <input className={errors.companyActivity ? "field has-error" : "field"} maxLength={60} {...register("companyActivity")} />
+          {errors.companyActivity ? <p className="field-error">{errors.companyActivity.message}</p> : null}
         </label>
       </FormSection>
     </FormPage>
