@@ -88,8 +88,7 @@ class WatchHealthCommand extends Command
         if (Cache::add('dev.wa.repair', true, now()->addMinutes(10))) {
             $result = app(RepairWhatsAppBridge::class)->handOff($status);
             if ($result['fixed'] && ! in_array($result['action'], ['already_up', 'needs_scan'], true)) {
-                $alert->send('تم إصلاح جسر واتساب. لا تُرسل هذه الرسالة للعميل.');
-                Cache::put('dev.wa.fixed-note', true, now()->addMinutes(30));
+                $alert->bridgeRepaired();
             }
         }
     }

@@ -2,6 +2,7 @@
 
 namespace App\Actions;
 
+use App\Services\DevAlert;
 use App\Services\WhatsAppWebClient;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -12,7 +13,10 @@ use Illuminate\Support\Facades\Log;
  */
 class RepairWhatsAppBridge
 {
-    public function __construct(private WhatsAppWebClient $whatsApp) {}
+    public function __construct(
+        private WhatsAppWebClient $whatsApp,
+        private DevAlert $alert,
+    ) {}
 
     /**
      * Ask n8n to repair. When that webhook is empty, repair here.
@@ -63,9 +67,13 @@ class RepairWhatsAppBridge
             return ['fixed' => false, 'action' => 'needs_scan'];
         }
         if ($status['reachable'] && $this->whatsApp->restartProcess()) {
+            $this->alert->bridgeRepaired();
+
             return ['fixed' => true, 'action' => 'process_restart'];
         }
         if ($this->restartContainer()) {
+            $this->alert->bridgeRepaired();
+
             return ['fixed' => true, 'action' => 'container_restart'];
         }
 

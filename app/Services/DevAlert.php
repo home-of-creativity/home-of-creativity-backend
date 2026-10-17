@@ -26,6 +26,19 @@ class DevAlert
         $this->send($text);
     }
 
+    /**
+     * Tell HOC DEV the WhatsApp bridge was restarted. Once per half hour so
+     * the repair action and the health watch do not both ping.
+     */
+    public function bridgeRepaired(): void
+    {
+        if (! Cache::add('dev.wa.fixed-note', true, now()->addMinutes(30))) {
+            return;
+        }
+
+        $this->send('تم إصلاح جسر واتساب. لا تُرسل هذه الرسالة للعميل.');
+    }
+
     public function send(string $text): void
     {
         $token = (string) config('services.telegram.dev_bot_token');

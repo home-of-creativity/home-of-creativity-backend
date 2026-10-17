@@ -18,6 +18,8 @@ class WhatsAppBridgeRepairTest extends TestCase
             'services.whatsapp.web_url' => 'http://wa-web.test',
             'services.whatsapp.web_secret' => 'web-secret',
             'services.whatsapp.web_container' => '',
+            'services.telegram.dev_bot_token' => 'dev-token',
+            'services.telegram.dev_chat_id' => '42',
         ]);
     }
 
@@ -52,6 +54,7 @@ class WhatsAppBridgeRepairTest extends TestCase
         Http::fake([
             'http://wa-web.test/status' => Http::response(['connected' => false, 'qr' => null, 'phone' => null], 200),
             'http://wa-web.test/repair' => Http::response(['restarting' => true], 200),
+            'https://api.telegram.org/*' => Http::response(['ok' => true], 200),
         ]);
 
         $this->withHeaders(['X-N8N-Secret' => 'n8n-secret'])
@@ -61,6 +64,8 @@ class WhatsAppBridgeRepairTest extends TestCase
 
         Http::assertSent(fn ($sent): bool => $sent->url() === 'http://wa-web.test/repair'
             && $sent->hasHeader('X-Webhook-Secret', 'web-secret'));
+        Http::assertSent(fn ($sent): bool => str_contains($sent->url(), 'api.telegram.org/botdev-token/sendMessage')
+            && str_contains((string) $sent['text'], 'تم إصلاح جسر واتساب'));
     }
 
     public function test_the_repair_route_rejects_a_missing_secret(): void
