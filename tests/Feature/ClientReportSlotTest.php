@@ -107,7 +107,7 @@ class ClientReportSlotTest extends TestCase
             'is_admin' => false,
             'role_id' => Role::query()->create([
                 'name' => 'مشاهدة',
-                'abilities' => ['ops.reports.view'],
+                'abilities' => ['ops.reports.view', 'ops.reports.calendar_view'],
             ])->id,
         ]);
         Sanctum::actingAs($viewer);

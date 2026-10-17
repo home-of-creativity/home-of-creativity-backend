@@ -197,7 +197,7 @@ class GoogleDriveStorageAccountTest extends TestCase
         $drive = new GoogleDriveClient($auth, app(GoogleDriveUploader::class));
 
         $this->assertNull($drive->uploadFile('report-folder', 'report.docx', 'PK bytes', 'application/octet-stream'));
-        $this->assertStringContainsString('Drive storage', (string) $drive->lastError());
+        $this->assertStringContainsString('مساحة Drive غير متاحة', (string) $drive->lastError());
         Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), 'upload/drive'));
     }
 

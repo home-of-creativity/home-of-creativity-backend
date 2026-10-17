@@ -83,7 +83,7 @@ class ReportCalendarsTest extends TestCase
         $this->deadline(null, 'رئيسي');
         $this->deadline($calendar->id, 'سري');
 
-        $without = $this->staff($this->role('بلا تقويم', ['ops.reports.view', 'ops.reports.create', 'ops.reports.delete', 'ops.report_calendar.main']));
+        $without = $this->staff($this->role('بلا تقويم', ['ops.reports.view', 'ops.reports.calendar_view', 'ops.reports.calendar_create', 'ops.reports.calendar_delete', 'ops.report_calendar.main']));
         Sanctum::actingAs($without);
         $response = $this->getJson($this->range())->assertOk();
         $this->assertSame(['رئيسي'], array_column($response->json('data.deadlines'), 'title'));
@@ -101,7 +101,7 @@ class ReportCalendarsTest extends TestCase
         $hidden = ReportDeadline::query()->where('title', 'سري')->firstOrFail();
         $this->deleteJson("/api/admin/report-deadlines/{$hidden->id}")->assertNotFound();
 
-        $with = $this->staff($this->role('مع التقويم', ['ops.reports.view', 'ops.reports.create', 'ops.report_calendar.main', $calendar->abilityKey()]));
+        $with = $this->staff($this->role('مع التقويم', ['ops.reports.view', 'ops.reports.calendar_view', 'ops.reports.calendar_create', 'ops.report_calendar.main', $calendar->abilityKey()]));
         Sanctum::actingAs($with);
         $titles = array_column($this->getJson($this->range())->json('data.deadlines'), 'title');
         sort($titles);
@@ -122,7 +122,7 @@ class ReportCalendarsTest extends TestCase
         $main = $this->deadline(null, 'رئيسي');
         $this->deadline($calendar->id, 'سري');
 
-        Sanctum::actingAs($this->staff($this->role('تقويم خاص فقط', ['ops.reports.view', 'ops.reports.create', 'ops.reports.update', 'ops.reports.delete', $calendar->abilityKey()])));
+        Sanctum::actingAs($this->staff($this->role('تقويم خاص فقط', ['ops.reports.view', 'ops.reports.calendar_view', 'ops.reports.calendar_create', 'ops.reports.calendar_update', 'ops.reports.calendar_delete', $calendar->abilityKey()])));
         $response = $this->getJson($this->range())->assertOk();
         $this->assertSame(['سري'], array_column($response->json('data.deadlines'), 'title'));
         $this->assertFalse($response->json('data.main_visible'));
@@ -172,7 +172,7 @@ class ReportCalendarsTest extends TestCase
 
     public function test_the_creator_keeps_seeing_a_calendar_and_others_need_the_manage_permission(): void
     {
-        $manager = $this->role('مدير التقارير', ['ops.reports.view', 'ops.report_calendars']);
+        $manager = $this->role('مدير التقارير', ['ops.reports.view', 'ops.reports.calendar_view', 'ops.report_calendars']);
         $user = $this->staff($manager);
         Sanctum::actingAs($user);
 
