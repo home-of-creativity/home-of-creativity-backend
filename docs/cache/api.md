@@ -1,6 +1,13 @@
 # Laravel API
 
-Last updated: 17 October 2026 (Staging Drive stays inside `GOOGLE_DRIVE_PARENT_FOLDER_ID` (`HOC Clients Staging`): the picker root is that folder, and list, search, open, create, upload and the minute poll refuse a folder outside it. `ops:renew-drive-watch` does not run on staging, because `changes.watch` would see the live client folders too.)
+Last updated: 17 October 2026 (A guest on any `api/*` path gets 401 JSON, including `Accept: */*`. `POST /api/contact/messages` rejects a phone that is not 8 to 40 digits, spaces, or `+().-`. Empty phone stays allowed. Staff login still returns `data.token` and also sets the httpOnly cookie `hoc_staff`. `PromoteStaffCookie` copies that cookie into `Authorization` only when the request has no bearer.)
+
+Previous: 17 October 2026 (`bot_feedback` stores WhatsApp ratings after the support agent ends. `GET /admin/bot-feedback` needs `ops.bot_feedback`. Callbacks `botfb:` / `botfbwhy:`. )
+Last updated: 17 October 2026 (LibreOffice copies Noto Color Emoji into the conversion profile when the font is installed, so a PDF keeps emoji that the editor showed. The PHP image installs `fonts-noto-color-emoji`.)
+
+Previous: 17 October 2026 (A report title stores without `/ \ : * ? " < > |`. Saving an older copy returns 409 and leaves the file. A body over the limit returns 413. Oversized pictures inside a staging report.docx are shrunk after a `.bak` copy. A calendar date is marked delivered only when the requested WhatsApp send succeeds, or when the send was email only and that mail went out.)
+
+Previous: 17 October 2026 (Staging Drive stays inside `GOOGLE_DRIVE_PARENT_FOLDER_ID` (`HOC Clients Staging`): the picker root is that folder, and list, search, open, create, upload and the minute poll refuse a folder outside it. `ops:renew-drive-watch` does not run on staging, because `changes.watch` would see the live client folders too.)
 
 Previous: 17 October 2026 (Slot kind `carousel` replaces `image`. `ClientResource` includes `logo_url` from the client's saved logo, so choosing that client brings the same logo.)
 

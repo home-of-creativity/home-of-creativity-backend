@@ -1,6 +1,15 @@
 # Staff dashboard (Vite SPA)
 
-Last updated: 17 October 2026 (Content kind «صورة» is now «كاروسيل». The client logo saved once comes back whenever that client is chosen.)
+Last updated: 17 October 2026 (The staff session is the httpOnly cookie `hoc_staff`. The dashboard does not keep the token in localStorage. A 401 or 419 signs out. A 5xx or a network failure keeps the session and retries. Production builds set `sourcemap: false`. The staging dashboard Caddy block sends a script CSP without `unsafe-inline`. Unknown dashboard paths and a missing record render «الصفحة غير موجودة» inside the shell.)
+
+Previous: 17 October 2026 (`/bot-feedback` lists client ratings of the support assistant. Ability `ops.bot_feedback` is a single checkbox. `GET /admin/bot-feedback`.)
+Last updated: 17 October 2026 (The report editor adds paragraph alignment, indent, heading, find, and replace shortcuts, a picture right-click menu, column-edge resize, a horizontal line, and a page break. Ctrl+F opens the find pane. A PDF download warns when its page count differs from the editor. The title keeps width beside the save status, and menus stay inside the screen.)
+
+Previous: 17 October 2026 (The report editor shrinks pictures before insert, refuses a stale save with 409, keeps an empty new report in the browser until it has text or an explicit save, and sets paragraph direction per paragraph. Save is the primary button. A WhatsApp send marks the calendar delivered only after that send succeeds.)
+
+Previous: 17 October 2026 (The report editor side panel has the «التعليقات» tab again, on the saved report. Calendar content comments stay on the plan item.)
+
+Previous: 17 October 2026 (Content kind «صورة» is now «كاروسيل». The client logo saved once comes back whenever that client is chosen.)
 
 Previous: 17 October 2026 (Content on the reports calendar belongs to a calendar, not a comment subject. The drawer takes several pictures, a full block color, and the client logo, which is drawn inside the colored event. Hiding a calendar hides its content too.)
 
@@ -113,6 +122,12 @@ Build: `tsc --noEmit && vite build` (`vite.config` `base` `/dashboard/`, React R
 ## Auth
 
 `src/auth.tsx` + `src/api.ts`. Login `POST /auth/login`. Token key `hoc-staff-token` in **localStorage**. Dashboard entry requires `user.is_admin` or a staff `role`. `is_admin` without a role is unrestricted. A role limits sidebar routes to its abilities. Canonical URL **https://hoc.agency/dashboard/** (trailing slash). React Router `basename` stays `/dashboard`. On each navigation, if the browser path is exactly `/dashboard`, the shell `history.replaceState`s to `/dashboard/` and keeps the search and hash. Caddy still 308s `/dashboard` to `/dashboard/`. `/staff` 308s straight to `/dashboard/`.
+
+Clients permissions (17 October 2026): under `ops.clients` each tab is its own set of operations — list CRUD, `logos_view|create|update|delete`, `quotations_view|create|update`, `invoices_view|create|update`, plus `odoo` (sync/import only), `odoo_delete`, `odoo_note`, `proforma`. Site pricing and contact were left unchanged. Roles that already had `ops.clients.odoo` or client/site CRUD keep the matching tab ops via migration `2026_10_17_180000_split_client_tab_abilities`.
+
+Employee profession photographer (17 October 2026): `EmployeeProfession::Photography` (`photography` / مصور) is on the employees form beside media. Shoot alerts and photographer checks include both `photography` and legacy `media`.
+
+Reports permissions (17 October 2026): under `ops.reports` the list keeps view/create/update/delete/send; the calendar tab uses `calendar_view|create|update|delete` (deadlines and content slots); edit history uses `history_view` and `history_restore`. Tabs the role lacks are hidden. Migration `2026_10_17_181000_split_report_tab_abilities` copies from the older list CRUD.
 
 Demo: `admin@example.com` / `password`.
 
