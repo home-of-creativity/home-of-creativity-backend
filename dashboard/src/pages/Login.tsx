@@ -165,9 +165,9 @@ export function Login({
         <aside className="form-card signup-card">
           <p className="eyebrow">{t(copy.clients)}</p>
           <h2>{t(copy.signupTitle)}</h2>
-          <p className="muted">{t(copy.signupLede)}</p>
+          <p className="muted">{import.meta.env.VITE_TELEGRAM_BOT ? t(copy.signupLede) : t(copy.signupLedeNoBot)}</p>
           <ol className="signup-steps">
-            <li>{t(copy.signupStep1)}</li>
+            <li>{import.meta.env.VITE_TELEGRAM_BOT ? t(copy.signupStep1) : t(copy.signupStep1NoBot)}</li>
             <li>{t(copy.signupStep2)}</li>
             <li>{t(copy.signupStep3)}</li>
           </ol>

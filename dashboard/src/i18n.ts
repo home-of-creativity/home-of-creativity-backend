@@ -311,6 +311,8 @@ export const copy = {
   signupLede: { ar: "لا يوجد تسجيل بالبريد. افتح البوت ثم اضغط Start.", en: "There is no email signup. Open the bot and press Start." },
   signupCta: { ar: "فتح بوت تيليجرام", en: "Open Telegram bot" },
   signupStep1: { ar: "افتح البوت من الزر أدناه.", en: "Open the bot from the button below." },
+  signupLedeNoBot: { ar: "لا يوجد تسجيل بالبريد. رابط بوت تيليجرام يُضاف من إعدادات البناء.", en: "There is no email signup. The Telegram bot link is added from the build settings." },
+  signupStep1NoBot: { ar: "رابط البوت غير مضاف بعد.", en: "The bot link is not added yet." },
   signupStep2: { ar: "اضغط Start لإنشاء حسابك.", en: "Press Start to create your account." },
   signupStep3: { ar: "أرسل طلبك بأمر /new.", en: "Send a request with /new." },
   recent: { ar: "آخر الطلبات", en: "Latest requests" },
