@@ -28,6 +28,7 @@ const abilityLabels: Record<StaffModule, { ar: string; en: string }> = {
   "ops.photography_all": { ar: "التصوير: كل المواعيد والإلغاء وضبط الجلسات", en: "Photography: all bookings, cancel, session counts" },
   "ops.photography_calendars": { ar: "التصوير: إضافة التقاويم وصلاحياتها", en: "Photography: add calendars and their access" },
   "ops.complaints": { ar: "الشكاوى", en: "Complaints" },
+  "ops.bot_feedback": { ar: "تقييم البوت", en: "Bot feedback" },
   "ops.report_gemini": { ar: "مساعد التقارير", en: "Report assistant" },
   "ops.report_templates": { ar: "قوالب التقارير", en: "Report templates" },
   "ops.report_media": { ar: "صور التقارير ومربع النص", en: "Report pictures and text box" },
@@ -300,8 +301,17 @@ export function Permissions({ locale, t }: { locale: Locale; t: (c: { ar: string
           }}
         >
           <h2 className="section-title">{draft.id ? t(copy.edit) : t(copy.newPermission)}</h2>
+          <label>
+            {t(copy.permissionName)}
+            <input value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} required />
+          </label>
           <div className="row-actions">
-            <button className="btn btn-primary" type="submit" disabled={busy || draft.abilities.length === 0}>
+            <button
+              className="btn btn-primary"
+              type="submit"
+              disabled={busy || draft.abilities.length === 0}
+              title={draft.abilities.length === 0 ? t(copy.permissionNeedsAbility) : undefined}
+            >
               {t(copy.savePermission)}
             </button>
             {draft.id ? (
@@ -310,10 +320,6 @@ export function Permissions({ locale, t }: { locale: Locale; t: (c: { ar: string
               </button>
             ) : null}
           </div>
-          <label>
-            {t(copy.permissionName)}
-            <input value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} required />
-          </label>
           {(["ops", "site", "social", "calendars"] as const).map((group) => {
             const items = groups.filter((item) => item.group === group);
             if (group === "calendars" && items.length === 0) return null;

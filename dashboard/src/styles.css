@@ -2438,7 +2438,16 @@ html[dir="rtl"] .back-link span {
   align-items: center;
   gap: 0.5rem;
   align-self: center;
-  min-height: 2.9rem;
+  min-height: 2.75rem;
+}
+
+.check-row input,
+.permission-fieldset input[type="checkbox"] {
+  width: 1.25rem;
+  height: 1.25rem;
+  min-width: 1.25rem;
+  border-radius: 0.25rem;
+  accent-color: var(--brand-purple);
 }
 
 .password-field {
@@ -2471,8 +2480,17 @@ html[dir="rtl"] .back-link span {
 
 .permission-part {
   padding: 0.2rem 0.7rem;
-  border-radius: 999px;
+  border-radius: 0.6rem;
   background: color-mix(in srgb, var(--brand-purple) 8%, transparent);
+}
+
+@media (max-width: 640px) {
+  .permission-fieldset,
+  .permission-line,
+  .permission-part {
+    display: grid;
+    justify-items: start;
+  }
 }
 
 .permission-hint {
