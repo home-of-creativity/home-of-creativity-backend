@@ -60,6 +60,22 @@ class WhatsAppWebClient implements WhatsAppMessenger
         return $this->adminStatus();
     }
 
+    /** Ask the bridge process to exit so Docker starts it again. Session files stay. */
+    public function restartProcess(): bool
+    {
+        if (! $this->configured()) {
+            return false;
+        }
+
+        try {
+            return $this->http()->timeout(5)->post($this->baseUrl().'/repair')->successful();
+        } catch (\Throwable $exception) {
+            Log::info('WhatsApp Web bridge did not accept a restart.', ['error' => $exception->getMessage()]);
+
+            return false;
+        }
+    }
+
     /**
      * @return array{connected: bool, qr: string|null, phone: string|null, reachable: bool}
      */

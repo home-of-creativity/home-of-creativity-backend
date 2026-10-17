@@ -282,4 +282,47 @@ class DevAlertTest extends TestCase
         ]);
         Http::assertNothingSent();
     }
+
+    public function test_health_watch_alerts_once_when_the_whatsapp_bridge_drops(): void
+    {
+        Cache::flush();
+        config([
+            'services.telegram.dev_bot_token' => 'test-token',
+            'services.telegram.dev_chat_id' => '1',
+            'services.whatsapp.transport' => 'web',
+            'services.whatsapp.web_url' => 'http://wa-web.test',
+            'services.whatsapp.web_secret' => 'web-secret',
+            'services.n8n.bridge_repair_url' => 'https://n8n.test/webhook/hoc-whatsapp-bridge',
+            'services.n8n.webhook_secret' => 'n8n-secret',
+            'services.dev.health_url' => 'https://api.hoc.agency/up',
+        ]);
+        Http::fake([
+            'https://api.hoc.agency/up' => Http::response('ok', 200),
+            'https://n8n.test/*' => Http::response(['fixed' => true, 'action' => 'process_restart'], 200),
+            'http://wa-web.test/status' => Http::sequence()
+                ->push(['connected' => false, 'qr' => null, 'phone' => null], 200)
+                ->push(['connected' => false, 'qr' => null, 'phone' => null], 200)
+                ->push(['connected' => false, 'qr' => null, 'phone' => null], 200)
+                ->push(['connected' => true, 'qr' => null, 'phone' => '963944000111'], 200),
+            'https://api.telegram.org/*' => Http::response(['ok' => true], 200),
+        ]);
+
+        $this->artisan('ops:watch-health')->assertSuccessful();
+        Http::assertNotSent(fn ($sent): bool => str_contains($sent->url(), 'api.telegram.org'));
+
+        $this->artisan('ops:watch-health')->assertSuccessful();
+        $this->artisan('ops:watch-health')->assertSuccessful();
+        $repairs = collect(Http::recorded())->filter(fn (array $pair): bool => str_contains($pair[0]->url(), 'n8n.test'));
+        $this->assertCount(1, $repairs);
+        $this->assertFalse($repairs->first()[0]['needs_scan']);
+        $this->assertTrue($repairs->first()[0]->hasHeader('X-N8N-Secret', 'n8n-secret'));
+        $alerts = collect(Http::recorded())->filter(fn (array $pair): bool => str_contains($pair[0]->url(), 'api.telegram.org'));
+        $this->assertCount(1, $alerts);
+        $this->assertStringContainsString('جسر واتساب انقطع', (string) $alerts->first()[0]['text']);
+
+        $this->artisan('ops:watch-health')->assertSuccessful();
+        $alerts = collect(Http::recorded())->filter(fn (array $pair): bool => str_contains($pair[0]->url(), 'api.telegram.org'));
+        $this->assertCount(2, $alerts);
+        $this->assertStringContainsString('جسر واتساب متصل', (string) $alerts->last()[0]['text']);
+    }
 }

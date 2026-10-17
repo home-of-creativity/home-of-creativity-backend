@@ -64,6 +64,8 @@ return [
         'drive_webhook_url' => env('N8N_DRIVE_WEBHOOK_URL'),
         // WhatsApp support agent webhook; empty keeps the bot's old escalation only.
         'support_agent_url' => env('N8N_SUPPORT_AGENT_URL'),
+        // When the WhatsApp bridge drops, Laravel asks this n8n webhook to repair it.
+        'bridge_repair_url' => env('N8N_BRIDGE_REPAIR_URL'),
         'timeout' => (int) env('N8N_TIMEOUT', 12),
     ],
 
@@ -231,6 +233,7 @@ return [
         'graph_base' => env('WHATSAPP_GRAPH_URL', env('META_GRAPH_URL', 'https://graph.facebook.com/v21.0')),
         'web_url' => env('WHATSAPP_WEB_URL'),
         'web_secret' => env('WHATSAPP_WEB_SECRET') ?: env('TELEGRAM_BOT_SECRET'),
+        'web_container' => env('WHATSAPP_WEB_CONTAINER'),
         // Management numbers for the weekly finance summary and low ratings; empty uses TELEGRAM_ADMIN_IDS.
         'management_numbers' => array_values(array_filter(array_map(
             'trim',

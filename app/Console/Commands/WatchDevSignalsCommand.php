@@ -7,8 +7,6 @@ use App\Models\IntegrationEvent;
 use App\Services\DevAlert;
 use App\Services\DevBeat;
 use App\Services\DevDigest;
-use App\Services\WhatsAppWebClient;
-use App\Support\ClientChannelGate;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -19,7 +17,7 @@ class WatchDevSignalsCommand extends Command
 
     protected $description = 'Alert once when bots, the queue, or the integration outbox need a developer.';
 
-    public function handle(DevAlert $alert, DevBeat $beats, DevDigest $digest, WhatsAppWebClient $whatsApp): int
+    public function handle(DevAlert $alert, DevBeat $beats, DevDigest $digest): int
     {
         foreach ($digest->labels() as $name => $label) {
             $age = $beats->ageSeconds($name);
@@ -68,15 +66,6 @@ class WatchDevSignalsCommand extends Command
                 'تكامل عالق '.$event->request_number.' '.$event->event_type->value.' محاولات '.$event->attempts.($error !== '' ? "\n".$error : ''),
                 1440,
             );
-        }
-
-        if (ClientChannelGate::usesWhatsAppWeb()) {
-            $status = $whatsApp->status();
-            if (! $status['reachable'] || ! $status['connected'] || $status['qr'] !== null) {
-                $alert->once('whatsapp-bridge', 'جسر واتساب انقطع أو يطلب مسحاً جديداً. لا تُرسل هذه الرسالة للعميل.', 60);
-            } else {
-                $alert->recover('whatsapp-bridge', 'جسر واتساب متصل.');
-            }
         }
 
         return self::SUCCESS;

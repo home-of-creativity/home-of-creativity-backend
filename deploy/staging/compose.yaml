@@ -16,6 +16,7 @@ x-php: &php
   volumes:
     - ../../:/var/www/hoc
     - hoc_staging_vendor:/var/www/hoc/vendor
+    - /var/run/docker.sock:/var/run/docker.sock
   env_file:
     - ../../.env
   environment: &php-env
@@ -26,6 +27,7 @@ x-php: &php
     DB_PORT: "3306"
     DB_DATABASE: hoc_testing
     DB_USERNAME: hoc_testing
+    WHATSAPP_WEB_CONTAINER: hoc-staging-whatsapp-web-1
   networks:
     - staging
 
@@ -118,6 +120,12 @@ services:
       WHATSAPP_WEB_PORT: "8090"
       WHATSAPP_WEB_AUTH_DIR: /var/www/hoc/storage/app/whatsapp-web
       WHATSAPP_WEB_ADMIN_AUTH_DIR: /var/www/hoc/storage/app/whatsapp-web-admin
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8090/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
     command: sh -c "npm install --omit=dev && node patch-baileys.js && node index.js"
     networks:
       - staging

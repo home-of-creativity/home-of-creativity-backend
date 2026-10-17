@@ -25,6 +25,9 @@ let qrDataUrl = "";
 let linkedPhone = "";
 let generation = 0;
 let restartTimer = null;
+/** When the client socket is down and not showing a scan code. A long stall exits so Docker starts a fresh process. */
+let clientStallSince = Date.now();
+const CLIENT_STALL_MS = 3 * 60 * 1000;
 const jidByDigits = new Map();
 const menuByDigits = new Map();
 
@@ -270,17 +273,22 @@ async function start() {
         connected = false;
         linkedPhone = "";
         qrDataUrl = await QRCode.toDataURL(update.qr);
+        clientStallSince = 0;
         logger.warn("WhatsApp Web is waiting for a phone scan");
       }
       if (update.connection === "open") {
         connected = true;
         linkedPhone = phoneFromJid(sock?.user?.id);
         qrDataUrl = "";
+        clientStallSince = 0;
         logger.warn("WhatsApp Web is linked");
       }
       if (update.connection === "close") {
         connected = false;
         linkedPhone = "";
+        if (clientStallSince === 0) {
+          clientStallSince = Date.now();
+        }
         const code = update.lastDisconnect?.error?.output?.statusCode;
         const loggedOut = code === DisconnectReason.loggedOut;
         if (loggedOut) {
@@ -447,11 +455,22 @@ async function unlinkPhone() {
 }
 
 const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url || "/", "http://localhost");
+  if (req.method === "POST" && url.pathname === "/repair") {
+    if (!authorized(req)) return sendJson(res, 401, { error: "unauthorized" });
+    sendJson(res, 200, { restarting: true });
+    setTimeout(() => process.exit(0), 400);
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/health") {
+    sendJson(res, 200, { ok: true, connected });
+    return;
+  }
   if (!authorized(req)) {
     sendJson(res, 401, { message: "Invalid webhook secret." });
     return;
   }
-  const url = new URL(req.url || "/", "http://localhost");
   try {
     if (req.method === "GET" && url.pathname === "/status") {
       sendJson(res, 200, { connected, qr: qrDataUrl || null, phone: linkedPhone || null });
@@ -482,6 +501,22 @@ const server = http.createServer(async (req, res) => {
     sendJson(res, 502, { message: error instanceof Error ? error.message : "WhatsApp Web failed" });
   }
 });
+
+setInterval(() => {
+  if (connected || qrDataUrl) {
+    clientStallSince = 0;
+    return;
+  }
+  if (clientStallSince === 0) {
+    clientStallSince = Date.now();
+    return;
+  }
+  if (Date.now() - clientStallSince < CLIENT_STALL_MS) {
+    return;
+  }
+  logger.warn("WhatsApp Web stayed disconnected, exiting so the process restarts");
+  process.exit(1);
+}, 30_000);
 
 server.listen(port, "0.0.0.0", () => {
   logger.warn({ port }, "WhatsApp Web bridge listening");

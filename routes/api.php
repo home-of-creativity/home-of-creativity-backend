@@ -54,6 +54,7 @@ use App\Http\Controllers\DevBotController;
 use App\Http\Controllers\GithubWebhookController;
 use App\Http\Controllers\GoogleDriveAccountController;
 use App\Http\Controllers\IntegrationController;
+use App\Http\Controllers\WhatsAppBridgeRepairController;
 use App\Http\Controllers\LandingReelController;
 use App\Http\Controllers\LegalPageController;
 use App\Http\Controllers\LinkedInOAuthController;
@@ -506,6 +507,7 @@ Route::prefix('integrations')->middleware(['shared.secret:services.n8n.webhook_s
     Route::post('clickup/mapping', [IntegrationController::class, 'mapping']);
     Route::post('telegram/notify', [IntegrationController::class, 'notify']);
     Route::post('drive/poll', [IntegrationController::class, 'pollDrive']);
+    Route::post('whatsapp-bridge/repair', WhatsAppBridgeRepairController::class);
 });
 
 Route::post('integrations/drive/changed', [IntegrationController::class, 'driveChanged'])

@@ -27,6 +27,7 @@ services:
     volumes:
       - ../:/var/www/hoc
       - hoc_vendor:/var/www/hoc/vendor
+      - /var/run/docker.sock:/var/run/docker.sock
     expose:
       - "9000"
     env_file:
@@ -39,6 +40,7 @@ services:
       DB_HOST: mysql
       DB_PORT: "3306"
       DEV_HEALTH_INTERNAL_URL: http://hoc-edge/up
+      WHATSAPP_WEB_CONTAINER: hoc-prod-hoc-whatsapp-web-1
     command: >
       sh -c "composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
       && php artisan migrate --force
@@ -75,6 +77,7 @@ services:
     volumes:
       - ../:/var/www/hoc
       - hoc_vendor:/var/www/hoc/vendor
+      - /var/run/docker.sock:/var/run/docker.sock
     env_file:
       - ../.env
     environment:
@@ -85,6 +88,7 @@ services:
       DB_HOST: mysql
       DB_PORT: "3306"
       DEV_HEALTH_INTERNAL_URL: http://hoc-edge/up
+      WHATSAPP_WEB_CONTAINER: hoc-prod-hoc-whatsapp-web-1
     command: php artisan schedule:work
     depends_on:
       hoc-api:
@@ -182,6 +186,12 @@ services:
       WHATSAPP_WEB_AUTH_DIR: /var/www/hoc/storage/app/whatsapp-web
     ports:
       - "127.0.0.1:8090:8090"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8090/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
     command: sh -c "npm install --omit=dev && node patch-baileys.js && node index.js"
     depends_on:
       hoc-edge:
