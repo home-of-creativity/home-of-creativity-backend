@@ -1023,7 +1023,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
           <table className="odoo-table">
             <thead>
               <tr>
-                {(tab === "quotations" ? canEditQuotes : canEditInvoices) ? (
+                {canEditInvoices ? (
                   <th className="pick-cell">
                     <input
                       type="checkbox"
@@ -1060,7 +1060,7 @@ export function Clients({ locale, t }: { locale: Locale; t: (c: { ar: string; en
                   const partner = partnerLines(item.partner_name);
                   return (
                   <tr key={item.id}>
-                    {(tab === "quotations" ? canEditQuotes : canEditInvoices) ? (
+                    {canEditInvoices ? (
                       <td className="pick-cell">
                         <input
                           type="checkbox"

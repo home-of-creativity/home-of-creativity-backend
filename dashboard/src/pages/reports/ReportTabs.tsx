@@ -46,11 +46,12 @@ export function useReportTab(): [ReportTab, (tab: ReportTab) => void] {
 export function ReportTabs({ locale, tab, onTab, first }: { locale: Locale; tab: ReportTab; onTab: (tab: ReportTab) => void; first: { ar: string; en: string } }) {
   const ar = locale === "ar";
   const can = useCan();
-  const items: Array<{ id: ReportTab; label: string; icon: typeof List }> = [
+  const all: Array<{ id: ReportTab; label: string; icon: typeof List }> = [
     { id: "list", label: first[locale], icon: List },
     { id: "calendar", label: ar ? "التقويم" : "Calendar", icon: CalendarDays },
     { id: "history", label: ar ? "سجل التعديلات" : "Edit history", icon: FileClock },
-  ].filter((item) => tabAllowed(item.id, can));
+  ];
+  const items = all.filter((item) => tabAllowed(item.id, can));
 
   return (
     <div className="tabs report-tabs" role="tablist" aria-label={ar ? "عرض التقارير" : "Reports view"}>
