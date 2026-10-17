@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\StagingGuard;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -15,6 +16,9 @@ class GoogleDriveClient
 
     /** @var array<string, bool> Folders already shared with the storage account in this request. */
     private array $sharedFolders = [];
+
+    /** @var array<string, bool> Whether a folder sits inside the staging test Drive. */
+    private array $sandboxCache = [];
 
     public function __construct(
         private GoogleServiceAccount $auth,
@@ -60,6 +64,19 @@ class GoogleDriveClient
         }
 
         $parent = trim((string) $parentId);
+        if ($this->sandboxed()) {
+            if ($parent === '') {
+                $root = $this->folder($this->parentFolderId());
+
+                return $root === null ? null : [
+                    'folders' => [$root],
+                    'next_page_token' => null,
+                ];
+            }
+            if (! $this->insideSandbox($parent, $token)) {
+                return $this->fail('That folder is outside the test Drive.');
+            }
+        }
         // Without a parent, only top-level folders: the account's own root and folders shared with
         // it. Their subfolders are listed when the parent is opened, not as separate entries.
         $query = $parent === ''
@@ -168,6 +185,13 @@ class GoogleDriveClient
                 ];
             }
 
+            if ($this->sandboxed()) {
+                $folders = array_values(array_filter(
+                    $folders,
+                    fn (array $folder): bool => $this->insideSandbox($folder['id'], $token),
+                ));
+            }
+
             $next = $response->json('nextPageToken');
             usort($folders, fn (array $a, array $b): int => strcasecmp($a['name'], $b['name']));
 
@@ -216,6 +240,9 @@ class GoogleDriveClient
             }
             if ($response->json('mimeType') !== 'application/vnd.google-apps.folder') {
                 return $this->fail('That Drive item is not a folder.');
+            }
+            if ($this->sandboxed() && ! $this->insideSandbox($id, $token)) {
+                return $this->fail('That folder is outside the test Drive.');
             }
 
             return [
@@ -288,6 +315,9 @@ class GoogleDriveClient
 
         try {
             $rootParent = $parentId !== '' ? $parentId : $this->parentFolderId();
+            if ($this->sandboxed() && ! $this->insideSandbox($rootParent, $token)) {
+                return $this->fail('That folder is outside the test Drive.');
+            }
             $context = $this->parentContext($token, $rootParent);
             if ($context === null) {
                 return null;
@@ -332,6 +362,9 @@ class GoogleDriveClient
 
         $token = $this->auth->accessToken();
         if ($token === null) {
+            return [];
+        }
+        if ($this->sandboxed() && ! $this->insideSandbox($folderId, $token)) {
             return [];
         }
 
@@ -1133,6 +1166,9 @@ class GoogleDriveClient
         if ($token === null) {
             return $this->fail('Google service account could not get an access token. Check the private key.');
         }
+        if ($this->sandboxed() && ! $this->insideSandbox($folderId, $token)) {
+            return $this->fail('That folder is outside the test Drive.');
+        }
 
         $context = $this->parentContext($token, $folderId);
         if ($context === null) {
@@ -1197,6 +1233,9 @@ class GoogleDriveClient
         $token = $this->auth->accessToken();
         if ($token === null) {
             return $this->fail('Google service account could not get an access token. Check the private key.');
+        }
+        if ($this->sandboxed() && ! $this->insideSandbox($folderId, $token)) {
+            return $this->fail('That folder is outside the test Drive.');
         }
         $context = $this->parentContext($token, $folderId);
         if ($context === null) {
@@ -1303,6 +1342,106 @@ class GoogleDriveClient
         }
 
         return $message.' The service account has no Drive storage. Set GOOGLE_DRIVE_REFRESH_TOKEN in the server environment.';
+    }
+
+    /**
+     * Staging may keep a folder id only when it lives under the test parent.
+     * Production accepts whatever folder the staff assigned.
+     */
+    public function acceptsFolder(string $folderId): bool
+    {
+        if (! $this->sandboxed()) {
+            return true;
+        }
+
+        $folderId = trim($folderId);
+        if ($folderId === '') {
+            return false;
+        }
+
+        $token = $this->auth->accessToken();
+        if ($token === null) {
+            return false;
+        }
+
+        return $this->insideSandbox($folderId, $token);
+    }
+
+    private function sandboxed(): bool
+    {
+        return app()->environment(StagingGuard::ENVIRONMENT);
+    }
+
+    /**
+     * The staging service account also owns the live client folders. Stay inside the test parent.
+     */
+    private function insideSandbox(string $folderId, string $token): bool
+    {
+        $root = $this->parentFolderId();
+        $folderId = trim($folderId);
+        if ($root === '' || $folderId === '') {
+            return false;
+        }
+        if ($folderId === $root) {
+            return true;
+        }
+        if (array_key_exists($folderId, $this->sandboxCache)) {
+            return $this->sandboxCache[$folderId];
+        }
+
+        $cursor = $folderId;
+        $seen = [];
+        for ($depth = 0; $depth < 12; $depth++) {
+            if (isset($seen[$cursor])) {
+                break;
+            }
+            $seen[$cursor] = true;
+
+            try {
+                $response = Http::withToken($token)
+                    ->timeout(20)
+                    ->acceptJson()
+                    ->get(self::API.'/files/'.rawurlencode($cursor), [
+                        'fields' => 'id,parents,trashed',
+                        'supportsAllDrives' => 'true',
+                    ]);
+            } catch (Throwable) {
+                return $this->sandboxCache[$folderId] = false;
+            }
+
+            if (! $response->successful() || $response->json('trashed') === true) {
+                return $this->sandboxCache[$folderId] = false;
+            }
+
+            $parents = array_values(array_filter(
+                array_map(fn (mixed $id): string => (string) $id, $response->json('parents') ?? []),
+                fn (string $id): bool => $id !== '',
+            ));
+            if (in_array($root, $parents, true) || in_array($cursor, [$root], true)) {
+                foreach ($seen as $id => $_) {
+                    $this->sandboxCache[$id] = true;
+                }
+
+                return true;
+            }
+            if ($parents === []) {
+                break;
+            }
+            $cursor = $parents[0];
+            if ($cursor === $root) {
+                foreach ($seen as $id => $_) {
+                    $this->sandboxCache[$id] = true;
+                }
+
+                return true;
+            }
+        }
+
+        foreach ($seen as $id => $_) {
+            $this->sandboxCache[$id] = false;
+        }
+
+        return false;
     }
 
     private function parentFolderId(): string

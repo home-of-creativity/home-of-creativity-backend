@@ -1,6 +1,10 @@
 # Staff dashboard (Vite SPA)
 
-Last updated: 17 October 2026 (Reports calendar content plan: side button «جدولة محتوى» and `pages/reports/CalendarPlanDrawer.tsx` add a picture, post, or reel on the calendar with a private image. Nothing is published. The same drawer’s side list switches between that plan item (`report_slot`) and the client’s reports. The report editor no longer has a comments tab.)
+Last updated: 17 October 2026 (Content kind «صورة» is now «كاروسيل». The client logo saved once comes back whenever that client is chosen.)
+
+Previous: 17 October 2026 (Content on the reports calendar belongs to a calendar, not a comment subject. The drawer takes several pictures, a full block color, and the client logo, which is drawn inside the colored event. Hiding a calendar hides its content too.)
+
+Previous: 17 October 2026 (Reports calendar content plan: side button «جدولة محتوى» and `pages/reports/CalendarPlanDrawer.tsx` add a picture, post, or reel on the calendar with a private image. Nothing is published. Comments stay on that plan item. The report editor no longer has a comments tab.)
 
 Previous: 15 October 2026 (Voucher «الباقي»: every kind has `remaining` + `show_remaining`; form row with amount and checkbox «عرض الباقي على الورقة»; the sheet shows الباقي only when checked. Kept on templates too.)
 

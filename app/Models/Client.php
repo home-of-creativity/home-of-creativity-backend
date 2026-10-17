@@ -24,6 +24,7 @@ class Client extends Model
         'user_id',
         'name',
         'company_name',
+        'logo_path',
         'company_activity',
         'email',
         'phone',

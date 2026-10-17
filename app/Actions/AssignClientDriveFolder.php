@@ -4,6 +4,7 @@ namespace App\Actions;
 
 use App\Models\Client;
 use App\Services\GoogleDriveClient;
+use App\Support\StagingGuard;
 
 class AssignClientDriveFolder
 {
@@ -14,6 +15,9 @@ class AssignClientDriveFolder
         if ($mode === 'existing') {
             $id = $this->folderId((string) $folder);
             abort_if($id === '', 422, 'A Drive folder link is required.');
+            if (app()->environment(StagingGuard::ENVIRONMENT)) {
+                abort_if($this->drive->folder($id) === null, 422, $this->drive->lastError() ?? 'That folder is outside the test Drive.');
+            }
             $client->forceFill(['google_drive_folder_id' => $id])->save();
 
             return $client->refresh();

@@ -113,13 +113,13 @@ const LAYER_COPY: Record<ActivityLayer, { ar: string; en: string }> = {
 const STATUSES: ReportDeadlineStatus[] = ["upcoming", "overdue", "done", "skipped"];
 
 const PLAN_COLORS: Record<ReportSlot["kind"], string> = {
-  image: "#5b8def",
+  carousel: "#5b8def",
   post: "#f0b56a",
   reel: "#b07cff",
 };
 
 const PLAN_COPY: Record<ReportSlot["kind"], { ar: string; en: string }> = {
-  image: { ar: "صورة", en: "Picture" },
+  carousel: { ar: "كاروسيل", en: "Carousel" },
   post: { ar: "بوست", en: "Post" },
   reel: { ar: "ريل", en: "Reel" },
 };
@@ -305,19 +305,27 @@ export function ReportsCalendar({ locale, client }: { locale: Locale; client?: {
     }
     for (const row of slots) {
       if (!row.scheduled_at) continue;
+      const calendarId = row.calendar_id ?? MAIN_CALENDAR;
+      if (prefs.hiddenCalendars.includes(calendarId)) continue;
       if (!matches([row.caption, row.client_name, PLAN_COPY[row.kind][locale]])) continue;
       const start = new Date(row.scheduled_at).getTime();
       if (Number.isNaN(start)) continue;
+      const fill = row.color || (row.calendar_id == null ? null : calendarColors.get(row.calendar_id)) || PLAN_COLORS[row.kind];
       const label = PLAN_COPY[row.kind][locale];
       list.push({
         id: `s:${row.id}`,
-        title: `${label}${row.caption ? ` · ${row.caption}` : ""}`,
+        title: `${row.client_name ? `${row.client_name} · ` : ""}${label}${row.caption ? ` · ${row.caption}` : ""}`,
         start: new Date(start).toISOString(),
         end: new Date(start + 2 * QUARTER_HOUR).toISOString(),
-        color: PLAN_COLORS[row.kind],
-        contrastColor: "#1a1224",
+        backgroundColor: fill,
+        borderColor: fill,
+        textColor: contrast(fill),
+        color: fill,
+        contrastColor: contrast(fill),
         editable: false,
-        className: `gcal-ev rc-plan is-${row.kind}`,
+        display: "block",
+        className: `gcal-ev rc-plan is-filled is-${row.kind}`,
+        extendedProps: { logoUrl: row.logo_url, fill },
       });
     }
     return list;
@@ -680,6 +688,20 @@ export function ReportsCalendar({ locale, client }: { locale: Locale; client?: {
             select={onSelect}
             eventClick={onEventClick}
             eventDrop={onEventDrop}
+            eventDidMount={(info) => {
+              if (!info.event.id.startsWith("s:")) return;
+              const fill = String(info.event.extendedProps.fill ?? "");
+              info.el.style.setProperty("--plan-fill", fill);
+              info.el.style.setProperty("--plan-ink", contrast(fill));
+              const logo = info.event.extendedProps.logoUrl as string | null;
+              const host = info.el.querySelector(".fc-event-main");
+              if (!logo || !host || host.querySelector(".rc-plan-logo")) return;
+              const image = document.createElement("img");
+              image.className = "rc-plan-logo";
+              image.alt = "";
+              image.src = logo;
+              host.prepend(image);
+            }}
           />
         </section>
       </div>
@@ -779,6 +801,8 @@ export function ReportsCalendar({ locale, client }: { locale: Locale; client?: {
           slot={plan.slot}
           at={plan.at}
           fixedClient={client ? { id: client.id, name: client.name, company_name: client.company_name } : null}
+          calendars={calendars}
+          mainVisible={mainVisible}
           onClose={() => setPlan(null)}
           onSaved={(saved) => {
             setPlan({ slot: saved, at: saved.scheduled_at ?? "" });

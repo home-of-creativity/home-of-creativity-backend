@@ -3058,6 +3058,50 @@ html[dir="ltr"] .report-panel {
   border-radius: 0.4rem;
 }
 
+.report-slot-photos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.report-slot-photo {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+}
+
+.report-slot-logo {
+  display: block;
+  width: 3.2rem;
+  height: 3.2rem;
+  object-fit: contain;
+  border-radius: 0.4rem;
+  background: #fff;
+}
+
+.gcal-main .fc-event.rc-plan {
+  background-color: var(--plan-fill) !important;
+  border-color: var(--plan-fill) !important;
+  color: var(--plan-ink);
+}
+
+.gcal-main .fc-event.rc-plan .fc-event-main {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: var(--plan-fill) !important;
+  color: var(--plan-ink) !important;
+}
+
+.rc-plan-logo {
+  width: 1.15rem;
+  height: 1.15rem;
+  flex: none;
+  object-fit: contain;
+  border-radius: 0.2rem;
+  background: #fff;
+}
+
 .report-thread-backdrop {
   position: fixed;
   inset: 0;

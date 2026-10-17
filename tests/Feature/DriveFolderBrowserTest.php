@@ -276,4 +276,110 @@ class DriveFolderBrowserTest extends TestCase
                 && $request->hasHeader('Authorization', 'Bearer owner-token');
         });
     }
+
+    public function test_staging_drive_opens_on_the_test_folder_only(): void
+    {
+        $this->app['env'] = 'staging';
+        config(['services.google.drive_parent_folder_id' => 'parent-hoc']);
+        $this->mock(GoogleServiceAccount::class, function ($mock): void {
+            $mock->shouldReceive('configured')->andReturn(true);
+            $mock->shouldReceive('configurationError')->andReturn(null);
+            $mock->shouldReceive('accessToken')->andReturn('token');
+        });
+        Http::fake(function ($request) {
+            if (str_contains($request->url(), '/files/parent-hoc')) {
+                return Http::response([
+                    'id' => 'parent-hoc',
+                    'name' => 'HOC Clients Staging',
+                    'mimeType' => 'application/vnd.google-apps.folder',
+                    'trashed' => false,
+                ]);
+            }
+
+            return Http::response([
+                'files' => [['id' => 'live', 'name' => 'HOC Clients']],
+                'drives' => [['id' => 'shared', 'name' => 'Team']],
+            ]);
+        });
+
+        Sanctum::actingAs(User::factory()->admin()->create());
+
+        $this->getJson('/api/admin/drive/folders')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', 'parent-hoc')
+            ->assertJsonPath('data.0.name', 'HOC Clients Staging');
+
+        Http::assertNotSent(fn ($request): bool => str_contains($request->url(), '/drives'));
+        Http::assertNotSent(fn ($request): bool => str_contains((string) ($request->data()['q'] ?? ''), 'root'));
+    }
+
+    public function test_staging_drive_refuses_a_folder_outside_the_test_parent(): void
+    {
+        $this->app['env'] = 'staging';
+        config(['services.google.drive_parent_folder_id' => 'parent-hoc']);
+        $this->mock(GoogleServiceAccount::class, function ($mock): void {
+            $mock->shouldReceive('configured')->andReturn(true);
+            $mock->shouldReceive('configurationError')->andReturn(null);
+            $mock->shouldReceive('accessToken')->andReturn('token');
+        });
+        Http::fake(function ($request) {
+            if (str_contains($request->url(), '/files/live-folder')) {
+                return Http::response([
+                    'id' => 'live-folder',
+                    'name' => 'HOC Clients',
+                    'mimeType' => 'application/vnd.google-apps.folder',
+                    'trashed' => false,
+                    'parents' => ['somewhere-else'],
+                ]);
+            }
+
+            return Http::response([
+                'id' => 'somewhere-else',
+                'parents' => [],
+                'trashed' => false,
+            ]);
+        });
+
+        Sanctum::actingAs(User::factory()->admin()->create());
+
+        $this->getJson('/api/admin/drive/folders?parent=live-folder')
+            ->assertStatus(422);
+
+        $this->assertFalse(app(GoogleDriveClient::class)->acceptsFolder('live-folder'));
+    }
+
+    public function test_staging_search_keeps_only_folders_inside_the_test_parent(): void
+    {
+        $this->app['env'] = 'staging';
+        config(['services.google.drive_parent_folder_id' => 'parent-hoc']);
+        $this->mock(GoogleServiceAccount::class, function ($mock): void {
+            $mock->shouldReceive('configured')->andReturn(true);
+            $mock->shouldReceive('configurationError')->andReturn(null);
+            $mock->shouldReceive('accessToken')->andReturn('token');
+        });
+        Http::fake(function ($request) {
+            $url = $request->url();
+            if (str_contains($url, '/files/inside')) {
+                return Http::response(['id' => 'inside', 'parents' => ['parent-hoc'], 'trashed' => false]);
+            }
+            if (str_contains($url, '/files/outside')) {
+                return Http::response(['id' => 'outside', 'parents' => ['live-root'], 'trashed' => false]);
+            }
+
+            return Http::response([
+                'files' => [
+                    ['id' => 'outside', 'name' => 'عميل حي'],
+                    ['id' => 'inside', 'name' => 'عميل اختبار'],
+                ],
+            ]);
+        });
+
+        Sanctum::actingAs(User::factory()->admin()->create());
+
+        $this->getJson('/api/admin/drive/folders?q=عميل')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', 'inside');
+    }
 }

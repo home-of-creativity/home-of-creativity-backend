@@ -6,6 +6,7 @@ use App\Models\Client;
 use App\Services\OdooClient;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Facades\Storage;
 
 /** @mixin Client */
 class ClientResource extends JsonResource
@@ -29,6 +30,7 @@ class ClientResource extends JsonResource
             'id' => $this->id,
             'name' => $this->name,
             'company_name' => $this->company_name,
+            'logo_url' => filled($this->logo_path) ? Storage::disk('public')->url($this->logo_path) : null,
             'company_activity' => $this->company_activity,
             'email' => $this->email,
             'phone' => $this->phone,

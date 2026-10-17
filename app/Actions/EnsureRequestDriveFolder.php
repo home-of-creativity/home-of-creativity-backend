@@ -18,7 +18,7 @@ class EnsureRequestDriveFolder
 
     public function handle(ServiceRequest $request): ServiceRequest
     {
-        if (filled($request->google_drive_folder_id)) {
+        if (filled($request->google_drive_folder_id) && $this->drive->acceptsFolder((string) $request->google_drive_folder_id)) {
             return $request;
         }
 

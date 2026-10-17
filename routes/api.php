@@ -252,7 +252,7 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::post('report-slots', [AdminClientReportSlotController::class, 'store']);
         Route::match(['put', 'post'], 'report-slots/{slot}', [AdminClientReportSlotController::class, 'update']);
         Route::delete('report-slots/{slot}', [AdminClientReportSlotController::class, 'destroy']);
-        Route::get('report-slots/{slot}/image', [AdminClientReportSlotController::class, 'image']);
+        Route::get('report-slots/{slot}/images/{image}', [AdminClientReportSlotController::class, 'image']);
         Route::get('report-history', [ReportHistoryController::class, 'index']);
         Route::get('report-versions/{client_report_version}/document', [ReportHistoryController::class, 'document']);
         Route::put('report-versions/{client_report_version}/restore', [ReportHistoryController::class, 'restore']);

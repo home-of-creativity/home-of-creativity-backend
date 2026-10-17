@@ -4,6 +4,7 @@ namespace App\Actions;
 
 use App\Models\OpsSetting;
 use App\Services\GoogleDriveClient;
+use App\Support\StagingGuard;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -14,6 +15,13 @@ class RegisterDriveWatch
     public function handle(): bool
     {
         if (! $this->drive->configured()) {
+            return false;
+        }
+
+        // changes.watch follows the whole service account, which also owns the live client folders.
+        if (app()->environment(StagingGuard::ENVIRONMENT)) {
+            Log::info('Drive watch skipped on staging.');
+
             return false;
         }
 

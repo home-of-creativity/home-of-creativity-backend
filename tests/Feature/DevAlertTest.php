@@ -317,12 +317,12 @@ class DevAlertTest extends TestCase
         $this->assertFalse($repairs->first()[0]['needs_scan']);
         $this->assertTrue($repairs->first()[0]->hasHeader('X-N8N-Secret', 'n8n-secret'));
         $alerts = collect(Http::recorded())->filter(fn (array $pair): bool => str_contains($pair[0]->url(), 'api.telegram.org'));
-        $this->assertCount(1, $alerts);
+        $this->assertCount(2, $alerts);
         $this->assertStringContainsString('جسر واتساب انقطع', (string) $alerts->first()[0]['text']);
+        $this->assertStringContainsString('تم إصلاح جسر واتساب', (string) $alerts->last()[0]['text']);
 
         $this->artisan('ops:watch-health')->assertSuccessful();
         $alerts = collect(Http::recorded())->filter(fn (array $pair): bool => str_contains($pair[0]->url(), 'api.telegram.org'));
         $this->assertCount(2, $alerts);
-        $this->assertStringContainsString('جسر واتساب متصل', (string) $alerts->last()[0]['text']);
     }
 }

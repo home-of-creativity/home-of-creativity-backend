@@ -482,6 +482,7 @@ export type Client = {
   id: number;
   name: string;
   company_name?: string | null;
+  logo_url?: string | null;
   company_activity?: string | null;
   email: string | null;
   phone: string | null;
@@ -530,16 +531,22 @@ export type ClientReport = {
   updated_at?: string | null;
 };
 
-/** A planned picture, post, or reel on the reports calendar. It is never published from here. */
+export type ReportSlotImage = { id: number; name: string | null };
+
+/** A planned picture, post, or reel on one reports calendar. It is never published from here. */
 export type ReportSlot = {
   id: number;
   client_id: number;
   client_name: string;
-  kind: "image" | "post" | "reel";
+  calendar_id: number | null;
+  kind: "carousel" | "post" | "reel";
+  color: string | null;
   scheduled_at: string | null;
   caption: string | null;
+  images: ReportSlotImage[];
   has_image: boolean;
   image_name: string | null;
+  logo_url: string | null;
 };
 
 export type WorkPlanDepartment = "design" | "content" | "programming";
@@ -1917,11 +1924,11 @@ export const api = {
   deleteReportSlot(slotId: number) {
     return request<{ data: null }>(`/admin/report-slots/${slotId}`, { method: "DELETE" });
   },
-  async reportSlotImage(slotId: number) {
+  async reportSlotImage(slotId: number, imageId: number) {
     const headers = new Headers({ Accept: "image/*" });
     const token = getToken();
     if (token) headers.set("Authorization", `Bearer ${token}`);
-    const response = await fetch(`${API_URL}/admin/report-slots/${slotId}/image`, { headers });
+    const response = await fetch(`${API_URL}/admin/report-slots/${slotId}/images/${imageId}`, { headers });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return response.blob();
   },

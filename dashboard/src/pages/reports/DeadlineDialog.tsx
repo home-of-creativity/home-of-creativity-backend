@@ -8,7 +8,7 @@ import { REPEATS, REPEAT_COPY, clientLabel } from "./model";
 
 export type DeadlineDraft = {
   id?: number;
-  client: { id: number; name: string; company_name: string | null } | null;
+  client: { id: number; name: string; company_name: string | null; logo_url?: string | null } | null;
   /** Null is the main calendar. */
   calendar_id: number | null;
   title: string;
@@ -287,7 +287,7 @@ export function ClientPicker({ locale, value, onChange }: { locale: Locale; valu
                 role="option"
                 aria-selected={value?.id === client.id}
                 onClick={() => {
-                  onChange({ id: client.id, name: client.name, company_name: client.company_name ?? null });
+                  onChange({ id: client.id, name: client.name, company_name: client.company_name ?? null, logo_url: client.logo_url ?? null });
                   setOpen(false);
                   setQuery("");
                 }}

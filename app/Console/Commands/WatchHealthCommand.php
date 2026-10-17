@@ -63,7 +63,12 @@ class WatchHealthCommand extends Command
         $linked = $status['reachable'] && $status['connected'] && $status['qr'] === null;
         if ($linked) {
             Cache::forget('dev.wa.misses');
-            $alert->recover('whatsapp-bridge', 'جسر واتساب متصل.');
+            if (Cache::pull('dev.wa.fixed-note')) {
+                Cache::forget('dev.alert.whatsapp-bridge');
+
+                return;
+            }
+            $alert->recover('whatsapp-bridge', 'تم إصلاح جسر واتساب. لا تُرسل هذه الرسالة للعميل.');
 
             return;
         }
@@ -81,7 +86,11 @@ class WatchHealthCommand extends Command
         };
         $alert->once('whatsapp-bridge', $text, 60);
         if (Cache::add('dev.wa.repair', true, now()->addMinutes(10))) {
-            app(RepairWhatsAppBridge::class)->handOff($status);
+            $result = app(RepairWhatsAppBridge::class)->handOff($status);
+            if ($result['fixed'] && ! in_array($result['action'], ['already_up', 'needs_scan'], true)) {
+                $alert->send('تم إصلاح جسر واتساب. لا تُرسل هذه الرسالة للعميل.');
+                Cache::put('dev.wa.fixed-note', true, now()->addMinutes(30));
+            }
         }
     }
 }

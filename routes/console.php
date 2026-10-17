@@ -32,7 +32,7 @@ Schedule::command('odoo:sync-invoices', ['--full'])->hourly()->withoutOverlappin
 Schedule::command('ops:process-reminders')->everyMinute()->timezone('Asia/Damascus')->withoutOverlapping();
 Schedule::command('ops:process-bot-sla')->everyMinute()->timezone('Asia/Damascus')->withoutOverlapping();
 Schedule::command('ops:poll-drive', ['--limit' => 200])->everyMinute()->timezone('Asia/Damascus')->withoutOverlapping();
-Schedule::command('ops:renew-drive-watch')->hourly()->timezone('Asia/Damascus')->withoutOverlapping();
+Schedule::command('ops:renew-drive-watch')->hourly()->timezone('Asia/Damascus')->withoutOverlapping()->skip($notOnStaging);
 Schedule::command('ops:clickup-due-alerts')->hourly()->timezone('Asia/Damascus')->withoutOverlapping();
 Schedule::command('clickup:retry-tasks')->everyFiveMinutes()->withoutOverlapping();
 Schedule::command('ops:photography-day-before')->hourly()->timezone('Asia/Damascus')->withoutOverlapping();
