@@ -82,6 +82,23 @@ class ProfilePdfTest extends TestCase
         ], ['Accept' => 'application/json'])->assertUnprocessable();
     }
 
+    public function test_admin_upload_rejects_a_png_or_exe_renamed_to_pdf(): void
+    {
+        Storage::fake('local');
+        Sanctum::actingAs(User::factory()->create(['is_admin' => true]));
+        $image = UploadedFile::fake()->image('photo.png');
+        $png = (string) file_get_contents($image->getRealPath());
+
+        foreach ([$png, "MZ\x90\x00\x03\x00\x00\x00PE\x00\x00"] as $bytes) {
+            $this->post('/api/admin/ops-settings/profile-pdf', [
+                'file' => UploadedFile::fake()->createWithContent('profile.pdf', $bytes),
+            ], ['Accept' => 'application/json'])
+                ->assertUnprocessable()
+                ->assertJsonValidationErrors('file');
+        }
+        $this->assertSame([], Storage::disk('local')->allFiles('profile'));
+    }
+
     private function fakePdf(string $name): UploadedFile
     {
         return UploadedFile::fake()->createWithContent(

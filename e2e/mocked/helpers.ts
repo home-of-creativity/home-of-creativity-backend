@@ -6,7 +6,15 @@ export const STAFF = {
   email: "qa-admin@example.test",
   is_admin: true,
   role: null,
-  abilities: [],
+  abilities: [
+    "ops.clients",
+    "ops.requests",
+    "ops.finance",
+    "ops.photography",
+    "ops.complaints",
+    "site.articles",
+    "site.profile_pdf",
+  ],
 };
 
 type Handler = (route: Route, url: URL) => Promise<boolean> | boolean;

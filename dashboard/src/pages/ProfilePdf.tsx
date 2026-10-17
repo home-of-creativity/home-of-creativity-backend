@@ -8,6 +8,13 @@ import { PageHeader } from "../components/PageHeader";
 import { copy, type Locale } from "../i18n";
 import { formatWhen } from "./social/helpers";
 
+const MAX_PDF_BYTES = 20 * 1024 * 1024;
+
+async function startsLikePdf(file: File) {
+  const head = new Uint8Array(await file.slice(0, 5).arrayBuffer());
+  return String.fromCharCode(...head) === "%PDF-";
+}
+
 function previewSrc(pdf: ProfilePdfPayload | null) {
   if (!pdf?.url) return null;
   const stamp = pdf.updated_at ? encodeURIComponent(pdf.updated_at) : String(Date.now());
@@ -32,8 +39,16 @@ export function ProfilePdf({ locale, t }: { locale: Locale; t: (c: { ar: string;
   async function upload(files: File[]) {
     const file = files[0];
     if (!file) return;
-    setBusy(true);
     setError("");
+    if (file.size > MAX_PDF_BYTES) {
+      setError(t(copy.profilePdfTooBig));
+      return;
+    }
+    if (!(await startsLikePdf(file))) {
+      setError(t(copy.profilePdfNotPdf));
+      return;
+    }
+    setBusy(true);
     try {
       const res = await api.uploadProfilePdf(file);
       setPdf(res.data);

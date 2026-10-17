@@ -614,6 +614,8 @@ export const copy = {
   profilePdfOpen: { ar: "فتح الملف", en: "Open PDF" },
   profilePdfSaved: { ar: "تم حفظ الملف التعريفي.", en: "Company profile PDF saved." },
   uploadPdf: { ar: "رفع PDF", en: "Upload PDF" },
+  profilePdfNotPdf: { ar: "هذا الملف ليس PDF. اختر ملف PDF حقيقياً.", en: "This file is not a PDF. Choose a real PDF file." },
+  profilePdfTooBig: { ar: "حجم الملف أكبر من 20 ميغابايت.", en: "The file is larger than 20 MB." },
   replacePdf: { ar: "استبدال PDF", en: "Replace PDF" },
   legalPrivacyTitle: { ar: "سياسة الخصوصية", en: "Privacy Policy" },
   legalPrivacyLede: {
