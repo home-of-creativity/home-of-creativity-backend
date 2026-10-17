@@ -48,11 +48,12 @@ import { DayPicker } from "react-day-picker";
 import "react-day-picker/style.css";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { api, type ClientReport, type ReportCalendar, type ReportDeadlineRow, type ReportDeadlineStatus, type ReportVersion, type ReportVersionEvent } from "../../api";
+import { api, type ClientReport, type ReportCalendar, type ReportDeadlineRow, type ReportDeadlineStatus, type ReportSlot, type ReportVersion, type ReportVersionEvent } from "../../api";
 import type { Locale } from "../../i18n";
 import { useCan } from "../../lib/useCan";
 import { VIEWS, ZONE, addDays, contrast, formatRangeText, intlTag, zoned, type ViewId } from "../photography/model";
 import { CalendarDialog } from "./CalendarDialog";
+import { CalendarPlanDrawer } from "./CalendarPlanDrawer";
 import { CalendarPdfExport } from "./CalendarPdfExport";
 import { DeadlineDialog, deadlinePayload, draftFromDeadline, emptyDeadline, type DeadlineDraft } from "./DeadlineDialog";
 import { EVENT_COLORS, EVENT_COPY, REPEAT_COPY, STATUS_COLORS, STATUS_COPY, clientLabel, stamp } from "./model";
@@ -111,6 +112,18 @@ const LAYER_COPY: Record<ActivityLayer, { ar: string; en: string }> = {
 
 const STATUSES: ReportDeadlineStatus[] = ["upcoming", "overdue", "done", "skipped"];
 
+const PLAN_COLORS: Record<ReportSlot["kind"], string> = {
+  image: "#5b8def",
+  post: "#f0b56a",
+  reel: "#b07cff",
+};
+
+const PLAN_COPY: Record<ReportSlot["kind"], { ar: string; en: string }> = {
+  image: { ar: "صورة", en: "Picture" },
+  post: { ar: "بوست", en: "Post" },
+  reel: { ar: "ريل", en: "Reel" },
+};
+
 const plugins = [classicTheme, dayGridPlugin, timeGridPlugin, listPlugin, multiMonthPlugin, interactionPlugin];
 const views = { timeGridFourDay: { type: "timeGrid", duration: { days: 4 } } };
 const CLOCK = { hour: "2-digit", minute: "2-digit", hour12: false } as const;
@@ -143,6 +156,8 @@ export function ReportsCalendar({ locale, client }: { locale: Locale; client?: {
   const [prefs, setPrefsState] = useState<Prefs>(loadPrefs);
   const [range, setRange] = useState<{ from: string; to: string } | null>(null);
   const [deadlines, setDeadlines] = useState<ReportDeadlineRow[]>([]);
+  const [slots, setSlots] = useState<ReportSlot[]>([]);
+  const [plan, setPlan] = useState<{ slot: ReportSlot | null; at: string } | null>(null);
   const [activity, setActivity] = useState<ReportVersion[]>([]);
   const [calendars, setCalendars] = useState<ReportCalendar[]>([]);
   const [canManageCalendars, setCanManageCalendars] = useState(false);
@@ -192,6 +207,22 @@ export function ReportsCalendar({ locale, client }: { locale: Locale; client?: {
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [range, client?.id, reloadKey]);
+
+  useEffect(() => {
+    if (!range) return;
+    let cancelled = false;
+    api
+      .reportSlots(range.from, range.to, client?.id)
+      .then((res) => {
+        if (!cancelled) setSlots(res.data);
+      })
+      .catch((err) => {
+        if (!cancelled) toast.error(message(err));
       });
     return () => {
       cancelled = true;
@@ -272,8 +303,25 @@ export function ReportsCalendar({ locale, client }: { locale: Locale; client?: {
         className: `gcal-ev rc-activity is-${row.event}`,
       });
     }
+    for (const row of slots) {
+      if (!row.scheduled_at) continue;
+      if (!matches([row.caption, row.client_name, PLAN_COPY[row.kind][locale]])) continue;
+      const start = new Date(row.scheduled_at).getTime();
+      if (Number.isNaN(start)) continue;
+      const label = PLAN_COPY[row.kind][locale];
+      list.push({
+        id: `s:${row.id}`,
+        title: `${label}${row.caption ? ` · ${row.caption}` : ""}`,
+        start: new Date(start).toISOString(),
+        end: new Date(start + 2 * QUARTER_HOUR).toISOString(),
+        color: PLAN_COLORS[row.kind],
+        contrastColor: "#1a1224",
+        editable: false,
+        className: `gcal-ev rc-plan is-${row.kind}`,
+      });
+    }
     return list;
-  }, [shownDeadlines, calendarColors, activity, prefs, matches, client, ar, locale, canUpdate]);
+  }, [shownDeadlines, calendarColors, activity, slots, prefs, matches, client, ar, locale, canUpdate]);
 
   const selectedDeadline = selected?.key.startsWith("d:") ? deadlines.find((row) => `d:${row.key}` === selected.key) ?? null : null;
   const selectedActivity = selected?.key.startsWith("a:") ? activity.find((row) => `a:${row.id}` === selected.key) ?? null : null;
@@ -299,6 +347,11 @@ export function ReportsCalendar({ locale, client }: { locale: Locale; client?: {
 
   function onEventClick(info: EventClickInfo) {
     info.jsEvent.preventDefault();
+    if (info.event.id.startsWith("s:")) {
+      const slot = slots.find((row) => `s:${row.id}` === info.event.id) ?? null;
+      if (slot) setPlan({ slot, at: slot.scheduled_at ?? "" });
+      return;
+    }
     setSelected({ key: info.event.id, rect: info.el.getBoundingClientRect() });
   }
 
@@ -372,7 +425,7 @@ export function ReportsCalendar({ locale, client }: { locale: Locale; client?: {
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target as HTMLElement | null;
       if (target?.closest("input, textarea, select, [contenteditable='true'], [role='dialog']")) return;
-      if (dialog || move) return;
+      if (dialog || move || plan) return;
       const key = event.key.toLowerCase();
       const view = VIEWS.find((item) => item.key === key);
       if (view) controller.changeView(view.id);
@@ -443,6 +496,12 @@ export function ReportsCalendar({ locale, client }: { locale: Locale; client?: {
               <Plus size={20} aria-hidden />
               <span>{ar ? "موعد تقرير" : "Report deadline"}</span>
               <kbd>C</kbd>
+            </button>
+          ) : null}
+          {canCreate ? (
+            <button type="button" className="gcal-create" onClick={() => setPlan({ slot: null, at: `${zoned(new Date()).date}T12:00` })}>
+              <Plus size={20} aria-hidden />
+              <span>{ar ? "جدولة محتوى" : "Schedule content"}</span>
             </button>
           ) : null}
 
@@ -709,6 +768,24 @@ export function ReportsCalendar({ locale, client }: { locale: Locale; client?: {
           onClose={() => setDialog(null)}
           onSaved={() => {
             setDialog(null);
+            reload();
+          }}
+        />
+      ) : null}
+
+      {plan ? (
+        <CalendarPlanDrawer
+          locale={locale}
+          slot={plan.slot}
+          at={plan.at}
+          fixedClient={client ? { id: client.id, name: client.name, company_name: client.company_name } : null}
+          onClose={() => setPlan(null)}
+          onSaved={(saved) => {
+            setPlan({ slot: saved, at: saved.scheduled_at ?? "" });
+            reload();
+          }}
+          onDeleted={() => {
+            setPlan(null);
             reload();
           }}
         />

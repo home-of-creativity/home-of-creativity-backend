@@ -164,6 +164,35 @@ class WhatsAppSupportAgentTest extends TestCase
         $this->assertFalse(WhatsAppSupportAgent::saysReady('موافق على الإلغاء'));
     }
 
+    public function test_code_166_talks_with_the_support_agent(): void
+    {
+        $this->fakeAgent(['reply' => 'أنا مساعد الدعم.', 'handoff' => false, 'handoff_reason' => '']);
+
+        $this->send('١٦٦', 'c166');
+
+        Http::assertSent(fn (Request $sent): bool => $sent->url() === self::AGENT
+            && $sent['message'] === '166'
+            && $sent['reason'] === 'The client sent inquiry code 166.');
+        $this->assertSentToClient('مساعد الدعم');
+        $this->assertSentToClient('أنا مساعد الدعم.');
+        $this->assertTrue(app(WhatsAppSupportAgent::class)->active('963922222222'));
+    }
+
+    public function test_code_168_hands_the_chat_to_management(): void
+    {
+        Http::fake(['http://wa-web.test/*' => Http::response(['id' => 'wa-1'], 200)]);
+
+        $this->send('168', 'c168');
+
+        $this->assertSentToClient('فريق الإدارة');
+        $this->assertSentTo(self::MANAGEMENT, 'أرسل 168');
+        $this->assertFalse(app(WhatsAppSupportAgent::class)->active('963922222222'));
+
+        $this->send('مرحبا', 'c169');
+
+        Http::assertNotSent(fn (Request $sent): bool => str_contains((string) ($sent['text'] ?? ''), 'مرحبا'));
+    }
+
     public function test_back_to_bot_leaves_the_agent(): void
     {
         $this->fakeAgent(['reply' => 'أكيد، تفضل.', 'handoff' => false, 'handoff_reason' => '']);

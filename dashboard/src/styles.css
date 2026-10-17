@@ -3010,6 +3010,10 @@ html[dir="ltr"] .report-panel {
   color: var(--brand-ink);
 }
 
+.report-panel-tabs {
+  overflow-x: auto;
+}
+
 .report-panel-body {
   display: grid;
   align-content: start;
@@ -3018,6 +3022,72 @@ html[dir="ltr"] .report-panel {
   min-height: 0;
   overflow: auto;
   padding: 1rem;
+}
+
+.report-schedule,
+.report-schedule-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.report-schedule-hint {
+  margin: 0;
+  color: var(--brand-muted);
+  font-size: 0.86rem;
+}
+
+.report-slot-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+}
+
+.report-slot-table th,
+.report-slot-table td {
+  padding: 0.45rem 0.35rem;
+  border-bottom: 1px solid var(--brand-line);
+  text-align: start;
+  vertical-align: middle;
+}
+
+.report-slot-thumb {
+  display: block;
+  width: 3.2rem;
+  height: 3.2rem;
+  object-fit: cover;
+  border-radius: 0.4rem;
+}
+
+.report-thread-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  border: 0;
+  background: color-mix(in srgb, var(--brand-ink) 28%, transparent);
+  cursor: pointer;
+}
+
+.report-thread-drawer {
+  position: fixed;
+  inset-block: 0;
+  inset-inline-end: 0;
+  z-index: 41;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: min(26rem, 100vw);
+  padding: 1rem;
+  overflow: auto;
+  background: var(--brand-surface);
+  border-inline-start: 1px solid var(--brand-line);
+  box-shadow: -0.5rem 0 1.5rem color-mix(in srgb, var(--brand-ink) 12%, transparent);
+}
+
+.report-thread-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
 }
 
 .report-gemini,

@@ -242,7 +242,7 @@ class HandleWhatsAppInbound
         }
 
         $calendar = app(WorkCalendar::class);
-        if (! $calendar->isWhatsAppOpen() && ! $this->complaintAnytime($phone, $message) && ! $this->quoteAnytime($phone)) {
+        if (! $calendar->isWhatsAppOpen() && ! $this->complaintAnytime($phone, $message) && ! $this->quoteAnytime($phone) && ! $this->inquiryAnytime($message)) {
             $this->whatsApp->markRead($wamid);
             $queued = trim($this->messageText($message));
             if ($queued !== '' && $this->photoRuleIntent($queued, true) !== null) {
@@ -265,6 +265,12 @@ class HandleWhatsAppInbound
         try {
             $callback = $this->callbackId($message);
             $text = $this->messageText($message);
+            $inquiry = (! is_string($callback) || $callback === '') ? $this->inquiryCode(is_string($text) ? $text : null) : '';
+            if ($inquiry !== '') {
+                $this->routeInquiryCode($client, $chatId, $phone, $session, $inquiry);
+
+                return;
+            }
             if ($this->heldByHuman($phone, $chatId, (string) $text)) {
                 return;
             }
@@ -3724,6 +3730,51 @@ class HandleWhatsAppInbound
         return 'hoc:wa-human:'.$phone;
     }
 
+    /** 166 and 168 are inquiry codes, so they pass even while the bot is closed. */
+    private function inquiryAnytime(array $message): bool
+    {
+        return $this->inquiryCode($this->messageText($message)) !== '';
+    }
+
+    /** The whole message is 166 or 168, in Western or Arabic digits. */
+    private function inquiryCode(?string $text): string
+    {
+        $digits = strtr(trim((string) $text), [
+            '٠' => '0', '١' => '1', '٢' => '2', '٣' => '3', '٤' => '4',
+            '٥' => '5', '٦' => '6', '٧' => '7', '٨' => '8', '٩' => '9',
+            '۰' => '0', '۱' => '1', '۲' => '2', '۳' => '3', '۴' => '4',
+            '۵' => '5', '۶' => '6', '۷' => '7', '۸' => '8', '۹' => '9',
+        ]);
+
+        return in_array($digits, ['166', '168'], true) ? $digits : '';
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function routeInquiryCode(Client $client, string $chatId, string $phone, array $session, string $code): void
+    {
+        $this->replyLang = ($session['lang'] ?? $client->locale ?? 'ar') === 'en' ? 'en' : 'ar';
+        if ($code === '166') {
+            Cache::forget($this->humanKey($phone));
+            $this->supportAgent()->end($phone);
+            $this->startSupportAgent($client, $chatId, $phone, $session, '166', 'The client sent inquiry code 166.');
+
+            return;
+        }
+
+        $this->supportAgent()->end($phone);
+        $this->holdForHuman($phone);
+        $name = trim((string) ($client->company_name ?: $client->name));
+        $this->notifyEmployees->management(
+            'العميل '.($name !== '' ? $name : $phone).' ('.$phone.') أرسل 168 ويريد الحديث مع فريق الإدارة.',
+        );
+        $this->safeSend($chatId, $this->tx(
+            'رح يكمل معك فريق الإدارة هون. إذا بدك ترجع للقائمة اكتب: رجوع للبوت',
+            'The management team will continue with you here. To go back to the menu, write: return to the bot',
+        ));
+    }
+
     /** Staff typed on the company phone. The bot stays quiet until the client asks it back, or two hours pass. */
     /**
      * «ارجع آخر 3 رسائل»: the chat's last messages again, at most three.
@@ -3865,6 +3916,10 @@ class HandleWhatsAppInbound
 
     private function sendMenu(string $chatId, string $text): void
     {
+        $text .= "\n\n".$this->tx(
+            'للاستعلام أرسل 166 لمساعد الدعم، أو 168 لفريق الإدارة.',
+            'For an inquiry send 166 for the support assistant, or 168 for the management team.',
+        );
         $this->telegram->sendInlineKeyboard($chatId, $text, [
             [['text' => $this->tx('طلب جديد', 'New request'), 'callback_data' => 'menu:new']],
             [['text' => $this->tx('طلباتي', 'My requests'), 'callback_data' => 'menu:mine']],

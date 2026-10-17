@@ -5,6 +5,7 @@ use App\Http\Controllers\Admin\ClientChannelController as AdminClientChannelCont
 use App\Http\Controllers\Admin\ClientController as AdminClientController;
 use App\Http\Controllers\Admin\ClientReportController as AdminClientReportController;
 use App\Http\Controllers\Admin\ClientReportSendController as AdminClientReportSendController;
+use App\Http\Controllers\Admin\ClientReportSlotController as AdminClientReportSlotController;
 use App\Http\Controllers\Admin\CommentController as AdminCommentController;
 use App\Http\Controllers\Admin\ComplaintController as AdminComplaintController;
 use App\Http\Controllers\Admin\ContactChannelController as AdminContactChannelController;
@@ -246,6 +247,11 @@ Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function ()
         Route::get('reports/{client_report}', [AdminClientReportController::class, 'show']);
         Route::match(['put', 'post'], 'reports/{client_report}', [AdminClientReportController::class, 'update']);
         Route::delete('reports/{client_report}', [AdminClientReportController::class, 'destroy']);
+        Route::get('report-slots', [AdminClientReportSlotController::class, 'index']);
+        Route::post('report-slots', [AdminClientReportSlotController::class, 'store']);
+        Route::match(['put', 'post'], 'report-slots/{slot}', [AdminClientReportSlotController::class, 'update']);
+        Route::delete('report-slots/{slot}', [AdminClientReportSlotController::class, 'destroy']);
+        Route::get('report-slots/{slot}/image', [AdminClientReportSlotController::class, 'image']);
         Route::get('report-history', [ReportHistoryController::class, 'index']);
         Route::get('report-versions/{client_report_version}/document', [ReportHistoryController::class, 'document']);
         Route::put('report-versions/{client_report_version}/restore', [ReportHistoryController::class, 'restore']);

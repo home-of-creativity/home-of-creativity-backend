@@ -6,6 +6,7 @@ use App\Actions\ManageCalendarEvents;
 use App\Enums\SocialAbility;
 use App\Enums\StaffAbility;
 use App\Models\ClientReport;
+use App\Models\ClientReportSlot;
 use App\Models\PhotographyBooking;
 use App\Models\SocialPost;
 use App\Models\User;
@@ -24,6 +25,8 @@ class CommentAccess
         return match ($type) {
             'report' => $user->canAbility('ops.reports.view')
                 && ctype_digit($id) && ClientReport::query()->whereKey((int) $id)->exists(),
+            'report_slot' => $user->canAbility('ops.reports.view')
+                && ctype_digit($id) && ClientReportSlot::query()->whereKey((int) $id)->exists(),
             'social_post' => $this->seesPosts($user)
                 && ctype_digit($id) && SocialPost::query()->whereKey((int) $id)->exists(),
             'photography_booking' => $user->canAbility(StaffAbility::OpsPhotography)

@@ -13,7 +13,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Comment extends Model
 {
     /** @var list<string> */
-    public const SUBJECTS = ['report', 'social_post', 'calendar_event', 'photography_booking'];
+    public const SUBJECTS = ['report', 'social_post', 'calendar_event', 'photography_booking', 'report_slot'];
 
     protected $fillable = [
         'subject_type',

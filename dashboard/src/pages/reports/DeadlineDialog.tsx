@@ -225,7 +225,7 @@ export function DeadlineDialog({
   );
 }
 
-function ClientPicker({ locale, value, onChange }: { locale: Locale; value: DeadlineDraft["client"]; onChange: (client: DeadlineDraft["client"]) => void }) {
+export function ClientPicker({ locale, value, onChange }: { locale: Locale; value: DeadlineDraft["client"]; onChange: (client: DeadlineDraft["client"]) => void }) {
   const ar = locale === "ar";
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Client[]>([]);

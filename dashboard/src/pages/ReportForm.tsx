@@ -10,7 +10,6 @@ import {
   FileUp,
   Info,
   Maximize2,
-  MessageSquare,
   Minimize2,
   PanelLeftClose,
   PanelLeftOpen,
@@ -22,7 +21,6 @@ import {
 import { toast } from "sonner";
 import { api, canAbility, type Client, type ClientReport, type ClientReportAttachment, type ReportTemplateFile } from "../api";
 import { useAuth } from "../auth";
-import { CommentsPanel } from "../components/CommentsPanel";
 import { ConfirmAction } from "../components/ConfirmAction";
 import { DriveFolderPicker } from "../components/DriveFolderPicker";
 import { FileDropzone } from "../components/FileDropzone";
@@ -48,7 +46,7 @@ function failureMessage(err: unknown, fallback: string, capture: string): string
 
 type Phase = "loading" | "template" | "editing" | "error";
 type Busy = null | "saving" | "rendering" | "publishing";
-type PanelTab = "gemini" | "files" | "info" | "comments";
+type PanelTab = "gemini" | "files" | "info";
 /**
  * auto: the timer after an edit; skipped when the server is current, retried when it fails.
  * leave: leaving the editor; skipped when the server is current.
@@ -109,7 +107,6 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
   const [files, setFiles] = useState<File[]>([]);
   const [existing, setExisting] = useState<ClientReportAttachment[]>([]);
   const [removeIds, setRemoveIds] = useState<number[]>([]);
-  const [commentCount, setCommentCount] = useState(0);
   const [panel, setPanel] = useState<PanelTab | null>(() => (window.matchMedia("(min-width: 1180px)").matches ? "gemini" : null));
   const [focus, setFocus] = useState(false);
   /** True while the browser is full screen because focus writing asked for it. */
@@ -692,8 +689,6 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
     { id: "gemini", label: t(copy.reportGemini), icon: Sparkles },
     { id: "files", label: `${t(copy.reportPanelFiles)}${existing.length - removeIds.length + files.length > 0 ? ` (${existing.length - removeIds.length + files.length})` : ""}`, icon: Paperclip },
     { id: "info", label: t(copy.reportPanelInfo), icon: Info },
-    // Comments need a saved report to sit on.
-    ...(report ? [{ id: "comments" as const, label: `${t(copy.comments)}${commentCount > 0 ? ` (${commentCount})` : ""}`, icon: MessageSquare }] : []),
   ];
 
   return (
@@ -827,9 +822,6 @@ export function ReportForm({ locale, t }: { locale: Locale; t: (c: { ar: string;
                     ))}
                   </ul>
                 </div>
-              ) : null}
-              {panel === "comments" && report ? (
-                <CommentsPanel subject={{ type: "report", id: String(report.id) }} locale={locale} t={t} onCount={setCommentCount} />
               ) : null}
               {panel === "info" ? (
                 <div className="report-info">

@@ -1,5 +1,7 @@
 # Telegram bots
 
+WhatsApp inquiry codes (17 October 2026): a message that is only `166` or `١٦٦` starts the support agent (`HandleWhatsAppInbound::routeInquiryCode`, even outside open hours). `168` or `١٦٨` ends the agent, holds the bot for two hours, tells the client the management team will continue, and notifies `NotifyEmployees::management`. The menu text names both codes. «رجوع للبوت» still returns the menu.
+
 WhatsApp resend (14 October 2026): every message Laravel sends on WhatsApp (Web and Cloud clients, `DeliverClientDocument` included) is kept in `whatsapp_outbox_messages` by `WhatsAppOutbox::record` (recipient digits, kind text/choice/document/image, text or caption, buttons, a copy of the file under `storage/app/private/whatsapp-outbox`, last 10 per chat, older rows and files pruned). A client sentence like «ارجع آخر 3 رسائل», «عيد آخر رسالة» or «resend the last 2 messages» (`WhatsAppOutbox::requestedCount`, Arabic digits and words, «رسائل» alone means 3) is caught in `HandleWhatsAppInbound` before complaints and every flow (`resendLastMessages`): a short line, then those messages oldest first, at most 3 (asking for more says the limit). Resends are not recorded again. No history answers «ما في رسائل سابقة أعيد إرسالها». Telegram is not covered.
 
 Staff payment reply (14 October 2026): `payok:` in `bot/staff.py` adds the invoice line from `/bot/staff/confirm-payment` (`invoice_summary`, e.g. «🧾 الفاتورة INV/2026/0090 مرحّلة ومدفوعة.»); when Odoo did not take it (`invoice_error`) the line starts with ⚠️ and gives the reason.

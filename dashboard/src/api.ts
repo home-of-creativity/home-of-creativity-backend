@@ -530,6 +530,18 @@ export type ClientReport = {
   updated_at?: string | null;
 };
 
+/** A planned picture, post, or reel on the reports calendar. It is never published from here. */
+export type ReportSlot = {
+  id: number;
+  client_id: number;
+  client_name: string;
+  kind: "image" | "post" | "reel";
+  scheduled_at: string | null;
+  caption: string | null;
+  has_image: boolean;
+  image_name: string | null;
+};
+
 export type WorkPlanDepartment = "design" | "content" | "programming";
 
 /** «تغيير الخطة»: every ClickUp department with its staff and what the approved plan holds. */
@@ -1099,7 +1111,7 @@ type Envelope<T> = { data: T; message?: string };
 
 /** What a comment thread sits on. A Google event also names its calendar. */
 export type CommentSubject = {
-  type: "report" | "social_post" | "calendar_event" | "photography_booking";
+  type: "report" | "social_post" | "calendar_event" | "photography_booking" | "report_slot";
   id: string;
   calendarId?: string;
 };
@@ -1894,6 +1906,24 @@ export const api = {
   },
   deleteClientReport(id: number) {
     return request<Envelope<null>>(`/admin/reports/${id}`, { method: "DELETE" });
+  },
+  reportSlots(from: string, to: string, clientId?: number) {
+    return request<{ data: ReportSlot[] }>(`/admin/report-slots${queryString({ from, to, client_id: clientId })}`);
+  },
+  saveReportSlot(form: FormData, slotId?: number) {
+    const path = slotId ? `/admin/report-slots/${slotId}` : "/admin/report-slots";
+    return request<{ data: ReportSlot }>(path, { method: "POST", body: form });
+  },
+  deleteReportSlot(slotId: number) {
+    return request<{ data: null }>(`/admin/report-slots/${slotId}`, { method: "DELETE" });
+  },
+  async reportSlotImage(slotId: number) {
+    const headers = new Headers({ Accept: "image/*" });
+    const token = getToken();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    const response = await fetch(`${API_URL}/admin/report-slots/${slotId}/image`, { headers });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.blob();
   },
   reportHistory(filters: { page?: number; client_id?: number; report_id?: number; event?: string; search?: string; per_page?: number } = {}) {
     return request<Paginated<ReportVersion>>(`/admin/report-history${queryString({
