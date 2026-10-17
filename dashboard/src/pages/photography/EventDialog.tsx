@@ -10,7 +10,7 @@ import {
   type PhotographyBoard,
   type PhotographySlot,
 } from "../../api";
-import type { Locale } from "../../i18n";
+import { copy, type Locale } from "../../i18n";
 import {
   GOOGLE_COLORS,
   WEEKDAYS,
@@ -251,6 +251,9 @@ export function EventDialog({
   }
 
   async function saveEvent() {
+    if (!draft.title.trim()) {
+      throw new Error(ar ? copy.fieldRequired.ar : copy.fieldRequired.en);
+    }
     const when = times(draft);
     if (!draft.all_day && when.end <= when.start) {
       setError(ar ? "النهاية قبل البداية." : "The end is before the start.");
@@ -309,7 +312,8 @@ export function EventDialog({
       else await saveEvent();
       onSaved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const raw = err instanceof Error ? err.message : String(err);
+      setError(raw === "api_unreachable" ? (ar ? copy.apiUnreachable.ar : copy.apiUnreachable.en) : raw);
     } finally {
       setBusy(false);
     }
@@ -328,7 +332,7 @@ export function EventDialog({
             <X aria-hidden />
           </button>
         </div>
-        <form className="form-dialog-form" onSubmit={submit}>
+        <form className="form-dialog-form" lang={locale} onSubmit={submit}>
           <div className="form-dialog-body gcal-form">
             {showTabs ? (
               <div className="gcal-segment" role="tablist">
@@ -383,14 +387,17 @@ export function EventDialog({
               </>
             ) : (
               <>
-                <input
-                  className="field gcal-title-input"
-                  placeholder={ar ? "أضف عنواناً" : "Add title"}
-                  value={draft.title}
-                  onChange={(event) => patch({ title: event.target.value })}
-                  autoFocus
-                  maxLength={1024}
-                />
+                <label className="field-label">
+                  {ar ? "العنوان" : "Title"}
+                  <input
+                    className="field gcal-title-input"
+                    placeholder={ar ? "أضف عنواناً" : "Add title"}
+                    value={draft.title}
+                    onChange={(event) => patch({ title: event.target.value })}
+                    autoFocus
+                    maxLength={1024}
+                  />
+                </label>
 
                 <div className="gcal-line">
                   <Clock size={17} aria-hidden />
@@ -485,7 +492,7 @@ export function EventDialog({
 
                 <div className="gcal-line">
                   <MapPin size={17} aria-hidden />
-                  <input className="field gcal-line-body" placeholder={ar ? "أضف مكاناً" : "Add location"} value={draft.location} onChange={(event) => patch({ location: event.target.value })} maxLength={1024} />
+                  <input className="field gcal-line-body" aria-label={ar ? "المكان" : "Location"} placeholder={ar ? "أضف مكاناً" : "Add location"} value={draft.location} onChange={(event) => patch({ location: event.target.value })} maxLength={1024} />
                 </div>
 
                 <div className="gcal-line">
